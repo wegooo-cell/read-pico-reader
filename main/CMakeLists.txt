@@ -67,6 +67,7 @@ idf_component_register(
         "apps/app_image.c"
         "apps/app_transfer.c"
         "apps/app_weread.c"
+        "apps/book_notes_popup.c"
         "apps/usb_storage.c"
         "book/book_store.c"
         "book/book_progress.c"

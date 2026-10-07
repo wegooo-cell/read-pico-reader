@@ -20,14 +20,14 @@ enum class Kind : uint8_t {
 
 constexpr size_t kKindCount = 3;
 constexpr uint32_t kPageMagic = 0x31425257;  // WRB1
-constexpr uint16_t kPageVersion = 1;
+constexpr uint16_t kPageVersion = 2;  // v2: 双文本段（正文+abstract 划线原文）与章级缓存目录
 constexpr uint32_t kCacheMagic = 0x31435257;  // WRC1
-constexpr uint16_t kCacheVersion = 1;
+constexpr uint16_t kCacheVersion = 2;
 constexpr uint16_t kCacheManifestSize = 100;
 constexpr uint32_t kMaxItemTextBytes = 64 * 1024;
 constexpr uint32_t kMaxResponseBytes = 4 * 1024 * 1024;
 constexpr uint32_t kMaxRecords = 4096;
-constexpr uint32_t kMaxCachedReviews = 50;
+constexpr uint32_t kMaxCachedReviews = 100;  // 章级 review/list 覆盖上限
 constexpr uint16_t kRecordTextTruncated = 1U << 0;
 constexpr uint16_t kPageResponseTruncated = 1U << 0;
 constexpr uint16_t kPageHasMore = 1U << 1;
@@ -54,8 +54,10 @@ struct PageHeader {
 static_assert(sizeof(PageHeader) == 32);
 
 struct Record {
-  uint32_t textOffset = 0;
+  uint32_t textOffset = 0;      ///< 主文本段（想法正文）在页文本流中的偏移 / Main text segment offset
   uint32_t textLength = 0;
+  uint32_t abstractOffset = 0;  ///< 划线原文段（abstract）偏移 / Highlight excerpt segment offset
+  uint32_t abstractLength = 0;
   uint32_t heat = 0;
   uint32_t createTime = 0;
   uint32_t idx = 0;
@@ -65,7 +67,7 @@ struct Record {
   char chapter[128] = {};
   char author[96] = {};
 };
-static_assert(sizeof(Record) == 312);
+static_assert(sizeof(Record) == 320);
 
 struct CacheManifest {
   uint32_t magic = kCacheMagic;
@@ -82,28 +84,31 @@ static_assert(sizeof(CacheManifest) == 100);
 
 constexpr size_t kindIndex(const Kind kind) { return static_cast<size_t>(kind); }
 
-std::string indexPath(const char* bookId, uint8_t slot, Kind kind, uint32_t page);
-std::string textPath(const char* bookId, uint8_t slot, Kind kind, uint32_t page);
-bool loadCache(const char* bookId, const char* ownerVid, CacheManifest& manifest);
-bool beginCache(const char* bookId, const char* ownerVid, CacheManifest& manifest);
-bool commitCache(const char* bookId, const CacheManifest& manifest);
-void abortCache(const char* bookId, uint8_t slot);
+// 缓存按章落盘：目录 = root/<书号>_ch<章uid>；章 uid 为空串即书级目录（旧兼容读取）。
+// / Per-chapter cache dirs: root/<book>_ch<uid>; an empty uid means the book-level dir.
+std::string indexPath(const char* bookId, const char* chapterUid, uint8_t slot, Kind kind, uint32_t page);
+std::string textPath(const char* bookId, const char* chapterUid, uint8_t slot, Kind kind, uint32_t page);
+bool loadCache(const char* bookId, const char* chapterUid, const char* ownerVid, CacheManifest& manifest);
+bool beginCache(const char* bookId, const char* chapterUid, const char* ownerVid, CacheManifest& manifest);
+bool commitCache(const char* bookId, const char* chapterUid, const CacheManifest& manifest);
+void abortCache(const char* bookId, const char* chapterUid, uint8_t slot);
 bool clearAllCaches();
 bool clearLegacyWorkspace();
-bool openPage(const char* bookId, const CacheManifest& manifest, Kind kind, uint32_t page, PageHeader& header,
-              HalFile& index, HalFile& text);
+bool openPage(const char* bookId, const char* chapterUid, const CacheManifest& manifest, Kind kind, uint32_t page,
+              PageHeader& header, HalFile& index, HalFile& text);
 bool readRecord(HalFile& index, const PageHeader& header, uint32_t recordIndex, Record& record);
 
 class PageWriter {
  public:
   ~PageWriter() { abort(); }
-  bool begin(const char* bookId, uint8_t slot, Kind kind, uint32_t page);
+  bool begin(const char* bookId, const char* chapterUid, uint8_t slot, Kind kind, uint32_t page);
   bool beginRecord();
   bool appendText(const uint8_t* data, size_t len);
   bool finishRecord(Record record);
   bool finish(bool hasMore, uint32_t nextMaxIdx, uint64_t nextSyncKey, bool responseTruncated);
   void abort();
   uint32_t count() const { return header_.count; }
+  uint32_t textPosition() const { return recordStart_ + recordBytes_; }
   bool pageTruncated() const { return pageTruncated_; }
 
  private:
@@ -124,7 +129,8 @@ class PageWriter {
 
 class ResponseParser {
  public:
-  ResponseParser(const char* bookId, uint8_t slot, Kind kind, uint32_t page, uint32_t maxRecords = kMaxRecords);
+  ResponseParser(const char* bookId, const char* chapterUid, uint8_t slot, Kind kind, uint32_t page,
+                 uint32_t maxRecords = kMaxRecords);
 
   bool reset();
   bool feed(const uint8_t* data, size_t len);
@@ -146,6 +152,7 @@ class ResponseParser {
     SyncKey,
     Text,
     HtmlText,
+    Abstract,
     ChapterUid,
     Chapter,
     Author,
@@ -180,7 +187,9 @@ class ResponseParser {
   static bool decodedTextSink(void* raw, const uint8_t* data, size_t len);
 
   void acceptValue(const char* value, size_t len);
-  void startText(bool html);
+  void startText(unsigned slot, bool html);
+  void sealSeg(unsigned slot);
+  int textFieldSlot() const;
   bool feedText(const char* value, size_t len, bool final);
   bool filterText(const uint8_t* data, size_t len);
   bool emitFiltered(const uint8_t* data, size_t len);
@@ -194,12 +203,23 @@ class ResponseParser {
   uint32_t page_;
   uint32_t maxRecords_;
   char bookId_[64] = {};
+  char chapterUid_[64] = {};
   uint8_t slot_ = 0;
   StreamingJsonParser parser_;
   PageWriter writer_;
   WeReadProtocol::JsonStringDecoder decoder_;
   Record current_;
   TextFilter filter_;
+  // 文本双槽：槽0=主文本（markText|content，想法正文），槽1=abstract（划线原文）。
+  // / Two text slots: 0 = main text (thought body), 1 = abstract (highlight excerpt).
+  struct TextSeg {
+    uint32_t start = 0;
+    uint32_t len = 0;
+    bool active = false;
+  };
+  TextSeg segs_[2];
+  bool textSelected_[2] = {};
+  bool textComplete_[2] = {};
   Field field_ = Field::None;
   int depth_ = 0;
   int recordsDepth_ = -1;
@@ -217,8 +237,6 @@ class ResponseParser {
   bool hasMore_ = false;
   bool responseTruncated_ = false;
   bool storageFailed_ = false;
-  bool textSelected_ = false;
-  bool textComplete_ = false;
   bool textFailed_ = false;
   bool skipRecord_ = false;
 };

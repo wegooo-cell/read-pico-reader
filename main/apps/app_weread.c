@@ -14,6 +14,8 @@
 #include "read_pico_sd.h"
 #include "ttf_font.h"
 #include "weread_service.h"
+#include "weread_notes.h"
+#include "book_progress.h"
 #include "ui_kit.h"
 #include "ui_nav.h"
 #include "ui_menu.h"
@@ -22,6 +24,9 @@
 #include "esp_heap_caps.h"
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
+#include <sys/stat.h>
+#include <limits.h>
 
 static weread_snapshot_t *s_view_storage;
 #define s_view (*s_view_storage)
@@ -34,6 +39,18 @@ static unsigned s_selection_count, s_selection_capacity;
 static char s_message[96];
 static int64_t s_next_tick;
 static char s_qr[320];
+// 划线想法浏览：视图开关、当前分类（划线/想法）、页码、任务完成后自动着陆。
+// / Thoughts browser: view flag, active tab, page, and auto-landing after the fetch task.
+static bool s_thoughts_view, s_thoughts_pending;
+static unsigned s_thoughts_kind, s_thoughts_page;
+// 整本拉取的状态行节流：条数每页都在涨，30 秒重绘一次进度行。
+// / Throttle for the whole-book fetch status line: counts tick per page,
+// / redraw the progress line every 30 s.
+static int64_t s_notes_redraw_tick;
+static unsigned s_notes_seen_done = UINT_MAX, s_notes_seen_total;
+// 整本拉取完成确认：任务启动置 pending，结束后消费并弹一次性卡片。
+// / Whole-book fetch confirm card: pending set at start, consumed on end.
+static bool s_notes_toast, s_notes_toast_pending;
 static EpdRect sync_rect(void) { return (EpdRect){36, 293, 260, 64}; }
 static EpdRect logout_rect(void) { return (EpdRect){468, 293, 180, 64}; }
 static EpdRect select_rect(void) { return (EpdRect){316, 293, 132, 64}; }
@@ -44,8 +61,19 @@ static EpdRect prev_rect(void) { return (EpdRect){36, 1003, 164, 66}; }
 static EpdRect next_rect(void) { return (EpdRect){484, 1003, 164, 66}; }
 static EpdRect image_rect(void) { return (EpdRect){36, 456, 612, 84}; }
 static EpdRect download_rect(void) { return (EpdRect){36, 570, 612, 78}; }
-static EpdRect redownload_rect(void) { return (EpdRect){36, 668, 612, 78}; }
-static EpdRect shelf_rect(void) { return (EpdRect){36, 766, 612, 78}; }
+static EpdRect thoughts_rect(void) { return (EpdRect){36, 668, 612, 78}; }
+static EpdRect redownload_rect(void) { return (EpdRect){36, 766, 612, 78}; }
+// y766 行已下载的书拆两半：左「立即同步」右「重新下载」（设置 WiFi 仍用整宽）。
+// / Downloaded books split the y766 row: sync left, re-download right (WiFi keeps full width).
+static EpdRect sync_now_rect(void) { return (EpdRect){36, 766, 298, 78}; }
+static EpdRect redownload_half_rect(void) { return (EpdRect){350, 766, 298, 78}; }
+static EpdRect shelf_rect(void) { return (EpdRect){36, 864, 612, 78}; }
+static EpdRect thought_tab_rect(int tab) { return (EpdRect){tab ? 342 : 36, 152, 306, 76}; }
+static EpdRect thought_prev_rect(void) { return (EpdRect){36, 1080, 164, 70}; }
+static EpdRect thought_next_rect(void) { return (EpdRect){484, 1080, 164, 70}; }
+#define THOUGHT_ROWS 3
+#define THOUGHT_CARD_H 244
+#define THOUGHT_TEXT_CAP 768
 
 static void card(uint8_t *fb, EpdRect r, int radius) {
     ui_fill_round_rect(fb, r, radius, UI_GRAY_WHITE);
@@ -57,6 +85,17 @@ static void button(uint8_t *fb, EpdRect r, const char *label, bool primary) {
     if (primary) ui_draw_round_rect(fb, (EpdRect){r.x + 2, r.y + 2, r.width - 4, r.height - 4}, 18, 0x30);
     ui_text_vc(fb, r.x + r.width / 2, r.y + r.height / 2, 25, label, EPD_DRAW_ALIGN_CENTER, false);
 }
+// 像素心形（9x8，灰度 0x30）：已拉取划线想法书籍的角标（系统字库无 ♥ 字形，位图最稳）。
+// / 9x8 pixel heart (gray 0x30): badge for books with fetched notes (no ♥ in the font).
+static void notes_heart(uint8_t *fb, int x, int y) {
+    static const char *art[8] = {
+        ".XX...XX.", "XXXX.XXXX", "XXXXXXXXX", "XXXXXXXXX",
+        ".XXXXXXX.", "..XXXXX..", "...XXX...", "....X....",
+    };
+    for (int r = 0; r < 8; ++r)
+        for (int c = 0; c < 9; ++c)
+            if (art[r][c] == 'X') epd_fill_rect((EpdRect){x + c, y + r, 1, 1}, 0x30, fb);
+}
 static void fit_text(char *dst, size_t cap, const char *src, int px, int width) {
     size_t n = strnlen(src, cap - 1);
     memcpy(dst, src, n); dst[n] = 0;
@@ -64,6 +103,38 @@ static void fit_text(char *dst, size_t cap, const char *src, int px, int width) 
         --n;
         while (n && ((unsigned char)dst[n] & 0xc0) == 0x80) --n;
         dst[n] = 0;
+    }
+}
+// 按像素宽折行绘制，超出行数在末行截断；会原地修改文本，渲染每次重新读取可放心。
+// / Word-wrap by pixel width, truncating into the last line; mutates in place, safe because render refetches.
+static void draw_paragraph(uint8_t *fb, int x, int y, int width, int px, char *text, int lines) {
+    char *cursor = text;
+    for (int row = 0; row < lines && cursor[0]; ++row) {
+        const int top = y + row * (px + 16);
+        // 逐字符试探：临时截断测宽再恢复，避免整条文本恒超行宽导致空行。
+        // / Probe per character: truncate temporarily to measure, then restore.
+        size_t keep = strlen(cursor);
+        while (keep) {
+            const char saved = cursor[keep];
+            cursor[keep] = 0;
+            const int w = ui_text_fixed_width_px(px, cursor);
+            cursor[keep] = saved;
+            if (w <= width) break;
+            --keep;
+            while (keep && ((unsigned char)cursor[keep] & 0xc0) == 0x80) --keep;
+        }
+        if (!keep) break;
+        if (row == lines - 1) {
+            cursor[keep] = 0;
+            ui_text(fb, x, top, px, cursor, EPD_DRAW_ALIGN_LEFT, false);
+            break;
+        }
+        const char next = cursor[keep];
+        cursor[keep] = 0;
+        ui_text(fb, x, top, px, cursor, EPD_DRAW_ALIGN_LEFT, false);
+        cursor[keep] = next;
+        cursor += keep;
+        while (*cursor == ' ') ++cursor;
     }
 }
 // 跨页选择按云端书号保存，内存按需增长，退出时统一释放。
@@ -104,6 +175,20 @@ static const char *status_text(void) {
     if (s_view.state == WEREAD_QR) return "请用手机微信扫码确认登录";
     if (s_view.state == WEREAD_WORKING) {
         if (s_view.action == WEREAD_LOAD) return "正在读取本地书架";
+        if (s_view.action == WEREAD_READ_REPORT) return "正在同步阅读进度";
+        if (s_view.action == WEREAD_NOTES) {
+            // 整本划线想法：章粒度 + 条粒度（服务器未知总数时只报已获取条数）。
+            // / Whole-book notes: chapter progress plus thought counts (0 = unknown total).
+            static char notes_status[96];
+            if (s_view.notes_total)
+                snprintf(notes_status, sizeof(notes_status), "划线想法 %u/%u 章 · 想法 %u/%u 条",
+                         s_view.done, s_view.target, s_view.notes_done, s_view.notes_total);
+            else
+                snprintf(notes_status, sizeof(notes_status), "划线想法 %u/%u 章 · 已获取 %u 条想法",
+                         s_view.done, s_view.target, s_view.notes_done);
+            return notes_status;
+        }
+        if (s_view.action == WEREAD_THOUGHTS) return "正在获取划线想法";
         switch (s_view.stage) {
         case WEREAD_PREPARING: return "正在准备封面与书籍";
         case WEREAD_IMAGES: return "正在下载正文插图";
@@ -125,12 +210,32 @@ static const char *status_text(void) {
         case 8: case 11: return "此书暂不可下载，请换一本";
         case 9: return "设备时间无效，请重新联网";
         case 10: return "内存不足，请重启后重试";
+        case 12: return "本书缺少目录缓存，请重新下载全书";
         default: return "操作失败，可以重新尝试";
         }
     }
     if (s_view.state == WEREAD_COMPLETE && s_view.output[0])
         return s_view.skipped_images ? "下载完成，部分插图未能获取" : "下载完成，可以离线阅读";
     return s_view.logged_in ? "选择书籍，下载后可离线阅读" : "扫码登录后，获取微信读书书架";
+}
+// 手动「立即同步」：把本地保存的阅读位置推到云端（纯进度包，rt=0，官方 enter 同形态）。
+// 无本地进度的书直接拒绝——绝不把未知位置当 0 上传，防止云端进度被拉回开头。
+// / Manual "Sync now": push the locally saved position upstream (progress-only, rt=0,
+// / official enter shape). Refuse books without local progress — never upload a guessed
+// / position that could drag cloud progress back to the start.
+static void refresh_snapshot(void);
+static void start_progress_sync(void) {
+    const char *path = s_view.books[s_selected].local_path;
+    struct stat st;
+    book_progress_t p;
+    if (!path[0] || stat(path, &st) != 0 ||
+        !book_progress_load(path, (uint32_t)st.st_size, &p)) {
+        snprintf(s_message, sizeof(s_message), "本书无本地进度，请先阅读");
+        return;
+    }
+    if (!weread_start_read_report(s_view.books[s_selected].id, p.chapter, p.byte_off, p.pct, 0))
+        snprintf(s_message, sizeof(s_message), "同步未启动，请稍后重试");
+    refresh_snapshot();
 }
 static void refresh_snapshot(void) {
     if (!s_view_storage) return;
@@ -162,6 +267,9 @@ static void start_action(weread_action_t action, unsigned page, unsigned index) 
 }
 static void on_enter(app_ctx_t *ctx) {
     s_selected = -1; s_multiselect = s_batch_panel = false; s_selection_count = 0; s_message[0] = 0; s_qr[0] = 0; s_qr_ok = s_logout_confirm = false;
+    s_thoughts_view = s_thoughts_pending = false;
+    s_notes_toast = s_notes_toast_pending = false; s_notes_redraw_tick = 0;
+    s_notes_seen_done = UINT_MAX; s_notes_seen_total = 0;
     s_next_tick = ctx->now_ms;
     display_set_bulk_io(true);
     ui_wifi_qr_clear();
@@ -172,7 +280,7 @@ static void weread_on_exit(app_ctx_t *ctx) {
     weread_stop(); refresh_snapshot(); ui_wifi_qr_clear(); s_qr[0] = 0;
     heap_caps_free(s_view_storage); s_view_storage = NULL;
     heap_caps_free(s_selection); s_selection = NULL; s_selection_count = s_selection_capacity = 0;
-    s_multiselect = s_batch_panel = false;
+    s_multiselect = s_batch_panel = s_thoughts_view = s_thoughts_pending = false;
     display_set_bulk_io(false);
 }
 static void on_media_lost(app_ctx_t *ctx) { weread_on_exit(ctx); s_ready = false; s_selected = -1; }
@@ -184,15 +292,73 @@ static void draw_images_option(uint8_t *fb) {
     ui_fill_round_rect(fb, (EpdRect){548, 479, 76, 38}, 19, s_images ? 0x40 : 0xb0);
     ui_fill_round_rect(fb, (EpdRect){s_images ? 587 : 551, 482, 32, 32}, 16, UI_GRAY_WHITE);
 }
+// 划线想法浏览页：分类 Tab + 每页三条卡片（折行文本 + 章节与热度小字）。
+// / Thoughts browser: tabs, three cards per page (wrapped text + chapter/heat captions).
+static void render_thoughts(uint8_t *fb) {
+    const weread_book_t *book = &s_view.books[s_selected];
+    ui_clear_page(fb);
+    epd_fill_rect((EpdRect){0, 0, UI_LOCK_WIDTH, UI_NAV_TOP}, 0xe0, fb);
+    ui_nav_status(fb); ui_nav_back(fb, 36, 79);
+    ui_text_vc(fb, 342, 107, 34, "划线想法", EPD_DRAW_ALIGN_CENTER, false);
+    for (int tab = 0; tab < 2; ++tab) {
+        char label[48];
+        snprintf(label, sizeof(label), "%s %u", tab ? "热门想法" : "热门划线",
+                 weread_thoughts_count(tab ? WEREAD_THOUGHT_REVIEWS : WEREAD_THOUGHT_HIGHLIGHTS));
+        button(fb, thought_tab_rect(tab), label, s_thoughts_kind == (tab ? WEREAD_THOUGHT_REVIEWS : WEREAD_THOUGHT_HIGHLIGHTS));
+    }
+    const unsigned kind = s_thoughts_kind ? WEREAD_THOUGHT_REVIEWS : WEREAD_THOUGHT_HIGHLIGHTS;
+    const unsigned total = weread_thoughts_count(kind);
+    const unsigned pages = total ? (total + THOUGHT_ROWS - 1) / THOUGHT_ROWS : 1;
+    if (s_thoughts_page >= pages) s_thoughts_page = pages - 1;
+    char count[64];
+    snprintf(count, sizeof(count), "共 %u 条 · 第 %u/%u 页", total, s_thoughts_page + 1, pages);
+    ui_text(fb, 48, 272, 21, count, EPD_DRAW_ALIGN_LEFT, false);
+    if (!total) {
+        card(fb, (EpdRect){36, 320, 612, 240}, 24);
+        ui_text_vc(fb, 342, 400, 26, "暂无公开划线或想法", EPD_DRAW_ALIGN_CENTER, false);
+        ui_text_vc(fb, 342, 456, 21, "可在书籍详情页重新获取", EPD_DRAW_ALIGN_CENTER, false);
+    }
+    static char texts[THOUGHT_ROWS][THOUGHT_TEXT_CAP];
+    static weread_thought_meta_t metas[THOUGHT_ROWS];
+    for (unsigned i = 0; i < THOUGHT_ROWS; ++i) {
+        const unsigned index = s_thoughts_page * THOUGHT_ROWS + i;
+        if (index >= total) break;
+        EpdRect r = {36, 300 + i * 250, 612, 240};
+        card(fb, r, 22);
+        if (weread_thoughts_get(kind, index, texts[i], THOUGHT_TEXT_CAP, &metas[i])) {
+            draw_paragraph(fb, 58, r.y + 18, 566, 26, texts[i], 3);
+            char who[288], chapter[128];
+            fit_text(chapter, sizeof(chapter), metas[i].chapter, 20, 320);
+            if (metas[i].author[0]) snprintf(who, sizeof(who), "%s · %s", chapter, metas[i].author);
+            else snprintf(who, sizeof(who), "%s", chapter);
+            ui_text(fb, 58, r.y + 200, 20, who, EPD_DRAW_ALIGN_LEFT, false);
+            char heat[48];
+            if (kind == WEREAD_THOUGHT_HIGHLIGHTS)
+                snprintf(heat, sizeof(heat), "%u 人划线", (unsigned)metas[i].heat);
+            else
+                snprintf(heat, sizeof(heat), "%u 赞", (unsigned)metas[i].heat);
+            ui_text_fixed(fb, 626, r.y + 200, 20, heat, EPD_DRAW_ALIGN_RIGHT, false);
+        } else {
+            ui_text_vc(fb, 342, r.y + 110, 22, "读取失败", EPD_DRAW_ALIGN_CENTER, false);
+        }
+    }
+    button(fb, thought_prev_rect(), "上一页", s_thoughts_page == 0);
+    button(fb, thought_next_rect(), "下一页", s_thoughts_page >= pages - 1);
+    ui_nav_draw(fb, 2);
+}
 static void draw_progress(uint8_t *fb) {
     card(fb, (EpdRect){36, 384, 612, 312}, 24);
     char progress[80], title[192];
+    // 划线想法任务用专属文案：突出逐章保存与断点续传，慢也不慌。
+    // / Notes runs get dedicated copy highlighting per-chapter saves and resume.
+    const bool notes = s_view.action == WEREAD_NOTES;
+    const bool report = s_view.action == WEREAD_READ_REPORT;
     if (s_view.batch_total && s_view.batch_current) snprintf(progress, sizeof(progress), "第 %u / %u 本", s_view.batch_current, s_view.batch_total);
-    else snprintf(progress, sizeof(progress), "正在下载");
+    else snprintf(progress, sizeof(progress), notes ? "正在获取划线想法" : report ? "正在同步阅读进度" : "正在下载");
     ui_text_vc(fb, 342, 422, 29, progress, EPD_DRAW_ALIGN_CENTER, false);
     fit_text(title, sizeof(title), s_view.batch_title, 26, 544);
     ui_text_fixed(fb, 342, 463, 26, title, EPD_DRAW_ALIGN_CENTER, false);
-    if (s_view.target) snprintf(progress, sizeof(progress), "%u / %u", s_view.done, s_view.target);
+    if (s_view.target) snprintf(progress, sizeof(progress), notes ? "%u / %u 章" : "%u / %u", s_view.done, s_view.target);
     else snprintf(progress, sizeof(progress), "正在处理");
     ui_text_vc(fb, 342, 524, 30, progress, EPD_DRAW_ALIGN_CENTER, false);
     ui_fill_round_rect(fb, (EpdRect){70, 575, 544, 10}, 5, 0xb0);
@@ -201,18 +367,32 @@ static void draw_progress(uint8_t *fb) {
         int width = (int)((uint64_t)done * 544 / s_view.target);
         if (width) ui_fill_round_rect(fb, (EpdRect){70, 575, width, 10}, 5, 0x30);
     }
-    ui_text_vc(fb, 342, 641, 22, "一次只下载一本，完成后继续下一本", EPD_DRAW_ALIGN_CENTER, false);
+    if (notes) {
+        // 实时想法条数随任务增长，展示出来让人有「数据在进来」的踏实感。
+        // / Live thought tally gives a sense of steady progress.
+        if (s_view.notes_total) snprintf(progress, sizeof(progress), "已获取 %u/%u 条想法 · 已完成章节自动保存", s_view.notes_done, s_view.notes_total);
+        else snprintf(progress, sizeof(progress), "已获取 %u 条想法 · 已完成章节自动保存", s_view.notes_done);
+    } else if (report) snprintf(progress, sizeof(progress), "正在上传本书的阅读位置，几秒即可完成");
+    else snprintf(progress, sizeof(progress), "一次只下载一本，完成后继续下一本");
+    ui_text_vc(fb, 342, 641, 22, progress, EPD_DRAW_ALIGN_CENTER, false);
     button(fb, cancel_rect(), "取消操作", true);
-    ui_text(fb, 48, 864, 22, "离开页面或锁屏会停止本次操作", EPD_DRAW_ALIGN_LEFT, false);
+    ui_text(fb, 48, 864, 22, notes ? "离开或锁屏会暂停；已完成章节已保存，重新打开书籍自动续传" :
+            report ? "同步的是本书最近阅读位置，失败不影响本地阅读" : "离开页面或锁屏会停止本次操作", EPD_DRAW_ALIGN_LEFT, false);
 }
 static void render(app_ctx_t *ctx, uint8_t *fb) {
     (void)ctx;
     const bool detail = s_view_storage && s_selected >= 0 && (unsigned)s_selected < s_view.count;
+    if (s_thoughts_view && detail) { render_thoughts(fb); return; }
     const bool secondary = detail || s_batch_panel;
     ui_clear_page(fb);
     epd_fill_rect((EpdRect){0, 0, UI_LOCK_WIDTH, UI_NAV_TOP}, 0xe0, fb);
     ui_nav_status(fb); ui_nav_back(fb, 36, 79);
-    ui_text_vc(fb, 342, 107, 34, s_batch_panel ? "批量下载" : detail ? "书籍下载" : "微读传书", EPD_DRAW_ALIGN_CENTER, false);
+    // 划线想法任务进行中时使用专属标题与卡片文案，让进度页成为划线想法语境。
+    // / Dedicated title and card copy while a notes fetch runs, so the progress
+    // / page reads as a notes-specific view.
+    const bool notes_task = s_view_storage && s_view.active && s_view.action == WEREAD_NOTES;
+    const bool report_task = s_view_storage && s_view.active && s_view.action == WEREAD_READ_REPORT;
+    ui_text_vc(fb, 342, 107, 34, s_batch_panel ? "批量下载" : detail ? (notes_task ? "划线想法下载" : report_task ? "进度同步" : "书籍下载") : "微读传书", EPD_DRAW_ALIGN_CENTER, false);
     if (secondary) {
         card(fb, (EpdRect){36, 176, 612, detail ? 174 : 94}, 22);
         char title[192], author[96];
@@ -221,12 +401,41 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             fit_text(author, sizeof(author), s_view.books[s_selected].author, 24, 564);
             ui_text_fixed(fb, 58, 203, 30, title, EPD_DRAW_ALIGN_LEFT, false);
             ui_text_fixed(fb, 58, 259, 24, author, EPD_DRAW_ALIGN_LEFT, false);
-            ui_text(fb, 58, 307, 22, "封面始终下载", EPD_DRAW_ALIGN_LEFT, false);
+            ui_text(fb, 58, 307, 22, notes_task ? "逐章获取 · 实时保存到 TF 卡" :
+                    report_task ? "正在上传本书的阅读进度" : "封面始终下载", EPD_DRAW_ALIGN_LEFT, false);
+            // 已缓存划线想法：卡内右侧常驻标记（纯 SD 只读扫描，无任务时才走到这）。
+            // / Cached notes marker at the card's right (read-only SD scan; no task runs here).
+            unsigned n_cached, n_total, n_marks;
+            if (weread_notes_book_stats(s_view.books[s_selected].id, &n_cached, &n_total, &n_marks)) {
+                char badge[64];
+                if (n_total)
+                    snprintf(badge, sizeof(badge), "划线想法 %u/%u 章 · %u 句", n_cached, n_total, n_marks);
+                else
+                    snprintf(badge, sizeof(badge), "划线想法 %u 章 · %u 句", n_cached, n_marks);
+                ui_text_fixed(fb, 626, 307, 22, badge, EPD_DRAW_ALIGN_RIGHT, false);
+            }
         } else {
             snprintf(title, sizeof(title), "已选择 %u 本书籍", s_selection_count);
             ui_text_vc(fb, 58, 223, 29, title, EPD_DRAW_ALIGN_LEFT, false);
         }
         ui_text(fb, 48, detail ? 359 : 293, 23, status_text(), EPD_DRAW_ALIGN_LEFT, false);
+        // 阅读进度同步状态（详情页空闲时）：最近一次上报尝试的结果与时刻。
+        // / Read-report status (idle detail page): latest attempt result and when.
+        if (detail && !s_view.active) {
+            bool has, ok;
+            int64_t epoch;
+            weread_last_read_report(&has, &ok, &epoch);
+            if (has) {
+                char sync_info[48];
+                const time_t now = time(NULL);
+                if (!ok) snprintf(sync_info, sizeof(sync_info), "上次同步失败，可重试");
+                else if (epoch > 0 && now > (time_t)epoch && now - (time_t)epoch < 86400)
+                    snprintf(sync_info, sizeof(sync_info), "已同步 · %ld 分钟前",
+                             (long)((now - (time_t)epoch) / 60));
+                else snprintf(sync_info, sizeof(sync_info), "已同步");
+                ui_text_fixed(fb, 626, 359, 22, sync_info, EPD_DRAW_ALIGN_RIGHT, false);
+            }
+        }
     } else {
         card(fb, (EpdRect){36, 176, 612, 94}, 22);
         ui_text(fb, 58, 187, 27, s_view_storage && s_view.logged_in ? "微信读书书架" : "微信读书", EPD_DRAW_ALIGN_LEFT, false);
@@ -265,12 +474,15 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             button(fb, download_rect(), "开始批量下载", true);
         } else {
             button(fb, download_rect(), s_view.books[s_selected].local_path[0] ? "打开已下载书籍" : "下载到 TF 卡", true);
-            if (s_view.books[s_selected].local_path[0]) button(fb, redownload_rect(), "重新下载", false);
+            button(fb, thoughts_rect(), "划线想法", true);
+            if (s_view.books[s_selected].local_path[0]) {
+                button(fb, sync_now_rect(), "立即同步", false);
+                button(fb, redownload_half_rect(), "重新下载", false);
+            }
         }
         if (s_view.state == WEREAD_FAILED && s_view.error == 100) button(fb, redownload_rect(), "设置 WiFi", false);
         button(fb, shelf_rect(), "返回微信书架", false);
-        ui_text(fb, 48, 892, 22, "不下载正文插图时，仍保留书籍封面", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 48, 934, 21, "部分书籍可能受账号或内容权限限制", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(fb, 48, 964, 21, "划线与想法为网友公开内容，只读浏览", EPD_DRAW_ALIGN_LEFT, false);
     } else if (!s_view.count) {
         card(fb, (EpdRect){36, 384, 612, 286}, 24);
         ui_text_vc(fb, 342, 445, 28, "把微信读书带到 Pico", EPD_DRAW_ALIGN_CENTER, false);
@@ -294,6 +506,15 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
                 if (selection_index(s_view.books[i].id) >= 0) ui_fill_round_rect(fb, (EpdRect){589, r.y + 27, 24, 24}, 4, 0x20);
             } else ui_text_vc(fb, 620, r.y + 27, 28, "›", EPD_DRAW_ALIGN_CENTER, false);
             if (s_view.books[i].local_path[0]) ui_text_fixed(fb, 624, r.y + 51, 18, "已下载", EPD_DRAW_ALIGN_RIGHT, false);
+            // 已拉取划线想法的书：作者行 ♥ + 划线句数角标（纯 SD 只读扫描）。
+            // / Books with fetched notes: heart + highlight count on the author row.
+            unsigned n_cached, n_total, n_marks;
+            if (weread_notes_book_stats(s_view.books[i].id, &n_cached, &n_total, &n_marks)) {
+                char marks[12];
+                snprintf(marks, sizeof(marks), "%u", n_marks);
+                ui_text_fixed(fb, 552, r.y + 51, 18, marks, EPD_DRAW_ALIGN_RIGHT, false);
+                notes_heart(fb, 552 - ui_text_fixed_width_px(ui_text_effective_px(18), marks) - 13, r.y + 57);
+            }
         }
         button(fb, prev_rect(), "上一页", false); button(fb, next_rect(), "下一页", false);
         if (s_multiselect) {
@@ -312,6 +533,21 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         button(fb, (EpdRect){82, 604, 240, 74}, "取消", false);
         button(fb, (EpdRect){362, 604, 240, 74}, "退出登录", true);
     }
+    // 整本划线想法完成确认：统计一次拉取成果，任意点击/按键关闭。
+    // / Whole-book notes confirm: the run's tally; any tap/key dismisses it.
+    if (s_notes_toast) {
+        const bool failed = s_view.state == WEREAD_FAILED;
+        card(fb, (EpdRect){58, 416, 568, 300}, 28);
+        ui_text_vc(fb, 342, 477, 30, failed ? "划线想法下载失败" : "划线想法下载完成", EPD_DRAW_ALIGN_CENTER, false);
+        char line[96];
+        if (failed)
+            snprintf(line, sizeof(line), "%s", status_text());
+        else
+            snprintf(line, sizeof(line), "已获取 %u 章 · %u 条想法", s_view.done, s_view.notes_done);
+        ui_text_vc(fb, 342, 536, 22, line, EPD_DRAW_ALIGN_CENTER, false);
+        ui_text_vc(fb, 342, 578, 18, "进入正文即可查看划线与想法", EPD_DRAW_ALIGN_CENTER, false);
+        button(fb, (EpdRect){242, 604, 200, 74}, "好", true);
+    }
 }
 static app_redraw_t on_tick(app_ctx_t *ctx) {
     if (!s_view_storage || ctx->now_ms < s_next_tick) return APP_REDRAW_NONE;
@@ -324,14 +560,54 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
     unsigned bucket = s_view.target ? (unsigned)((uint64_t)s_view.done * 20 / s_view.target) : 0;
     refresh_snapshot();
     unsigned next = s_view.target ? (unsigned)((uint64_t)s_view.done * 20 / s_view.target) : 0;
+    // 拉取任务收尾：成功自动进入浏览视图，失败给出原因。
+    // / Fetch-task landing: open the browser on success, explain on failure.
+    if (s_thoughts_pending && !s_view.active && s_view.action == WEREAD_THOUGHTS) {
+        s_thoughts_pending = false;
+        if (s_view.state == WEREAD_COMPLETE && s_selected >= 0 &&
+            (unsigned)s_selected < s_view.count &&
+            weread_thoughts_open(s_view.books[s_selected].id)) {
+            s_thoughts_view = true; s_thoughts_kind = WEREAD_THOUGHT_HIGHLIGHTS; s_thoughts_page = 0;
+            return APP_REDRAW_PAGE;
+        }
+        if (s_view.state == WEREAD_FAILED)
+            snprintf(s_message, sizeof(s_message), "%s", status_text());
+        return APP_REDRAW_PAGE;
+    }
+    // 整本划线想法收尾：完成后弹一次性确认卡片（含统计）；取消不弹。
+    // / Whole-book notes landing: one-shot confirm card on completion or
+    // / failure (with the tally); silent on user cancel.
+    if (s_view.action == WEREAD_NOTES && s_view.active) s_notes_toast_pending = true;
+    if (s_notes_toast_pending && !s_view.active && s_view.action == WEREAD_NOTES) {
+        s_notes_toast_pending = false;
+        if (s_view.state == WEREAD_COMPLETE || s_view.state == WEREAD_FAILED) {
+            s_notes_toast = true;
+            return APP_REDRAW_PAGE;
+        }
+    }
     if (revision == s_view.revision) return APP_REDRAW_NONE;
     if (!s_view.active) return APP_REDRAW_PAGE;
+    // 整本划线想法：条数每页都在涨，但状态行按 30 秒节流重绘——进度可见又不频闪；
+    // 章数与条数的变化都计入「动了」的判定。
+    // / Whole-book notes: counts tick per page; redraw the status line at most
+    // / every 30 s — visible progress without constant e-ink flashing.
+    if (s_view.action == WEREAD_NOTES) {
+        const bool moved = s_view.notes_done != s_notes_seen_done ||
+                           s_view.notes_total != s_notes_seen_total || bucket != next;
+        s_notes_seen_done = s_view.notes_done;
+        s_notes_seen_total = s_view.notes_total;
+        if (!moved || ctx->now_ms < s_notes_redraw_tick) return APP_REDRAW_NONE;
+        s_notes_redraw_tick = ctx->now_ms + 30000;
+        return APP_REDRAW_PAGE;
+    }
     return state != s_view.state || stage != s_view.stage || active != s_view.active ||
            current != s_view.batch_current || failures != s_view.batch_failed ||
            count != s_view.count || changed != s_view.changed || bucket != next ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
 }
 static app_redraw_t go_back(app_ctx_t *ctx) {
+    if (s_notes_toast) { s_notes_toast = false; return APP_REDRAW_PAGE; }
     if (s_logout_confirm) { s_logout_confirm = false; return APP_REDRAW_PAGE; }
+    if (s_thoughts_view) { s_thoughts_view = false; s_message[0] = 0; return APP_REDRAW_PAGE; }
     if (s_view_storage && s_view.active) { weread_stop(); refresh_snapshot(); }
     if (s_selected >= 0 || s_batch_panel) { s_selected = -1; s_batch_panel = false; s_message[0] = 0; return APP_REDRAW_PAGE; }
     if (s_multiselect) { s_multiselect = false; return APP_REDRAW_PAGE; }
@@ -342,6 +618,7 @@ static app_redraw_t go_back(app_ctx_t *ctx) {
 }
 static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if (ev->type != UI_GESTURE_TAP && ev->type != UI_GESTURE_SWIPE_L && ev->type != UI_GESTURE_SWIPE_R) return APP_REDRAW_NONE;
+    if (s_notes_toast) { s_notes_toast = false; return APP_REDRAW_PAGE; }
     if (s_logout_confirm) {
         if (ev->type == UI_GESTURE_TAP && ui_rect_hit((EpdRect){362, 604, 240, 74}, ev->x0, ev->y0)) {
             s_logout_confirm = false; s_selected = -1; s_selection_count = 0; start_action(WEREAD_LOGOUT, 0, 0);
@@ -352,6 +629,27 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         if (ui_rect_hit((EpdRect){36, 79, 56, 56}, ev->x0, ev->y0)) return go_back(ctx);
         int nav = ui_nav_hit(ev->x0, ev->y0);
         if (nav >= 0) { ui_nav_request(ctx, nav); return APP_REDRAW_NONE; }
+        // 划线想法浏览视图：Tab 切换与翻页。/ Thoughts browser: tabs and paging.
+        if (s_thoughts_view) {
+            const unsigned highlights = WEREAD_THOUGHT_HIGHLIGHTS, reviews = WEREAD_THOUGHT_REVIEWS;
+            if (ui_rect_hit(thought_tab_rect(0), ev->x0, ev->y0)) {
+                if (s_thoughts_kind != highlights) { s_thoughts_kind = highlights; s_thoughts_page = 0; }
+                return APP_REDRAW_PAGE;
+            }
+            if (ui_rect_hit(thought_tab_rect(1), ev->x0, ev->y0)) {
+                if (s_thoughts_kind != reviews) { s_thoughts_kind = reviews; s_thoughts_page = 0; }
+                return APP_REDRAW_PAGE;
+            }
+            const unsigned total = weread_thoughts_count(s_thoughts_kind);
+            const unsigned pages = total ? (total + THOUGHT_ROWS - 1) / THOUGHT_ROWS : 1;
+            if (ui_rect_hit(thought_prev_rect(), ev->x0, ev->y0) && s_thoughts_page) {
+                --s_thoughts_page; return APP_REDRAW_PAGE;
+            }
+            if (ui_rect_hit(thought_next_rect(), ev->x0, ev->y0) && s_thoughts_page < pages - 1) {
+                ++s_thoughts_page; return APP_REDRAW_PAGE;
+            }
+            return APP_REDRAW_NONE;
+        }
         if (s_view_storage && s_view.active &&
             ui_rect_hit(s_view.state == WEREAD_QR ? (EpdRect){36, 990, 612, 70} : cancel_rect(), ev->x0, ev->y0)) {
             weread_stop(); refresh_snapshot(); return APP_REDRAW_PAGE;
@@ -365,6 +663,11 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         else if (ui_rect_hit(image_rect(), ev->x0, ev->y0)) s_images = !s_images;
         else if (s_view.state == WEREAD_FAILED && s_view.error == 100 && ui_rect_hit(redownload_rect(), ev->x0, ev->y0)) {
             app_transfer_request_wifi_setup(); extern const app_desc_t app_transfer; ctx->request_app = &app_transfer;
+        } else if (ui_rect_hit(thoughts_rect(), ev->x0, ev->y0)) {
+            // 临时验证入口：触发句子级按章拉取（断点续传）；弹窗 UI 在下一阶段接入。
+            // / Temporary trigger for the sentence-level per-chapter fetch; popup lands next stage.
+            s_message[0] = 0; s_thoughts_pending = false; s_thoughts_view = false;
+            start_action(WEREAD_NOTES, s_view.page, s_view.page * WEREAD_ROWS + s_selected);
         } else if (ui_rect_hit(download_rect(), ev->x0, ev->y0)) {
             if (s_batch_panel) {
                 s_message[0] = 0; ttf_font_cache_clear(); (void)weread_set_include_images(s_images);
@@ -376,7 +679,11 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
                     extern const app_desc_t app_book; ctx->request_app = &app_book;
                 }
             } else start_action(WEREAD_DOWNLOAD, s_view.page, s_view.page * WEREAD_ROWS + s_selected);
-        } else if (detail && s_view.books[s_selected].local_path[0] && ui_rect_hit(redownload_rect(), ev->x0, ev->y0))
+        } else if (detail && s_view.books[s_selected].local_path[0] && ui_rect_hit(sync_now_rect(), ev->x0, ev->y0)) {
+            // 手动「立即同步」：本地进度推云端（纯进度包）。/ Manual "Sync now": push local position upstream.
+            s_message[0] = 0;
+            start_progress_sync();
+        } else if (detail && s_view.books[s_selected].local_path[0] && ui_rect_hit(redownload_half_rect(), ev->x0, ev->y0))
             start_action(WEREAD_DOWNLOAD, s_view.page, s_view.page * WEREAD_ROWS + s_selected);
         return ctx->request_app ? APP_REDRAW_NONE : APP_REDRAW_PAGE;
     }
@@ -418,6 +725,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     return APP_REDRAW_PAGE;
 }
 static app_redraw_t on_key(app_ctx_t *ctx, int key) {
+    if (s_notes_toast) { s_notes_toast = false; return APP_REDRAW_PAGE; }
     if (key == UI_KEY_2) { ui_nav_request(ctx, 0); return APP_REDRAW_NONE; }
     return go_back(ctx);
 }

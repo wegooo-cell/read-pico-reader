@@ -104,10 +104,12 @@ static esp_err_t mount_card(bool format_if_failed) {
     if (card != NULL) return ESP_OK;
 
     sdmmc_host_t host = SDMMC_HOST_DEFAULT();
-    // 1-bit 只能靠提时钟换带宽。20MHz 默认对随机小读太慢，40MHz 多数卡能稳住。
-    // / 1-bit only buys bandwidth by raising the clock. 20 MHz is too slow for
-    // random small reads; 40 MHz holds on most cards.
-    host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;
+    // 40MHz 在此卡上连续写入会间歇性总线超时（sdmmc_write_blocks 0x101），
+    // 首选降到 20MHz 官方默认值换稳定性；挂载失败仍可经下方降速重试兜底。
+    // / 40 MHz intermittently times out on this card under sustained writes
+    // / (sdmmc_write_blocks 0x101); prefer the 20 MHz default, with the slower
+    // / retry loop below as a further fallback.
+    host.max_freq_khz = SDMMC_FREQ_DEFAULT;
 
     sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
     slot.width = 1;
@@ -129,7 +131,7 @@ static esp_err_t mount_card(bool format_if_failed) {
 
     // 高容量卡对高速协商及信号裕量更敏感；失败后降速重试，绝不在探测时格式化。
     // Retry high-capacity cards at slower bus clocks; probing never formats media.
-    const int clocks[] = {SDMMC_FREQ_HIGHSPEED, 20000, 10000};
+    const int clocks[] = {SDMMC_FREQ_DEFAULT, 10000};
     esp_err_t err = ESP_FAIL;
     for (size_t attempt = 0; attempt < sizeof(clocks) / sizeof(clocks[0]); ++attempt) {
         if (!read_pico_sd_present()) return ESP_ERR_NOT_FOUND;

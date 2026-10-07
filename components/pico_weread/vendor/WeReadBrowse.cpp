@@ -28,20 +28,27 @@ const char* kindName(const Kind kind) {
   return "unknown";
 }
 
-std::string bookCacheDirectory(const char* bookId) {
-  return std::string(kCacheRoot) + "/" + StringUtils::sanitizeFilename(bookId ? bookId : "", 56);
+std::string bookCacheDirectory(const char* bookId, const char* chapterUid) {
+  std::string name = StringUtils::sanitizeFilename(bookId ? bookId : "", 56);
+  if (chapterUid && chapterUid[0]) {
+    name += "_ch";
+    name += StringUtils::sanitizeFilename(chapterUid, 24);
+  }
+  return std::string(kCacheRoot) + "/" + name;
 }
 
-std::string slotDirectory(const char* bookId, const uint8_t slot) {
-  return bookCacheDirectory(bookId) + (slot == 0 ? "/slot0" : "/slot1");
+std::string slotDirectory(const char* bookId, const char* chapterUid, const uint8_t slot) {
+  return bookCacheDirectory(bookId, chapterUid) + (slot == 0 ? "/slot0" : "/slot1");
 }
 
-std::string manifestPath(const char* bookId) { return bookCacheDirectory(bookId) + "/cache.bin"; }
+std::string manifestPath(const char* bookId, const char* chapterUid) {
+  return bookCacheDirectory(bookId, chapterUid) + "/cache.bin";
+}
 
-bool makePath(const char* bookId, const uint8_t slot, const Kind kind, const uint32_t page, const char* extension,
-              char* output, const size_t outputSize) {
+bool makePath(const char* bookId, const char* chapterUid, const uint8_t slot, const Kind kind, const uint32_t page,
+              const char* extension, char* output, const size_t outputSize) {
   if (!bookId || !bookId[0] || slot > 1) return false;
-  const std::string directory = slotDirectory(bookId, slot);
+  const std::string directory = slotDirectory(bookId, chapterUid, slot);
   const int length = snprintf(output, outputSize, "%s/%s-%06u.%s", directory.c_str(), kindName(kind),
                               static_cast<unsigned>(page), extension);
   return length > 0 && static_cast<size_t>(length) < outputSize;
@@ -110,27 +117,29 @@ bool commitPair(const char* indexPart, const char* indexFinal, const char* textP
 
 }  // namespace
 
-std::string indexPath(const char* bookId, const uint8_t slot, const Kind kind, const uint32_t page) {
+std::string indexPath(const char* bookId, const char* chapterUid, const uint8_t slot, const Kind kind,
+                      const uint32_t page) {
   char path[192] = {};
-  return makePath(bookId, slot, kind, page, "idx", path, sizeof(path)) ? path : "";
+  return makePath(bookId, chapterUid, slot, kind, page, "idx", path, sizeof(path)) ? path : "";
 }
 
-std::string textPath(const char* bookId, const uint8_t slot, const Kind kind, const uint32_t page) {
+std::string textPath(const char* bookId, const char* chapterUid, const uint8_t slot, const Kind kind,
+                     const uint32_t page) {
   char path[192] = {};
-  return makePath(bookId, slot, kind, page, "txt", path, sizeof(path)) ? path : "";
+  return makePath(bookId, chapterUid, slot, kind, page, "txt", path, sizeof(path)) ? path : "";
 }
 
-bool openPage(const char* bookId, const CacheManifest& manifest, const Kind kind, const uint32_t page,
-              PageHeader& header, HalFile& index, HalFile& text) {
+bool openPage(const char* bookId, const char* chapterUid, const CacheManifest& manifest, const Kind kind,
+              const uint32_t page, PageHeader& header, HalFile& index, HalFile& text) {
   header = {};
   if (!validKind(kind) || manifest.activeSlot > 1 || page >= manifest.pageCounts[kindIndex(kind)]) return false;
   static constexpr uint16_t kKnownPageFlags = kPageResponseTruncated | kPageHasMore;
-  if (!Storage.openFileForRead("WR", indexPath(bookId, manifest.activeSlot, kind, page), index) ||
+  if (!Storage.openFileForRead("WR", indexPath(bookId, chapterUid, manifest.activeSlot, kind, page), index) ||
       index.read(&header, sizeof(header)) != static_cast<int>(sizeof(header)) || header.magic != kPageMagic ||
       header.version != kPageVersion || header.recordSize != sizeof(Record) || header.kind != kind ||
       header.count > kMaxRecords || (header.flags & ~kKnownPageFlags) != 0 || header.reserved != 0 ||
       index.fileSize64() != sizeof(PageHeader) + static_cast<uint64_t>(header.count) * sizeof(Record) ||
-      !Storage.openFileForRead("WR", textPath(bookId, manifest.activeSlot, kind, page), text) ||
+      !Storage.openFileForRead("WR", textPath(bookId, chapterUid, manifest.activeSlot, kind, page), text) ||
       text.fileSize64() != header.textBytes) {
     return false;
   }
@@ -139,18 +148,20 @@ bool openPage(const char* bookId, const CacheManifest& manifest, const Kind kind
 
 namespace {
 
-bool validateCache(const char* bookId, const char* ownerVid, const CacheManifest& manifest) {
+bool validateCache(const char* bookId, const char* chapterUid, const char* ownerVid, const CacheManifest& manifest) {
   static constexpr uint16_t kKnownCacheFlags = kCacheReviewsLimited;
   if (!bookId || !bookId[0] || !ownerVid || !ownerVid[0] || manifest.magic != kCacheMagic ||
       manifest.version != kCacheVersion || manifest.size != sizeof(CacheManifest) || manifest.activeSlot > 1 ||
       (manifest.flags & ~kKnownCacheFlags) != 0 || manifest.reserved != 0 ||
       !boundedString(manifest.ownerVid, sizeof(manifest.ownerVid)) || strcmp(manifest.ownerVid, ownerVid) != 0 ||
-      manifest.pageCounts[kindIndex(Kind::PopularHighlights)] != 1 ||
-      manifest.pageCounts[kindIndex(Kind::MyHighlights)] != 1 ||
+      // bestbookmarks/bookmarklist 两类已停拉（数据源切换到按章 review/list），新缓存不应再有它们的页。
+      // / bestbookmarks/bookmarklist are no longer fetched; new caches carry reviews pages only.
+      manifest.pageCounts[kindIndex(Kind::PopularHighlights)] != 0 ||
+      manifest.pageCounts[kindIndex(Kind::MyHighlights)] != 0 ||
       manifest.pageCounts[kindIndex(Kind::PopularReviews)] == 0 ||
       manifest.pageCounts[kindIndex(Kind::PopularReviews)] > kMaxCachedReviews ||
-      manifest.recordCounts[kindIndex(Kind::PopularHighlights)] > kMaxRecords ||
-      manifest.recordCounts[kindIndex(Kind::MyHighlights)] > kMaxRecords ||
+      manifest.recordCounts[kindIndex(Kind::PopularHighlights)] != 0 ||
+      manifest.recordCounts[kindIndex(Kind::MyHighlights)] != 0 ||
       manifest.recordCounts[kindIndex(Kind::PopularReviews)] > kMaxCachedReviews ||
       ((manifest.flags & kCacheReviewsLimited) != 0 &&
        manifest.recordCounts[kindIndex(Kind::PopularReviews)] != kMaxCachedReviews)) {
@@ -164,7 +175,7 @@ bool validateCache(const char* bookId, const char* ownerVid, const CacheManifest
       PageHeader header;
       HalFile index;
       HalFile text;
-      if (!openPage(bookId, manifest, kind, page, header, index, text) || records > UINT32_MAX - header.count) {
+      if (!openPage(bookId, chapterUid, manifest, kind, page, header, index, text) || records > UINT32_MAX - header.count) {
         return false;
       }
       records += header.count;
@@ -173,56 +184,57 @@ bool validateCache(const char* bookId, const char* ownerVid, const CacheManifest
   });
 }
 
-bool readManifest(const char* bookId, const char* ownerVid, const std::string& path, CacheManifest& manifest) {
+bool readManifest(const char* bookId, const char* chapterUid, const char* ownerVid, const std::string& path,
+                  CacheManifest& manifest) {
   manifest = {};
   HalFile file;
   return Storage.openFileForRead("WR", path, file) && file.fileSize64() == sizeof(manifest) &&
          file.read(&manifest, sizeof(manifest)) == static_cast<int>(sizeof(manifest)) &&
-         validateCache(bookId, ownerVid, manifest);
+         validateCache(bookId, chapterUid, ownerVid, manifest);
 }
 
 }  // namespace
 
-bool loadCache(const char* bookId, const char* ownerVid, CacheManifest& manifest) {
+bool loadCache(const char* bookId, const char* chapterUid, const char* ownerVid, CacheManifest& manifest) {
   manifest = {};
-  const std::string finalPath = manifestPath(bookId);
+  const std::string finalPath = manifestPath(bookId, chapterUid);
   const std::string backupPath = finalPath + ".bak";
   if (!Storage.exists(finalPath.c_str()) && Storage.exists(backupPath.c_str()) &&
       !Storage.rename(backupPath.c_str(), finalPath.c_str())) {
     return false;
   }
-  if (readManifest(bookId, ownerVid, finalPath, manifest)) {
+  if (readManifest(bookId, chapterUid, ownerVid, finalPath, manifest)) {
     if (Storage.exists(backupPath.c_str())) Storage.remove(backupPath.c_str());
     return true;
   }
   if (!Storage.exists(backupPath.c_str())) return false;
   if (Storage.exists(finalPath.c_str()) && !Storage.remove(finalPath.c_str())) return false;
   if (!Storage.rename(backupPath.c_str(), finalPath.c_str())) return false;
-  return readManifest(bookId, ownerVid, finalPath, manifest);
+  return readManifest(bookId, chapterUid, ownerVid, finalPath, manifest);
 }
 
-bool beginCache(const char* bookId, const char* ownerVid, CacheManifest& manifest) {
+bool beginCache(const char* bookId, const char* chapterUid, const char* ownerVid, CacheManifest& manifest) {
   if (!bookId || !bookId[0] || !ownerVid || !ownerVid[0] || strlen(ownerVid) >= sizeof(manifest.ownerVid) ||
       !WeReadStore::ensureRoot() || !Storage.ensureDirectoryExists(kCacheRoot)) {
     return false;
   }
   CacheManifest current;
-  const bool hasCurrent = loadCache(bookId, ownerVid, current);
-  const std::string bookDirectory = bookCacheDirectory(bookId);
+  const bool hasCurrent = loadCache(bookId, chapterUid, ownerVid, current);
+  const std::string bookDirectory = bookCacheDirectory(bookId, chapterUid);
   if (!hasCurrent && Storage.exists(bookDirectory.c_str()) && !Storage.removeDir(bookDirectory.c_str())) return false;
   if (!Storage.ensureDirectoryExists(bookDirectory.c_str())) return false;
 
   manifest = {};
   memcpy(manifest.ownerVid, ownerVid, strlen(ownerVid) + 1);
   manifest.activeSlot = hasCurrent ? static_cast<uint8_t>(1 - current.activeSlot) : 0;
-  const std::string staging = slotDirectory(bookId, manifest.activeSlot);
+  const std::string staging = slotDirectory(bookId, chapterUid, manifest.activeSlot);
   if (Storage.exists(staging.c_str()) && !Storage.removeDir(staging.c_str())) return false;
   return Storage.ensureDirectoryExists(staging.c_str());
 }
 
-bool commitCache(const char* bookId, const CacheManifest& manifest) {
-  if (!validateCache(bookId, manifest.ownerVid, manifest)) return false;
-  const std::string finalPath = manifestPath(bookId);
+bool commitCache(const char* bookId, const char* chapterUid, const CacheManifest& manifest) {
+  if (!validateCache(bookId, chapterUid, manifest.ownerVid, manifest)) return false;
+  const std::string finalPath = manifestPath(bookId, chapterUid);
   const std::string partPath = finalPath + ".part";
   if (Storage.exists(partPath.c_str())) Storage.remove(partPath.c_str());
   bool written = false;
@@ -236,18 +248,18 @@ bool commitCache(const char* bookId, const CacheManifest& manifest) {
     if (Storage.exists(partPath.c_str())) Storage.remove(partPath.c_str());
     return false;
   }
-  const std::string oldSlot = slotDirectory(bookId, static_cast<uint8_t>(1 - manifest.activeSlot));
+  const std::string oldSlot = slotDirectory(bookId, chapterUid, static_cast<uint8_t>(1 - manifest.activeSlot));
   if (Storage.exists(oldSlot.c_str()) && !Storage.removeDir(oldSlot.c_str())) {
     LOG_ERR("WR", "failed to remove old browse cache slot");
   }
   return true;
 }
 
-void abortCache(const char* bookId, const uint8_t slot) {
+void abortCache(const char* bookId, const char* chapterUid, const uint8_t slot) {
   if (!bookId || !bookId[0] || slot > 1) return;
-  const std::string staging = slotDirectory(bookId, slot);
+  const std::string staging = slotDirectory(bookId, chapterUid, slot);
   if (Storage.exists(staging.c_str())) Storage.removeDir(staging.c_str());
-  const std::string partPath = manifestPath(bookId) + ".part";
+  const std::string partPath = manifestPath(bookId, chapterUid) + ".part";
   if (Storage.exists(partPath.c_str())) Storage.remove(partPath.c_str());
 }
 
@@ -270,18 +282,20 @@ bool readRecord(HalFile& index, const PageHeader& header, const uint32_t recordI
       !boundedString(record.chapterUid, sizeof(record.chapterUid)) ||
       !boundedString(record.chapter, sizeof(record.chapter)) || !boundedString(record.author, sizeof(record.author)) ||
       (record.flags & ~kRecordTextTruncated) != 0 ||
-      static_cast<uint64_t>(record.textOffset) + record.textLength > header.textBytes) {
+      static_cast<uint64_t>(record.textOffset) + record.textLength > header.textBytes ||
+      static_cast<uint64_t>(record.abstractOffset) + record.abstractLength > header.textBytes) {
     return false;
   }
   return true;
 }
 
-bool PageWriter::begin(const char* bookId, const uint8_t slot, const Kind kind, const uint32_t page) {
+bool PageWriter::begin(const char* bookId, const char* chapterUid, const uint8_t slot, const Kind kind,
+                       const uint32_t page) {
   abort();
-  if (!makePath(bookId, slot, kind, page, "idx", indexFinal_, sizeof(indexFinal_)) ||
-      !makePath(bookId, slot, kind, page, "idx.part", indexPart_, sizeof(indexPart_)) ||
-      !makePath(bookId, slot, kind, page, "txt", textFinal_, sizeof(textFinal_)) ||
-      !makePath(bookId, slot, kind, page, "txt.part", textPart_, sizeof(textPart_))) {
+  if (!makePath(bookId, chapterUid, slot, kind, page, "idx", indexFinal_, sizeof(indexFinal_)) ||
+      !makePath(bookId, chapterUid, slot, kind, page, "idx.part", indexPart_, sizeof(indexPart_)) ||
+      !makePath(bookId, chapterUid, slot, kind, page, "txt", textFinal_, sizeof(textFinal_)) ||
+      !makePath(bookId, chapterUid, slot, kind, page, "txt.part", textPart_, sizeof(textPart_))) {
     return false;
   }
   if (Storage.exists(indexFinal_)) Storage.remove(indexFinal_);
@@ -329,11 +343,11 @@ bool PageWriter::appendText(const uint8_t* data, const size_t len) {
 
 bool PageWriter::finishRecord(Record record) {
   if (!active_ || !recordActive_) return false;
-  record.textOffset = recordStart_;
-  record.textLength = recordBytes_;
+  // 两段偏移由 ResponseParser 按槽位填好；两段全空不建索引。/ Offsets come from the
+  // / parser's slot tracking; records with both segments empty get no index row.
   if (recordTruncated_) record.flags |= kRecordTextTruncated;
   recordActive_ = false;
-  if (record.textLength == 0) return true;
+  if (record.textLength == 0 && record.abstractLength == 0) return true;
   if (index_.write(&record, sizeof(record)) != sizeof(record)) return false;
   ++header_.count;
   return true;
@@ -373,8 +387,8 @@ void PageWriter::abort() {
   if (textPart_[0] && Storage.exists(textPart_)) Storage.remove(textPart_);
 }
 
-ResponseParser::ResponseParser(const char* bookId, const uint8_t slot, const Kind kind, const uint32_t page,
-                               const uint32_t maxRecords)
+ResponseParser::ResponseParser(const char* bookId, const char* chapterUid, const uint8_t slot, const Kind kind,
+                               const uint32_t page, const uint32_t maxRecords)
     : kind_(kind),
       page_(page),
       maxRecords_(std::min(maxRecords, kMaxRecords)),
@@ -382,6 +396,7 @@ ResponseParser::ResponseParser(const char* bookId, const uint8_t slot, const Kin
       parser_(callbacks(this)),
       decoder_(decodedTextSink, &filter_) {
   if (bookId) strncpy(bookId_, bookId, sizeof(bookId_) - 1);
+  if (chapterUid) strncpy(chapterUid_, chapterUid, sizeof(chapterUid_) - 1);
   filter_.owner = this;
 }
 
@@ -412,13 +427,15 @@ bool ResponseParser::reset() {
   hasMore_ = false;
   responseTruncated_ = false;
   storageFailed_ = false;
-  textSelected_ = false;
-  textComplete_ = false;
   textFailed_ = false;
   skipRecord_ = false;
+  segs_[0] = {};
+  segs_[1] = {};
+  textSelected_[0] = textSelected_[1] = false;
+  textComplete_[0] = textComplete_[1] = false;
   parser_.reset();
   decoder_.reset();
-  return bookId_[0] && slot_ <= 1 && maxRecords_ > 0 && writer_.begin(bookId_, slot_, kind_, page_);
+  return bookId_[0] && slot_ <= 1 && maxRecords_ > 0 && writer_.begin(bookId_, chapterUid_, slot_, kind_, page_);
 }
 
 bool ResponseParser::feed(const uint8_t* data, const size_t len) {
@@ -466,6 +483,9 @@ void ResponseParser::onKey(void* raw, const char* key, size_t) {
     self.field_ = Field::Text;
   } else if (strcmp(key, "htmlContent") == 0) {
     self.field_ = Field::HtmlText;
+  } else if (strcmp(key, "abstract") == 0) {
+    // review/list 的 abstract 即划线原文片段（槽1）。/ review/list's abstract is the highlight excerpt (slot 1).
+    self.field_ = Field::Abstract;
   } else if (strcmp(key, "chapterUid") == 0) {
     self.field_ = Field::ChapterUid;
   } else if (strcmp(key, "chapterTitle") == 0 || strcmp(key, "chapterName") == 0) {
@@ -474,7 +494,7 @@ void ResponseParser::onKey(void* raw, const char* key, size_t) {
     self.field_ = Field::Author;
   } else if (strcmp(key, "name") == 0 || strcmp(key, "nick") == 0 || strcmp(key, "nickname") == 0) {
     self.field_ = Field::AuthorName;
-  } else if (strcmp(key, "totalCount") == 0 || strcmp(key, "likeCount") == 0) {
+  } else if (strcmp(key, "totalCount") == 0 || strcmp(key, "likeCount") == 0 || strcmp(key, "likesCount") == 0) {
     self.field_ = Field::Heat;
   } else if (strcmp(key, "star") == 0 || strcmp(key, "rating") == 0) {
     self.field_ = Field::Rating;
@@ -490,13 +510,14 @@ void ResponseParser::onKey(void* raw, const char* key, size_t) {
 void ResponseParser::onString(void* raw, const char* value, const size_t len) {
   auto& self = *static_cast<ResponseParser*>(raw);
   if (self.inRecord_ && !self.skipRecord_ && self.isRecordTextField()) {
+    const int slot = self.textFieldSlot();
     if (len == 0) {
       self.field_ = Field::None;
       return;
     }
-    self.startText(self.field_ == Field::HtmlText);
+    self.startText(static_cast<unsigned>(slot), self.field_ == Field::HtmlText);
     if (!self.feedText(value, len, true)) self.textFailed_ = true;
-    self.textComplete_ = true;
+    self.textComplete_[slot] = true;
     self.field_ = Field::None;
     return;
   }
@@ -552,10 +573,11 @@ void ResponseParser::onArrayEnd(void* raw) {
 void ResponseParser::onStringChunk(void* raw, const char* value, const size_t len, const bool final) {
   auto& self = *static_cast<ResponseParser*>(raw);
   if (!self.inRecord_ || self.skipRecord_ || !self.isRecordTextField()) return;
-  self.startText(self.field_ == Field::HtmlText);
+  const int slot = self.textFieldSlot();
+  self.startText(static_cast<unsigned>(slot), self.field_ == Field::HtmlText);
   if (!self.feedText(value, len, final)) self.textFailed_ = true;
   if (final) {
-    self.textComplete_ = true;
+    self.textComplete_[slot] = true;
     self.field_ = Field::None;
   }
 }
@@ -612,9 +634,19 @@ void ResponseParser::acceptValue(const char* value, const size_t len) {
   field_ = Field::None;
 }
 
-void ResponseParser::startText(const bool html) {
-  if (textSelected_) return;
-  textSelected_ = true;
+int ResponseParser::textFieldSlot() const {
+  // 槽0=主文本（markText|content/htmlContent），槽1=abstract 划线原文。
+  // / Slot 0 = main text (markText|content/html), slot 1 = abstract excerpt.
+  return field_ == Field::Abstract ? 1 : 0;
+}
+
+void ResponseParser::startText(const unsigned slot, const bool html) {
+  if (slot > 1 || textSelected_[slot] || textComplete_[slot]) return;
+  // 封口另一槽的活动段（字段串行不会交错，防御性收尾）。
+  // / Seal the other slot's active segment (defensive; JSON fields never interleave).
+  sealSeg(1 - slot);
+  textSelected_[slot] = true;
+  segs_[slot] = {writer_.textPosition(), 0, true};
   filter_.html = html;
   filter_.inTag = false;
   filter_.inEntity = false;
@@ -622,6 +654,12 @@ void ResponseParser::startText(const bool html) {
   filter_.atLineStart = true;
   filter_.entityLen = 0;
   decoder_.reset();
+}
+
+void ResponseParser::sealSeg(const unsigned slot) {
+  if (slot > 1 || !segs_[slot].active) return;
+  segs_[slot].len = writer_.textPosition() - segs_[slot].start;
+  segs_[slot].active = false;
 }
 
 bool ResponseParser::feedText(const char* value, const size_t len, const bool final) {
@@ -741,8 +779,10 @@ bool ResponseParser::emitNewline() {
 
 void ResponseParser::startRecord() {
   current_ = {};
-  textSelected_ = false;
-  textComplete_ = false;
+  segs_[0] = {};
+  segs_[1] = {};
+  textSelected_[0] = textSelected_[1] = false;
+  textComplete_[0] = textComplete_[1] = false;
   skipRecord_ = writer_.count() >= maxRecords_;
   if (skipRecord_) {
     responseTruncated_ = true;
@@ -763,7 +803,15 @@ void ResponseParser::finishRecord() {
     skipRecord_ = false;
     return;
   }
-  if (textSelected_ && !decoder_.finish()) textFailed_ = true;
+  sealSeg(0);
+  sealSeg(1);
+  // 双段偏移写回记录：槽0=想法正文，槽1=划线原文（review/list 的 abstract）。
+  // / Slot 0 = thought body, slot 1 = highlight excerpt, both into the record.
+  current_.textOffset = segs_[0].start;
+  current_.textLength = segs_[0].len;
+  current_.abstractOffset = segs_[1].start;
+  current_.abstractLength = segs_[1].len;
+  if ((textSelected_[0] && !decoder_.finish()) || (textSelected_[1] && !decoder_.finish())) textFailed_ = true;
   if (!textFailed_ && !writer_.finishRecord(current_)) {
     storageFailed_ = true;
     textFailed_ = true;
@@ -771,15 +819,14 @@ void ResponseParser::finishRecord() {
   if (current_.idx != 0) nextMaxIdx_ = current_.idx;
   inRecord_ = false;
   recordDepth_ = -1;
-  textSelected_ = false;
-  textComplete_ = false;
+  textSelected_[0] = textSelected_[1] = false;
+  textComplete_[0] = textComplete_[1] = false;
 }
 
 bool ResponseParser::isRecordTextField() const {
-  if (field_ != Field::Text && field_ != Field::HtmlText) return false;
-  if (textSelected_ && textComplete_) return false;
-  if (kind_ != Kind::PopularReviews) return field_ == Field::Text;
-  return field_ == Field::Text || field_ == Field::HtmlText;
+  if (field_ != Field::Text && field_ != Field::HtmlText && field_ != Field::Abstract) return false;
+  const unsigned slot = field_ == Field::Abstract ? 1U : 0U;
+  return !textSelected_[slot] || !textComplete_[slot];
 }
 
 }  // namespace WeReadBrowse

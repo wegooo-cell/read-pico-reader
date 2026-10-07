@@ -67,3 +67,30 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px);
 size_t book_layout_page_for_offset(size_t off);
 /// 返回页首原文字节偏移；越界页返回文本长度。/ Return source byte offset at page start; invalid pages return text length.
 size_t book_layout_page_start_offset(size_t page);
+
+/// 划线装饰（偏移区间语义）：加载时对章节全文做跳空白搜索，记录每条划线
+/// 在原文中的 [起点,终点) 区间；绘制时行区间与划线区间相交即画下划线。
+/// / Highlight decoration by source spans: locate each highlight inside the chapter
+/// / text once at load, then underline any line whose span intersects one.
+/// texts/count 为等长条目数组（条目步长 stride 字节）；换章或关书传 NULL。
+/// resolved 出参返回定位成功的条数。
+/// / texts is a fixed-stride array; pass NULL to clear. *resolved gets the hit count.
+bool book_layout_set_marks(const char* texts, size_t stride, unsigned count, unsigned* resolved);
+/// 查 y_rel 所在行与哪条划线相交（mark 索引，-1 无命中）。调用方须与绘制串行化。
+/// / Index of the mark intersecting the line at y_rel (-1 none); serialize with drawing.
+int book_layout_mark_at(size_t page, int y_rel);
+/// 第 k 个定位成功的 mark 对应的源条目序号（set_marks 输入数组下标）；越界返回 UINT_MAX。
+/// / Source entry index of the k-th resolved mark (into set_marks input); UINT_MAX out of range.
+unsigned book_layout_mark_src(unsigned k);
+/// 第 k 个 mark 在章节原文中的字节区间 [lo,hi)（阶段1串口打印用）；越界返回 false。
+/// / Byte span [lo,hi) of the k-th mark inside the chapter text; false out of range.
+bool book_layout_mark_span(unsigned k, size_t* lo, size_t* hi);
+/// 当前页上与划线相交的行段矩形（同 mark 连续行合并）；返回写入 out 的条数。
+/// 调用方须与绘制串行化（take_line 重放共用静态行缓冲）。
+/// / Rects of line runs intersecting marks on this page (consecutive lines merged);
+/// / returns the count written. Serialize with drawing (shared static line buffer).
+typedef struct {
+    unsigned mark; ///< mark 序号（mark_at/ mark_src 语义）/ Mark index (see mark_at/mark_src)
+    EpdRect rect;  ///< 屏幕矩形 / On-screen rectangle
+} book_layout_mark_rect_t;
+unsigned book_layout_page_mark_rects(size_t page, book_layout_mark_rect_t* out, unsigned cap);

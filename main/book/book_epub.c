@@ -17,6 +17,7 @@
 #include "book_index_cache.h"
 #include "zip_reader.h"
 #include "esp_heap_caps.h"
+#include "esp_log.h"
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -149,6 +150,10 @@ static bool epub_cache_load(const char* source, book_epub_t* book) {
     book->count = payload.count; book->total = payload.total; book->authored_count = payload.authored_count;
     book->navigation_capacity = payload.authored_count;
     book->body_scanned = payload.body_scanned != 0;
+    // 临时诊断：确认目录来自缓存还是重建。
+    // / Temporary diagnostics: cache hit vs rebuilt navigation.
+    ESP_LOGI("epub_nav", "cache hit: chapters=%u authored=%u",
+             (unsigned)payload.count, (unsigned)payload.authored_count);
     return true;
 }
 
@@ -1251,6 +1256,14 @@ static void navigation_prepare(book_epub_t *book) {
     size_t capacity = authored ? book->authored_count : book->count;
     book->visible_index = psram(capacity * sizeof(*book->visible_index));
     if (authored) {
+        // 临时诊断：目录条目异常（1 节）时打印每条 authored nav 的真实状态。
+        // / Temporary diagnostics: dump authored nav entries when the TOC looks wrong.
+        ESP_LOGI("epub_nav", "authored entries=%u", (unsigned)book->authored_count);
+        for (size_t i = 0; i < book->authored_count; ++i) {
+            const nav_entry_t *entry = &book->navigation[i];
+            ESP_LOGI("epub_nav", "  [%u] chapter=%u valid=%d title='%.40s'",
+                     (unsigned)i, (unsigned)entry->chapter, (int)entry->valid, entry->title);
+        }
         for (size_t i = 0; i < book->authored_count; ++i) {
             nav_entry_t *entry = &book->navigation[i];
             entry->visible = entry->valid && !front_matter_title(entry->title);

@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "esp_heap_caps.h"
+#include "esp_log.h"
 #include "ttf_font.h"
 
 #define PAGE_MAX 4096u
@@ -34,6 +35,17 @@ static int s_reading_line_offset;
 static bool s_images_visible = true;
 static size_t s_lead_skip;
 static unsigned s_lead_height;
+
+// 阶段1（映射+串口打印）不绘制划线；弹窗阶段置 1 恢复。
+// / Stage 1 maps and logs only; flip to 1 when the popup stage lands.
+#ifndef BOOK_NOTES_DRAW_MARKS
+#define BOOK_NOTES_DRAW_MARKS 1
+#endif
+static struct {
+    size_t lo, hi;
+    unsigned src;
+} *s_marks;
+static unsigned s_mark_count;
 
 static const blk_t* s_blocks;
 static size_t s_block_count;
@@ -183,6 +195,9 @@ void book_layout_free(void) {
     s_pages = NULL;
     s_line = NULL;
     s_text = NULL;
+    free(s_marks);
+    s_marks = NULL;
+    s_mark_count = 0;
     s_count = s_capacity = s_len = 0;
     s_px = 0;
     s_blocks = NULL;
@@ -614,6 +629,186 @@ size_t book_layout_page_for_offset(size_t off) {
     return lo;
 }
 
+// 在 [hay, hay+cap) 内跳过空白字符匹配 needle，给出匹配区间；未命中返回 false。
+// needle 侧已由调用方去空白。纯内存线性扫描，仅加载时调用。
+// / Whitespace-tolerant substring search; needle is pre-normalized by the caller.
+static bool mark_find(const char* hay, size_t cap, const char* needle, size_t* lo, size_t* hi) {
+    if (!hay || !needle || !needle[0]) return false;
+    for (size_t i = 0; i < cap && hay[i]; ++i) {
+        if (hay[i] == ' ' || hay[i] == '\t' || hay[i] == '\n' || hay[i] == '\r' ||
+            ((unsigned char)hay[i] == 0xE3 && i + 2 < cap && (unsigned char)hay[i + 1] == 0x80 &&
+             (unsigned char)hay[i + 2] == 0x80))  // 全角空格 U+3000 / ideographic space
+            continue;
+        size_t j = 0, k = i;
+        while (needle[j]) {
+            while (k < cap && hay[k] &&
+                   (hay[k] == ' ' || hay[k] == '\t' || hay[k] == '\n' || hay[k] == '\r' ||
+                    ((unsigned char)hay[k] == 0xE3 && k + 2 < cap &&
+                     (unsigned char)hay[k + 1] == 0x80 && (unsigned char)hay[k + 2] == 0x80)))
+                k += (unsigned char)hay[k] == 0xE3 ? 3 : 1;
+            if (k >= cap || !hay[k] || hay[k] != needle[j]) break;
+            ++k;
+            ++j;
+        }
+        if (!needle[j]) { *lo = i; *hi = k; return true; }
+    }
+    return false;
+}
+
+bool book_layout_set_marks(const char* texts, size_t stride, unsigned count, unsigned* resolved) {
+    free(s_marks);
+    s_marks = NULL;
+    s_mark_count = 0;
+    if (resolved) *resolved = 0;
+    if (!texts || !stride || !count || !s_text || !s_len) return false;
+    s_marks = malloc(count * sizeof(*s_marks));
+    if (!s_marks) return false;
+    for (unsigned i = 0; i < count; ++i) {
+        size_t lo, hi;
+        if (mark_find(s_text, s_len, texts + i * stride, &lo, &hi)) {
+            s_marks[s_mark_count] = (typeof(*s_marks)){.lo = lo, .hi = hi, .src = i};
+            ++s_mark_count;
+        }
+    }
+    if (resolved) *resolved = s_mark_count;
+    if (s_mark_count < count) {
+        // 失配诊断：取前 2 条失败划线，用其前 12 字节（约 4 个汉字）做短前缀
+        // 定位并打印命中处上下文——分叉字符直接可见。
+        // / Mismatch diagnosis: locate the first 2 failed highlights by a short
+        // / 12-byte prefix and dump the surrounding text; the diverging chars show up.
+        unsigned dumped = 0;
+        for (unsigned i = 0; i < count && dumped < 2; ++i) {
+            const char* hl = texts + i * stride;
+            size_t pfx = 0;
+            while (hl[pfx] && pfx < 12) {
+                if ((unsigned char)hl[pfx] >= 0x80) { pfx += 3; if (pfx > 12) break; }
+                else ++pfx;
+            }
+            if (pfx < 6) continue;  // 前缀太短无定位价值 / prefix too short to locate
+            char probe[13];
+            memcpy(probe, hl, pfx);
+            probe[pfx] = 0;
+            size_t lo, hi;
+            if (!mark_find(s_text, s_len, probe, &lo, &hi)) {
+                ESP_LOGW("book_layout", "mark miss: no prefix hit hl[%u]='%.48s'", i, hl);
+            } else {
+                const size_t ctx0 = lo > 24 ? lo - 24 : 0;
+                ESP_LOGW("book_layout", "mark miss: prefix hit ctx='%.40s' hl[%u]='%.48s'",
+                         s_text + ctx0, i, hl);
+            }
+            ++dumped;
+        }
+    }
+    if (!s_mark_count) {
+        // 终极诊断：一条都定位不到时，打印正文开头与首条划线的原始字节，
+        // 直接暴露编码/字符级差异。/ Ultimate diagnosis: dump raw bytes of the
+        // chapter head and the first highlight to expose encoding-level drift.
+        char dump[193];
+        size_t w = 0;
+        for (size_t i = 0; i < s_len && w < sizeof(dump) - 3 && s_text[i]; ++i) {
+            const unsigned char c = (unsigned char)s_text[i];
+            if (c == '\n' || c == '\r') break;
+            w += (size_t)snprintf(dump + w, sizeof(dump) - w, "%02X", c);
+        }
+        const char* first = texts;
+        ESP_LOGW("book_layout", "mark spans=0 text[%zu]='%.48s' hex=%s hl='%.48s'", s_len, s_text, dump, first);
+    }
+    return true;
+}
+
+// 行区间 [off, next) 与哪条划线相交；命中返回划线内部序号。
+// / Which mark intersects the line span [off, next); returns the mark index.
+static int mark_hit(size_t off, size_t next) {
+    for (unsigned i = 0; i < s_mark_count; ++i)
+        if (s_marks[i].lo < next && off < s_marks[i].hi) return (int)i;
+    return -1;
+}
+
+int book_layout_mark_at(size_t page, int y_rel) {
+    if (page >= s_count || !s_block_count || book_layout_page_image(page) >= 0) return -1;
+    // 与 draw_page 相同的行推进重放，定位行后查区间相交。
+    // / Same line walk as draw_page, then intersect the resolved marks.
+    size_t off = s_pages[page];
+    size_t end = page + 1 < s_count ? s_pages[page + 1] : s_len;
+    int64_t used = page == 0 ? s_lead_height : 0;
+    while (off < end) {
+        size_t visible = skip_image_spacing(off);
+        if (visible != off) { off = visible; continue; }
+        size_t next;
+        bool paragraph_end, heading;
+        int line_px, line_width, indent, margin_before, margin_after;
+        uint8_t align;
+        if (!take_line(off, &next, &paragraph_end, &line_px, &heading,
+                       &line_width, &indent, &align, &margin_before, &margin_after)) return -1;
+        int line_height = line_height_for(line_px);
+        int leading = used ? margin_before : 0;
+        if (used + leading + line_height > s_rect.height) return -1;
+        const int top = (int)used + leading;
+        used += leading;
+        if (s_line[0] && y_rel >= top && y_rel < top + line_height) return mark_hit(off, next);
+        used += line_height;
+        if (paragraph_end) used += gap_for(line_height, heading) + margin_after;
+        off = next;
+    }
+    return -1;
+}
+
+unsigned book_layout_mark_src(unsigned k) {
+    return s_marks && k < s_mark_count ? s_marks[k].src : UINT_MAX;
+}
+
+bool book_layout_mark_span(unsigned k, size_t* lo, size_t* hi) {
+    if (!s_marks || k >= s_mark_count) return false;
+    if (lo) *lo = s_marks[k].lo;
+    if (hi) *hi = s_marks[k].hi;
+    return true;
+}
+
+unsigned book_layout_page_mark_rects(size_t page, book_layout_mark_rect_t* out, unsigned cap) {
+    if (!out || !cap || page >= s_count || !s_block_count || book_layout_page_image(page) >= 0)
+        return 0;
+    // 与 draw_page 相同的行推进重放：行区间与划线相交即输出矩形，
+    // 同一 mark 的连续行合并为一块，翻页日志与点击判定共用同一几何。
+    // / Same line walk as draw_page: an intersecting line emits a rect, and
+    // / consecutive lines of one mark merge into one block for logs and taps.
+    unsigned n = 0;
+    size_t off = s_pages[page];
+    size_t end = page + 1 < s_count ? s_pages[page + 1] : s_len;
+    int64_t used = page == 0 ? s_lead_height : 0;
+    while (off < end) {
+        size_t visible = skip_image_spacing(off);
+        if (visible != off) { off = visible; continue; }
+        size_t next;
+        bool paragraph_end, heading;
+        int line_px, line_width, indent, margin_before, margin_after;
+        uint8_t align;
+        if (!take_line(off, &next, &paragraph_end, &line_px, &heading,
+                       &line_width, &indent, &align, &margin_before, &margin_after)) break;
+        int line_height = line_height_for(line_px);
+        int leading = used ? margin_before : 0;
+        if (used + leading + line_height > s_rect.height) break;
+        const int top = (int)used + leading;
+        used += leading;
+        if (s_line[0]) {
+            const int hit = mark_hit(off, next);
+            if (hit >= 0) {
+                const EpdRect r = {s_rect.x + indent, s_rect.y + top,
+                                   line_width > 0 ? line_width : line_px, line_height};
+                if (n && out[n - 1].mark == (unsigned)hit &&
+                    out[n - 1].rect.y + out[n - 1].rect.height == r.y)
+                    out[n - 1].rect.height += r.height;
+                else if (n < cap)
+                    out[n++] = (book_layout_mark_rect_t){.mark = (unsigned)hit, .rect = r};
+                if (n == cap) break;
+            }
+        }
+        used += line_height;
+        if (paragraph_end) used += gap_for(line_height, heading) + margin_after;
+        off = next;
+    }
+    return n;
+}
+
 void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
     if (!fb || page >= s_count || px != s_px || rect.width != s_rect.width ||
         rect.height != s_rect.height || rect.x < 0 || rect.y < 0 ||
@@ -682,6 +877,24 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
                 ttf_draw_text_px_spaced(fb, x, baseline, line_px, s_line, s_tracking_px, 0, 15);
             else
                 ttf_draw_text_px(fb, x, baseline, line_px, s_line, EPD_DRAW_ALIGN_LEFT, 0, 15);
+            // 划线装饰：行区间与划线区间相交即画点状虚线（仿微信读书 app：
+            // 3px 点 + 3px 间隔），点小色深以保证电子纸可见。
+            // / Highlight decoration: a dotted underline on intersecting spans
+            // / (WeRead mobile style: 3 px dots, 3 px gaps), dark enough for e-paper.
+#if BOOK_NOTES_DRAW_MARKS
+            const int hit_mark = mark_hit(off, next);
+            if (hit_mark >= 0) {
+                int mark_w = line_width;
+                if (x + mark_w > rect.x + rect.width) mark_w = rect.x + rect.width - x;
+                if (mark_w > 0) {
+                    const int dot_y = baseline + line_px / 8 + 2;
+                    for (int dx = 0; dx < mark_w; dx += 6) {
+                        const int dw = dx + 3 <= mark_w ? 3 : mark_w - dx;
+                        epd_fill_rect((EpdRect){x + dx, dot_y, dw, 2}, 0x30, fb);
+                    }
+                }
+            }
+#endif
         }
         used += line_height;
         if (paragraph_end) used += gap_for(line_height, heading) + margin_after;

@@ -75,6 +75,7 @@
 #include "book_title.h"
 #include "book_ticket.h"
 #include "book_toc.h"
+#include "book_notes_popup.h"
 #include "app_font_context.h"
 #include "book_source.h"
 #include "book_store.h"
@@ -211,7 +212,7 @@ static bool s_shelf_cache_valid, s_cache_sd_present, s_cache_sd_mounted;
 static uint8_t s_cache_shelf_style;
 static bool s_scan_pending, s_clear_confirm;
 static reader_panel_t s_reader_panel;
-static bool s_reader_fullscreen;
+static bool s_reader_fullscreen = true;  // 阅读页固定全屏；状态栏切换已取消 / Fixed fullscreen; bar toggle removed
 static char s_message[128], s_storage[128], s_path[BOOK_STORE_PATH_MAX], s_title[128];
 static char s_book_title[128];
 static char s_chapter_heading_title[128], s_chapter_heading_label[32];
@@ -2131,7 +2132,7 @@ static void ensure_prep(void) {
     }
 }
 static bool kick_prep(void) {
-    if (s_view != READING || s_toolbar || s_clear_confirm ||
+    if (s_view != READING || s_toolbar || s_clear_confirm || book_notes_active() ||
         s_page + 1 >= book_layout_page_count() || s_next_page == (int)s_page + 1 ||
         book_layout_page_image_count(s_page) > 0 ||
         book_layout_page_image_count(s_page + 1) > 0) return false;
@@ -2184,6 +2185,8 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
     }
     if (s_view == READING && s_text) {
         draw_reader(fb, s_page);
+        book_notes_render(fb);
+        book_notes_map_page(s_page);  // 阶段1：每页重绘都重算批注→屏幕矩形并打日志。/ Stage-1 mapping log.
         unlock_draw();
         return;
     }
@@ -2340,6 +2343,10 @@ static void track_ticket_stats(app_ctx_t* ctx) {
         uint32_t elapsed = (uint32_t)(ctx->now_ms - s_stats_last_ms);
         s_stats_pending_ms += elapsed;
         s_session_read_ms += elapsed;
+        // 微信读书阅读时长（rt）同步走同一活动判定；非微信读书书内部直返。
+        // / WeRead reading-time (rt) sync rides the same activity gate; no-op for other books.
+        book_notes_report_tick(elapsed, (uint16_t)s_chapter,
+                               (uint32_t)reader_page_offset(s_page), (uint8_t)percent(s_page));
     }
     s_stats_last_ms = ctx->now_ms;
     if (s_stats_pending_ms >= 30000) flush_ticket_stats();
@@ -2516,6 +2523,7 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     s_images = loaded.images; s_image_count = loaded.image_count;
     release_page_images();
     s_chapter = chapter;
+    book_notes_set_chapter(s_chapter);  // 章切换 → 装饰缓存失效（lock 内，无竞态）。
     if (clear_toc) s_selected_toc = SIZE_MAX;
     s_chapter_lead_skip = lead_skip;
     s_chapter_lead_height = lead_height;
@@ -2596,7 +2604,7 @@ static bool open_book(app_ctx_t* ctx, const char* path) {
     }
     save_progress();
     free_book();
-    s_reader_fullscreen = false;
+    s_reader_fullscreen = true;  // 阅读页固定全屏；状态栏模式已取消 / Fullscreen fixed; bar mode removed
     app_font_activate_reading();
     if (!pending_reserve(path)) {
         copy_text(s_message, sizeof(s_message), "内存不足，无法打开图书");
@@ -2651,6 +2659,13 @@ static bool open_book(app_ctx_t* ctx, const char* path) {
     s_turns = s_unsaved = 0;
     pending_mark_latest(s_path);
     save_progress();
+    // 微信读书书籍开书即绑定划线想法缓存；其他书静默跳过。bind 内部先 unbind
+    // 会清掉首次章加载的装饰状态（首次 set_chapter 跑在 bind 之前），因此绑定
+    // 成功后必须显式补跑当前章，否则恢复阅读位置的开书永远没有划线。
+    // / Bind highlight notes right after opening. bind() clears the decoration
+    // / state set by the first set_chapter (which ran before bind), so re-run
+    // / the current chapter explicitly or a resumed open never shows highlights.
+    if (book_notes_bind(s_path)) book_notes_set_chapter(s_chapter);
     // 打开即重新上书架：移出书架只隐藏条目，重新读这本书就是它该在架上的信号。
     // Opening puts the book back on the shelf: removal only hides the entry, and reading it
     // again is the signal that it belongs there.
@@ -3133,6 +3148,10 @@ static app_redraw_t resize_text(app_ctx_t* ctx, int dir) {
     s_px = next;
     s_page = book_layout_page_for_offset(off);
     unlock_draw();
+    // 字号重排后行位置全变，装饰缓存须作废重算，否则划线消失。
+    // / Reflow invalidates line rects; reload decorations or marks vanish.
+    book_notes_invalidate();
+    book_notes_set_chapter(s_chapter);
     app_settings_set_book_px(s_px);
     save_progress();
     return paint_reading(ctx, MODE_DU);
@@ -3167,6 +3186,10 @@ static app_redraw_t apply_reader_layout(app_ctx_t* ctx, int next_px, int next_ma
     }
     unlock_draw();
     if (!ok) return APP_REDRAW_NONE;
+    // 版式重排后行位置全变，装饰缓存须作废重算，否则划线消失。
+    // / Reflow invalidates line rects; reload decorations or marks vanish.
+    book_notes_invalidate();
+    book_notes_set_chapter(s_chapter);
     app_settings_set_book_px((uint8_t)s_px);
     app_settings_set_book_margin((uint8_t)s_margin);
     app_settings_set_book_line_spacing(next_line);
@@ -3194,6 +3217,10 @@ static app_redraw_t apply_reader_typography(app_ctx_t* ctx, int tracking_index) 
     }
     unlock_draw();
     if (!ok) return APP_REDRAW_NONE;
+    // 字距重排后行位置全变，装饰缓存须作废重算，否则划线消失。
+    // / Tracking reflow invalidates line rects; reload decorations or marks vanish.
+    book_notes_invalidate();
+    book_notes_set_chapter(s_chapter);
     app_settings_set_book_tracking((uint8_t)tracking_index);
     save_progress();
     return APP_REDRAW_PAGE;
@@ -3216,6 +3243,10 @@ static app_redraw_t apply_reader_indent(app_ctx_t* ctx, int em) {
     }
     unlock_draw();
     if (!ok) return APP_REDRAW_NONE;
+    // 缩进重排后行位置全变，装饰缓存须作废重算，否则划线消失。
+    // / Indent reflow invalidates line rects; reload decorations or marks vanish.
+    book_notes_invalidate();
+    book_notes_set_chapter(s_chapter);
     app_settings_set_book_indent((uint8_t)em);
     save_progress();
     return APP_REDRAW_PAGE;
@@ -3302,28 +3333,6 @@ static app_redraw_t reader_return(app_ctx_t *ctx, bool home) {
     return APP_REDRAW_PAGE;
 }
 
-static app_redraw_t toggle_reader_fullscreen(app_ctx_t* ctx) {
-    if (!s_text) return APP_REDRAW_NONE;
-    size_t off = book_layout_page_start_offset(s_page);
-    lock_draw();
-    invalidate_prep();
-    s_reader_fullscreen = !s_reader_fullscreen;
-    bool ok = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
-    if (ok) s_page = book_layout_page_for_offset(off);
-    else {
-        s_reader_fullscreen = !s_reader_fullscreen;
-        (void)book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
-    }
-    unlock_draw();
-    if (!ok) return APP_REDRAW_NONE;
-    release_page_images();
-    prepare_inline_image();
-    s_jump_offset = SIZE_MAX;
-    s_reader_panel = READER_PANEL_NONE;
-    save_progress();
-    return APP_REDRAW_PAGE;
-}
-
 static app_redraw_t select_reading_font_item(app_ctx_t* ctx, const ttf_font_item_t* item) {
     if (!item || !strcmp(ttf_font_path(), item->path)) return APP_REDRAW_NONE;
     char previous[TTF_FONT_PATH_MAX];
@@ -3340,6 +3349,12 @@ static app_redraw_t select_reading_font_item(app_ctx_t* ctx, const ttf_font_item
     }
     unlock_draw();
     if (!ok) return APP_REDRAW_NONE;
+    // 字体切换重排后排版行全部变化，装饰命中缓存必须按新行重算：
+    // set_chapter 对同章短路，必须先作废缓存再补跑（否则划线消失）。
+    // / A font switch rebuilds every layout line; set_chapter short-circuits
+    // / on the same spine, so poison the cache first or highlights vanish.
+    book_notes_invalidate();
+    book_notes_set_chapter(s_chapter);
     app_settings_set_font_path(item->path);
     copy_text(s_font_path, sizeof(s_font_path), item->path);
     save_progress();
@@ -3961,6 +3976,28 @@ static int reader_vertical_tap(EpdRect body, int y) {
     return zone == 0 ? -1 : zone == 2 ? 1 : 0;
 }
 
+// 正文中央点按：命中划线弹想法，未命中不做任何动作（全屏固定，原「点按切换状态栏
+// 模式」会让划线装饰随正文区变化而丢失，已按要求取消）。
+// Body tap: open the popup on a highlight; otherwise no-op (fullscreen is fixed here —
+// the old tap-to-toggle lost highlight decorations when the body rect changed).
+static app_redraw_t reader_body_tap(app_ctx_t* ctx, int x, int y) {
+    (void)x;
+    if (book_notes_bound() && !book_notes_active()) {
+        const EpdRect body = body_rect();
+        int mark = -1;
+        lock_draw();
+        mark = book_layout_mark_at(s_page, y - body.y);
+        unlock_draw();
+        if (mark >= 0 && book_notes_tap_mark(s_chapter, mark)) {
+            render(ctx, ctx->fb);
+            s_area = book_notes_area();
+            s_mode = MODE_GL16;
+            return APP_REDRAW_AREA;
+        }
+    }
+    return APP_REDRAW_NONE;
+}
+
 static app_redraw_t bulk_turn_page(app_ctx_t* ctx, int direction) {
     int next = ctx->leaf + direction;
     if (s_scan_pending || s_batch_confirm || next < 0 || next >= leaves()) return APP_REDRAW_NONE;
@@ -4138,12 +4175,12 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         if (app_settings_reader_vertical_turn()) {
             int target = reader_vertical_tap(body_rect(), y);
             if (target == -1 || target == 1) return turn_page(ctx, target);
-            if (target == 0) return toggle_reader_fullscreen(ctx);
+            if (target == 0) return reader_body_tap(ctx, x, y);
             return APP_REDRAW_NONE;
         }
         if (x < UI_LOCK_WIDTH * 3 / 10) return turn_page(ctx, -1);
         if (x >= UI_LOCK_WIDTH * 7 / 10) return turn_page(ctx, 1);
-        if (ui_rect_hit(body_rect(), x, y)) return toggle_reader_fullscreen(ctx);
+        if (ui_rect_hit(body_rect(), x, y)) return reader_body_tap(ctx, x, y);
         return APP_REDRAW_NONE;
     }
     if (s_view == SHELF) {
@@ -4196,7 +4233,7 @@ static void on_enter(app_ctx_t* ctx) {
     book_layout_set_first_line_indent(app_settings_book_indent());
     book_layout_set_reading_line(app_settings_book_reading_line());
     book_layout_set_reading_line_offset(app_settings_book_reading_line_offset());
-    s_reader_fullscreen = false;
+    s_reader_fullscreen = true;  // 阅读页固定全屏；状态栏模式已取消 / Fullscreen fixed; bar mode removed
     s_bookmark_edit = s_bookmark_delete_confirm = s_bookmark_delete_error = false;
     s_bookmark_selected = 0;
     clear_selection();
@@ -4248,6 +4285,7 @@ static void on_enter(app_ctx_t* ctx) {
 }
 static void book_on_exit(app_ctx_t* ctx) {
     s_presented_view = -1;
+    book_notes_unbind();
     free(s_editor_cover); s_editor_cover = NULL;
     s_pressed_control = -1;
     s_reader_slider = -1;
@@ -4265,6 +4303,7 @@ static void book_on_exit(app_ctx_t* ctx) {
 // Stop old-card handles and font preparation before the loop switches to the builtin font.
 static void book_on_media_lost(app_ctx_t* ctx) {
     lock_draw();
+    book_notes_unbind();
     save_progress();
     free_book();
     unlock_draw();
@@ -4437,6 +4476,20 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
         return APP_REDRAW_NONE;
     }
     if (s_view == READING && ev->type != UI_GESTURE_PRESS) s_stats_activity_ms = ctx->now_ms;
+    if (s_view == READING && book_notes_active()) {
+        // 弹窗展开期间独占触摸：点外关闭、按钮/滑动翻想法页，其余吞掉不翻页。
+        // / Popup owns touch while open: outside closes, buttons and swipes page; the rest is swallowed.
+        if (ev->type == UI_GESTURE_PRESS || ev->type == UI_GESTURE_MOVE ||
+            ev->type == UI_GESTURE_CANCEL)
+            return APP_REDRAW_NONE;
+        if (book_notes_gesture(ev->type, ev->x0, ev->y0)) {
+            render(ctx, ctx->fb);
+            s_area = book_notes_area();
+            s_mode = MODE_GL16;
+            return APP_REDRAW_AREA;
+        }
+        return APP_REDRAW_NONE;
+    }
     if (s_view == READING &&
         (s_reader_panel == READER_PANEL_FONT_SETTINGS || s_reader_panel == READER_PANEL_LAYOUT_SETTINGS)) {
         if (ev->type == UI_GESTURE_PRESS) {
@@ -4551,6 +4604,17 @@ static app_redraw_t on_key(app_ctx_t* ctx, int key) {
         if (s_view == SHELF) { ui_nav_request(ctx, 0); return APP_REDRAW_NONE; }
     }
     if (s_scan_pending || s_clear_confirm) return APP_REDRAW_NONE;
+    if (book_notes_active()) {
+        // 弹窗展开时三键全部由弹窗消费：1/3 翻想法页，2 关闭。
+        // / While open, the three keys belong to the popup: 1/3 page, 2 closes.
+        if (book_notes_key(key)) {
+            render(ctx, ctx->fb);
+            s_area = book_notes_area();
+            s_mode = MODE_GL16;
+            return APP_REDRAW_AREA;
+        }
+        return APP_REDRAW_NONE;
+    }
     if (key == UI_KEY_2) {
         if (s_view == BULK) s_view = SHELF;
         else if (s_view == SHELF) { ui_nav_request(ctx, 3); return APP_REDRAW_NONE; }
@@ -4576,7 +4640,7 @@ static app_redraw_t on_key(app_ctx_t* ctx, int key) {
     return APP_REDRAW_PAGE;
 }
 static app_redraw_t on_power_short(app_ctx_t* ctx) {
-    if (s_view != READING || !s_text || s_toolbar || s_clear_confirm ||
+    if (s_view != READING || !s_text || s_toolbar || s_clear_confirm || book_notes_active() ||
         !app_settings_reader_power_turn()) return APP_REDRAW_NONE;
     s_stats_activity_ms = ctx->now_ms;
     app_redraw_t result = turn_page(ctx, 1);
@@ -4589,6 +4653,16 @@ static app_redraw_t on_key_long(app_ctx_t* ctx, int key) {
         return APP_REDRAW_PAGE;
     }
     if (s_view != READING && s_view != TOC) { ui_nav_request(ctx, 0); return APP_REDRAW_NONE; }
+    if (s_view == READING && book_notes_active()) {
+        // 中键长按优先收起弹窗，不做刷新/返回。/ A middle-key hold collapses the popup first.
+        if (book_notes_key(UI_KEY_2)) {
+            render(ctx, ctx->fb);
+            s_area = book_notes_area();
+            s_mode = MODE_GL16;
+            return APP_REDRAW_AREA;
+        }
+        return APP_REDRAW_NONE;
+    }
     if (s_view == READING) {
         if (app_settings_reader_hold_refresh()) return reader_manual_refresh(ctx);
         return reader_return(ctx, true);
@@ -4648,6 +4722,17 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
             if (redraw != APP_REDRAW_NONE) return redraw;
         } else if (ble_dir && s_view == READING) {
             s_stats_activity_ms = ctx->now_ms;
+            if (book_notes_active()) {
+                // 弹窗展开时 BLE 翻页键与物理键同语义：翻想法页，不翻正文。
+                // / While open, BLE turn keys page the thoughts, not the book.
+                if (book_notes_key(ble_dir < 0 ? UI_KEY_1 : UI_KEY_3)) {
+                    render(ctx, ctx->fb);
+                    s_area = book_notes_area();
+                    s_mode = MODE_GL16;
+                    return APP_REDRAW_AREA;
+                }
+                return APP_REDRAW_NONE;
+            }
             return turn_page(ctx, ble_dir);
         }
     }
