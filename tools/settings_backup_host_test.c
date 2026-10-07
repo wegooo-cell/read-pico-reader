@@ -103,6 +103,8 @@ int main(void) {
     s_home_full_refresh = true;
     s_ble_turner = true;
     s_reader_hold_refresh = true;
+    app_settings_set_book_weight(700);
+    assert(app_settings_book_weight() == 700);
     app_settings_set_reader_vertical_turn(true);
     assert(app_settings_reader_vertical_turn());
 
@@ -115,7 +117,7 @@ int main(void) {
     assert(app_settings_backup_save() == ESP_OK);
     assert(history_saves == 1);
     FILE *saved = fopen(BACKUP_FILE, "rb");
-    assert(saved && fseek(saved, sizeof(settings_backup_v1_t) + 7, SEEK_SET) == 0);
+    assert(saved && fseek(saved, sizeof(settings_backup_v1_t) + 8, SEEK_SET) == 0);
     settings_backup_profile_t saved_profile;
     assert(fread(&saved_profile, 1, sizeof(saved_profile), saved) == sizeof(saved_profile));
     settings_backup_wifi_t saved_network;
@@ -132,7 +134,7 @@ int main(void) {
     // 旧备份仍可恢复，但退出的极速测试位被忽略；其他配置与网络继续恢复。
     // Accept old backups while ignoring the retired fast-test bit; restore other settings and WiFi.
     saved = fopen(BACKUP_FILE, "r+b");
-    settings_backup_v1_t legacy_header; uint8_t legacy_ext[7];
+    settings_backup_v1_t legacy_header; uint8_t legacy_ext[8];
     assert(saved && fread(&legacy_header, 1, sizeof(legacy_header), saved) == sizeof(legacy_header));
     assert(fread(legacy_ext, 1, sizeof(legacy_ext), saved) == sizeof(legacy_ext));
     saved_profile.home_full_refresh |= 64;
@@ -143,20 +145,22 @@ int main(void) {
     assert(fclose(saved) == 0);
     memset(&saved_wifi, 0, sizeof(saved_wifi));
     saved = fopen(BACKUP_FILE, "r+b");
-    assert(saved && fseek(saved, sizeof(settings_backup_v1_t) + 7 +
+    assert(saved && fseek(saved, sizeof(settings_backup_v1_t) + 8 +
                             sizeof(settings_backup_profile_t) +
                             offsetof(settings_backup_wifi_t, credentials.password), SEEK_SET) == 0);
     assert(fputc('X', saved) != EOF && fclose(saved) == 0);
     assert(app_settings_backup_restore() == ESP_ERR_INVALID_RESPONSE);
     assert(!saved_wifi.configured && wifi_imports == 0);
     saved = fopen(BACKUP_FILE, "r+b");
-    assert(saved && fseek(saved, sizeof(settings_backup_v1_t) + 7 +
+    assert(saved && fseek(saved, sizeof(settings_backup_v1_t) + 8 +
                             sizeof(settings_backup_profile_t), SEEK_SET) == 0);
     assert(fwrite(&saved_network, 1, sizeof(saved_network), saved) == sizeof(saved_network));
     assert(fclose(saved) == 0);
     s_system_size = 120;
     s_book_px = 48;
     s_book_tracking = 2;
+    app_settings_set_book_weight(500);
+    assert(app_settings_book_weight() == 500);
     s_book_indent = 0;
     s_book_rule_offset = 4;
     s_reader_full_pages = 15;
@@ -185,6 +189,7 @@ int main(void) {
            !strcmp(saved_wifi.password, "password123"));
     assert(s_book_px == 62 && s_book_tracking == 4 && s_book_indent == 3 &&
            s_book_rule_offset == 7 && s_reader_full_pages == 5);
+    assert(app_settings_book_weight() == 700); /* V9 backups carry the body weight step. */
     assert(s_reader_turn_effect == 1 && s_reader_power_turn && s_reader_immersive && s_shelf_style == 3);
     assert(s_staged_shutdown&&app_settings_auto_lock_minutes()==5);
     assert(s_ble_turner);
@@ -220,8 +225,41 @@ int main(void) {
            s_staged_shutdown);
     assert(!strcmp(saved_wifi.ssid, "Home_2.4G"));
 
-    /* PICOSET3 backups predate the shutdown choice and restore the safe off default. */
+    /* PICOSET8 backups have no weight byte and restore the default step. */
     FILE *file = fopen(BACKUP_FILE, "rb");
+    assert(file);
+    settings_backup_v1_t v8_header;
+    uint8_t v9_extension[8];
+    settings_backup_profile_t v8_profile;
+    settings_backup_wifi_t v8_network;
+    assert(fread(&v8_header, 1, sizeof(v8_header), file) == sizeof(v8_header));
+    assert(fread(v9_extension, 1, sizeof(v9_extension), file) == sizeof(v9_extension));
+    assert(fread(&v8_profile, 1, sizeof(v8_profile), file) == sizeof(v8_profile));
+    assert(fread(&v8_network, 1, sizeof(v8_network), file) == sizeof(v8_network));
+    assert(fclose(file) == 0);
+    memcpy(v8_header.magic, "PICOSET8", sizeof(v8_header.magic));
+    backup_seal(&v8_header);
+    uint8_t v8_extension[7] = {v9_extension[0], v9_extension[1], v9_extension[2]};
+    uint32_t v8_hash = backup_shutdown_checksum(&v8_header, v8_extension[0], v8_extension[1], v8_extension[2]);
+    for (int i = 0; i < 4; ++i) v8_extension[i + 3] = (uint8_t)(v8_hash >> (i * 8));
+    uint32_t v8_profile_hash = backup_profile_checksum(&v8_header, v8_extension[0], v8_extension[1],
+                                                       v8_extension[2], &v8_profile);
+    for (int i = 0; i < 4; ++i) v8_profile.checksum[i] = (uint8_t)(v8_profile_hash >> (i * 8));
+    file = fopen(BACKUP_FILE, "wb");
+    assert(file);
+    assert(fwrite(&v8_header, 1, sizeof(v8_header), file) == sizeof(v8_header));
+    assert(fwrite(v8_extension, 1, sizeof(v8_extension), file) == sizeof(v8_extension));
+    assert(fwrite(&v8_profile, 1, sizeof(v8_profile), file) == sizeof(v8_profile));
+    assert(fwrite(&v8_network, 1, sizeof(v8_network), file) == sizeof(v8_network));
+    assert(fwrite("RPHIST1", 1, 8, file) == 8);
+    assert(fclose(file) == 0);
+    s_book_px = 48;
+    app_settings_set_book_weight(700);
+    assert(app_settings_backup_restore() == ESP_OK && s_book_px == 70);
+    assert(app_settings_book_weight() == APP_BOOK_WEIGHT_DEFAULT);
+
+    /* PICOSET3 backups predate the shutdown choice and restore the safe off default. */
+    file = fopen(BACKUP_FILE, "rb");
     assert(file);
     settings_backup_v1_t legacy;
     assert(fread(&legacy, 1, sizeof(legacy), file) == sizeof(legacy));
@@ -303,6 +341,6 @@ int main(void) {
     app_settings_init(); assert(app_settings_system_font_size() == 200);
 
 
-    puts("settings backup host test passed (including 200% size persistence and restore)");
+    puts("settings backup host test passed (including 200% size, v9 body weight and restore)");
     return 0;
 }

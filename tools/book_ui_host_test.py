@@ -277,6 +277,11 @@ static int app_settings_book_margin(void){return 36;}
 static int app_settings_book_line_spacing(void){return 130;}
 static int app_settings_book_paragraph_spacing(void){return 50;}
 static int app_settings_book_tracking(void){return 2;}
+#define APP_BOOK_WEIGHT_COUNT 3
+static const uint16_t app_settings_book_weights[APP_BOOK_WEIGHT_COUNT]={400,500,700};
+static uint16_t test_book_weight=400;
+static uint16_t app_settings_book_weight(void){return test_book_weight;}
+static void app_settings_set_book_weight(uint16_t wght){test_book_weight=wght;}
 static int app_settings_book_indent(void){return 2;}
 static int app_settings_book_reading_line(void){return 0;}
 static int app_settings_book_reading_line_offset(void){return 0;}
@@ -321,6 +326,7 @@ static char test_wrapped[512];
 #define BOOK_MARGIN_MIN 24
 #define BOOK_MARGIN_MAX 60
 #define BOOK_MARGIN_CHOICES (BOOK_MARGIN_MAX - BOOK_MARGIN_MIN + 1)
+static const EpdRect s_weight_card={36,778,612,84};
 #define EPD_DRAW_ALIGN_LEFT 0
 static int ui_content_width(void){return 604;}
 static int ttf_text_width_px(int px,const char* text){int width=0;for(;*text;text++)if(((unsigned char)*text&0xc0)!=0x80)width+=px;return width;}
@@ -330,7 +336,7 @@ unit += function("book_layout_balanced_rect", layout_source) + "\n"
 unit += function("set_reader_view") + "\n"
 unit += function("ble_pt_action_for_usage", source.parents[2] / "components/ble_page_turner/src/ble_page_turner.c") + "\n"
 for name in ("inline_ink_gray", "reader_margin_width", "reader_margin_levels", "reader_margin_level_for", "reader_margin_for_level", "slider_index", "reader_margin_input", "reader_area", "reader_fullscreen_progress_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_rows", "row_rect", "shelf_matches", "compare_books", "sort_shelf", "shelf_reserve", "delete_retry_find", "delete_retry_reserve", "delete_retry_discard", "scan_shelf_dir", "shelf_backfill_visit", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress",
-             "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "leaves", "selected_count", "clear_selection", "toggle_selection", "select_page", "bookmark_compact", "search_keys", "search_begin", "refresh_search_matches", "search_finish", "search_action", "refresh_capacity", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
+             "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "leaves", "selected_count", "clear_selection", "toggle_selection", "select_page", "bookmark_compact", "search_keys", "search_begin", "refresh_search_matches", "search_finish", "search_action", "refresh_capacity", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "apply_reader_weight", "weight_chip_rect", "reader_return", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
     unit += function(name) + "\n"
 for name in ("book_remote_direction", "shelf_turn_page", "shelf_page_arrow_rect", "reader_vertical_tap", "reader_swipe_direction"):
     unit += function(name) + "\n"
@@ -662,6 +668,20 @@ int main(void) {
     assert(apply_reader_option(&ctx,2)==APP_REDRAW_PAGE&&test_hide_images&&!test_images_visible&&s_page==1);
     assert(test_reflows==4&&test_image_preparations==2);
     assert(apply_reader_option(&ctx,2)==APP_REDRAW_PAGE&&!test_hide_images&&test_images_visible&&s_page==1);
+    // 字体粗细档位只重绘当前页，字宽与页码不变；三档都落在该行内。
+    // Weight steps only repaint the page; advances and the page number stay, and all three chips fit the row.
+    test_book_weight=400;
+    assert(apply_reader_weight(&ctx,400)==APP_REDRAW_NONE&&test_book_weight==400);
+    assert(apply_reader_weight(&ctx,700)==APP_REDRAW_PAGE&&test_book_weight==700&&s_page==1);
+    assert(apply_reader_weight(&ctx,500)==APP_REDRAW_PAGE&&test_book_weight==500&&s_page==1);
+    for(int i=0;i<APP_BOOK_WEIGHT_COUNT;i++){
+        const EpdRect chip=weight_chip_rect(i);
+        assert(chip.y==s_weight_card.y+16&&chip.height==52);
+        if(i)assert(chip.x==weight_chip_rect(i-1).x+weight_chip_rect(i-1).width+16);
+    }
+    assert(weight_chip_rect(0).x==184&&weight_chip_rect(APP_BOOK_WEIGHT_COUNT-1).x+
+           weight_chip_rect(APP_BOOK_WEIGHT_COUNT-1).width==636);
+    test_book_weight=400;
     test_hold_refresh=test_power_turn=false;s_reader_fullscreen=test_reader_immersive=false;
     s_view=TOC;s_toc_jump_open=true;s_toc_jump_percent=50;
     assert(on_key(&ctx,UI_KEY_1)==APP_REDRAW_PAGE&&s_toc_jump_percent==45);

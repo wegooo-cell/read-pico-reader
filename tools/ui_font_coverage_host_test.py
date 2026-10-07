@@ -63,10 +63,11 @@ def has_glyph(codepoint):
 
 
 source = (root / "main/apps/app_book.c").read_text(encoding="utf-8")
-first = source.index("static void draw_reading_toggle(")
+first = source.index("static void draw_font_settings(")
 last = source.index("static void draw_font_picker(", first)
-# Covers the reading sheet, its explanations, and the horizontal/vertical page
-# diagrams. Dynamic book text and user font names intentionally use other paths.
+# Covers the font sheet, the reading sheet, their explanations, and the
+# horizontal/vertical page diagrams. Dynamic book text and user font names
+# intentionally use other paths.
 section = source[first:last]
 labels = re.findall(r'"([^"\n]*)"', section)
 missing = {}

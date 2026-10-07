@@ -93,6 +93,11 @@ int ttf_text_width_px(int pixel_height, const char* text);
 /// 首字符左侧留白，不生成位图；用于段首开标点的视觉对齐。
 /// First-glyph left bearing without rasterizing; used for paragraph-opening punctuation alignment.
 int ttf_text_left_bearing_px(int pixel_height, const char* text);
+/// 设置当前字重，字宽不变。带 wght 轴的字体走真实变体；静态字体按与常规字重
+/// 之差做覆盖率形态学，近似更粗或更细的字面，每 300 字重约一像素。
+/// Set the current weight without changing advances. wght-axis fonts use real
+/// variations; static fonts approximate a heavier or lighter face by coverage
+/// morphology relative to the regular weight, roughly one pixel per 300 units.
 void ttf_set_weight(int wght);
 int ttf_get_weight(void);
 

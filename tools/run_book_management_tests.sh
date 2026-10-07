@@ -20,6 +20,14 @@ python3 tools/book_ui_host_test.py
 python3 tools/reader_images_host_test.py
 python3 tools/book_layout_draw_host_test.py
 python3 tools/ui_font_coverage_host_test.py
+# 正文字重：静态字体按档位单调加墨或减墨，字宽不变，未设置时与常规档一致。
+# Body weight: static fonts gain or lose ink monotonically per step without changing advances, and the untouched look matches the regular step.
+gcc -std=gnu11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer \
+    -Itools/font_weight_stubs -Imain/font tools/font_weight_host_test.c main/font/ttf_font.c -lm \
+    -o build/book-tests/font-weight
+# 字体模块保留常驻 PSRAM 缓冲；宿主测试只查越界与行为，关掉泄漏检查。
+# The font module keeps resident PSRAM buffers; the host test only checks bounds and behaviour, so leak checks are off.
+ASAN_OPTIONS=detect_leaks=0 build/book-tests/font-weight
 python3 tools/test_home_recent.py
 python3 tools/test_book_toc.py
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \

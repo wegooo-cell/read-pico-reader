@@ -1574,21 +1574,40 @@ static void draw_font_name_with_current_face(uint8_t* fb, int x, int y, const ch
 }
 
 // Same-height setting rows; these rectangles also define the touch targets.
-static const EpdRect s_font_card = {36, 840, 294, 92};
-static const EpdRect s_shake_card = {354, 840, 294, 92};
-static const EpdRect s_layout_card = {36, 950, 612, 92};
-static const EpdRect s_rule_card = {36, 1060, 612, 92};
+static const EpdRect s_font_card = {36, 874, 294, 92};
+static const EpdRect s_shake_card = {354, 874, 294, 92};
+static const EpdRect s_layout_card = {36, 984, 612, 92};
+static const EpdRect s_rule_card = {36, 1094, 612, 92};
 static const EpdRect s_rule_offset_up = {36, 980, 190, 88};
 static const EpdRect s_rule_offset_reset = {246, 980, 192, 88};
 static const EpdRect s_rule_offset_down = {458, 980, 190, 88};
+// 正文字体粗细行：左侧是标签，右侧是名称档位。/ Body weight row: label on the left, named chips on the right.
+static const EpdRect s_weight_card = {36, 778, 612, 84};
+static const char* const s_weight_names[APP_BOOK_WEIGHT_COUNT] = {"常规", "中等", "粗体"};
+
+static EpdRect weight_chip_rect(int index) {
+    return (EpdRect){184 + index * 156, s_weight_card.y + 16, 140, 52};
+}
 
 static void draw_font_settings(uint8_t* fb) {
-    const int top = 640;
+    const int top = 620;
     draw_sheet(fb, top, "字体设置");
     int shown_px = s_reader_slider >= 0 ? s_reader_preview_px : s_px;
     char value[16]; snprintf(value, sizeof(value), "%d", shown_px);
     draw_pill_slider(fb, reader_slider_rect(0), "A", "A", value,
                      shown_px - BOOK_PX_MIN, BOOK_PX_MAX - BOOK_PX_MIN + 1, 20, 31);
+    EpdRect weight_card = s_weight_card;
+    ui_fill_round_rect(fb, weight_card, 20, 0xd8); ui_draw_round_rect(fb, weight_card, 20, 0x70);
+    ui_text_vc(fb, 58, weight_card.y + 42, 21, "字体粗细", EPD_DRAW_ALIGN_LEFT, false);
+    uint8_t weight_index = app_settings_book_weight_index();
+    for (int i = 0; i < APP_BOOK_WEIGHT_COUNT; ++i) {
+        EpdRect chip = weight_chip_rect(i);
+        bool selected = i == weight_index;
+        ui_fill_round_rect(fb, chip, 16, selected ? UI_GRAY_BLACK : 0xe4);
+        ui_draw_round_rect(fb, chip, 16, selected ? UI_GRAY_BLACK : 0x98);
+        ui_text_vc(fb, chip.x + chip.width / 2, chip.y + chip.height / 2, 21,
+                   s_weight_names[i], EPD_DRAW_ALIGN_CENTER, selected);
+    }
     EpdRect font_card = s_font_card;
     EpdRect shake_card = s_shake_card;
     ui_fill_round_rect(fb, font_card, 20, 0xd8); ui_draw_round_rect(fb, font_card, 20, 0x70);
@@ -2063,6 +2082,10 @@ static void draw_reader(uint8_t* fb, size_t page) {
     if (!(s_reader_fullscreen && app_settings_reader_immersive())) ui_nav_status(fb);
     if (!s_reader_fullscreen) draw_reader_header(fb);
     EpdRect body = body_rect();
+    // 正文字重来自阅读设置；页眉、页脚、面板与插图提示保持系统字重。
+    // The reader setting owns body weight; header, footer, panels and image notices keep the system weight.
+    const int previous_weight = ttf_get_weight();
+    ttf_set_weight((int)app_settings_book_weight());
     book_layout_draw_page(fb, page, body, s_px);
     if (page == 0 && s_chapter_lead_height && s_chapter_heading_title[0]) {
         char heading[128]; copy_text(heading, sizeof(heading), s_chapter_heading_title);
@@ -2071,6 +2094,7 @@ static void draw_reader(uint8_t* fb, size_t page) {
         ui_text(fb, UI_LOCK_WIDTH / 2, body.y + 87, 49, heading, EPD_DRAW_ALIGN_CENTER, false);
         ui_hairline(fb, body.y + 174, 210, 264, UI_GRAY_LIGHT);
     }
+    ttf_set_weight(previous_weight);
     draw_reader_images(fb, page, body);
     if (s_reader_fullscreen) {
         // Full-book progress uses the last few screen rows and no footer text.
@@ -3221,6 +3245,16 @@ static app_redraw_t apply_reader_indent(app_ctx_t* ctx, int em) {
     return APP_REDRAW_PAGE;
 }
 
+static app_redraw_t apply_reader_weight(app_ctx_t* ctx, uint16_t wght) {
+    (void)ctx;
+    if (wght == app_settings_book_weight()) return APP_REDRAW_NONE;
+    // 字重只改光栅化的覆盖率，不改格位与字宽，所以不必重排，重绘当前页即可。
+    // Weight only changes rasterized coverage, not advances, so the page is repainted without reflow.
+    app_settings_set_book_weight(wght);
+    invalidate_prep();
+    return APP_REDRAW_PAGE;
+}
+
 static app_redraw_t reader_manual_refresh(app_ctx_t* ctx) {
     (void)ctx;
     if (!s_text) return APP_REDRAW_NONE;
@@ -3365,7 +3399,7 @@ static int reader_margin_input(EpdRect rect, int x, int current, int px, int tra
 }
 
 static EpdRect reader_slider_rect(int slider) {
-    if (slider == 0) return (EpdRect){36, 746, 612, 66};
+    if (slider == 0) return (EpdRect){36, 700, 612, 66};
     if (slider == 1) return (EpdRect){36, 700, 294, 66};
     if (slider == 2) return (EpdRect){354, 700, 294, 66};
     if (slider == 3) return (EpdRect){36, 819, 612, 66};
@@ -3582,7 +3616,7 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
         return APP_REDRAW_PAGE;
     }
     if (s_reader_panel == READER_PANEL_FONT_SETTINGS) {
-        const int top = 640;
+        const int top = 620;
         EpdRect size = reader_slider_rect(0);
         EpdRect font = s_font_card;
         EpdRect shake = s_shake_card;
@@ -3593,6 +3627,9 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
             return apply_reader_layout(ctx, px, s_margin, app_settings_book_line_spacing(),
                                        app_settings_book_paragraph_spacing());
         }
+        for (int i = 0; i < APP_BOOK_WEIGHT_COUNT; ++i)
+            if (ui_rect_hit(weight_chip_rect(i), x, y))
+                return apply_reader_weight(ctx, app_settings_book_weights[i]);
         if (ui_rect_hit(font, x, y)) {
             ttf_font_scan();
             s_font_page = 0;

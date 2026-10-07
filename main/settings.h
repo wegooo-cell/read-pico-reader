@@ -111,6 +111,21 @@ void app_settings_set_ble_turner(bool on);
 /// 字间距档位 0..4，默认 2 居中；对应 -4/-2/0/+2/+4 像素。/ Tracking index 0..4, centered default 2; maps to -4/-2/0/+2/+4 pixels.
 uint8_t app_settings_book_tracking(void);
 void app_settings_set_book_tracking(uint8_t index);
+/// 正文字体粗细档位：常规（400）、中等（500）、粗体（700），默认常规；带 wght 轴的
+/// 字体走真实变体，静态字体按覆盖率形态学近似，未调整时外观与字体本身一致。
+/// Body weight steps: regular (400), medium (500) and bold (700), default regular;
+/// wght-axis fonts use real variations while static fonts approximate the face by
+/// coverage morphology, so the untouched look matches the font itself.
+#define APP_BOOK_WEIGHT_COUNT 3
+#define APP_BOOK_WEIGHT_DEFAULT 400
+#define APP_BOOK_WEIGHT_DEFAULT_INDEX 0
+extern const uint16_t app_settings_book_weights[APP_BOOK_WEIGHT_COUNT];
+/// 当前档位下标；越界返回默认档。/ Current step index; out-of-range returns the default step.
+uint8_t app_settings_book_weight_index(void);
+/// 当前正文字体粗细（400/500/700）。/ Current body weight (400, 500 or 700).
+uint16_t app_settings_book_weight(void);
+/// 只接受档位表内的字重，其他值忽略。/ Only a weight from the step table is accepted; other values are ignored.
+void app_settings_set_book_weight(uint16_t wght);
 /// 普通正文首行缩进 0..3 字，默认两字。/ First-line indent: 0..3 em, default 2.
 uint8_t app_settings_book_indent(void);
 void app_settings_set_book_indent(uint8_t em);

@@ -77,4 +77,6 @@ File management groups its launchers as WiFi/hotspot, USB and WeRead transfer. W
 
 在微信书架点「多选」，可跨页选择书籍或「全选本页」，再点「下载 N 本」进入批量下载页。每次只下载一本；取消、离页或锁屏会停止队列，已完成书籍保留。封面始终下载，正文插图可选；封面获取失败会提示重试。文件名使用微信书架的书名，仅替换文件系统禁用字符；每批最多选择 1024 本。单本详情返回微信书架，微信书架返回文件管理。
 
+The reader Font Settings sheet holds the body size and the body weight; the weight steps are labelled Regular, Medium and Bold (400, 500 and 700), with Regular as the default. wght-axis fonts use their real variation axis, while static fonts, including the embedded subset, approximate the face with coverage morphology, so the untouched look is unchanged. Weight applies to the body only and never changes advances or pagination.
+
 Shake-to-turn is off by default and enabled in reader Font Settings. A horizontal left/right impulse turns to the previous/next page. Slow tilts, other axes, touch and rebounds are filtered; wait through an 800 ms cooldown and rest before the next gesture. Direction and sensitivity still need device validation. The global refresh test option is removed and ignored in older configurations.

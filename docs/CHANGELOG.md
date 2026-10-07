@@ -26,6 +26,10 @@ Text-only turns use the CrossMux / FreeInk waveform and grayscale differentials 
 
 The release adds inline images, swipe page turns, configurable idle lock, clearer learned Bluetooth keys, distinct UI icons and improved file-management layouts. From rc84 onward, the online update offer displays short release notes before installation. USB, TF-card and online updates share one build and retain the compatible dual-slot layout and user data.
 
+## 2026-10-07 · DeepSeek Harness
+
+- rc85 本地测试：阅读「字体设置」在字号下方新增正文字体粗细，三档直接显示为常规（400）/ 中等（500）/ 粗体（700），默认常规，只重绘当前页，字宽与分页不变；随重启与 TF 卡配置备份保留，备份格式升到 PICOSET9，旧备份仍可恢复并沿用默认 400。带 wght 可变轴的字体使用真实字重轴；静态字体（含内建思源黑体 Medium 子集）按与常规档的差值做覆盖率形态学，近似加粗或变细，未调整时外观与原来完全一致。宿主回归覆盖档位单调加墨减墨、字宽稳定与默认档回退，实机观感待验收；本地版本号保持 rc85，固件尚未发布到在线刷机页。
+
 ## 2026-10-07 · Codex
 
 - rc83 本地测试：删除“全局刷新模式”测试项及实验刷新引擎，旧 NVS / TF 备份不再开启该模式，保留标准刷新及阅读全刷设置。晃动翻页改用新加速度采样区分左右：左晃上一页、右晃下一页；一次横向动作触发，过滤倾斜、其他方向及回弹，触摸和工具栏期间禁用，离页恢复传感器睡眠。方向与灵敏度已通过模拟轨迹回归，仍需实机试用。

@@ -3,11 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * 可变 TTF：卡上按需读扇区，glyf/gvar 能装下就整表进 PSRAM；字形按
- * codepoint/字号/字重缓存。内置字体是 Noto Sans SC Medium 子集。
+ * codepoint/字号/字重缓存。有 wght 轴的字体走真实变体；静态字体按与常规
+ * 字重之差做覆盖率形态学，近似更粗或更细的字面。内置字体是 Noto Sans SC
+ * Medium 子集。
  *
  * Variable TTF: sector I/O from the card; glyf/gvar map into PSRAM when
- * they fit. Glyphs are cached by codepoint, size and weight. The built-in
- * font is a Noto Sans SC Medium subset.
+ * they fit. Glyphs are cached by codepoint, size and weight. Fonts with a
+ * wght axis use real variations; static fonts approximate a heavier or
+ * lighter face by coverage morphology relative to the regular weight. The
+ * built-in font is a Noto Sans SC Medium subset.
  */
 
 #include "ttf_font.h"
@@ -68,6 +72,15 @@ static void ttf_free(void* ptr, void* userdata) {
 #define TTF_WGHT_MIN 300
 #define TTF_WGHT_MAX 800
 #define TTF_WGHT_DEF 300
+// 每 300 字重约等于一像素笔画增减，用于静态字体的合成字重。
+// 300 weight units is about one pixel of stem growth for synthetic static-font weight.
+#define TTF_SYNTH_WGHT_PER_PX 300.0f
+// 静态字体的中性字重：合成字重以它为基准，未调整时外观就与字体本身一致。
+// Neutral weight for static fonts: synthetic weight is relative to it, so the untouched look matches the font itself.
+#define TTF_WGHT_NEUTRAL 400
+// 合成字重的最大笔画增减，避免异常字重把字形糊成一团。
+// Synthetic stem delta cap so an odd weight cannot smear the glyph.
+#define TTF_SYNTH_MAX_PX 2.0f
 // FatFs 扇区是 4KB；32 槽把最近扇区留在 PSRAM。/ FatFs sector is 4KB; 32 PSRAM slots keep recent sectors.
 #define TTF_IO_BLOCK 4096
 #define TTF_IO_SLOTS 32
@@ -161,7 +174,7 @@ static stbtt_fontinfo font_info;
 static bool font_ready;
 static ttf_size_metrics_t size_metrics[2];
 static int raw_ascent_units;
-static int current_weight = TTF_WGHT_DEF;
+static int current_weight = TTF_WGHT_NEUTRAL;
 static int wght_min = TTF_WGHT_MIN;
 static int wght_def = TTF_WGHT_DEF;
 static int wght_max = TTF_WGHT_MAX;
@@ -1334,7 +1347,9 @@ static void reset_variation(void) {
     wght_min = TTF_WGHT_MIN;
     wght_def = TTF_WGHT_DEF;
     wght_max = TTF_WGHT_MAX;
-    current_weight = TTF_WGHT_DEF;
+    // 静态字体停在中性字重，合成字重默认不改变外观；带轴字体随后覆盖为轴默认档。
+    // Static fonts rest at the neutral weight so synthetic weight is a no-op; axis fonts override it below.
+    current_weight = TTF_WGHT_NEUTRAL;
 }
 
 static bool load_variation(const uint8_t* header, size_t header_len) {
@@ -1418,7 +1433,10 @@ static bool load_variation(const uint8_t* header, size_t header_len) {
 
 // 把当前字形及其复合引用从 SD 填进工作字体的 glyf 窗口，并改写 loca。
 static bool pack_glyph_tree(int root_gid) {
-    if (root_gid == packed_root && current_weight == packed_weight) {
+    // 只有带 gvar 的字体才需要按字重重打包；静态字体的合成字重不改轮廓。
+    // Only gvar fonts repack per weight; synthetic weight leaves static outlines untouched.
+    const int pack_weight = gvar_ready ? current_weight : 0;
+    if (root_gid == packed_root && pack_weight == packed_weight) {
         return true;
     }
     if (root_gid < 0 || root_gid >= num_glyphs) return true;
@@ -1460,7 +1478,7 @@ static bool pack_glyph_tree(int root_gid) {
         }
     }
     packed_root = root_gid;
-    packed_weight = current_weight;
+    packed_weight = pack_weight;
     return true;
 }
 
@@ -1677,6 +1695,65 @@ static glyph_entry_t* cache_lookup(uint32_t codepoint, int size) {
     return NULL;
 }
 
+/* ---- 合成字重 / Synthetic weight ---- */
+// 静态字体没有 wght 轴，按目标字重与中性字重之差做覆盖率形态学：更重就膨胀，
+// 更轻就腐蚀。每 300 字重算一像素，不足一像素的余量在腐蚀/膨胀结果与原图之间按
+// 覆盖率混合，避免只能整像素跳档。
+// Static fonts have no wght axis, so the gap between the requested weight and the
+// neutral weight drives coverage morphology: heavier dilates, lighter erodes. Every
+// 300 weight units counts as one pixel; the sub-pixel remainder blends between the
+// morphed copy and the original so the steps are not whole-pixel jumps.
+static float synthetic_weight_px(void) {
+    if (gvar_ready) return 0.0f;
+    const int delta = current_weight - TTF_WGHT_NEUTRAL;
+    if (!delta) return 0.0f;
+    float px = fabsf((float)delta) / TTF_SYNTH_WGHT_PER_PX;
+    if (px > TTF_SYNTH_MAX_PX) px = TTF_SYNTH_MAX_PX;
+    return delta < 0 ? -px : px;
+}
+
+// 3x3 邻域取极值：grow 膨胀取最大，否则腐蚀取最小。blend_q8 为 0 时把结果写回，
+// 否则按 8 位定点在原值与极值之间混合；水平中间结果放在 scratch。缓冲边界外不再
+// 取样，膨胀的外扩由调用方补白。
+// Extreme over a 3x3 neighbourhood: grow takes the maximum, otherwise the minimum.
+// blend_q8 0 stores the extreme; otherwise an 8-bit fraction blends it with the original.
+// The horizontal intermediate lives in scratch. Nothing is sampled past the buffer edge;
+// the caller pads the box for dilation.
+static void morph_coverage(uint8_t* data, uint8_t* scratch, int width, int height,
+                           bool grow, int blend_q8) {
+    for (int y = 0; y < height; ++y) {
+        const uint8_t* row = data + (size_t)y * width;
+        uint8_t* out = scratch + (size_t)y * width;
+        for (int x = 0; x < width; ++x) {
+            uint8_t v = row[x];
+            for (int dx = -1; dx <= 1; dx += 2) {
+                const int nx = x + dx;
+                if (nx < 0 || nx >= width) continue;
+                const uint8_t n = row[nx];
+                if (grow ? n > v : n < v) v = n;
+            }
+            out[x] = v;
+        }
+    }
+    for (int y = 0; y < height; ++y) {
+        uint8_t* out = data + (size_t)y * width;
+        const uint8_t* mid = scratch + (size_t)y * width;
+        const uint8_t* up = y > 0 ? mid - width : NULL;
+        const uint8_t* down = y + 1 < height ? mid + width : NULL;
+        for (int x = 0; x < width; ++x) {
+            uint8_t v = mid[x];
+            if (up) v = grow ? (up[x] > v ? up[x] : v) : (up[x] < v ? up[x] : v);
+            if (down) v = grow ? (down[x] > v ? down[x] : v) : (down[x] < v ? down[x] : v);
+            if (blend_q8 <= 0) out[x] = v;
+            else {
+                const int delta = (int)v - (int)out[x];
+                out[x] = (uint8_t)((int)out[x] +
+                                   (delta * blend_q8 + (delta >= 0 ? 128 : -128)) / 256);
+            }
+        }
+    }
+}
+
 static glyph_entry_t* rasterize_glyph(uint32_t codepoint, int pixel_height) {
     int gid = stbtt_FindGlyphIndex(&font_info, (int)codepoint);
     if (!pack_glyph_tree(gid)) return NULL;
@@ -1685,11 +1762,21 @@ static glyph_entry_t* rasterize_glyph(uint32_t codepoint, int pixel_height) {
     int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
     stbtt_GetGlyphBitmapBox(&font_info, gid, scale, scale, &x0, &y0, &x1, &y1);
 
-    int width = x1 - x0;
-    int height = y1 - y0;
-    if (width < 0) width = 0;
-    if (height < 0) height = 0;
+    int ink_width = x1 - x0;
+    int ink_height = y1 - y0;
+    if (ink_width < 0) ink_width = 0;
+    if (ink_height < 0) ink_height = 0;
 
+    const float synth = synthetic_weight_px();
+    const int steps = (int)fabsf(synth);
+    const float blend = fabsf(synth) - (float)steps;
+    const bool grow = synth > 0.0f;
+    // 膨胀要外扩，笔画两端才不会被原本的字形盒裁平；腐蚀不需要外扩。
+    // Dilation pads the box so stem ends are not clipped flat; erosion needs no padding.
+    const int pad = grow ? steps + (blend > 0.02f ? 1 : 0) : 0;
+
+    int width = ink_width + pad * 2;
+    int height = ink_height + pad * 2;
     size_t bitmap_bytes = (size_t)width * (size_t)height;
     cache_reserve(bitmap_bytes + sizeof(glyph_entry_t));
 
@@ -1699,16 +1786,33 @@ static glyph_entry_t* rasterize_glyph(uint32_t codepoint, int pixel_height) {
     if (entry == NULL) return NULL;
 
     if (bitmap_bytes > 0) {
-        entry->bitmap = heap_caps_malloc(
-            bitmap_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
+        entry->bitmap = heap_caps_calloc(
+            1, bitmap_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
         );
         if (entry->bitmap == NULL) {
             heap_caps_free(entry);
             return NULL;
         }
         stbtt_MakeGlyphBitmap(
-            &font_info, entry->bitmap, width, height, width, scale, scale, gid
+            &font_info, entry->bitmap + (size_t)pad * width + pad,
+            ink_width, ink_height, width, scale, scale, gid
         );
+        if (steps > 0 || blend > 0.02f) {
+            uint8_t* scratch = heap_caps_malloc(
+                bitmap_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
+            );
+            // 缓冲区不足时退回未调整的字形，不丢字。/ Fall back to the unadjusted glyph when scratch is unavailable.
+            if (scratch != NULL) {
+                for (int i = 0; i < steps; ++i) {
+                    morph_coverage(entry->bitmap, scratch, width, height, grow, 0);
+                }
+                if (blend > 0.02f) {
+                    morph_coverage(entry->bitmap, scratch, width, height, grow,
+                                   (int)lroundf(blend * 256.0f));
+                }
+                heap_caps_free(scratch);
+            }
+        }
     }
 
     int advance = 0;
@@ -1720,8 +1824,8 @@ static glyph_entry_t* rasterize_glyph(uint32_t codepoint, int pixel_height) {
     entry->weight = (uint16_t)current_weight;
     entry->width = (int16_t)width;
     entry->height = (int16_t)height;
-    entry->left = (int16_t)x0;
-    entry->top = (int16_t)(-y0);
+    entry->left = (int16_t)(x0 - pad);
+    entry->top = (int16_t)(pad - y0);
     entry->advance_x = (int16_t)lroundf(advance * scale);
     entry->bitmap_bytes = bitmap_bytes;
 

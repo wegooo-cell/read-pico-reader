@@ -57,6 +57,7 @@
 #define NVS_KEY_BOOK_PARA "bk_para"
 #define NVS_KEY_BOOK_MARGIN "bk_margin"
 #define NVS_KEY_BOOK_TRACK "bk_track"
+#define NVS_KEY_BOOK_WEIGHT "bk_wght"
 #define NVS_KEY_BOOK_INDENT "bk_indent"
 #define NVS_KEY_BOOK_RULE "bk_rule"
 #define NVS_KEY_BOOK_RULE_OFFSET "bk_rule_y"
@@ -96,11 +97,17 @@ static bool s_ble_turner;
 static bool s_shelf_recent_sort;
 static uint8_t s_book_tracking = 2, s_book_reading_line, s_book_rule_offset = 4;
 static uint8_t s_book_indent = 2;
+// 档位下标与 app_settings_book_weights 顺序一致，默认第一档常规。
+// Step index matches the app_settings_book_weights order; the first regular step is the default.
+static uint8_t s_book_weight_index = APP_BOOK_WEIGHT_DEFAULT_INDEX;
 static uint8_t s_auto_lock_minutes;
 static uint8_t s_shelf_style = 2;
 static char s_books_dir[MEDIA_DIR_MAX] = "/sdcard/books";
 static char s_fonts_dir[MEDIA_DIR_MAX] = "/sdcard/fonts";
 static void nvs_put_u8(const char* key, uint8_t value);
+
+// 正文字体粗细档位。/ Body weight steps.
+const uint16_t app_settings_book_weights[APP_BOOK_WEIGHT_COUNT] = { 400, 500, 700 };
 
 static bool valid_media_dir(const char* path) {
     if (!path || strncmp(path, "/sdcard/", 8) || !path[8] ||
@@ -235,8 +242,12 @@ void app_settings_init(void) {
     if (nvs_get_u8(h, NVS_KEY_BLE_TURNER, &ble_turner) == ESP_OK) s_ble_turner = ble_turner == 1;
     if (nvs_get_u8(h, NVS_KEY_SHELF_RECENT, &recent_sort) == ESP_OK) s_shelf_recent_sort = recent_sort == 1;
     uint8_t tracking = 2, reading_line = 0, rule_offset = 4, indent = 2;
+    uint8_t weight_index = APP_BOOK_WEIGHT_DEFAULT_INDEX;
     if (nvs_get_u8(h, NVS_KEY_BOOK_TRACK, &tracking) == ESP_OK && tracking <= 4)
         s_book_tracking = tracking;
+    if (nvs_get_u8(h, NVS_KEY_BOOK_WEIGHT, &weight_index) == ESP_OK &&
+        weight_index < APP_BOOK_WEIGHT_COUNT)
+        s_book_weight_index = weight_index;
     if (nvs_get_u8(h, NVS_KEY_BOOK_RULE, &reading_line) == ESP_OK && reading_line <= 2)
         s_book_reading_line = reading_line;
     if (nvs_get_u8(h, NVS_KEY_BOOK_RULE_OFFSET, &rule_offset) == ESP_OK && rule_offset <= 8)
@@ -533,6 +544,21 @@ void app_settings_set_book_indent(uint8_t em) {
     s_book_indent = em;
     nvs_put_u8(NVS_KEY_BOOK_INDENT, em);
 }
+uint8_t app_settings_book_weight_index(void) {
+    return s_book_weight_index < APP_BOOK_WEIGHT_COUNT
+        ? s_book_weight_index : APP_BOOK_WEIGHT_DEFAULT_INDEX;
+}
+uint16_t app_settings_book_weight(void) {
+    return app_settings_book_weights[app_settings_book_weight_index()];
+}
+void app_settings_set_book_weight(uint16_t wght) {
+    for (uint8_t i = 0; i < APP_BOOK_WEIGHT_COUNT; ++i) {
+        if (app_settings_book_weights[i] != wght || i == s_book_weight_index) continue;
+        s_book_weight_index = i;
+        nvs_put_u8(NVS_KEY_BOOK_WEIGHT, i);
+        return;
+    }
+}
 uint8_t app_settings_book_reading_line(void) { return s_book_reading_line; }
 void app_settings_set_book_reading_line(uint8_t style) {
     if (style > 2 || style == s_book_reading_line) return;
@@ -669,6 +695,14 @@ static uint32_t backup_shutdown_checksum(const settings_backup_v1_t *backup, uin
                                          uint8_t rule_offset, uint8_t staged_shutdown) {
     return (backup_rule_offset_checksum(backup, indent, rule_offset) ^ staged_shutdown) * 16777619u;
 }
+// v9 起扩展字节多一个正文字重档位；后续校验串在关机模式之后。
+// V9 adds the body weight step to the extension bytes; later checksums chain after the shutdown mode.
+static uint32_t backup_weight_checksum(const settings_backup_v1_t *backup, uint8_t indent,
+                                       uint8_t rule_offset, uint8_t staged_shutdown,
+                                       uint8_t weight_index) {
+    return (backup_shutdown_checksum(backup, indent, rule_offset, staged_shutdown) ^ weight_index)
+        * 16777619u;
+}
 static uint32_t backup_profile_checksum(const settings_backup_v1_t *backup, uint8_t indent,
                                         uint8_t rule_offset, uint8_t staged_shutdown,
                                         const settings_backup_profile_t *profile) {
@@ -692,7 +726,7 @@ static bool backup_card_ready(void) {
 esp_err_t app_settings_backup_save(void) {
     if (!backup_card_ready()) return ESP_ERR_INVALID_STATE;
     settings_backup_v1_t backup = {0};
-    memcpy(backup.magic, "PICOSET8", sizeof(backup.magic));
+    memcpy(backup.magic, "PICOSET9", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -718,10 +752,11 @@ esp_err_t app_settings_backup_save(void) {
     strlcpy(backup.fonts_dir, s_fonts_dir, sizeof(backup.fonts_dir));
     backup_seal(&backup);
     uint8_t idle_index = s_auto_lock_minutes == 1 ? 1 : s_auto_lock_minutes == 5 ? 2 : s_auto_lock_minutes == 10 ? 3 : 0;
-    uint8_t extension[7] = {s_book_indent, s_book_rule_offset, (s_staged_shutdown ? 1 : 0) | (idle_index << 1)};
-    uint32_t extension_hash = backup_shutdown_checksum(&backup, s_book_indent,
-                                                        s_book_rule_offset, extension[2]);
-    for (int i = 0; i < 4; ++i) extension[i + 3] = (uint8_t)(extension_hash >> (i * 8));
+    uint8_t extension[8] = {s_book_indent, s_book_rule_offset, (s_staged_shutdown ? 1 : 0) | (idle_index << 1),
+                            app_settings_book_weight_index()};
+    uint32_t extension_hash = backup_weight_checksum(&backup, s_book_indent,
+                                                      s_book_rule_offset, extension[2], extension[3]);
+    for (int i = 0; i < 4; ++i) extension[i + 4] = (uint8_t)(extension_hash >> (i * 8));
     settings_backup_profile_t profile = {0};
     strlcpy(profile.device_name, s_device_name, sizeof(profile.device_name));
     strlcpy(profile.avatar, s_avatar, sizeof(profile.avatar));
@@ -788,7 +823,8 @@ static bool backup_valid(const settings_backup_v1_t *backup) {
     if ((memcmp(backup->magic, "PICOSET1", 8) && memcmp(backup->magic, "PICOSET2", 8) &&
          memcmp(backup->magic, "PICOSET3", 8) && memcmp(backup->magic, "PICOSET4", 8) &&
          memcmp(backup->magic, "PICOSET5", 8) && memcmp(backup->magic, "PICOSET6", 8) &&
-         memcmp(backup->magic, "PICOSET7", 8) && memcmp(backup->magic, "PICOSET8", 8)) ||
+         memcmp(backup->magic, "PICOSET7", 8) && memcmp(backup->magic, "PICOSET8", 8) &&
+         memcmp(backup->magic, "PICOSET9", 8)) ||
         checksum != backup_checksum(backup)) return false;
     if (f[BK_SLEEP] > APP_SLEEP_OFF || f[BK_PICKUP] > 1 ||
         f[BK_SYS_SIZE] < 100 || f[BK_SYS_SIZE] > 200 || f[BK_SYS_SIZE] % 10 ||
@@ -825,9 +861,11 @@ esp_err_t app_settings_backup_restore(void) {
     settings_backup_v1_t backup;
     bool ok = fread(&backup, 1, sizeof(backup), file) == sizeof(backup);
     uint8_t indent = 2, rule_offset = 4, staged_shutdown = 0;
+    uint8_t weight_index = APP_BOOK_WEIGHT_DEFAULT_INDEX;
     settings_backup_profile_t profile = {.device_name = "Pico"};
     settings_backup_wifi_t wifi = {0};
     bool has_wifi = false;
+    bool has_profile = false;
     if (ok && !memcmp(backup.magic, "PICOSET2", 8)) {
         uint8_t extension[5];
         ok = fread(extension, 1, sizeof(extension), file) == sizeof(extension);
@@ -847,6 +885,21 @@ esp_err_t app_settings_backup_restore(void) {
             ok = indent <= 3 && rule_offset <= 8 &&
                  stored == backup_rule_offset_checksum(&backup, indent, rule_offset);
         }
+    } else if (ok && !memcmp(backup.magic, "PICOSET9", 8)) {
+        // v9 扩展字节带正文字重档位；v5 起还有资料卡。/ V9 carries the body weight step; v5+ also carry the profile.
+        uint8_t extension[8];
+        ok = fread(extension, 1, sizeof(extension), file) == sizeof(extension);
+        if (ok) {
+            indent = extension[0]; rule_offset = extension[1];
+            staged_shutdown = extension[2]; weight_index = extension[3];
+            uint32_t stored = 0;
+            for (int i = 0; i < 4; ++i) stored |= (uint32_t)extension[i + 4] << (i * 8);
+            ok = indent <= 3 && rule_offset <= 8 && staged_shutdown <= 7 &&
+                 weight_index < APP_BOOK_WEIGHT_COUNT &&
+                 stored == backup_weight_checksum(&backup, indent, rule_offset,
+                                                  staged_shutdown, weight_index);
+        }
+        has_profile = ok;
     } else if (ok && (!memcmp(backup.magic, "PICOSET4", 8) || !memcmp(backup.magic, "PICOSET5", 8) ||
                       !memcmp(backup.magic, "PICOSET6", 8) || !memcmp(backup.magic, "PICOSET7", 8) || !memcmp(backup.magic, "PICOSET8", 8))) {
         uint8_t extension[7];
@@ -858,28 +911,31 @@ esp_err_t app_settings_backup_restore(void) {
             ok = indent <= 3 && rule_offset <= 8 && staged_shutdown <= (!memcmp(backup.magic, "PICOSET8", 8) ? 7 : 1) &&
                  stored == backup_shutdown_checksum(&backup, indent, rule_offset, staged_shutdown);
         }
-        if (ok && ( !memcmp(backup.magic, "PICOSET5", 8) || !memcmp(backup.magic, "PICOSET6", 8) ||
-                    !memcmp(backup.magic, "PICOSET7", 8) || !memcmp(backup.magic, "PICOSET8", 8))) {
-            ok = fread(&profile, 1, sizeof(profile), file) == sizeof(profile);
-            if (ok) {
-                uint32_t stored = 0;
-                for (int i = 0; i < 4; ++i) stored |= (uint32_t)profile.checksum[i] << (i * 8);
-                ok = stored == backup_profile_checksum(&backup, indent, rule_offset,
-                                                        staged_shutdown, &profile) &&
-                     strnlen(profile.device_name, sizeof(profile.device_name)) < sizeof(profile.device_name) &&
-                     profile.device_name[0] &&
-                     strnlen(profile.status_signature, sizeof(profile.status_signature)) < sizeof(profile.status_signature) &&
-                     // 保留旧备份的位6兼容性，但不再恢复实验刷新。/ Accept legacy bit 6 without restoring the retired mode.
-                     profile.home_full_refresh <= 127 &&
-                     backup_path_valid(profile.avatar, sizeof(profile.avatar));
-            }
+        has_profile = ok && (!memcmp(backup.magic, "PICOSET5", 8) || !memcmp(backup.magic, "PICOSET6", 8) ||
+                             !memcmp(backup.magic, "PICOSET7", 8) || !memcmp(backup.magic, "PICOSET8", 8));
+    }
+    if (ok && has_profile) {
+        ok = fread(&profile, 1, sizeof(profile), file) == sizeof(profile);
+        if (ok) {
+            uint32_t stored = 0;
+            for (int i = 0; i < 4; ++i) stored |= (uint32_t)profile.checksum[i] << (i * 8);
+            ok = stored == backup_profile_checksum(&backup, indent, rule_offset,
+                                                    staged_shutdown, &profile) &&
+                 strnlen(profile.device_name, sizeof(profile.device_name)) < sizeof(profile.device_name) &&
+                 profile.device_name[0] &&
+                 strnlen(profile.status_signature, sizeof(profile.status_signature)) < sizeof(profile.status_signature) &&
+                 // 保留旧备份的位6兼容性，但不再恢复实验刷新。/ Accept legacy bit 6 without restoring the retired mode.
+                 profile.home_full_refresh <= 127 &&
+                 backup_path_valid(profile.avatar, sizeof(profile.avatar));
         }
     }
     long history_position = -1;
-    has_wifi = ok && (!memcmp(backup.magic, "PICOSET7", 8) || !memcmp(backup.magic, "PICOSET8", 8));
+    has_wifi = ok && (!memcmp(backup.magic, "PICOSET7", 8) || !memcmp(backup.magic, "PICOSET8", 8) ||
+                      !memcmp(backup.magic, "PICOSET9", 8));
     if (has_wifi) ok = fread(&wifi, 1, sizeof(wifi), file) == sizeof(wifi) && backup_wifi_valid(&wifi);
     bool has_history = ok && (!memcmp(backup.magic, "PICOSET6", 8) ||
-                              !memcmp(backup.magic, "PICOSET7", 8) || !memcmp(backup.magic, "PICOSET8", 8));
+                              !memcmp(backup.magic, "PICOSET7", 8) || !memcmp(backup.magic, "PICOSET8", 8) ||
+                              !memcmp(backup.magic, "PICOSET9", 8));
     if (has_history) {
         history_position = ftell(file);
         ok = history_position >= 0 && book_history_backup_validate(file);
@@ -934,6 +990,7 @@ esp_err_t app_settings_backup_restore(void) {
     BACKUP_SET_U8(NVS_KEY_POWER_TURN, BK_POWER_TURN);
     BACKUP_SET_U8(NVS_KEY_IMMERSIVE, BK_IMMERSIVE);
     BACKUP_SET_U8(NVS_KEY_BOOK_TRACK, BK_TRACKING);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_WEIGHT, weight_index);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_INDENT, indent);
     BACKUP_SET_U8(NVS_KEY_BOOK_RULE, BK_READING_LINE);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_RULE_OFFSET, rule_offset);
@@ -977,6 +1034,7 @@ esp_err_t app_settings_backup_restore(void) {
     s_reader_power_turn = f[BK_POWER_TURN];
     s_reader_immersive = f[BK_IMMERSIVE];
     s_book_tracking = f[BK_TRACKING];
+    s_book_weight_index = weight_index;
     s_book_indent = indent;
     s_book_reading_line = f[BK_READING_LINE];
     s_book_rule_offset = rule_offset;
