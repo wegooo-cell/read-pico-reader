@@ -1,8 +1,21 @@
+# Metalio 板用厂商示例固件的波形表，本仓库那份波形组件不进依赖图（MINIMAL_BUILD 下不编）。
+# 连续 DU 与翻页引擎也建立在同一套波形类型之上，一并摘掉；epdiy/compat/ 里有同名空实现。
+# The Metalio board uses the vendor demo firmware's waveform tables, so this repo's waveform
+# component is left out of the dependency graph and is not built under MINIMAL_BUILD. Continuous
+# DU and the page-turn engine are built on the same waveform types, so they go too; epdiy/compat/
+# carries same-named no-ops for both.
+if(PICO_BOARD STREQUAL "metalio_eink4_plus")
+    set(main_waveform_req "")
+else()
+    set(main_waveform_req e0470_epaper_waveform continuous_du e0470_page_turn)
+endif()
+
 set(main_requires
     read_pico
     read_pico_transfer
     pico_weread
     read_pico_search
+    ${main_waveform_req}
     espressif__qrcode
     espressif__esp_jpeg
     # 渐进式 JPEG；基线仍走 esp_jpeg。/ Progressive JPEG; baseline stays on esp_jpeg.
@@ -18,9 +31,6 @@ set(main_requires
     bt
     # 蓝牙翻页器本体。/ The page-turner itself.
     ble_page_turner
-    continuous_du
-    e0470_epaper_waveform
-    e0470_page_turn
     read_pico_pmu
     fatfs
     wear_levelling

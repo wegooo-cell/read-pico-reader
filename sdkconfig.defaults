@@ -1,33 +1,9 @@
-CONFIG_IDF_TARGET="esp32s3"
-CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
-CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
-CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_16M.csv"
-CONFIG_SPIRAM=y
-CONFIG_SPIRAM_MODE_OCT=y
-# 实验性组合：MSPI 的 flash 与 PSRAM 共用时钟域，CPU 240MHz 下 IDF 只标定了
-# 模块时钟 120MHz，所以 PSRAM 想上 120MHz，flash 必须一起 120MHz。
-# 渲染线程逐行读 PSRAM 里的 framebuffer，80MHz 时的实效带宽（约 32MB/s）
-# 就是刷新速度的天花板。flash 侧靠 main/flash_hpm_zb.c 补上本机型号的高性能模式。
-# 已知风险：上电后温度漂移约 20℃ 会让 PSRAM 访问随机出错。IDF 的温度补偿
-# （SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR）只对 flash vendor
-# 0xC8/0x20 验证过，本机是 ZB25VQ128(Zbit)，开了会在 do_system_init_fn 里报
-# 「flash model has not been verified」直接 abort 并循环重启，所以必须关掉，
-# 等于没有这层保护。别改成 y。
-CONFIG_IDF_EXPERIMENTAL_FEATURES=y
-CONFIG_ESPTOOLPY_FLASHFREQ_120M=y
-# 显式启用 HPM（AUTO 会因为"依赖具体 flash 型号"报 #warning，-Werror 下编不过）。
-# 本机 flash 靠写状态寄存器进入高性能模式，不需要调 dummy cycle，所以关掉 HPM-DC。
-CONFIG_SPI_FLASH_HPM_ENA=y
-CONFIG_SPI_FLASH_HPM_DC_DISABLE=y
-CONFIG_SPIRAM_SPEED_120M=y
-CONFIG_SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR=n
+# 通用配置：两块板共用的部分。板级差异一律放 boards/<名字>/sdkconfig.defaults，
+# 它在本文件之后追加，因此那里的值优先。
+# Shared configuration. Anything board-specific belongs in boards/<name>/sdkconfig.defaults,
+# which is appended after this file and therefore wins.
+
 CONFIG_SPIRAM_USE_MALLOC=y
-CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
-CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
-# 渲染线程逐行流式读 PSRAM 里的 framebuffer，cache 越大预取越不容易失效
-CONFIG_ESP32S3_DATA_CACHE_64KB=y
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
@@ -42,9 +18,11 @@ CONFIG_FATFS_API_ENCODING_UTF_8=y
 # Transfer AP prefers PSRAM network buffers, preserving internal display memory.
 CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
-# Read Pico only serves one browser client and scans nearby access points. The
-# high-throughput defaults reserve tens of kilobytes at esp_wifi_init(), which
-# can starve the hosted WiFi control path after the reader UI has been used.
+# 只服务一个浏览器客户端并扫描附近热点。高吞吐默认值在 esp_wifi_init() 就预留几十 KB，
+# 阅读界面用过之后会把托管的 WiFi 控制路径饿死。
+# One browser client and one nearby-AP scan. The high-throughput defaults reserve tens of
+# kilobytes at esp_wifi_init(), which can starve the hosted WiFi control path after the reader
+# UI has been used.
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=4
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=8
 CONFIG_ESP_WIFI_STATIC_TX_BUFFER=y
@@ -60,8 +38,8 @@ CONFIG_HTTPD_MAX_URI_LEN=1024
 # 蓝牙翻页器：BLE HID 主机（central），配对市面上的 BLE 翻页器／键盘。
 # Bluetooth page-turner: a BLE HID host (central) pairing off-the-shelf BLE remotes.
 #
-# 只用 BLE。ESP32-S3 没有 Bluetooth Classic 射频，纯 Classic 的翻页器连不上。
-# BLE only. The ESP32-S3 has no Bluetooth Classic radio, so Classic-only remotes cannot pair.
+# 只用 BLE。两块板都没有 Bluetooth Classic 射频，纯 Classic 的翻页器连不上。
+# BLE only. Neither board has a Bluetooth Classic radio, so Classic-only remotes cannot pair.
 CONFIG_BT_ENABLED=y
 CONFIG_BT_BLUEDROID_ENABLED=n
 CONFIG_BT_NIMBLE_ENABLED=y
@@ -85,24 +63,19 @@ CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=6
 CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT=6
 CONFIG_BT_NIMBLE_ACL_BUF_COUNT=6
 CONFIG_BT_NIMBLE_ATT_MAX_PREP_ENTRIES=4
-# 控制器只能用内部 RAM——它跑在硬件路径上，读不到 PSRAM。这组值是 CrossMux 在同一块
-# 板子上验证过的：BLE_MAX_ACT 是"同时允许几个控制器活动"，扫描与建立连接各占一个，
-# 压到 1 会让扫描和连接互相排斥，起不来。文件/图片/壁纸列表等搬进 PSRAM 之后 DIRAM
-# 空闲约 148KB，这里不需要再省。
+# 控制器只能用内部 RAM——它跑在硬件路径上，读不到 PSRAM。这组值是 CrossMux 在 Read Pico 上
+# 验证过的：BLE_MAX_ACT 是"同时允许几个控制器活动"，扫描与建立连接各占一个，压到 1 会让
+# 扫描和连接互相排斥、栈起不来。
 # The controller must stay in internal RAM (it sits on the hardware path and cannot read PSRAM).
-# These are the values CrossMux verified on this same board: BLE_MAX_ACT is how many controller
+# These are the values CrossMux verified on Read Pico: BLE_MAX_ACT is how many controller
 # activities may coexist, scanning and connection setup each take one, and squeezing it to 1 makes
-# them mutually exclusive so the stack cannot come up. After the file, image and wallpaper lists
-# moved into PSRAM, DIRAM has about 148 KB free, so there is nothing left to economise here.
+# them mutually exclusive so the stack cannot come up.
 CONFIG_BT_CTRL_BLE_MAX_ACT=3
 CONFIG_BT_CTRL_BLE_ADV_REPORT_FLOW_CTRL_NUM=50
 CONFIG_BT_CTRL_ADV_DUP_FILT_MAX=10
 CONFIG_BLE_MESH=n
 
 CONFIG_TINYUSB_MSC_ENABLED=y
-CONFIG_TINYUSB_MSC_BUFSIZE=8192
-CONFIG_TINYUSB_DESC_PRODUCT_STRING="Read Pico SD"
-CONFIG_TINYUSB_DESC_MANUFACTURER_STRING="MindReset"
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
 # rc76: keep transfer listings and TLS allocations out of internal task RAM.

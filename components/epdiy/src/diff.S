@@ -1,8 +1,12 @@
-#include <xtensa/config/core-isa.h>
-#include <xtensa/config/core-matmap.h>
 #include "sdkconfig.h"
 
 #ifdef CONFIG_IDF_TARGET_ESP32S3
+// 这两个头只有 Xtensa 目标才有，必须放在既有的守卫里面：RISC-V 上汇编器会在读到守卫之前
+// 就因为找不到头文件而失败。
+// These headers only exist on Xtensa targets and must sit inside the existing guard: on RISC-V
+// the assembler fails on the missing include before it ever reaches the guard.
+#include <xtensa/config/core-isa.h>
+#include <xtensa/config/core-matmap.h>
 
 .text
 .align  4

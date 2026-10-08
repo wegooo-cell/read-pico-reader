@@ -1,0 +1,30 @@
+# Metalio E-Ink4-Plus 板级覆盖项（追加在根 sdkconfig.defaults 之后，因此这里优先）。
+# Metalio E-Ink4-Plus overrides, appended after the root sdkconfig.defaults so they win.
+#
+# 与 Read Pico 的硬件差异：
+#   - 芯片是 esp32s31（RISC-V），不是 esp32s3（Xtensa）
+#   - PSRAM 200MHz octal，内部 RAM 保留 64KB
+#   - 面板同为 ED047TC2 1216x684，所以 epdiy 与波形表可复用
+# Hardware differences from Read Pico:
+#   - esp32s31 (RISC-V) rather than esp32s3 (Xtensa)
+#   - 200 MHz octal PSRAM, 64 KB internal RAM reserved
+#   - same ED047TC2 1216x684 panel, so epdiy and the waveform tables carry over
+
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_16M.csv"
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+# 本板 PSRAM 上 200MHz。根 defaults 里那套 120MHz 组合是为 Read Pico 的 Zbit flash 写的，
+# 换芯片后既不需要也不成立。
+# This board runs PSRAM at 200 MHz. The 120 MHz combination in the root defaults was written for
+# Read Pico's Zbit flash and neither applies nor holds on a different chip.
+CONFIG_SPIRAM_SPEED_200M=y
+# 面板 DMA 需要连续内部内存，且 S31 的 BLE 控制器同样只能用内部 RAM。
+# The panel DMA needs contiguous internal memory, and the S31's BLE controller likewise only has
+# internal RAM to work with.
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+CONFIG_TINYUSB_DESC_PRODUCT_STRING="Metalio Ink SD"
+CONFIG_TINYUSB_DESC_MANUFACTURER_STRING="Metalio"

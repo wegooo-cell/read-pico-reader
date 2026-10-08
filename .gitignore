@@ -109,3 +109,12 @@ Desktop.ini
 *.workspace # General workspace files, can be from various tools
 *.suo       # Visual Studio Solution User Options
 *.sln.docstates # Visual Studio
+
+# 每块板的 SDKCONFIG 产物（tools/build_board.ps1 用 -DSDKCONFIG 生成，落在仓库根）。
+# 锚定到根目录，否则会连 boards/<板名>/sdkconfig.defaults 一起忽略掉——
+# 那两个文件是板级配置，必须入库。
+# Per-board SDKCONFIG output, generated at the repo root via -DSDKCONFIG by
+# tools/build_board.ps1. Anchored to the root: a bare sdkconfig.* also matches
+# boards/<name>/sdkconfig.defaults, and those are board configuration that has to be
+# committed.
+/sdkconfig.*

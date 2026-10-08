@@ -9,7 +9,12 @@
 #include <stdint.h>
 
 #include <esp_err.h>
+// 周期计数器只有 Xtensa 头提供；epd_busy_delay() 在别的架构上改用 IDF 的可移植接口。
+// The cycle counter only comes from the Xtensa header; epd_busy_delay() uses IDF's portable
+// interface on other architectures.
+#if defined(__XTENSA__)
 #include <xtensa/core-macros.h>
+#endif
 
 /**
  * State of display control pins.

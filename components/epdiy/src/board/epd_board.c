@@ -1,5 +1,7 @@
 #include "epd_board.h"
 
+#include <esp_cpu.h>
+
 #include <esp_log.h>
 #include <stddef.h>
 
@@ -25,9 +27,17 @@ const EpdBoardDefinition* epd_board = NULL;
  * IRAM_ATTR 表示放入指令 RAM，加快执行速度。
  */
 void IRAM_ATTR epd_busy_delay(uint32_t cycles) {
+#if defined(__XTENSA__)
     volatile unsigned long counts = XTHAL_GET_CCOUNT() + cycles;
     while (XTHAL_GET_CCOUNT() < counts) {
     };
+#else
+    // RISC-V 上用 IDF 的可移植周期计数，语义与 XTHAL_GET_CCOUNT 相同。
+    // On RISC-V this uses IDF's portable cycle counter; the semantics match XTHAL_GET_CCOUNT.
+    const uint32_t start = esp_cpu_get_cycle_count();
+    while ((uint32_t)(esp_cpu_get_cycle_count() - start) < cycles) {
+    }
+#endif
 }
 
 /**

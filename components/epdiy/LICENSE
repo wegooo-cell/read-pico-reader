@@ -19,6 +19,24 @@ listed above.
 - output_lcd/render_lcd.c：扫描未消费完即结束时中止相位，汇合生产者后清理行队列，防止下一相位死锁。
   Abort incomplete scan phases and clear queues after joining producers to prevent next-phase deadlock.
 
+- 新增 src/output_common/nonxtensa_ve_fallback.c：lut.S / diff.S 的等价 C 实现，供 RISC-V 目标
+  （ESP32-S31，Metalio E-Ink4-Plus）使用；同时把两个 .S 的 xtensa 头移进 CONFIG_IDF_TARGET_ESP32S3
+  守卫内，epd_board.h 的 xtensa 头改为条件包含，epd_busy_delay() 改用 esp_cpu_get_cycle_count()。
+  Added src/output_common/nonxtensa_ve_fallback.c: C equivalents of lut.S / diff.S for RISC-V
+  targets (ESP32-S31, Metalio E-Ink4-Plus), with the xtensa includes moved inside the
+  CONFIG_IDF_TARGET_ESP32S3 guard, epd_board.h's xtensa include made conditional, and
+  epd_busy_delay() switched to esp_cpu_get_cycle_count().
+
+- src/displays.c：Metalio 板的 ED047TC2 是 8 位/20MHz，与 Read Pico 的 16 位/24MHz 按板分叉。
+  src/displays.c: the Metalio board's ED047TC2 is 8-bit at 20 MHz, split by board from
+  Read Pico's 16-bit at 24 MHz.
+- output_lcd/lcd_driver.c 与 render_lcd.c 补齐 ESP32-S31：专用 LCD_DATA IOMUX、
+  cache 一致的回弹缓冲（bb_behind_cache + esp_cache_msync）、SRAM 与传输缓冲供电、
+  以及 HAL 未开的像素时钟门；S31 上跳过 cache 预取。
+  ESP32-S31 support in output_lcd/lcd_driver.c and render_lcd.c: the dedicated LCD_DATA
+  IOMUX, cache-coherent bounce buffers, SRAM/transmit-buffer power, and the pixel-clock
+  gate the HAL leaves shut; the cache prefetch is skipped on S31.
+
 The full text of the GNU Lesser General Public License version 3 is available at
 https://www.gnu.org/licenses/lgpl-3.0.txt and applies to all files in this
 directory unless a file states otherwise. 上游文件头部的版权声明保持原样。

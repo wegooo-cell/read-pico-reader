@@ -255,7 +255,14 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
         uint32_t* lp = (uint32_t*)input_line;
         const uint8_t* ptr = ptr_start + bytes_per_line * (l - min_y);
 
+// S31 上整段跳过预取：例程固件在 S31 就是不预取，而不是换个名字调用——换名字那次是我照着
+        // 编译器的提示写的，行为未必相同。
+        // Skip the prefetch entirely on S31: the reference firmware simply does not prefetch there
+        // rather than calling a differently-named entry point, which is what I had done after
+        // following the compiler's suggestion.
+#if !CONFIG_IDF_TARGET_ESP32S31
         Cache_Start_DCache_Preload((uint32_t)ptr, ctx->display_width, 0);
+#endif
 
         lp = (uint32_t*)ptr;
 

@@ -1,4 +1,17 @@
 #include "lcd_driver.h"
+
+// ESP32-S3 的 LCD 由 PLL240M 驱动；ESP32-S31 上没有这个源，默认是 PLL160M。
+// 像素时钟不受影响：lcd.src_clk_hz 从时钟树读，分频由 lcd_hal_cal_pclk_freq() 按实际源算。
+// ESP32-S3 drives the LCD from PLL240M; ESP32-S31 has no such source and defaults to
+// PLL160M. The pixel clock is unaffected: lcd.src_clk_hz is read from the clock tree and the
+// divider is derived from it by lcd_hal_cal_pclk_freq().
+#if defined(LCD_CLK_SRC_PLL240M)
+#define EPD_LCD_CLK_SRC LCD_CLK_SRC_PLL240M
+#define EPD_LCD_SRC_CLK_HZ 240000000u
+#else
+#define EPD_LCD_CLK_SRC LCD_CLK_SRC_DEFAULT
+#define EPD_LCD_SRC_CLK_HZ 160000000u
+#endif
 #include "epdiy.h"
 
 #include "../output_common/render_method.h"
@@ -26,6 +39,7 @@ esp_err_t esp_clk_tree_enable_src(soc_module_clk_t clk_src, bool enable);
 
 #include <driver/gpio.h>
 #include <esp_check.h>
+#include <esp_cache.h>
 #include <esp_err.h>
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_rgb.h>
@@ -35,7 +49,32 @@ esp_err_t esp_clk_tree_enable_src(soc_module_clk_t clk_src, bool enable);
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <hal/dma_types.h>
+#include <hal/gdma_channel.h>
 #include <hal/gdma_ll.h>
+#include <hal/rmt_periph.h>
+#include <soc/rmt_struct.h>
+#include "epdiy_idf6_compat.h"
+
+// S31/P4：LCD 挂在 AXI-GDMA 上；S3：AHB-GDMA。通道分配器、描述符类型与对齐三者必须配套，
+// 只改其中一样会在 gdma_connect 报 "peripheral and DMA system bus mismatch" 然后 abort。
+// S31/P4 hang the LCD off the AXI GDMA while S3 uses the AHB one. The channel allocator, the
+// descriptor type and its alignment have to agree; changing only one of them makes gdma_connect
+// report "peripheral and DMA system bus mismatch" and abort.
+// 这里必须按芯片型号判断，不能用总线宏：SOC_GDMA_TRIG_PERIPH_LCD0_BUS 在 S3 上也等于
+// SOC_GDMA_BUS_AXI，照它分支会让 S3 去调只有 S31 才有的 gdma_new_axi_channel，链接期报
+// undefined reference。哪块板实测走哪条总线是确定的，所以直接写型号。
+// The guard has to name the chip rather than a bus macro: SOC_GDMA_TRIG_PERIPH_LCD0_BUS equals
+// SOC_GDMA_BUS_AXI on S3 too, so branching on it sends S3 after gdma_new_axi_channel, which only
+// exists on S31, and the link fails with an undefined reference.
+#if defined(CONFIG_IDF_TARGET_ESP32S31) || defined(CONFIG_IDF_TARGET_ESP32P4)
+#define LCD_GDMA_NEW_CHANNEL gdma_new_axi_channel
+#define LCD_GDMA_DESC_ALIGN 8
+typedef dma_descriptor_align8_t lcd_dma_desc_t;
+#else
+#define LCD_GDMA_NEW_CHANNEL gdma_new_ahb_channel
+#define LCD_GDMA_DESC_ALIGN 4
+typedef dma_descriptor_t lcd_dma_desc_t;
+#endif
 #include <hal/gpio_hal.h>
 #include <hal/lcd_hal.h>
 #include <hal/lcd_ll.h>
@@ -59,6 +98,9 @@ extern const soc_lcd_rgb_signal_desc_t soc_lcd_rgb_signals[LCD_LL_GET(RGB_PANEL_
 #else
 #include <rom/cache.h>
 #include <soc/lcd_periph.h>
+// S31 的数据脚 IOMUX 描述表在 hal/lcd_periph.h 里，soc/lcd_periph.h 没有。
+// S31's data-pin IOMUX table lives in hal/lcd_periph.h; soc/lcd_periph.h does not carry it.
+#include <hal/lcd_periph.h>
 #endif
 
 #include "hal/gpio_hal.h"
@@ -91,7 +133,13 @@ static inline int max(int x, int y) {
 // #define S3_LCD_PIN_NUM_MODE           4
 
 #define LINE_BATCH 1000
-#define BOUNCE_BUF_LINES 4
+// 每块回弹缓冲覆盖的行数。8 位总线下 line_bytes 只有 16 位的一半，缓冲总量跟着减半，
+// 补充周期缩短到会欠载（真机首次点亮就报 line buffer underrun）。例程用 8：
+// 行扫描 16us 时对应 EOF 约 128us。
+// Lines per bounce buffer. An 8-bit bus halves line_bytes against a 16-bit one, which halves the
+// total buffer and shortens the refill period until it underruns (the first hardware boot reported
+// exactly that). The demo firmware uses 8: about 128 us between EOFs at a 16 us line.
+#define BOUNCE_BUF_LINES 8
 
 #define RMT_CKV_CHAN RMT_COMPAT_CHANNEL_1
 
@@ -130,6 +178,10 @@ typedef struct {
     uint8_t* bounce_buffer[2];
     // size of a single bounce buffer
     size_t bb_size;
+    /// 回弹缓冲是否位于 cacheable 区：是则每次填充后必须 C2M 同步，否则 DMA 读到旧数据。
+    /// / Whether the bounce buffers are cacheable. If so each fill needs a C2M sync, or the DMA
+    /// reads stale data.
+    bool bb_behind_cache;
     size_t bb_eof_count;
     size_t batches;
 
@@ -138,7 +190,7 @@ typedef struct {
     // DMA channel handle
     gdma_channel_handle_t dma_chan;
     // DMA descriptors pool
-    dma_descriptor_t* dma_nodes;
+    lcd_dma_desc_t* dma_nodes;
 
     /// LCD peripheral source clock frequency (Hz), from clock tree when available.
     uint32_t src_clk_hz;
@@ -181,6 +233,16 @@ static IRAM_ATTR bool fill_bounce_buffer(uint8_t* buffer) {
             memset(&buffer[i * lcd.line_bytes], 0x00, lcd.line_bytes);
         }
     }
+#if defined(CONFIG_IDF_TARGET_ESP32S31)
+    // CPU 刚写完这一段，DMA 马上要读：S31 内部 SRAM 也在 cache 后面，必须推下去。
+    // The CPU just wrote this range and the DMA reads it next; on S31 internal SRAM sits behind
+    // the cache too, so it has to be pushed out.
+    if (lcd.bb_behind_cache) {
+        esp_cache_msync(
+            buffer, lcd.bb_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED
+        );
+    }
+#endif
     return task_awoken;
 }
 
@@ -210,44 +272,112 @@ static void rebuild_line_geometry(int pclk_mhz) {
     lcd.line_length_us = (lcd.line_time_01us + 9) / 10;
 }
 
+#ifndef RMT_IDLE_LEVEL_LOW
+#define RMT_IDLE_LEVEL_LOW 0
+#endif
+
+// RMTMEM 的正式声明在 IDF 的 driver/deprecated/rmt_legacy.c 里，它通过私有的 rmt_private.h
+// 访问，SDK 外拿不到，所以自己 extern 一份（例程同样做法）。新结构字段名不同但数据相同，
+// typedef 一下即可。
+// RMTMEM's real declaration lives in IDF's driver/deprecated/rmt_legacy.c, which reaches it
+// through the private rmt_private.h and cannot be used outside the SDK, so declare it here; the
+// demo firmware does the same. The new struct names its fields differently but holds the same
+// data, so a typedef is enough.
+typedef rmt_mem_t rmt_block_mem_t;
+extern rmt_block_mem_t RMTMEM;
+
 static void ckv_rmt_build_signal() {
-    int total_time = lcd.line_time_01us;
-    // 行时间还没算出来（init 阶段），等 epd_lcd_set_pixel_clock_MHz 再来构造
-    if (total_time < 2 * CKV_MIN_LOW_TIME) {
-        return;
+    // 门极一行周期必须等于 LCD 一行时间；偏短会出现「一行数据多次 CKV」，格子被拉折。
+    // The gate line period has to equal the LCD line time; too short and one line of data gets
+    // several CKV edges, which stretches the image.
+    // 本 fork 里门极一行周期叫 line_length_us（例程叫 ckv_period_us）。
+    // The gate-line period is line_length_us in this fork; the demo calls it ckv_period_us.
+    const int period_us = lcd.line_length_us > 0 ? lcd.line_length_us : 1;
+    // 本 fork 把 ckv_high_time 放在 lcd 上而不是 config 里，单位同样是 0.1us。
+    // This fork keeps ckv_high_time on the lcd object rather than in the config; same 0.1 us.
+    const int high_us = (lcd.ckv_high_time + 5) / 10;
+    int high = high_us > 0 ? high_us : 1;
+    if (high >= period_us) {
+        high = period_us - 1;
     }
+    const int low = period_us - high;
 
-    int high_time = lcd.config.line.ckv_high_time;
-    if (high_time > total_time - CKV_MIN_LOW_TIME) {
-        high_time = total_time - CKV_MIN_LOW_TIME;
-    }
-    if (high_time < CKV_MIN_LOW_TIME) {
-        high_time = CKV_MIN_LOW_TIME;
-    }
-    lcd.ckv_high_time = high_time;
-
-    rmt_compat_write_single_item(
-        RMT_CKV_CHAN, high_time, true, total_time - high_time, false, true
-    );
+    volatile rmt_item32_t* rmt_mem_ptr = &(RMTMEM.chan[RMT_CKV_CHAN].data32[0]);
+    rmt_mem_ptr->duration0 = high;
+    rmt_mem_ptr->level0 = 1;
+    rmt_mem_ptr->duration1 = low;
+    rmt_mem_ptr->level1 = 0;
+    rmt_mem_ptr[1].val = 0;
 }
 
 /**
  * Configure the RMT peripheral for use as the CKV clock.
  */
 static void init_ckv_rmt() {
-    rmt_compat_reset_module();
-    rmt_compat_enable_module(true);
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+    // IDF6 / S31：RMT 不在 shared_periph_module 列表里，必须走 LL 的总线时钟，
+    // 而且要显式给 RMT 内存上电——这一步漏了 CKV 就一个边沿都发不出来。
+    // IDF6 / S31: RMT is not in the shared_periph_module list, so it has to go through the LL bus
+    // clock, and the RMT memory needs an explicit power-on. Miss that and CKV emits nothing at all.
+    PERIPH_RCC_ATOMIC() {
+        rmt_ll_enable_bus_clock(0, true);
+        rmt_ll_reset_register(0);
+    }
+    rmt_ll_mem_force_power_on(&RMT);
+    rmt_ll_enable_mem_access_nonfifo(&RMT, true);
+    esp_clk_tree_enable_src((soc_module_clk_t)RMT_CLK_SRC_DEFAULT, true);
+    PERIPH_RCC_ATOMIC() {
+        // rmt_sclk = src / (1 + (integral-1) + num/den) = src
+        rmt_ll_set_group_clock_src(&RMT, RMT_CKV_CHAN, RMT_CLK_SRC_DEFAULT, 1, 1, 0);
+        rmt_ll_enable_group_clock(&RMT, true);
+    }
+#else
+    periph_module_reset(PERIPH_RMT_MODULE);
+    periph_module_enable(PERIPH_RMT_MODULE);
+    rmt_ll_enable_periph_clock(&RMT, true);
+    rmt_ll_set_group_clock_src(&RMT, RMT_CKV_CHAN, RMT_CLK_SRC_DEFAULT, 1, 0, 0);
+    rmt_ll_enable_mem_access_nonfifo(&RMT, true);
+#endif
 
-    rmt_compat_enable_periph_clock(true);
-    rmt_compat_set_group_clock_src(RMT_CKV_CHAN);
-    rmt_compat_set_clock_div(RMT_CKV_CHAN, 8);
-    rmt_compat_set_mem_blocks(RMT_CKV_CHAN, 2);
-    rmt_compat_enable_mem_access_nonfifo(true);
-    rmt_compat_tx_set_idle_level(RMT_CKV_CHAN, 0, true);
-    rmt_compat_tx_enable_carrier(RMT_CKV_CHAN, false);
-    rmt_compat_tx_enable_loop(RMT_CKV_CHAN, true);
+    uint32_t src_hz = 80000000;
+    esp_err_t clk_err =
+        esp_clk_tree_src_get_freq_hz((soc_module_clk_t)RMT_CLK_SRC_DEFAULT,
+                                     ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &src_hz);
+    if (clk_err != ESP_OK || src_hz == 0) {
+        src_hz = 80000000;
+    }
+    // 目标 1MHz 通道时钟：1 tick = 1us，不必再假设「APB/8 → 0.1us」。
+    // Aim for a 1 MHz channel clock so one tick is one microsecond, instead of assuming APB/8.
+    uint32_t chan_div = (src_hz + 500000) / 1000000;
+    if (chan_div < 1) {
+        chan_div = 1;
+    }
+    if (chan_div > 255) {
+        chan_div = 255;
+    }
+    rmt_ll_tx_set_channel_clock_div(&RMT, RMT_CKV_CHAN, chan_div);
+    // 与厂商一致：2 个 mem block（S31 每通道 48 word，够用）。
+    // Two memory blocks, as the vendor does; 48 words per channel is plenty on S31.
+    rmt_ll_tx_set_mem_blocks(&RMT, RMT_CKV_CHAN, 2);
+    rmt_ll_tx_fix_idle_level(&RMT, RMT_CKV_CHAN, RMT_IDLE_LEVEL_LOW, true);
+    rmt_ll_tx_enable_carrier_modulation(&RMT, RMT_CKV_CHAN, false);
+    rmt_ll_tx_enable_loop(&RMT, RMT_CKV_CHAN, true);
 
-    rmt_compat_connect_gpio(RMT_CKV_CHAN, lcd.config.bus.ckv);
+    gpio_hal_func_sel(&hal, lcd.config.bus.ckv, PIN_FUNC_GPIO);
+    gpio_set_direction(lcd.config.bus.ckv, GPIO_MODE_OUTPUT);
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+    esp_rom_gpio_connect_out_signal(
+        lcd.config.bus.ckv, soc_rmt_signals[0].channels[RMT_CKV_CHAN].tx_sig, false, 0
+    );
+#else
+    esp_rom_gpio_connect_out_signal(
+        lcd.config.bus.ckv, rmt_periph_signals.groups[0].channels[RMT_CKV_CHAN].tx_sig, false, 0
+    );
+#endif
+    ESP_LOGI(
+        TAG, "CKV RMT src=%uHz div=%u -> %uHz (1 tick=1us)", (unsigned)src_hz, (unsigned)chan_div,
+        (unsigned)(src_hz / chan_div)
+    );
 
     ckv_rmt_build_signal();
 }
@@ -256,9 +386,16 @@ static void init_ckv_rmt() {
  * Reset the CKV RMT configuration.
  */
 static void deinit_ckv_rmt() {
-    rmt_compat_reset_module();
-    rmt_compat_enable_periph_clock(false);
-    rmt_compat_enable_module(false);
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+    PERIPH_RCC_ATOMIC() {
+        rmt_ll_reset_register(0);
+        rmt_ll_enable_bus_clock(0, false);
+    }
+#else
+    periph_module_reset(PERIPH_RMT_MODULE);
+    periph_module_disable(PERIPH_RMT_MODULE);
+#endif
+
     gpio_reset_pin(lcd.config.bus.ckv);
 }
 
@@ -343,7 +480,7 @@ static esp_err_t init_dma_trans_link() {
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
     gdma_channel_alloc_config_t dma_chan_config = { 0 };
     ESP_RETURN_ON_ERROR(
-        gdma_new_ahb_channel(&dma_chan_config, &lcd.dma_chan, NULL), TAG, "alloc DMA channel failed"
+        LCD_GDMA_NEW_CHANNEL(&dma_chan_config, &lcd.dma_chan, NULL), TAG, "alloc DMA channel failed"
     );
     // IDF 6.0's gdma_connect no longer implicitly resets the channel (removed).
     // Do it explicitly to match IDF 5.4 behavior.
@@ -506,6 +643,13 @@ static void assign_lcd_parameters_from_config(
     // each bounce buffer holds a number of lines with data + dummy bytes each
     lcd.bb_size = BOUNCE_BUF_LINES * (lcd.line_bytes + lcd.dummy_bytes);
 
+    // 本 fork 把 CKV 高电平放在 config.line 里，而 s3_lcd_t 另有一个同名字段。两边不打通的话
+    // 后者一直是 0，CKV 脉冲宽度为零——面板电源全对也一个像素都画不出来。
+    // This fork keeps the CKV high time in config.line while s3_lcd_t has a field of the same name.
+    // Leaving them unlinked keeps the latter at zero, which makes the CKV pulse zero wide: the
+    // panel can be powered perfectly and still show nothing.
+    lcd.ckv_high_time = lcd.config.line.ckv_high_time;
+
     check_cache_configuration();
 
     ESP_LOGI(TAG, "using resolution %dx%d", lcd.lcd_res_h, lcd.display_lines);
@@ -519,14 +663,35 @@ static esp_err_t allocate_lcd_buffers() {
 
     // allocate bounce buffers
     for (int i = 0; i < 2; i++) {
-        lcd.bounce_buffer[i] = heap_caps_aligned_calloc(4, 1, lcd.bb_size, dma_flags);
+        // S31/P4 需要 64 字节对齐：AXI-GDMA 的突发按 64 对齐，且 cache 行也是 64。
+        // S31/P4 want 64-byte alignment: the AXI-GDMA burst is 64-aligned and so are the cache
+        // lines.
+#if defined(CONFIG_IDF_TARGET_ESP32S31) || defined(CONFIG_IDF_TARGET_ESP32P4)
+        const size_t bb_align = 64;
+        lcd.bb_behind_cache = true;
+#else
+        const size_t bb_align = 4;
+        lcd.bb_behind_cache = false;
+#endif
+        lcd.bounce_buffer[i] = heap_caps_aligned_calloc(bb_align, 1, lcd.bb_size, dma_flags);
         ESP_RETURN_ON_FALSE(lcd.bounce_buffer[i], ESP_ERR_NO_MEM, TAG, "install interrupt failed");
+#if defined(CONFIG_IDF_TARGET_ESP32S31) || defined(CONFIG_IDF_TARGET_ESP32P4)
+        if (lcd.bb_behind_cache) {
+            esp_cache_msync(
+                lcd.bounce_buffer[i], lcd.bb_size,
+                ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED
+            );
+        }
+#endif
     }
 
     // So far, I haven't seen any displays with > 4096 pixels per line,
     // so we only need one DMA node for now.
     assert(lcd.bb_size < DMA_DESCRIPTOR_BUFFER_MAX_SIZE);
-    lcd.dma_nodes = heap_caps_calloc(1, sizeof(dma_descriptor_t) * 2, dma_flags);
+    // 描述符必须按总线要求的边界对齐，分配时就要给对。
+    // Descriptors must sit on the alignment their bus requires, so the allocation has to ask.
+    lcd.dma_nodes
+        = heap_caps_aligned_calloc(LCD_GDMA_DESC_ALIGN, 2, sizeof(lcd_dma_desc_t), dma_flags);
     ESP_RETURN_ON_FALSE(lcd.dma_nodes, ESP_ERR_NO_MEM, TAG, "no mem for dma nodes");
     return ESP_OK;
 }
@@ -569,13 +734,13 @@ static esp_err_t init_lcd_peripheral() {
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
     // IDF 6 requires explicit clock-tree enable; otherwise PCLK can fall back to a slow source.
     ESP_RETURN_ON_ERROR(
-        esp_clk_tree_enable_src((soc_module_clk_t)LCD_CLK_SRC_PLL240M, true),
+        esp_clk_tree_enable_src((soc_module_clk_t)EPD_LCD_CLK_SRC, true),
         TAG,
         "enable lcd clk src failed"
     );
     ESP_RETURN_ON_ERROR(
         esp_clk_tree_src_get_freq_hz(
-            (soc_module_clk_t)LCD_CLK_SRC_PLL240M,
+            (soc_module_clk_t)EPD_LCD_CLK_SRC,
             ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED,
             &lcd.src_clk_hz
         ),
@@ -584,18 +749,31 @@ static esp_err_t init_lcd_peripheral() {
     );
     PERIPH_RCC_ATOMIC() {
         lcd_ll_enable_clock(lcd.hal.dev, true);
-        lcd_ll_select_clk_src(lcd.hal.dev, LCD_CLK_SRC_PLL240M);
+        lcd_ll_select_clk_src(lcd.hal.dev, EPD_LCD_CLK_SRC);
     }
+#if defined(CONFIG_IDF_TARGET_ESP32S31)
+    // 与 esp_lcd RGB 对齐：LCD 的 SRAM 单独供电，并打开传输缓冲防 FIFO 欠载。
+    // Match esp_lcd RGB: power the LCD's SRAM separately and enable the transmit buffer so the
+    // FIFO cannot underrun.
+    lcd_ll_mem_set_low_power_mode(lcd.hal.dev, LCD_LL_MEM_LP_MODE_SHUT_DOWN);
+    lcd_ll_mem_power_by_pmu(lcd.hal.dev);
+    lcd_ll_enable_trans_buffer(lcd.hal.dev, true);
+#endif
 #else
-    lcd.src_clk_hz = 240000000;
+    lcd.src_clk_hz = EPD_LCD_SRC_CLK_HZ;
     lcd_ll_enable_clock(lcd.hal.dev, true);
-    lcd_ll_select_clk_src(lcd.hal.dev, LCD_CLK_SRC_PLL240M);
+    lcd_ll_select_clk_src(lcd.hal.dev, EPD_LCD_CLK_SRC);
 #endif
     ESP_LOGI(TAG, "lcd src clk: %u Hz", (unsigned)lcd.src_clk_hz);
     ESP_RETURN_ON_ERROR(ret, TAG, "set source clock failed");
 
     lcd_ll_fifo_reset(lcd.hal.dev);
     lcd_ll_reset(lcd.hal.dev);
+#if defined(CONFIG_IDF_TARGET_ESP32S31)
+    // reset 会把传输缓冲清掉，这里补开一次。
+    // The reset clears the transmit buffer, so it is re-enabled here.
+    lcd_ll_enable_trans_buffer(lcd.hal.dev, true);
+#endif
 
     // install interrupt service, (LCD peripheral shares the interrupt source with Camera by
     // different mask)
@@ -668,6 +846,9 @@ static void deinit_lcd_peripheral() {
     esp_intr_free(lcd.done_intr);
 
     lcd_ll_stop(lcd.hal.dev);
+#if defined(CONFIG_IDF_TARGET_ESP32S31)
+    lcd_ll_enable_trans_buffer(lcd.hal.dev, false);
+#endif
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
     PERIPH_RCC_ATOMIC() {
         lcd_ll_enable_clock(lcd.hal.dev, false);
@@ -746,7 +927,7 @@ void epd_lcd_set_line_timing(const LcdLineTiming_t* timing) {
 void epd_lcd_set_pixel_clock_MHz(int frequency) {
     lcd.config.pixel_clock = frequency * 1000 * 1000;
     if (lcd.src_clk_hz == 0) {
-        lcd.src_clk_hz = 240000000;
+        lcd.src_clk_hz = EPD_LCD_SRC_CLK_HZ;
     }
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 3, 0)
@@ -770,6 +951,23 @@ void epd_lcd_set_pixel_clock_MHz(int frequency) {
             lcd.hal.dev, (int)clk_div.integer, (int)clk_div.denominator, (int)clk_div.numerator
         );
     }
+#if defined(CONFIG_IDF_TARGET_ESP32S31)
+    // HAL 只写了 HP 分频。LCD 自己的寄存器里 clk_en 默认是 0（时钟门关着），
+    // 而 lcd_clkm_div_num 默认 4 会再除一次，两者都会让 PCLK 出不来。
+    // The HAL only writes the HP divider. In the LCD's own registers clk_en defaults to 0 (the
+    // gate is shut) and lcd_clkm_div_num defaults to 4, which divides again - either one leaves
+    // the pixel clock dead.
+    lcd.hal.dev->lcd_clock.clk_en = 1;
+    lcd.hal.dev->lcd_clock.lcd_clk_sel = 2;  // 2 = CLK160 / PLL160M
+    lcd.hal.dev->lcd_clock.lcd_clkm_div_num = 1;
+    lcd.hal.dev->lcd_clock.lcd_clkm_div_a = 0;
+    lcd.hal.dev->lcd_clock.lcd_clkm_div_b = 0;
+    ESP_LOGI(
+        TAG, "S31 PCLK gate: clk_en=%u sel=%u clkm_div=%u",
+        (unsigned)lcd.hal.dev->lcd_clock.clk_en, (unsigned)lcd.hal.dev->lcd_clock.lcd_clk_sel,
+        (unsigned)lcd.hal.dev->lcd_clock.lcd_clkm_div_num
+    );
+#endif
 #else
     lcd_ll_set_group_clock_coeff(
         &LCD_CAM, (int)clk_div.integer, (int)clk_div.denominator, (int)clk_div.numerator

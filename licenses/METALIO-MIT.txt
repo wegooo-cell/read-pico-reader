@@ -1,0 +1,48 @@
+MIT License
+
+Copyright (c) 2025 Shenzhen Xinzhi Future Technology Co., Ltd.
+Copyright (c) 2025 Project Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+Source: https://github.com/CloudZao/Metalio-E-INK4-Plus
+
+Material used from this project:
+
+- `main/boards/metalio-e-ink4-plus/config.h` - pin map, TCA9555 bit assignments
+- `main/boards/metalio-e-ink4-plus/bus/tps65185.{c,h}` - TPS65185 register map, VCOM
+  encoding (mV/10 across VCOM2/VCOM1) and the thermistor conversion sequence
+- `main/boards/metalio-e-ink4-plus/bus/pca9555.{c,h}` - 9555 access pattern
+- `main/boards/metalio-e-ink4-plus/display/epd_board_metalio_eink4_plus.c` - the
+  TPS65185 power-on/power-off sequence and its interaction with PWR_GOOD
+- `main/boards/metalio-e-ink4-plus/display/epdiy_riscv_ve_stub.c` - the C equivalents
+  of the Xtensa SIMD paths, including the ESP32-S31 in-byte pixel order
+- `main/boards/metalio-e-ink4-plus/display/output_lcd/{lcd_driver.c,render_lcd.c}` -
+  the ESP32-S31 LCD blocks: dedicated LCD_DATA IOMUX, cache-coherent bounce buffers
+  and the pixel-clock gate the HAL leaves shut
+
+Portions of this project are Apache-2.0 (see the top-level LICENSE) and portions
+under `components/epdiy/` are LGPL-3.0-or-later; this MIT notice covers the
+material listed above wherever it appears, and the other licenses are not
+superseded.
+
+本项目部分代码移植自 Metalio E-Ink4-Plus 示例固件，遵循其 MIT 许可，版权与许可
+声明见上。

@@ -19,6 +19,7 @@ remain in the source. This project is not an official MindReset release.
 | FreeInk SDK StreamingJsonParser, commit `96de1be6ce08eb732909e6e8149af8f892b9a2c5` | MIT | [FreeInk SDK notice](components/pico_weread/vendor/LICENSE-FreeInk-SDK.txt) |
 | Embedded Noto Sans SC Medium font subset and compressed common-Han bitmaps | SIL OFL-1.1 | [Font license](main/assets/OFL-Noto.txt) |
 | [ESP Web Tools](https://github.com/esphome/esp-web-tools) browser flasher | Apache-2.0 | [Bundled web tool license](flash/vendor/LICENSE) |
+| [Metalio E-Ink4-Plus](https://github.com/CloudZao/Metalio-E-INK4-Plus) demo firmware: TPS65185 driver, TCA9555 access, the ESP32-S31 board layer and the S31 LCD blocks | MIT | [Metalio notice](licenses/METALIO-MIT.txt) |
 | Espressif TinyUSB component | Apache-2.0 | [Component license](components/espressif__esp_tinyusb/LICENSE) |
 
 License terms apply to their respective material. The repository's top-level

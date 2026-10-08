@@ -3,8 +3,10 @@
 #include "sdkconfig.h"
 
 // 本 fork 只保留 ESP32-S3 的 LCD/CAM 外设输出路径。
-#ifndef CONFIG_IDF_TARGET_ESP32S3
-#error "this epdiy fork only supports ESP32-S3 (LCD render path)"
+// ESP32-S3 与 ESP32-S31 都走 LCD/CAM 外设输出路径。
+// Both ESP32-S3 and ESP32-S31 use the LCD/CAM output path.
+#if !defined(CONFIG_IDF_TARGET_ESP32S3) && !defined(CONFIG_IDF_TARGET_ESP32S31)
+#error "this epdiy fork only supports the ESP32-S3 / ESP32-S31 LCD render path"
 #endif
 #define RENDER_METHOD_LCD 1
 
