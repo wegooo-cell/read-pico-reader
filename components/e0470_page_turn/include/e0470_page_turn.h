@@ -26,6 +26,8 @@ typedef enum {
 } e0470_turn_dir_t;
 
 #define E0470_TURN_DEFAULT_TICK_US 21000
+// 快档只缩短软件补等，不改变单次扫描或每像素相位。/ Fast only shortens software padding, never a scan or pixel's phases.
+#define E0470_TURN_FAST_TICK_US 14000
 
 const char* e0470_turn_dir_name(e0470_turn_dir_t dir);
 

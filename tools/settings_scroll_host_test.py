@@ -29,6 +29,8 @@ render_start=s.index('static void render(')
 render_size=block(s.index('if (s_page == SETTINGS_SYSTEM_SIZE)',render_start))
 gesture_start=s.index('static app_redraw_t on_gesture(')
 select_size=block(s.index('if (s_page == SETTINGS_SYSTEM_SIZE)',gesture_start))
+select_style=block(s.index('if (s_page == SETTINGS_SHELF_STYLE) {',gesture_start))
+scroll_style=block(s.index('if (s_page == SETTINGS_SHELF_STYLE &&',gesture_start))
 # 资料卡必须在蓝牙和扫描页 return 之后绘制。/ The profile must draw only after both Bluetooth early returns.
 profile=s.index('const int profile_y',render_start)
 for page in ('SETTINGS_BLUETOOTH','SETTINGS_BLE_SCAN'):
@@ -70,6 +72,9 @@ static EpdRect upgrade_progress_area(void){return (EpdRect){52,468,580,64};}
 static void guard_draw_result(void *hl,int status){(void)hl;assert(!status);}
 static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&y>=r.y&&x<r.x+r.width&&y<r.y+r.height;}
 static uint8_t chosen=120;
+static uint8_t chosen_style=2;
+static int s_style_scroll;
+static void app_settings_set_shelf_style(uint8_t style){chosen_style=style;}
 static uint8_t app_settings_system_font_size(void){return chosen;}
 static void app_settings_set_system_font_size(uint8_t percent){chosen=percent;}
 static void ui_text_set_system_scale(bool enabled){assert(enabled);}
@@ -84,6 +89,8 @@ static void ui_nav_draw(uint8_t *fb,int tab){(void)fb;(void)tab;}
 """+function('scroll_gesture')+'\n'+function('settings_present')+'\n'
 unit+='static void draw_size(uint8_t *fb){'+render_size+'}\n'
 unit+='static app_redraw_t choose_size(int x,int y){ui_gesture_event_t event={.x0=x,.y0=y};const ui_gesture_event_t *ev=&event;'+select_size+'return APP_REDRAW_NONE;}\n'
+unit+='static app_redraw_t choose_style(int x,int y){ui_gesture_event_t event={.x0=x,.y0=y};const ui_gesture_event_t *ev=&event;'+select_style+'return APP_REDRAW_NONE;}\n'
+unit+='static app_redraw_t swipe_style(const ui_gesture_event_t *ev){'+scroll_style+'return APP_REDRAW_NONE;}\n'
 unit+=r"""
 int main(void){
  app_ctx_t ctx={0};ui_gesture_event_t ev={.type=UI_GESTURE_PRESS,.x0=300,.y0=700,.x=300,.y=700};int offset=0;bool handled;
@@ -112,6 +119,27 @@ int main(void){
  s_page=SETTINGS_SYSTEM_SIZE;draw_size(NULL);assert(cards==11);
  for(unsigned i=0;i<11;++i){EpdRect r=boxes[i];assert(choose_size(r.x+r.width/2,r.y+r.height/2)==APP_REDRAW_PAGE&&chosen==100+i*10);}
  assert(chosen==200&&choose_size(340,310)==APP_REDRAW_NONE&&chosen==200&&choose_size(400,970)==APP_REDRAW_NONE);
+ // 第五种样式可滚动选择；屏幕外卡片、题头、导航和卡片间隙不得误选。
+ // Reach the fifth style without selecting clipped cards, headers, navigation or gutters.
+ s_page=SETTINGS_SHELF_STYLE;s_style_scroll=0;
+ ev.type=UI_GESTURE_SWIPE_D;assert(swipe_style(&ev)==APP_REDRAW_NONE);
+ ev.type=UI_GESTURE_SWIPE_U;
+ assert(swipe_style(&ev)==APP_REDRAW_AREA&&s_style_scroll==253);
+ assert(swipe_style(&ev)==APP_REDRAW_AREA&&s_style_scroll==506);
+ assert(swipe_style(&ev)==APP_REDRAW_NONE&&s_style_scroll==506);
+ for(int offset=0;offset<=506;offset+=253)for(int i=0;i<5;++i){
+   s_style_scroll=offset;s_page=SETTINGS_SHELF_STYLE;chosen_style=0;
+   int y=263+i*253-offset+115;
+   if(y<242||y>=1096)continue;
+   assert(choose_style(340,y)==APP_REDRAW_PAGE&&chosen_style==i+1&&s_page==SETTINGS_MAIN);
+ }
+ s_style_scroll=506;s_page=SETTINGS_SHELF_STYLE;chosen_style=5;
+ assert(choose_style(340,230)==APP_REDRAW_NONE&&chosen_style==5);
+ assert(choose_style(340,1096)==APP_REDRAW_NONE&&chosen_style==5);
+ assert(choose_style(35,800)==APP_REDRAW_NONE&&chosen_style==5);
+ assert(choose_style(648,800)==APP_REDRAW_NONE&&chosen_style==5);
+ assert(choose_style(340,750)==APP_REDRAW_NONE&&chosen_style==5);
+ puts("PASS: all five shelf styles reachable; scroll clamps and clipped-header/nav/gutter hit guards");
  puts("PASS: immediate bounded scroll, one update per drag, no periodic GC16 during 80 swipes, header/nav excluded across all settings lists, Bluetooth profile isolation and eleven size options through 200%");
 }
 """

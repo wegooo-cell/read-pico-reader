@@ -80,7 +80,7 @@ void app_settings_set_book_shake(bool on);
 /// Full-screen cleanup every 5/10/15/30 turns; 0 disables periodic cleanup only.
 uint8_t app_settings_reader_full_pages(void);
 void app_settings_set_reader_full_pages(uint8_t pages);
-/// 阅读翻页效果：0 默认，1 水波纹；初始为默认。/ Reader turn effect: 0 default, 1 water ripple; initially default.
+/// 阅读翻页效果：0 默认，1 原速水波纹，2 快速水波纹；初始为默认。/ Reader turn effect: 0 default, 1 original ripple, 2 fast ripple; initially default.
 uint8_t app_settings_reader_turn_effect(void);
 void app_settings_set_reader_turn_effect(uint8_t effect);
 /// 阅读正文里短按电源键翻下一页；默认关闭。/ Short power press turns forward only in reader body; off by default.
@@ -129,7 +129,7 @@ void app_settings_set_book_margin(uint8_t px);
 /// 段后距离百分比，0/25/50/75。/ Paragraph-gap percentage: 0/25/50/75.
 uint8_t app_settings_book_paragraph_spacing(void);
 void app_settings_set_book_paragraph_spacing(uint8_t percent);
-/// 书架样式：1 深色书轨、2 亚克力挡板、3 半透明书袋、4 封面与书脊。/ Shelf style: rail, acrylic, pocket, or covers and spines.
+/// 书架样式：1 深色书轨、2 亚克力挡板、3 半透明书袋、4 封面与书脊、5 清晰书单。/ Shelf style: rail, acrylic, pocket, covers/spines, or clear list.
 uint8_t app_settings_shelf_style(void);
 void app_settings_set_shelf_style(uint8_t style);
 /// 当前 TF 卡书籍目录和字体目录；默认分别为 /sdcard/books、/sdcard/fonts。

@@ -63,13 +63,16 @@ static bool commit_fails;
 static int commit_count;
 static uint8_t test_loaded_system_size;
 static uint8_t test_loaded_fast;
+static uint8_t test_loaded_shelf;
+static bool test_turn_present;
+static uint8_t test_loaded_turn;
 esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *info) { info->mounted = card_mounted; return ESP_OK; }
 esp_err_t nvs_flash_init(void) { return ESP_OK; }
 esp_err_t nvs_flash_erase(void) { return ESP_OK; }
 esp_err_t nvs_open(const char *ns, int mode, nvs_handle_t *h) { (void)ns; (void)mode; *h = 1; return ESP_OK; }
 void nvs_close(nvs_handle_t h) { (void)h; }
-esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) { (void)h; if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } return ESP_FAIL; }
-esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) { (void)h; if (!strcmp(key, "ui_fast")) test_loaded_fast=value; return ESP_OK; }
+esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) { (void)h; if (!strcmp(key, NVS_KEY_READER_TURN) && test_turn_present) { *value = test_loaded_turn; return ESP_OK; } if (!strcmp(key, NVS_KEY_SHELF_V22)) { *value = 1; return ESP_OK; } if (!strcmp(key, NVS_KEY_SHELF_STYLE) && test_loaded_shelf) { *value = test_loaded_shelf; return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } return ESP_FAIL; }
+esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) { (void)h; if (!strcmp(key, NVS_KEY_READER_TURN)) { test_loaded_turn=value; test_turn_present=true; } if (!strcmp(key, NVS_KEY_SHELF_STYLE)) test_loaded_shelf=value; if (!strcmp(key, "ui_fast")) test_loaded_fast=value; return ESP_OK; }
 esp_err_t nvs_get_str(nvs_handle_t h, const char *key, char *value, size_t *size) { (void)h; (void)key; (void)value; (void)size; return ESP_FAIL; }
 esp_err_t nvs_set_str(nvs_handle_t h, const char *key, const char *value) { (void)h; (void)key; (void)value; return ESP_OK; }
 esp_err_t nvs_erase_key(nvs_handle_t h, const char *key) { (void)h; (void)key; return ESP_OK; }
@@ -97,7 +100,7 @@ int main(void) {
     s_reader_turn_effect = 1;
     s_reader_power_turn = true;
     s_reader_immersive = true;
-    s_shelf_style = 3;
+    s_shelf_style = 5;
     s_staged_shutdown = true;
     s_auto_lock_minutes = 5;
     s_home_full_refresh = true;
@@ -185,7 +188,7 @@ int main(void) {
            !strcmp(saved_wifi.password, "password123"));
     assert(s_book_px == 62 && s_book_tracking == 4 && s_book_indent == 3 &&
            s_book_rule_offset == 7 && s_reader_full_pages == 5);
-    assert(s_reader_turn_effect == 1 && s_reader_power_turn && s_reader_immersive && s_shelf_style == 3);
+    assert(s_reader_turn_effect == 1 && s_reader_power_turn && s_reader_immersive && s_shelf_style == 5);
     assert(s_staged_shutdown&&app_settings_auto_lock_minutes()==5);
     assert(s_ble_turner);
     assert(s_reader_hold_refresh);
@@ -303,6 +306,46 @@ int main(void) {
     app_settings_init(); assert(app_settings_system_font_size() == 200);
 
 
-    puts("settings backup host test passed (including 200% size persistence and restore)");
+    test_loaded_shelf = 5; s_shelf_style = 2;
+    app_settings_init(); assert(app_settings_shelf_style() == 5);
+    app_settings_set_shelf_style(6); assert(app_settings_shelf_style() == 5);
+    for (int style = 1; style <= 5; ++style) {
+        app_settings_set_shelf_style((uint8_t)style);
+        assert(app_settings_shelf_style() == style);
+        s_shelf_style = 0;
+        app_settings_init();
+        assert(app_settings_shelf_style() == style);
+        assert(app_settings_backup_save() == ESP_OK);
+        s_shelf_style = 2;
+        assert(app_settings_backup_restore() == ESP_OK);
+        assert(app_settings_shelf_style() == style);
+    }
+    int before_shelf_invalid = commit_count;
+    app_settings_set_shelf_style(0);
+    app_settings_set_shelf_style(6);
+    app_settings_set_shelf_style(255);
+    assert(app_settings_shelf_style() == 5 && commit_count == before_shelf_invalid);
+    test_loaded_shelf = 6; s_shelf_style = 2;
+    app_settings_init(); assert(app_settings_shelf_style() == 2);
+    // 覆盖原设置及快档的保存、重启加载与整包备份恢复，非法值不能生效。
+    // Exercise old/fast settings across save, reload and backup restore; reject invalid values.
+    for (uint8_t effect = 0; effect <= 2; ++effect) {
+        app_settings_set_reader_turn_effect(effect);
+        assert(app_settings_reader_turn_effect() == effect);
+        s_reader_turn_effect = 255;
+        app_settings_init();
+        assert(app_settings_reader_turn_effect() == effect);
+        assert(app_settings_backup_save() == ESP_OK);
+        s_reader_turn_effect = 0;
+        assert(app_settings_backup_restore() == ESP_OK);
+        assert(app_settings_reader_turn_effect() == effect);
+    }
+    int before_invalid = commit_count;
+    app_settings_set_reader_turn_effect(3);
+    app_settings_set_reader_turn_effect(255);
+    assert(app_settings_reader_turn_effect() == 2 && commit_count == before_invalid);
+    test_loaded_turn = 3; s_reader_turn_effect = 0;
+    app_settings_init(); assert(app_settings_reader_turn_effect() == 0);
+    puts("settings backup host test passed (original/fast ripple persistence/reload/backup, clear-list restore, 200% system size)");
     return 0;
 }

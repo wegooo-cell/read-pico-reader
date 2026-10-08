@@ -571,6 +571,17 @@ static void setting_toggle(uint8_t *fb, int y, const char *title, const char *de
 static void draw_style_thumbnail(uint8_t *fb, int style, int top) {
     if (top < 242 || top + 170 >= UI_NAV_TOP) return;
     const int left = 99;
+    if (style == 5) {
+        for (int i = 0; i < 2; ++i) {
+            int y = top + i * 78;
+            ui_fill_round_rect(fb, (EpdRect){left, y, 486, 68}, 8, UI_GRAY_WHITE);
+            ui_draw_round_rect(fb, (EpdRect){left, y, 486, 68}, 8, 0x80);
+            epd_fill_rect((EpdRect){left + 10, y + 8, 38, 52}, i ? 0x98 : 0x50, fb);
+            ui_text_fixed_vc(fb, left + 65, y + 23, 26, i ? "看清每一本书" : "清晰的大字书名", EPD_DRAW_ALIGN_LEFT, false);
+            ui_hairline(fb, y + 48, left + 65, 136, 0x90);
+        }
+        return;
+    }
     if (style == 4) {
         for (int i = 0; i < 2; ++i) {
             EpdRect cover = {left + 20 + i * 128, top + 3, 92, 135};
@@ -655,10 +666,10 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     if (s_page == SETTINGS_SHELF_STYLE) {
         ui_nav_back(fb, 36, 79);
         ui_text_vc(fb, 342, 107, 34, "书架样式", EPD_DRAW_ALIGN_CENTER, false);
-        ui_text(fb, 36, 207, 23, "常规每页 9 本 · 书脊模式为测试版", EPD_DRAW_ALIGN_LEFT, false);
-        static const char *const styles[] = {"深色书轨", "亚克力书架", "半透明书袋", "封面与书脊 · 测试版"};
-        static const char *const descriptions[] = {"封面落在书轨上", "透明亚克力挡板", "每本独立透明书袋", "非正式版本"};
-        for (int i = 0; i < 4; ++i) {
+        ui_text(fb, 36, 207, 23, "新增清晰书单 · 大字双行书名", EPD_DRAW_ALIGN_LEFT, false);
+        static const char *const styles[] = {"深色书轨", "亚克力书架", "半透明书袋", "封面与书脊 · 测试版", "清晰书单"};
+        static const char *const descriptions[] = {"封面落在书轨上", "透明亚克力挡板", "每本独立透明书袋", "非正式版本", "大字 · 每页5本"};
+        for (int i = 0; i < 5; ++i) {
             int y = 263 + i * 253 - s_style_scroll;
             if (y + 230 < 242 || y > 1095) continue;
             EpdRect card = {36, y, 612, 230};
@@ -1128,7 +1139,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     fit_value(font, 235);
     char size[32]; snprintf(size, sizeof(size), "%u%%  ›", app_settings_system_font_size());
     char contrast[32]; snprintf(contrast, sizeof(contrast), "%u%%  ›", app_settings_system_contrast());
-    static const char *const styles[] = {"深色书轨  ›", "深色书轨  ›", "亚克力书架  ›", "半透明书袋  ›", "书脊测试版  ›"};
+    static const char *const styles[] = {"深色书轨  ›", "深色书轨  ›", "亚克力书架  ›", "半透明书袋  ›", "书脊测试版  ›", "清晰书单  ›"};
     char signature_value[96];
     snprintf(signature_value, sizeof(signature_value), "%s  ›",
              app_settings_status_signature()[0] ? app_settings_status_signature() : "未设置");
@@ -1475,7 +1486,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if (s_page == SETTINGS_SHELF_STYLE && (ev->type == UI_GESTURE_SWIPE_U || ev->type == UI_GESTURE_SWIPE_D)) {
         int next = s_style_scroll + (ev->type == UI_GESTURE_SWIPE_U ? 253 : -253);
         if (next < 0) next = 0;
-        if (next > 253) next = 253;
+        if (next > 506) next = 506;
         if (next == s_style_scroll) return APP_REDRAW_NONE;
         s_style_scroll = next;
         s_scroll_present_pending = true;
@@ -1557,8 +1568,9 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     }
     if (s_page == SETTINGS_SHELF_STYLE) {
         if (y < 190) { s_page = SETTINGS_MAIN; return APP_REDRAW_PAGE; }
-        for (int i = 0; i < 4; ++i) {
-            if (y >= 263 + i * 253 - s_style_scroll && y < 493 + i * 253 - s_style_scroll && y < 1096) {
+        for (int i = 0; i < 5; ++i) {
+            if (ev->x0 >= 36 && ev->x0 < 648 && y >= 242 && y < UI_NAV_TOP &&
+                y >= 263 + i * 253 - s_style_scroll && y < 493 + i * 253 - s_style_scroll) {
                 app_settings_set_shelf_style((uint8_t)(i + 1));
                 s_page = SETTINGS_MAIN;
                 return APP_REDRAW_PAGE;

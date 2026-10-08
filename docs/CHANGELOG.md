@@ -3,6 +3,13 @@
 按日期和作者简述对用户可见的功能变化；详细实现历史见 Git。使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by date and author; Git retains implementation history. See [README](../README.md) for usage.
 
+## 未发布 / Unreleased
+
+- 书架样式新增“清晰书单”：每页五本，封面右侧显示双行大字书名、作者及阅读进度。原有样式与默认值保留。
+  Add an optional Clear List shelf with five books per page, large two-line titles, authors and progress beside covers; retain existing styles and defaults.
+- 阅读设置新增“快速水波纹”，将软件每拍目标从21ms缩至14ms，保留原速、全部刷新相位与周期全刷。52拍的目标时长约从1.09s降至0.73s；实际耗时取决于扫描速度。
+  Add Fast Ripple with a 14ms software tick target instead of 21ms. Original ripple, all phases and periodic cleanup remain; the 52-tick target falls from about 1.09s to 0.73s, subject to scan time.
+
 ## 0.3.3-rc86 · 2026-10-08
 
 - 新输入法：九宫格只输入中文拼音；全键盘支持中英文与大小写切换，数字和符号使用独立页面。文件/文件夹改名、资料卡名称、状态栏签名、书架搜索、书名编辑及 WiFi 密码共用这套界面。

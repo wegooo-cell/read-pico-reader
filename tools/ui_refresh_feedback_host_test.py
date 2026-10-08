@@ -97,6 +97,10 @@ static struct {uint8_t *gray;} test_image={.gray=(uint8_t*)"gray"},*s_page_image
 #define BOOK_TOC_ROWS 12
 #define E0470_TURN_RTL 1
 #define E0470_TURN_LTR -1
+#define E0470_TURN_DEFAULT_TICK_US 21000
+#define E0470_TURN_FAST_TICK_US 14000
+static int test_tick_us,test_tick_sets;
+static void e0470_page_turn_set_tick_us(int us){test_tick_us=us;++test_tick_sets;}
 static int book_layout_page_image_count(unsigned page){return !test_hide_images&&test_types[s_chapter][page]?1:0;}
 static int book_layout_page_image(unsigned page){return !test_hide_images&&test_types[s_chapter][page]==2?0:-1;}
 static unsigned book_layout_page_count(void){return 2;}
@@ -244,6 +248,28 @@ int main(void){
  test_full_pages=0;test_effect=0;s_page=0;test_types[0][0]=1;test_image.gray=NULL;
  trace_count=0;present(&ctx,paint_reading(&ctx,MODE_GL16));assert(!s_reader_text_frame);
  assert(turn_page(&ctx,1)==APP_REDRAW_AREA&&!s_reader_turn_pending);
+ // 原速/快档切换只更改等待；全刷与插图保持优先级，不漏到普通翻页。
+ // Switching speeds changes padding only; cleanup and images retain priority, without affecting ordinary turns.
+ memset(test_types,0,sizeof(test_types));s_chapter=0;test_image.gray=(uint8_t*)"gray";
+ s_view=s_presented_view=READING;s_reader_panel=READER_PANEL_NONE;s_clear_confirm=false;
+ for(int full=0;full<2;++full) for(int step=0;step<6;++step){
+   const int sequence[]={2,1,2,0,1,0};test_effect=sequence[step];test_full_pages=0;
+   s_reader_fullscreen=full;s_page=0;s_turns=0;trace_count=0;
+   present(&ctx,paint_reading(&ctx,MODE_GL16));
+   int before=test_tick_sets;app_redraw_t redraw=turn_page(&ctx,1);
+   trace_count=0;assert(present(&ctx,redraw));
+   assert(trace_route[0]==(test_effect?WATER:DIFF));
+   assert(test_tick_sets==before+(test_effect?1:0));
+   if(test_effect)assert(test_tick_us==(test_effect==2?14000:21000));
+ }
+ test_effect=2;test_full_pages=1;s_turns=0;s_page=0;
+ int before=test_tick_sets;app_redraw_t redraw=turn_page(&ctx,1);trace_count=0;
+ assert(present(&ctx,redraw)&&trace_route[0]==FULL&&test_tick_sets==before);
+ test_full_pages=0;s_page=0;test_types[0][1]=2;trace_count=0;
+ redraw=turn_page(&ctx,1);trace_count=0;
+ assert(present(&ctx,redraw)&&trace_route[0]!=WATER&&test_tick_sets==before);
+ puts("PASS: original/fast/default switching in normal and full-screen reading; manual/periodic cleanup and grayscale-image priority unchanged");
+
  puts("PASS: 36 text/mixed/image/hidden/full-screen combinations, 18 bidirectional chapter transitions, failed image/display/load guards and actual cleanup/water turns");
 }
 '''
@@ -274,7 +300,8 @@ static bool wifi,bluetooth,s_system_ttf;
 static bool ttf_font_is_builtin(void){return false;}
 static char signature[96];
 static const pmu_snapshot_t *read_pico_pmu_get(void){return &pmu;}
-static int pmu_battery_percent(const pmu_snapshot_t *snapshot){(void)snapshot;return pct;}
+// 与真实油量表一致，仅返回0..100或未知值-1。/ Match the real gauge's 0..100 or unknown -1 contract.
+static int pmu_battery_percent(const pmu_snapshot_t *snapshot){(void)snapshot;return pct>=0&&pct<=100?pct:-1;}
 static bool pmu_battery_charging(const pmu_snapshot_t *snapshot){(void)snapshot;return false;}
 static void read_pico_transfer_get_status(read_pico_transfer_status_t *status){*status=(read_pico_transfer_status_t){wifi,READ_PICO_TRANSFER_MODE_STA};}
 static bool app_settings_ble_turner(void){return bluetooth;}
@@ -330,6 +357,7 @@ with tempfile.TemporaryDirectory() as folder:
     for name, unit in (("shelf", shelf), ("status", status)):
         source, binary = Path(folder) / (name + ".c"), Path(folder) / name
         source.write_text(unit)
-        subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-fsanitize=address,undefined",
+        # 让GCC看见内联油量表的值域；保留所有警告和检测器。/ Expose the inline gauge range to GCC; retain warnings and sanitizers.
+        subprocess.run(["cc", "-std=gnu11", "-O1", "-UNDEBUG", "-Wall", "-Wextra", "-Werror", "-fsanitize=address,undefined",
                         str(source), "-o", str(binary)], check=True)
         subprocess.run([str(binary)], check=True)

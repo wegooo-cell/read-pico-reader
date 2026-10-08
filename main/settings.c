@@ -220,7 +220,7 @@ void app_settings_init(void) {
          reader_full_pages == 15 || reader_full_pages == 30))
         s_reader_full_pages = reader_full_pages;
     uint8_t reader_turn_effect = 0;
-    if (nvs_get_u8(h, NVS_KEY_READER_TURN, &reader_turn_effect) == ESP_OK && reader_turn_effect <= 1)
+    if (nvs_get_u8(h, NVS_KEY_READER_TURN, &reader_turn_effect) == ESP_OK && reader_turn_effect <= 2)
         s_reader_turn_effect = reader_turn_effect;
     uint8_t power_turn = 0;
     if (nvs_get_u8(h, NVS_KEY_POWER_TURN, &power_turn) == ESP_OK) s_reader_power_turn = power_turn == 1;
@@ -252,7 +252,7 @@ void app_settings_init(void) {
     if (nvs_get_u8(h, NVS_KEY_BOOK_MARGIN, &margin) == ESP_OK && margin >= 24 && margin <= 60)
         s_book_margin = margin;
     uint8_t shelf_style = 2;
-    if (nvs_get_u8(h, NVS_KEY_SHELF_STYLE, &shelf_style) == ESP_OK && shelf_style >= 1 && shelf_style <= 4)
+    if (nvs_get_u8(h, NVS_KEY_SHELF_STYLE, &shelf_style) == ESP_OK && shelf_style >= 1 && shelf_style <= 5)
         s_shelf_style = shelf_style;
     uint8_t shelf_v22 = 0;
     bool migrate_shelf = nvs_get_u8(h, NVS_KEY_SHELF_V22, &shelf_v22) != ESP_OK || shelf_v22 != 1;
@@ -475,7 +475,7 @@ void app_settings_set_reader_full_pages(uint8_t pages) {
 }
 uint8_t app_settings_reader_turn_effect(void) { return s_reader_turn_effect; }
 void app_settings_set_reader_turn_effect(uint8_t effect) {
-    if (effect > 1 || effect == s_reader_turn_effect) return;
+    if (effect > 2 || effect == s_reader_turn_effect) return;
     s_reader_turn_effect = effect;
     nvs_put_u8(NVS_KEY_READER_TURN, effect);
 }
@@ -569,7 +569,7 @@ void app_settings_set_book_paragraph_spacing(uint8_t percent) {
 }
 uint8_t app_settings_shelf_style(void) { return s_shelf_style; }
 void app_settings_set_shelf_style(uint8_t style) {
-    if (style < 1 || style > 4 || s_shelf_style == style) return;
+    if (style < 1 || style > 5 || s_shelf_style == style) return;
     s_shelf_style = style;
     nvs_put_u8(NVS_KEY_SHELF_STYLE, style);
 }
@@ -797,12 +797,12 @@ static bool backup_valid(const settings_backup_v1_t *backup) {
         f[BK_SHAKE] > 1 || (f[BK_FULL_PAGES] != 0 && f[BK_FULL_PAGES] != 5 &&
                             f[BK_FULL_PAGES] != 10 && f[BK_FULL_PAGES] != 15 &&
                             f[BK_FULL_PAGES] != 30) ||
-        f[BK_TURN] > 1 || f[BK_POWER_TURN] > 1 || f[BK_IMMERSIVE] > 1 ||
+        f[BK_TURN] > 2 || f[BK_POWER_TURN] > 1 || f[BK_IMMERSIVE] > 1 ||
         f[BK_TRACKING] > 4 || f[BK_READING_LINE] > 2 ||
         f[BK_LINE_SPACING] < 110 || f[BK_LINE_SPACING] > 150 ||
         f[BK_MARGIN] < 24 || f[BK_MARGIN] > 60 ||
         f[BK_PARAGRAPH] > 75 || f[BK_PARAGRAPH] % 25 ||
-        f[BK_SHELF] < 1 || f[BK_SHELF] > 4) return false;
+        f[BK_SHELF] < 1 || f[BK_SHELF] > 5) return false;
     if (strnlen(backup->books_dir, sizeof(backup->books_dir)) == sizeof(backup->books_dir) ||
         strnlen(backup->fonts_dir, sizeof(backup->fonts_dir)) == sizeof(backup->fonts_dir)) return false;
     return backup_path_valid(backup->font, sizeof(backup->font)) &&

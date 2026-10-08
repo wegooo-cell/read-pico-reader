@@ -16,7 +16,8 @@
  * 用户修订：单本管理为书架弹窗；管理页用于批量操作。分页和排序保留勾选，筛选/应用搜索及重扫清除勾选。
  * 失败进度仅按变更路径失效；删除后的清理重试保留到本次开机结束，不随切页释放。
  * 卡失效时先保存进度并关闭阅读资源，再由主循环回退字体；禁止自动续读失效挂载。
- * 用户最新修订：常规书架每页九本、书脊样式十三本，收录导入及读过的书；移出仅隐藏，再读重新上架。
+ * 用户最新修订：为提高书名可读性，新增清晰书单每页五本、双行大字书名及作者进度；常规九本、书脊十三本保持不变。
+ * 收录导入及读过的书；移出仅隐藏，再读重新上架。
  * 底栏保留首页/书架/文件/设置，设置直接进入设置页。
  * 用户修订：长按图书可用本机拼音输入编辑书名；阅读时长与翻页真实记录，供票根锁屏使用。
  * 用户最新修订：书名编辑可点选插入位置并用左右键微调，支持在文字中间插入和删除。
@@ -24,12 +25,14 @@
  * 用户修订：首页、书架、文件、设置四栏导航；切换界面采用 GL16，章节首页单独排标题。
  * 用户修订：EPUB 章节首页以书内目录标题为准，正文题头仅在相同时折叠，避免引言误判。
  * 用户修订：阅读进度条无外伸刻度并使用圆角；继续阅读区显示最近书籍封面。
- * 用户修订：书架只在封面下显示书名；首次打开时先显示书架，再逐本生成封面缓存。
+ * 用户修订：原有书架只在封面下显示书名，清晰书单在封面右侧显示书名与信息；首次打开先显示书架，再生成封面缓存。
  * 用户修订：字号和间距重排只保存最终进度，字号使用现有闲置灰阶整理。
  * 用户修订：阅读设置滑杆可拖动并在松手后重排；字体选择可纵向翻页；统计入口显示真实明细与近30天数据。
  * 用户修订：为减少翻页文字闪动，仅前后均为纯文字的翻页使用 CrossMux 文字波形与 GL16 差分；插图与混排转换、周期全刷及水波纹保持原规则。
  * 用户修订：目录由独立模块整页绘制与命中；目录标题清理换行并限制为单行，翻页不再沿用书架的局部刷新。
  * 用户修订：书架封面抽出与取消仅驱动变化像素，保持灰阶，不在点按时强制清屏。
+ * 用户修订：快速水波纹只将软件每拍目标从21ms缩至14ms；保留原速、完整相位、扫描时序和全刷优先级。
+ * User revision: fast ripple changes only the software tick target from 21ms to 14ms; retain original speed, all phases, scan timing and cleanup priority.
  * Frozen: Phase4b uses the shared gesture entry and owns previous/tools/next keys; the toolbar keeps full refresh. Screen turns commit on release without pressed decoration.
  * User revision: adopt PR9's book_layout unchanged; callers only adapt bitmap caching and context lifetimes.
  * Authorized keyboard revision: titles and search share T9/QWERTY, bilingual offline phrase candidates; body layout stays intact.
@@ -44,7 +47,8 @@
  * User revision: single-book actions use a shelf dialog; full management is for batches. Paging/sorting preserve selection; filtering/applied search and rescanning clear it.
  * Invalidate failed progress only for changed paths; retain deletion cleanup retries across page exits for this boot.
  * Lost media saves progress and closes reader resources before global font fallback; never auto-resume an invalid mount.
- * Latest user revision: regular shelf pages hold nine imported or read books and spine pages hold thirteen; removal hides until reread.
+ * Latest user revision: improve title legibility with a five-book clear list, large two-line titles, author and progress; retain nine-book regular and thirteen-book spine styles.
+ * Shelves include imported/read books; removal hides until reread.
  * The fourth tab opens Settings directly.
  * User revision: book details lead to an on-device Pinyin title editor; measured reading time and turns feed the ticket lock face.
  * Latest user revision: the title editor can place and move an insertion caret for edits in the middle of text.
@@ -53,7 +57,7 @@
  * User revision: home, shelf, files and settings have four-tab navigation; view changes use GL16 and chapter starts have a title lead.
  * User revision: EPUB chapter leads use navigation titles; body headings are folded only when matching, preventing front matter from being mislabeled.
  * User revision: the reader bar is rounded without protruding ticks; continue reading displays the latest cover.
- * User revision: the shelf shows titles without author rows; first visits paint the shelf before filling cached covers.
+ * User revision: existing shelves retain title-only covers; the clear list adds text beside covers. First visits paint before filling cached covers.
  * User revision: size and spacing reflow saves final progress only; size uses the existing idle grayscale settle.
  * User revision: reader sliders drag and reflow on release; font selection pages vertically; statistics entries show real details and recent-30-day data.
  * User revision: turns between text-only frames use the CrossMux text waveform with differential GL16; transitions involving images/mixed pages, periodic cleanup and water turns retain their policies.
@@ -388,10 +392,14 @@ static EpdRect progress_rect(void) {
     // The reader has no right-hand menu button; the footer spans the full content width.
     return (EpdRect){36, UI_BAR_TOP, UI_LOCK_WIDTH - 72, UI_BAR_H};
 }
-static int shelf_rows(void) { return app_settings_shelf_style() == 4 ? BOOK_ROWS : BOOK_GRID_ROWS; }
+static int shelf_rows(void) {
+    uint8_t style = app_settings_shelf_style();
+    return style == 5 ? 5 : style == 4 ? BOOK_ROWS : BOOK_GRID_ROWS;
+}
 #define SHELF_BOOK_LIFT_PX 16
 static EpdRect row_rect(int row) {
     if (s_view != BULK) {
+        if (app_settings_shelf_style() == 5) return (EpdRect){36, 224 + row * 154, 612, 140};
         if (app_settings_shelf_style() == 4) {
             if (row < 3) return (EpdRect){36 + row * 210, 224, 192, 260};
             return (EpdRect){42 + (row - 3) * 60, 594, 54, 364};
@@ -490,14 +498,15 @@ static bool cover_favorite_needs_white_edge(const uint8_t *gray, EpdRect image) 
     return sum < count * 145;
 }
 static void draw_shelf_cover(uint8_t* fb, EpdRect card, int row, const char* name, bool favorite) {
-    EpdRect image = {card.x + (card.width - 164) / 2, card.y, 164, 214};
+    EpdRect image = app_settings_shelf_style() == 5
+        ? (EpdRect){card.x + 12, card.y + 9, 90, 122}
+        : (EpdRect){card.x + (card.width - 164) / 2, card.y, 164, 214};
     epd_fill_rect(image, UI_GRAY_LIGHT, fb);
     if (s_covers[row].gray) {
 
         const uint8_t *gray = s_covers[row].gray;
-        // 封面缓冲是 176×240、这一格是 164×214；按长边铺满 + 居中裁剪，避免被压扁。
-        // The cover buffer is 176x240 and this frame is 164x214; fill by the longer side and
-        // centre-crop so the artwork is not squashed.
+        // 封面缓冲是176×240，按当前格子的尺寸铺满并居中裁剪，避免拉伸。
+        // Fill and centre-crop the 176x240 cover into the current frame without stretching.
         const unsigned frame_width = (unsigned)image.width, frame_height = (unsigned)image.height;
         const book_crop_t crop = book_cover_crop(BOOK_COVER_W, BOOK_COVER_H,
                                                  frame_width, frame_height);
@@ -557,7 +566,7 @@ static void draw_shelf_spine(uint8_t *fb, EpdRect card, const char *name, bool f
 }
 static void draw_shelf_furniture(uint8_t* fb) {
     uint8_t style = app_settings_shelf_style();
-    if (!style) return;
+    if (!style || style == 5) return;
     if (style == 4) {
         epd_fill_rect((EpdRect){36, 448, 612, 12}, 0x50, fb);
         ui_hairline(fb, 448, 36, 612, 0x28);
@@ -642,6 +651,53 @@ static void fit_fixed_text(char* text, int px, int width) {
         while (n && ((unsigned char)text[n] & 0xc0) == 0x80) --n;
         text[n] = 0;
     }
+}
+
+// 固定字号让书名可辨认；UTF-8 边界换行，超长第二行显式省略。
+// Fixed sizes keep titles legible; wrap at UTF-8 boundaries and mark a truncated second line.
+static void shelf_title_lines(const char *title, char lines[2][256]) {
+    const char *cursor = title;
+    for (int line = 0; line < 2; ++line) {
+        size_t used = 0;
+        lines[line][0] = 0;
+        while (*cursor) {
+            unsigned char lead = (unsigned char)*cursor;
+            size_t bytes = lead < 0x80 ? 1 : lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4;
+            if (strlen(cursor) < bytes || used + bytes >= sizeof(lines[0]) - sizeof("…")) break;
+            memcpy(lines[line] + used, cursor, bytes);
+            lines[line][used + bytes] = 0;
+            if (ui_text_fixed_width_px(36, lines[line]) > 446) {
+                lines[line][used] = 0;
+                break;
+            }
+            used += bytes;
+            cursor += bytes;
+        }
+        while (*cursor == ' ') ++cursor;
+    }
+    if (*cursor) {
+        fit_fixed_text(lines[1], 36, 446 - ui_text_fixed_width_px(36, "…"));
+        strcat(lines[1], "…");
+    }
+}
+static void draw_shelf_clear_card(uint8_t *fb, EpdRect card, int row, int index) {
+    const shelf_entry_t *book = &s_shelf[index];
+    ui_fill_round_rect(fb, card, 12, UI_GRAY_WHITE);
+    ui_draw_round_rect(fb, card, 12, s_pressed_control == row ? UI_GRAY_BLACK : 0xb0);
+    draw_shelf_cover(fb, card, row, book->name, book->favorite);
+    char title[2][256];
+    shelf_title_lines(book->name, title);
+    int x = card.x + 124;
+    ui_text_fixed_vc(fb, x, card.y + (title[1][0] ? 30 : 49), 36, title[0], EPD_DRAW_ALIGN_LEFT, false);
+    if (title[1][0]) ui_text_fixed_vc(fb, x, card.y + 72, 36, title[1], EPD_DRAW_ALIGN_LEFT, false);
+    char author[128];
+    copy_text(author, sizeof(author), book->author[0] ? book->author : "作者未标注");
+    fit_fixed_text(author, 22, 300);
+    ui_text_fixed_vc(fb, x, card.y + 114, 22, author, EPD_DRAW_ALIGN_LEFT, false);
+    char progress[24];
+    if (book->has_progress) snprintf(progress, sizeof(progress), "已读 %u%%", (unsigned)book->pct);
+    else copy_text(progress, sizeof(progress), "未读");
+    ui_text_fixed_vc(fb, card.x + card.width - 18, card.y + 114, 22, progress, EPD_DRAW_ALIGN_RIGHT, false);
 }
 
 static void reader_footer_strip_number(char *dst, size_t cap, const char *source) {
@@ -1582,6 +1638,10 @@ static void draw_reading_toggle(uint8_t *fb, int index, const char *title,
     epd_draw_circle(cx, track.y + 19, 16, 0x78, fb);
 }
 
+static EpdRect reader_effect_rect(int index) {
+    return (EpdRect){36 + index * 208, 548, 196, 68};
+}
+
 static void draw_reading_settings(uint8_t* fb) {
     draw_sheet(fb, 170, "阅读设置");
     EpdRect manual = {36, 270, 612, 96};
@@ -1606,9 +1666,9 @@ static void draw_reading_settings(uint8_t* fb) {
         if (selected) epd_fill_circle(rect.x + rect.width - 15, 433, 5, UI_GRAY_BLACK, fb);
     }
     ui_text(fb, 42, 510, 27, "翻页效果", EPD_DRAW_ALIGN_LEFT, false);
-    static const char* effects[] = {"默认效果", "水波纹效果"};
-    for (int i = 0; i < 2; ++i) {
-        EpdRect rect = {36 + i * 312, 548, 300, 68};
+    static const char* effects[] = {"默认效果", "水波纹效果", "快速水波纹"};
+    for (int i = 0; i < 3; ++i) {
+        EpdRect rect = reader_effect_rect(i);
         bool selected = app_settings_reader_turn_effect() == i;
         ui_fill_round_rect(fb, rect, 20, selected ? 0xd8 : UI_GRAY_WHITE);
         ui_draw_round_rect(fb, rect, 20, selected ? 0x48 : 0x68);
@@ -2084,8 +2144,10 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
         char name[128]; copy_text(name, sizeof(name), s_shelf[i].name);
         // 封面抽出只改变书本位置，层板及触摸目标保持原位。
         // Lifting changes the book position only; shelf furniture and touch targets stay put.
-        if (s_pressed_control == row) r.y -= SHELF_BOOK_LIFT_PX;
-        if (app_settings_shelf_style() == 4 && row >= 3)
+        if (s_pressed_control == row && app_settings_shelf_style() != 5) r.y -= SHELF_BOOK_LIFT_PX;
+        if (app_settings_shelf_style() == 5)
+            draw_shelf_clear_card(fb, r, row, i);
+        else if (app_settings_shelf_style() == 4 && row >= 3)
             draw_shelf_spine(fb, r, name, s_shelf[i].favorite, row);
         else draw_shelf_cover(fb, r, row, name, s_shelf[i].favorite);
     }
@@ -2138,6 +2200,11 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         err = update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, s_area);
     }
     else if (redraw == APP_REDRAW_AREA) {
+        // 每次显式选取速度，避免切回原速后沿用快档；扫描超时也必须完整执行。
+        // Select each turn to avoid leaking fast padding into original speed; slow scans still complete.
+        if (s_water_turn_pending)
+            e0470_page_turn_set_tick_us(app_settings_reader_turn_effect() == 2
+                ? E0470_TURN_FAST_TICK_US : E0470_TURN_DEFAULT_TICK_US);
         // 翻页动画与页脚刷新独立：全屏没有页脚，仍使用用户选择的水波纹。
         // The turn effect is independent of the footer: full-screen turns still use the selected water effect.
         err = s_water_turn_pending
@@ -3013,7 +3080,7 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
     s_reader_turn_pending = redraw == APP_REDRAW_AREA && from_text_frame &&
         book_layout_page_image_count(s_page) == 0;
     s_water_turn_pending = redraw == APP_REDRAW_AREA && !s_reader_cleanup &&
-                           app_settings_reader_turn_effect() == 1;
+                           (app_settings_reader_turn_effect() == 1 || app_settings_reader_turn_effect() == 2);
     s_water_turn_dir = dir > 0 ? E0470_TURN_RTL : E0470_TURN_LTR;
     return redraw;
 }
@@ -3454,8 +3521,8 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
             }
             return APP_REDRAW_NONE;
         } else if (y >= 548 && y < 616) {
-            for (int i = 0; i < 2; ++i) {
-                if (!ui_rect_hit((EpdRect){36 + i * 312, 548, 300, 68}, x, y)) continue;
+            for (int i = 0; i < 3; ++i) {
+                if (!ui_rect_hit(reader_effect_rect(i), x, y)) continue;
                 app_settings_set_reader_turn_effect((uint8_t)i);
                 return APP_REDRAW_PAGE;
             }

@@ -29,6 +29,8 @@ static const int *staged_x0, *staged_x1;
 static const int8_t* staged_bands;
 static int staged_count;
 static int scans, fail_at, differences, powerons;
+static int scan_time_us = 7000;
+static uint32_t trace_hash;
 static int64_t now_us;
 int water_test_alloc_fail;
 
@@ -126,24 +128,41 @@ enum EpdDrawError epd_draw_base(EpdRect area, const uint8_t* data, EpdRect crop,
         if (direction == E0470_TURN_LTR || direction == E0470_TURN_TTB) assert(coord < span / 4);
         else assert(coord > span * 3 / 4);
     }
-    now_us += 7000;
+    // 两档输出的相位、覆盖范围必须逐拍一致，时钟不计入指纹。
+    // Both speeds must submit identical phases and masks; timing is excluded from the fingerprint.
+    for (int y = 0; y < HEIGHT; ++y) {
+        trace_hash = (trace_hash ^ (uint8_t)lines[y]) * 16777619u;
+        if (staged_lines) trace_hash = (trace_hash ^ (uint8_t)staged_lines[y]) * 16777619u;
+    }
+    for (int x = 0; x < WIDTH / 2; ++x) trace_hash = (trace_hash ^ columns[x]) * 16777619u;
+    for (int b = 0; b < staged_count; ++b)
+        trace_hash = (trace_hash ^ (uint8_t)staged_bands[b]) * 16777619u;
+    now_us += scan_time_us;
     return fail_at == scans ? EPD_DRAW_OTHER_ERROR : EPD_DRAW_SUCCESS;
 }
 
 int main(void) {
     EpdiyHighlevelState hl = {front, back, diff, dirty_lines, dirty_columns};
+    uint32_t original_traces[4][4];
+    assert(e0470_page_turn_tick_us() == E0470_TURN_DEFAULT_TICK_US);
+    for (int speed = 0; speed < 2; ++speed) {
+    int target_us = speed ? E0470_TURN_FAST_TICK_US : E0470_TURN_DEFAULT_TICK_US;
+    e0470_page_turn_set_tick_us(target_us);
+    assert(e0470_page_turn_tick_us() == target_us);
     for (int rot = 0; rot < 4; ++rot) for (int dir = 0; dir < 4; ++dir) {
         rotation = (enum EpdRotation)rot;
         direction = (e0470_turn_dir_t)dir;
         memset(front, 0x24, sizeof(front));
         memset(back, 0xFF, sizeof(back));
         scans = differences = powerons = fail_at = 0;
-        now_us = 0;
+        now_us = 0; trace_hash = 2166136261u;
         EpdRect logical = (rot & 1) ? (EpdRect){0, 0, HEIGHT, WIDTH} :
                                       (EpdRect){0, 0, WIDTH, HEIGHT};
         assert(e0470_page_turn(&hl, logical, direction) == EPD_DRAW_SUCCESS);
         assert(scans == 52 && differences == 1 && powerons == 1);
-        assert(!memcmp(back, front, sizeof(back)) && now_us >= 1092000);
+        assert(!memcmp(back, front, sizeof(back)) && now_us == 52 * target_us);
+        if (!speed) original_traces[rot][dir] = trace_hash;
+        else assert(original_traces[rot][dir] == trace_hash);
         // 真实阅读页保留页眉和底栏；裁剪区同样必须覆盖全部 16 带。
         // The actual reader leaves header and footer outside the crop; all 16 bands must still run.
         EpdRect reader = {0, 160, logical.width, logical.height - 288};
@@ -167,6 +186,23 @@ int main(void) {
         assert(scans == 13 && differences == 1);
         for (size_t i = 0; i < sizeof(back); ++i) assert(back[i] == 0xFF);
     }
+    }
+    // 扫描超出目标时允许自然完成；任一拍失败都保留旧帧并清理暂存LUT。
+    // Let scans exceeding the target finish; any tick failure retains history and clears staged LUTs.
+    check_direction = false;
+    e0470_page_turn_set_tick_us(E0470_TURN_FAST_TICK_US);
+    fail_at = 0; scans = differences = 0; now_us = 0; scan_time_us = 18000;
+    assert(e0470_page_turn(&hl, (EpdRect){0, 0, HEIGHT, WIDTH}, E0470_TURN_RTL) == EPD_DRAW_SUCCESS);
+    assert(scans == 52 && now_us == 52 * 18000 && !staged_luts);
+    for (int tick = 1; tick <= 52; ++tick) {
+        scans = differences = 0; fail_at = tick;
+        memset(back, 0xFF, sizeof(back));
+        assert(e0470_page_turn(&hl, (EpdRect){0, 0, HEIGHT, WIDTH}, E0470_TURN_RTL) == EPD_DRAW_OTHER_ERROR);
+        assert(scans == tick && differences == 1 && !staged_luts);
+        for (size_t i = 0; i < sizeof(back); ++i) assert(back[i] == 0xFF);
+    }
+    e0470_page_turn_set_tick_us(E0470_TURN_DEFAULT_TICK_US);
+    assert(e0470_page_turn_tick_us() == 21000);
     e0470_page_turn_release();
     memset(back, 0xFF, sizeof(back));
     scans = differences = 0;
@@ -176,5 +212,5 @@ int main(void) {
            EPD_DRAW_NO_PHASES_AVAILABLE);
     assert(scans == 0 && differences == 0);
     for (size_t i = 0; i < sizeof(back); ++i) assert(back[i] == 0xFF);
-    puts("water turn: 4 rotations × 4 directions, 52 ticks, single diff, 37 phases and failure baseline passed");
+    puts("water turn: both speeds, 4 rotations x 4 directions, identical phase/mask traces, 52 ticks, all-tick failure recovery; simulated 1092ms -> 728ms; slower scans never interrupted");
 }

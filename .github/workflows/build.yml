@@ -31,3 +31,17 @@ jobs:
         run: |
           . $IDF_PATH/export.sh
           idf.py size
+
+      - name: shelf and ripple host regressions
+        shell: bash
+        run: |
+          mkdir -p build/book-tests/settings-card
+          cc -std=gnu11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+            -Itools/settings_backup_stubs -Icomponents/read_pico_transfer/include \
+            tools/settings_backup_host_test.c -o build/book-tests/settings-backup
+          build/book-tests/settings-backup
+          bash tools/run_water_turn_host_test.sh
+          python3 tools/clear_shelf_host_test.py
+          python3 tools/settings_scroll_host_test.py
+          python3 tools/ui_refresh_feedback_host_test.py
+          python3 tools/ui_font_coverage_host_test.py
