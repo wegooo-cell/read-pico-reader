@@ -61,6 +61,14 @@ static uint32_t* s_page_img_start;
 static book_layout_image_dims_fn s_dims_fn;
 static void* s_dims_ctx;
 
+// 插图可用区域。通栏开启时宽度换成整屏，竖直方向仍是正文那一条，分页数学不动。
+// Region illustrations may occupy. With full bleed on, its width becomes the panel's and its
+// vertical band stays the body's, leaving the pagination math alone.
+static EpdRect s_image_rect;
+// 通栏宽度（整屏像素）。面板常量，重排不必跟着改；0 关闭。
+// Full-bleed width in panel pixels. A panel constant, so re-layouts need not update it; 0 disables.
+static int s_image_bleed_width;
+
 // 块表是有序字节区间，二分查找当前行样式。/ Blocks are ordered byte ranges; binary-search the line style.
 static const blk_t* block_at(size_t off) {
     if (!s_block_count) return NULL;
@@ -265,6 +273,7 @@ void book_layout_free(void) {
     s_px = 0;
     s_blocks = NULL;
     s_block_count = 0;
+    s_image_rect = (EpdRect){0, 0, 0, 0};
 }
 
 void book_layout_set_spacing(unsigned line_percent, unsigned paragraph_percent) {
@@ -307,8 +316,27 @@ void book_layout_set_image_dims(book_layout_image_dims_fn fn, void* ctx) {
     s_dims_ctx = ctx;
 }
 
-// 按栏宽等比缩放、不超过整页高、不放大——与参考实现同一套规则。
-// Aspect-fit to the column width, never taller than the page, never upscaled, matching the
+void book_layout_set_image_bleed_width(int screen_width) {
+    s_image_bleed_width = screen_width > 0 ? screen_width : 0;
+}
+
+EpdRect book_layout_image_rect(void) {
+    return s_image_rect.width > 0 ? s_image_rect : s_rect;
+}
+
+// 每次重排由正文栏推出插图区域：宽度换成整屏并与正文栏同心，其余保持原样。
+// Derive the illustration region from the body column on every re-layout: the width becomes the
+// panel's, concentric with the column, and everything else stays put.
+static void resolve_image_rect(void) {
+    s_image_rect = s_rect;
+    if (s_image_bleed_width > s_rect.width) {
+        s_image_rect.x = s_rect.x + (s_rect.width - s_image_bleed_width) / 2;
+        s_image_rect.width = s_image_bleed_width;
+    }
+}
+
+// 按插图区域等比缩放、不超过区域高、不放大——与参考实现同一套规则。
+// Aspect-fit to the illustration region, never taller than it, never upscaled, matching the
 // reference implementations.
 static bool image_display_size(int image, int* out_w, int* out_h) {
     if (out_w) *out_w = 0;
@@ -316,7 +344,7 @@ static bool image_display_size(int image, int* out_w, int* out_h) {
     if (!s_dims_fn) return false;
     int w = 0, h = 0;
     if (!s_dims_fn(s_dims_ctx, image, &w, &h) || w <= 0 || h <= 0) return false;
-    int64_t cw = s_rect.width, ch = s_rect.height;
+    int64_t cw = s_image_rect.width, ch = s_image_rect.height;
     if (cw <= 0 || ch <= 0) return false;
     if (w > cw) { h = (int)((int64_t)h * cw / w); w = (int)cw; }
     if (h > ch) { w = (int)((int64_t)w * ch / h); h = (int)ch; }
@@ -593,6 +621,7 @@ bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks,
     s_len = len;
     s_px = px;
     s_rect = rect;
+    resolve_image_rect();
     s_line = heap_caps_malloc(len + 1, PSRAM_CAPS);
     size_t off = s_lead_skip;
     if (!s_line) goto fail;
@@ -616,7 +645,7 @@ bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks,
                 // 图是页面流里的一个块：放得下就留在本页，文字接着图下面排；放不下才翻页。
                 // An image is one block in the page flow: keep it on this page when it fits and
                 // let the text continue below it; only start a new page when it does not fit.
-                if (used && used + img_h > rect.height) {
+                if (used && used + img_h > s_image_rect.height) {
                     if (!append_page(off)) goto fail;
                     used = 0;
                 }

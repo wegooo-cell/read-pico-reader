@@ -196,6 +196,14 @@ static char* s_text;
 static int s_unsaved,s_px=48,s_margin=36,s_line_spacing=130;
 static uint32_t s_file_size=1000;
 static size_t s_chapter,s_page;
+static bool s_book_fonts_applied;
+static bool app_settings_book_fonts(void){return false;}
+static void book_set_embedded_fonts(bool enabled){(void)enabled;}
+#define BOOK_KIND_EPUB 1
+static int book_kind(void){return 0;}
+static bool load_chapter(app_ctx_t *ctx,size_t chapter,size_t offset,bool last_page){
+    (void)ctx;(void)chapter;(void)offset;(void)last_page;return true;
+}
 static size_t s_jump_offset=SIZE_MAX,s_jump_page;
 static int test_save_error,test_last_error,test_save_calls,test_last_calls;
 static size_t book_layout_page_count(void){return 3;}
@@ -298,6 +306,7 @@ static void book_layout_set_first_line_indent_adjust(int px){(void)px;}
 static void book_layout_set_reading_line(int style){(void)style;}
 static void book_layout_set_reading_line_offset(int offset){(void)offset;}
 static void book_layout_set_images_visible(bool visible){test_images_visible=visible;}
+static void book_layout_set_image_bleed_width(int screen_width){(void)screen_width;}
 static bool app_settings_book_shake(void){return false;}
 static void read_pico_sd_start_probe(void){}
 typedef struct {bool present,mounted;} read_pico_sd_info_t;

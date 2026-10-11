@@ -5,6 +5,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+- 正文插图去掉左右边距，按整屏宽等比缩放并居中，页首插图贴到阅读区顶端、全屏沉浸时铺满整页；正文仍按阅读边距排版，插图页两侧的点击同样能翻页。整页位图放不下时按最大空闲块缩一档，不再整页消失。
+  Body illustrations drop the side margins and scale into a panel-wide band: a page-start one reaches the top of the reading area and fills the page in immersive full screen. Text keeps its reading margins and taps on an illustration page's side strips still turn the page. A page bitmap that no longer fits the largest free block shrinks instead of vanishing.
+
 - 阅读 EPUB 时按样式表使用书内自带字体：`@font-face` 声明并被打包进来的 TTF 按 CSS 指定的位置逐段换字体，行高、字距与两端对齐的算法不变；字体按需解压进 PSRAM，装载失败、装不下或槽位用完时该段回退系统字体。字体设置面板最下面新增“书内自带字体”开关，默认开启，关掉后整本书回到系统字体。TXT 与不含字体的 EPUB 不受影响。
   EPUB reading now honours a book's own fonts: TTFs declared in `@font-face` and shipped in the package switch span by span exactly where the stylesheet asks, leaving line height, tracking and justification untouched. Faces are inflated into PSRAM on demand, and one that fails, does not fit or finds no free slot falls back to the system face for that span. The font sheet gains an “embedded book fonts” switch, on by default; turning it off puts the whole book back on the system face. TXT and EPUBs without faces are unaffected.
 - 书内字体支持 CFF/OpenType（OTTO）轮廓——章节标题常用的正是这种格式，以前会被静默跳过。字体按剩余内存排队装载：装不下的那一种回退系统字体，而不是让整本书加载失败。

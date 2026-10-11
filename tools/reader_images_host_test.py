@@ -45,7 +45,9 @@ typedef struct {int leaf;} app_ctx_t;
 #define EPD_DRAW_ALIGN_CENTER 0
 #define BOOK_KIND_EPUB 1
 #define TAG "test"
-#define ESP_LOGW(...) ((void)0)
+static void test_log(const char *tag,const char *format,...){(void)tag;(void)format;}
+#define ESP_LOGW(...) test_log(__VA_ARGS__)
+#define ESP_LOGI(...) test_log(__VA_ARGS__)
 #define ESP_FAIL -1
 enum {READING,SHELF};
 typedef struct {uint8_t *gray;int width,height;} reader_image_t;
@@ -60,6 +62,11 @@ static int alloc_fail_after=-1,read_failure=-1,decode_failure=-1;
 static unsigned reads,decodes,pixels,notices,invalidations;
 static int reading_image;
 static EpdRect body={40,20,100,200};
+// 插图可用区域：默认等于正文栏，通栏用例把它换成更宽的一条带。
+// Illustration region: the body column by default; the full-bleed case widens the band.
+static EpdRect image_band={40,20,100,200};
+static EpdRect reader_area_rect={40,20,100,200};
+static int pixel_min_x=1<<30,pixel_max_x=-1,pixel_min_y=1<<30,pixel_max_y=-1;
 static struct {int image,y,width,height;} slots[40];
 static int slot_count;
 static int whole_image=-1;
@@ -71,16 +78,26 @@ static size_t measured_chapter;
 static uint32_t generation=1;
 static bool app_settings_reader_hide_images(void){return hidden;}
 static EpdRect body_rect(void){return body;}
+static EpdRect reader_area(void){return reader_area_rect;}
+static EpdRect book_layout_image_rect(void){return image_band;}
+static size_t free_block=4u*1024u*1024u;
+static size_t heap_caps_get_largest_free_block(int caps){(void)caps;return free_block;}
+static size_t heap_caps_get_free_size(int caps){(void)caps;return free_block;}
+static unsigned uxTaskGetStackHighWaterMark(void *task){(void)task;return 4096;}
 static uint32_t book_layout_generation(void){return generation;}
 static int book_layout_page_image_count(size_t page){return page==s_page?slot_count:0;}
 static int book_layout_page_image(size_t page){return page==s_page?whole_image:-1;}
 static void book_layout_set_image_dims(bool (*fn)(void*,int,int*,int*),void *ctx){dims_fn=fn;dims_ctx=ctx;}
 static bool book_layout_page_image_at(size_t page,int i,int *image,int *y,int *w,int *h){
  if(page!=s_page||i<0||i>=slot_count)return false;
- if(image)*image=slots[i].image;if(y)*y=slots[i].y;if(w)*w=slots[i].width;if(h)*h=slots[i].height;return true;
+ if(image)*image=slots[i].image;
+ if(y)*y=slots[i].y;
+ if(w)*w=slots[i].width;
+ if(h)*h=slots[i].height;
+ return true;
 }
 static bool fail_alloc(void){if(!alloc_fail_after)return true;if(alloc_fail_after>0)--alloc_fail_after;return false;}
-static void *heap_caps_malloc(size_t n,int c){(void)c;return fail_alloc()?NULL:malloc(n);}
+static void *heap_caps_malloc(size_t n,int c){(void)c;if(n>free_block)return NULL;return fail_alloc()?NULL:malloc(n);}
 static void *heap_caps_calloc(size_t n,size_t size,int c){(void)c;return fail_alloc()?NULL:calloc(n,size);}
 static void invalidate_prep(void){++invalidations;}
 static void copy_text(char *out,size_t size,const char *in){snprintf(out,size,"%s",in);}
@@ -102,13 +119,22 @@ static bool book_image_grayscale(const uint8_t *data,size_t len,bool png,unsigne
 }
 static uint8_t ui_image_dither_gray(uint8_t g,int x,int y){(void)x;(void)y;assert(g==128);return g;}
 static void epd_draw_pixel(int x,int y,uint8_t gray,uint8_t *fb){
- (void)fb;assert(x>=body.x&&x<body.x+body.width&&y>=body.y&&y<body.y+body.height&&gray==128);++pixels;
+ (void)fb;
+ assert(x>=image_band.x&&x<image_band.x+image_band.width&&gray==128);++pixels;
+ assert(y>=reader_area_rect.y&&y<reader_area_rect.y+reader_area_rect.height);
+ if(x<pixel_min_x)pixel_min_x=x;
+ if(x>pixel_max_x)pixel_max_x=x;
+ if(y<pixel_min_y)pixel_min_y=y;
+ if(y>pixel_max_y)pixel_max_y=y;
 }
 static void ui_text_vc(uint8_t *fb,int x,int y,int px,const char *text,int align,bool inv){
  (void)fb;(void)align;(void)inv;assert(x>=body.x&&x<=body.x+body.width&&y-px/2>=body.y&&y+px/2<=body.y+body.height&&text);++notices;
 }
 static char *s_text;
 static blk_t *s_blocks;
+static html_run_t *s_runs;
+static size_t s_run_count;
+static void book_layout_set_runs(const html_run_t *runs,size_t count){(void)runs;(void)count;}
 static size_t s_text_len,s_block_count,s_selected_toc=2,s_jump_offset,s_jump_page;
 static size_t s_chapter_lead_skip;
 static unsigned s_chapter_lead_height;
@@ -121,7 +147,7 @@ static int book_kind(void){return 0;}
 static const char *ttf_font_path(void){return "font";}
 static esp_err_t book_chapter_title(size_t chapter,char *out,size_t cap){snprintf(out,cap,"chapter%zu",chapter);return ESP_OK;}
 void html_text_free(html_text_t *text){
- free(text->utf8);free(text->blocks);for(size_t i=0;i<text->image_count;++i)free(text->images[i]);free(text->images);memset(text,0,sizeof(*text));
+ free(text->utf8);free(text->blocks);free(text->runs);for(size_t i=0;i<text->image_count;++i)free(text->images[i]);free(text->images);memset(text,0,sizeof(*text));
 }
 static esp_err_t book_chapter_load_blocks_target(size_t chapter,const char *anchor,size_t source,size_t *off,html_text_t *out){
  (void)chapter;(void)anchor;(void)source;assert(!locked);if(load_error)return ESP_FAIL;*off=4;
@@ -139,12 +165,12 @@ static size_t book_layout_page_count(void){return 2;}
 static size_t book_layout_page_for_offset(size_t off){return off>=4?1:0;}
 static void release_page_images(void);
 static void free_book(void){
- release_page_images();free(s_text);free(s_blocks);for(size_t i=0;i<s_image_count;++i)free(s_images[i]);free(s_images);
- s_text=NULL;s_blocks=NULL;s_images=NULL;s_image_count=0;
+ release_page_images();free(s_text);free(s_blocks);free(s_runs);for(size_t i=0;i<s_image_count;++i)free(s_images[i]);free(s_images);
+ s_text=NULL;s_blocks=NULL;s_runs=NULL;s_run_count=0;s_images=NULL;s_image_count=0;
  book_layout_set_image_dims(NULL,NULL);s_reader_dims_ctx=(reader_dims_ctx_t){0};
 }
 '''
-for name in ('inline_ink_gray', 'reader_image_slots', 'reader_image_slot', 'reader_image_dims', 'release_page_images', 'prepare_inline_image', 'draw_reader_images', 'load_chapter_at'):
+for name in ('inline_ink_gray', 'reader_image_slots', 'reader_image_slot', 'reader_image_dims', 'alloc_page_bitmap', 'release_page_images', 'prepare_inline_image', 'draw_reader_images', 'load_chapter_at'):
     unit += '\n' + function(name)
 unit += r'''
 static void setup_images(int count){
@@ -202,7 +228,35 @@ int main(void){
  reflow_failures=2;assert(!load_chapter_at(&ctx,5,0,false,NULL,SIZE_MAX));assert(!s_text&&s_view==SHELF&&!locked);
  assert(!dims_fn&&!s_reader_dims_ctx.images);
  free_book();release_page_images();
- puts("PASS: >8 images, layout cache generation, grayscale bounds, partial decode/OOM, fallback aspect fit and chapter rollback");
+ // 通栏位图放不进最大空闲块时按块大小缩一档，而不是丢掉整页插图。
+ // A full-bleed bitmap that does not fit the largest free block steps down instead of dropping.
+ setup_images(1);slots[0].width=100;slots[0].height=200;
+ free_block=600;prepare_inline_image();
+ assert(s_page_images[0].gray&&s_page_images[0].width==39&&s_page_images[0].height==12);
+ pixel_min_x=1<<30;pixel_max_x=-1;
+ draw_reader_images(&fb,s_page,body);assert(pixels==468&&pixel_min_x==70&&pixel_max_x==108);
+ free_block=4u*1024u*1024u;release_page_images();
+ // 页首插图贴到阅读区顶端，正文上方的呼吸空间只留给正文。
+ // A page-start illustration sits at the top of the reading area; the inset above body text
+ // stays with the text.
+ setup_images(1);slots[0].width=100;slots[0].height=100;slots[0].y=0;
+ reader_area_rect=(EpdRect){40,0,100,200};
+ prepare_inline_image();assert(s_page_images[0].width==60&&s_page_images[0].height==20);
+ pixel_min_y=1<<30;pixel_max_y=-1;
+ draw_reader_images(&fb,s_page,body);assert(pixel_min_y==0&&pixel_max_y==19);
+ reader_area_rect=body;release_page_images();
+ // 通栏：插图在整屏宽的一条带里居中，正文栏的左右边距不再限制它。
+ // Full bleed: the illustration centers in the panel-wide band and the body margins no longer
+ // bound it.
+ setup_images(1);slots[0].width=60;slots[0].height=20;
+ image_band=(EpdRect){0,body.y,200,body.height};
+ pixel_min_x=1<<30;pixel_max_x=-1;
+ prepare_inline_image();assert(s_page_images[0].width==60&&s_page_images[0].height==20);
+ draw_reader_images(&fb,s_page,body);
+ assert(pixels==1200&&pixel_min_x==70&&pixel_max_x==129);
+ image_band=body;
+ release_page_images();
+ puts("PASS: >8 images, layout cache generation, grayscale bounds, partial decode/OOM, fallback aspect fit, full bleed and chapter rollback");
 }
 '''
 with tempfile.TemporaryDirectory() as folder:

@@ -53,6 +53,18 @@ typedef bool (*book_layout_image_dims_fn)(void* ctx, int image, int* width, int*
 /// / Register the dimensions callback; NULL clears it. Layout borrows it, the caller owns it.
 void book_layout_set_image_dims(book_layout_image_dims_fn fn, void* ctx);
 
+/// 插图通栏宽度（整屏像素宽）。设成屏宽后插图按整屏等比缩放、不再受正文边距约束；
+/// 0 关闭，退回正文栏宽。它是面板常量，改边距或字号后的重排不必重新调用。
+/// Full-bleed width for illustrations in panel pixels. Set to the panel width, illustrations
+/// scale to the whole screen instead of the body margins; 0 disables it and they fall back to
+/// the body column. It is a panel constant, so re-layouts after margin or size changes need no
+/// update.
+void book_layout_set_image_bleed_width(int screen_width);
+/// 插图可用区域：通栏开启时整屏宽、与正文同带；未开启或未排版时等于正文栏。
+/// Region illustrations may occupy: panel-wide and as tall as the body when full bleed is on;
+/// the body column itself when it is off or before the first layout.
+EpdRect book_layout_image_rect(void);
+
 /// 本页插图张数；越界返回 0。
 /// / Number of images placed on this page; 0 when out of range.
 int book_layout_page_image_count(size_t page);

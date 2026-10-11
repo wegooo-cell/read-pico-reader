@@ -3,7 +3,16 @@
 #include "book_epub.h"
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+// Keep the font engine's failed-load ownership while testing the EPUB container on the host.
+int ttf_font_open_mem(uint8_t *data, size_t len, const char *label) {
+    (void)len; (void)label;
+    free(data);
+    return -1;
+}
+void ttf_font_close_embedded(void) {}
 
 int main(int argc, char **argv) {
     assert(argc == 2);

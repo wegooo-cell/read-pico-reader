@@ -10,6 +10,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+// Match the source tests' font fallback and ownership without linking the hardware font engine.
+int ttf_font_open_mem(uint8_t *data, size_t len, const char *label) {
+    (void)len; (void)label;
+    free(data);
+    return -1;
+}
+void ttf_font_close_embedded(void) {}
 int main(int argc, char **argv) {
     assert(argc > 1);
     for (int a = 1; a < argc; ++a) {

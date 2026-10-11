@@ -252,6 +252,33 @@ int main(void) {
     assert(book_layout_build_blocks(parsed.utf8,parsed.len,parsed.blocks,parsed.count,illustrated_rect,10));
     assert(book_layout_page_count()==1&&book_layout_page_image(0)==-1);
     book_layout_free();html_text_free(&parsed);
+    // 通栏：屏宽大于正文栏时插图按整屏缩放且不放大；关闭后仍退回正文栏。
+    // Full bleed: on a panel wider than the column an illustration scales to the panel and is
+    // never upscaled; turning it off falls back to the body column.
+    html_text_t wide = {0};
+    blk_t wide_block = {.offset = 0, .len = 3, .image = 0, .image_width = 240, .image_height = 100};
+    wide.blocks = &wide_block; wide.count = 1;
+    book_layout_set_image_dims(fixture_image, &wide);
+    EpdRect column = {50, 0, 100, 200};
+    int wide_image = -1, wide_y = -1, wide_w = 0, wide_h = 0;
+    book_layout_set_image_bleed_width(0);
+    assert(book_layout_build_blocks("IMG", 3, &wide_block, 1, column, 10));
+    assert(book_layout_image_rect().x == 50 && book_layout_image_rect().width == 100);
+    assert(book_layout_page_image_at(0, 0, &wide_image, &wide_y, &wide_w, &wide_h) && wide_image == 0);
+    assert(wide_w == 100 && wide_h == 41);
+    book_layout_set_image_bleed_width(200);
+    assert(book_layout_build_blocks("IMG", 3, &wide_block, 1, column, 10));
+    assert(book_layout_page_count() == 1);
+    assert(book_layout_image_rect().x == 0 && book_layout_image_rect().width == 200);
+    assert(book_layout_page_image_at(0, 0, &wide_image, &wide_y, &wide_w, &wide_h));
+    assert(wide_w == 200 && wide_h == 83);
+    book_layout_set_image_dims(probe_image, &image_probe_count);
+    assert(book_layout_build_blocks("IMG", 3, &wide_block, 1, column, 10));
+    assert(book_layout_page_image_at(0, 0, &wide_image, &wide_y, &wide_w, &wide_h));
+    assert(wide_w == 80 && wide_h == 20);
+    image_probe_count = 0;
+    book_layout_set_image_bleed_width(0);
+    book_layout_free();
     const char *text_spacer="<p>甲</p><p>　</p><p>乙</p>";
     assert(html_to_blocks(text_spacer,strlen(text_spacer),&parsed)==ESP_OK);
     assert(book_layout_build_blocks(parsed.utf8,parsed.len,parsed.blocks,parsed.count,(EpdRect){0,0,100,20},10));

@@ -1299,6 +1299,7 @@ static bool body_heading_add(body_headings_t *found, size_t chapter, size_t sour
     memset(entry, 0, sizeof(*entry));
     entry->chapter = (uint16_t)chapter;
     entry->source_offset = (uint32_t)source_offset;
+    entry->anchor = "";
     entry->valid = true;
     entry->title = text_blocks_intern(&found->text_blocks, &found->text_last,
                                       title, strlen(title));
@@ -1543,7 +1544,7 @@ esp_err_t book_epub_navigation_title(book_epub_t *book, size_t position, char *b
 
 const char *book_epub_navigation_anchor(book_epub_t *book, size_t position) {
     nav_entry_t *entry = navigation_entry(book, position);
-    return entry && entry->anchor[0] ? entry->anchor : NULL;
+    return entry && entry->anchor && entry->anchor[0] ? entry->anchor : NULL;
 }
 size_t book_epub_navigation_source_offset(book_epub_t *book, size_t position) {
     nav_entry_t *entry = navigation_entry(book, position);

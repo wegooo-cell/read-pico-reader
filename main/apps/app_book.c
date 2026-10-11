@@ -2190,11 +2190,13 @@ static bool reader_image_slot(size_t page, int slot, int *index, int *y, int *wi
         return book_layout_page_image_at(page, slot, index, y, width, height);
     int image = book_layout_page_image(page);
     if (slot != 0 || image < 0) return false;
-    EpdRect body = body_rect();
+    // 未知尺寸的整页图同样通栏，不能拿正文栏宽当上限。
+    // An unknown-size whole-page image bleeds as well, so the body column is not its ceiling.
+    EpdRect band = book_layout_image_rect();
     if (index) *index = image;
     if (y) *y = 0;
-    if (width) *width = body.width;
-    if (height) *height = body.height;
+    if (width) *width = band.width;
+    if (height) *height = band.height;
     return true;
 }
 static void draw_reader_images(uint8_t *fb, size_t page, EpdRect body) {
@@ -2202,13 +2204,21 @@ static void draw_reader_images(uint8_t *fb, size_t page, EpdRect body) {
     // Match page and layout generation; a prefetched page must never borrow current-page bitmaps.
     if (!app_settings_reader_hide_images() && page == s_page &&
         s_page_images_for == page && s_page_images_generation == book_layout_generation()) {
+        // 横向按插图区域居中：通栏时图片铺满整屏，不再留正文边距。
+        // Center horizontally in the illustration region: with full bleed the image spans the
+        // panel and no longer carries the body margins.
+        EpdRect band = book_layout_image_rect();
         for (int i = 0; i < reader_image_slots(page); ++i) {
             int y, width, height;
             if (!reader_image_slot(page, i, NULL, &y, &width, &height)) continue;
             const reader_image_t *image = s_page_images && i < s_page_image_count ? &s_page_images[i] : NULL;
             if (image && image->gray) {
-                int left = body.x + (body.width - image->width) / 2;
-                int top = body.y + y + (height - image->height) / 2;
+                int left = band.x + (band.width - image->width) / 2;
+                int top = band.y + y + (height - image->height) / 2;
+                // 页首插图贴到阅读区顶端：正文上方那点呼吸空间只属于正文，不该把插图压下来。
+                // A page-start illustration sits at the top of the reading area: the inset above
+                // body text belongs to text and must not push the illustration down.
+                if (y == 0) top = reader_area().y;
 
                 for (int iy = 0; iy < image->height; ++iy)
                     for (int ix = 0; ix < image->width; ++ix)
@@ -2608,6 +2618,26 @@ static void free_book(void) {
     s_book_title[0] = 0;
     app_font_activate_system();
 }
+// 通栏之后一页位图更大：装不下就按最大空闲块等比缩一档——图小一圈也胜过整页消失。
+// A full-bleed page bitmap is larger: when it does not fit, step the aspect-preserving size down
+// into the largest free block. A slightly smaller illustration still beats a missing one.
+static uint8_t *alloc_page_bitmap(int *width, int *height, size_t *pixels) {
+    uint8_t *gray = heap_caps_malloc(*pixels, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (gray) return gray;
+    size_t room = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (room == 0) return NULL;
+    for (int guard = 0; guard < 24 && *pixels > room; ++guard) {
+        *width = *width > 1 ? *width * 7 / 8 : 1;
+        *height = *height > 1 ? *height * 7 / 8 : 1;
+        *pixels = (size_t)*width * (size_t)*height;
+    }
+    if (*pixels > room) return NULL;
+    gray = heap_caps_malloc(*pixels, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (gray)
+        ESP_LOGW(TAG, "inline illustration shrunk to %dx%d, free block %u KB",
+                 *width, *height, (unsigned)(room / 1024));
+    return gray;
+}
 static void release_page_images(void) {
     for (int i = 0; i < s_page_image_count; ++i) free(s_page_images[i].gray);
     free(s_page_images); s_page_images = NULL; s_page_image_count = 0;
@@ -2639,9 +2669,11 @@ static void prepare_inline_image(void) {
         return;
     }
     s_page_image_count = count;
-    // 逐张解码并立即释放压缩数据；全页灰阶位图的总面积不超过正文区域。
-    // Decode serially and release each encoded buffer; the page's bitmap area stays within its body.
-    size_t pixels_left = (size_t)body_rect().width * body_rect().height;
+    // 逐张解码并立即释放压缩数据；全页灰阶位图的总面积不超过插图区域。
+    // Decode serially and release each encoded buffer; the page's bitmap area stays within its
+    // illustration region.
+    EpdRect band = book_layout_image_rect();
+    size_t pixels_left = (size_t)band.width * band.height;
     int decoded = 0;
     for (int i = 0; i < count; ++i) {
         int index = -1, width = 0, height = 0;
@@ -2672,7 +2704,7 @@ static void prepare_inline_image(void) {
                 free(encoded);
                 continue;
             }
-            uint8_t *gray = heap_caps_malloc(pixels, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            uint8_t *gray = alloc_page_bitmap(&width, &height, &pixels);
             if (gray == NULL) {
                 ESP_LOGW(TAG, "inline %d: no PSRAM for %u px (free %u)",
                          i, (unsigned)pixels,
@@ -4509,8 +4541,13 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
             s_mode = MODE_GL16;
             return APP_REDRAW_AREA;
         }
-        if (!ui_rect_hit(body_rect(), x, y)) return APP_REDRAW_NONE;
-        int target = book_reader_tap_feed(&s_reader_tap, body_rect(), x, y,
+        // 通栏插图铺满整屏，点在图两侧的边条上同样要翻页；文字页仍按正文栏判定。
+        // A full-bleed illustration spans the panel, so taps on its side strips must turn pages
+        // too; text pages keep the body column.
+        EpdRect tap_area = body_rect();
+        if (reader_image_slots(s_page)) tap_area = ui_rect_union(tap_area, book_layout_image_rect());
+        if (!ui_rect_hit(tap_area, x, y)) return APP_REDRAW_NONE;
+        int target = book_reader_tap_feed(&s_reader_tap, tap_area, x, y,
                                          app_settings_reader_vertical_turn(), ctx->now_ms);
         if (target == BOOK_READER_TAP_FULLSCREEN) return toggle_reader_fullscreen(ctx);
         if (target) return turn_page(ctx, target);
@@ -4564,6 +4601,10 @@ static void on_enter(app_ctx_t* ctx) {
     while (ble_pt_pop_raw(&old_raw)) {}
     book_layout_set_spacing(app_settings_book_line_spacing(), app_settings_book_paragraph_spacing());
     book_layout_set_images_visible(!app_settings_reader_hide_images());
+    // 插图通栏：整屏宽是面板常量，进入阅读页说一次，之后每次重排都沿用同一条带。
+    // Full-bleed illustrations: the panel width is a constant, so publish it once per entry and
+    // every later re-layout reuses the same band.
+    book_layout_set_image_bleed_width(UI_LOCK_WIDTH);
     book_layout_set_typography(((int)app_settings_book_tracking() - 2) * 2);
     book_layout_set_first_line_indent(app_settings_book_indent());
     book_layout_set_first_line_indent_adjust(app_settings_book_indent_adjust());

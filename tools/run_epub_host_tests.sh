@@ -24,7 +24,7 @@ build/book-tests/epub-html
 # Link TXT and EPUB together so dispatch changes retain the existing source behavior.
 cc "${flags[@]}" "${includes[@]}" tools/book_source_host_test.c \
     main/book/book_source.c main/book/book_txt.c main/book/gbk.c \
-    main/book/book_epub.c main/book/book_index_cache.c main/book/zip_reader.c main/book/html_text.c \
+    main/book/book_epub.c main/book/book_index_cache.c main/book/book_image_header.c main/book/zip_reader.c main/book/html_text.c \
     -lz -o build/book-tests/epub-source
 shopt -s nullglob
 fixtures=(build/book-fixtures/books/*.txt build/book-fixtures/books/*.epub)
