@@ -11,6 +11,41 @@
 #include <string.h>
 #include "html_text.h"
 int html_test_fail_after = -1;
+// 宿主替身字体表：A 映射到槽 1、B 映射到槽 2，其余名字当作书里没有。
+// Host stand-in face table: A maps to slot 1, B to slot 2, every other name is absent.
+static uint8_t resolve_faces(void* ctx, const char* family, size_t len) {
+    (void)ctx;
+    if (len == 1 && family[0] == 'A') return 1;
+    if (len == 1 && family[0] == 'B') return 2;
+    return 0;
+}
+static html_text_t parse_faces(const char* html, const char* css, const char* expected) {
+    html_text_t out = {0};
+    html_font_map_t fonts = { .resolve = resolve_faces, .ctx = NULL };
+    assert(html_to_blocks_with_css_target(html, strlen(html), css, strlen(css), &fonts,
+                                           NULL, SIZE_MAX, NULL, &out) == ESP_OK);
+    assert(out.utf8 != NULL && out.len == strlen(expected));
+    assert(strcmp(out.utf8, expected) == 0);
+    return out;
+}
+// 每个块的 run 必须从块首起、首尾相接、正好铺满整块；否则排版会漏字或把上一段的
+// 字体串到下一段。零 run 表示整块走系统字体，不参与覆盖检查。
+// A block's runs must start at its first byte, abut, and exactly cover it, or layout would
+// skip text or bleed one span's face into the next. Zero runs means the block is entirely on
+// the system face and has nothing to cover.
+static void assert_runs_cover(const html_text_t* t) {
+    for (size_t i = 0; i < t->count; ++i) {
+        const blk_t* b = &t->blocks[i];
+        if (!b->run_count) continue;
+        size_t at = 0;
+        for (size_t r = 0; r < b->run_count; ++r) {
+            const html_run_t* run = &t->runs[b->run_first + r];
+            assert(run->offset == at && run->len > 0);
+            at += run->len;
+        }
+        assert(at == b->len);
+    }
+}
 static html_text_t parse(const char* html, const char* expected) {
     html_text_t out = {0};
     assert(html_to_blocks(html, strlen(html), &out) == ESP_OK);
@@ -127,5 +162,63 @@ int main(void) {
     }
     html_test_fail_after = -1;
     html_text_free(&t);
+
+    // ---- 书内字体的 run 表 / Embedded-face runs ----
+    // 没有字体映射时完全不记 run：没有内嵌字体的书不该多花这份内存。
+    // No face map means no runs at all: a book without embedded faces pays nothing.
+    t = parse("<p>甲<span class='num'>12</span>乙</p>", "甲12乙");
+    assert(t.run_count == 0 && t.blocks[0].run_count == 0 && t.runs == NULL);
+    html_text_free(&t);
+
+    // 类选择器换字体：三段槽位 0/1/0，字节区间正好铺满整块。
+    // A class switches the face: three spans on slots 0/1/0 covering the block exactly.
+    t = parse_faces("<p>甲<span class='num'>12</span>乙</p>", ".num{font-family:\"A\"}", "甲12乙");
+    assert(t.count == 1 && t.blocks[0].run_count == 3);
+    assert(t.runs[0].slot == 0 && t.runs[0].offset == 0 && t.runs[0].len == 3);
+    assert(t.runs[1].slot == 1 && t.runs[1].offset == 3 && t.runs[1].len == 2);
+    assert(t.runs[2].slot == 0 && t.runs[2].offset == 5 && t.runs[2].len == 3);
+    assert_runs_cover(&t);
+    html_text_free(&t);
+
+    // 行内 style 属性同样生效，family 列表取第一个认得出来的名字。
+    // An inline style attribute counts too, and a family list takes the first known name.
+    t = parse_faces("<p>甲<span style='font-family:Missing, \"B\", serif'>1</span>乙</p>", "", "甲1乙");
+    assert(t.blocks[0].run_count == 3 && t.runs[1].slot == 2);
+    assert_runs_cover(&t);
+    html_text_free(&t);
+
+    // 嵌套继承：内层没声明就沿用外层，闭标签回退到外层。
+    // Nesting inherits: an inner level without a declaration keeps its parent's, and a close
+    // tag restores it.
+    t = parse_faces("<p><span class='a'>甲<span class='b'>乙</span>丙</span>丁</p>",
+                    ".a{font-family:A}.b{font-family:B}", "甲乙丙丁");
+    assert(t.blocks[0].run_count == 4);
+    assert(t.runs[0].slot == 1 && t.runs[1].slot == 2 &&
+           t.runs[2].slot == 1 && t.runs[3].slot == 0);
+    assert_runs_cover(&t);
+    html_text_free(&t);
+
+    // 每块的 run 从自己的块首重新开始，上一段的字体不跨段。
+    // Each block restarts its runs at its own first byte; a face never spans blocks.
+    t = parse_faces("<p><span class='a'>甲</span></p><p>乙<span class='a'>丙</span></p>",
+                    ".a{font-family:A}", "甲\n乙丙");
+    assert(t.count == 2);
+    assert(t.blocks[0].run_count == 1 && t.runs[0].slot == 1 && t.runs[0].len == 3);
+    assert(t.blocks[1].run_count == 2 && t.runs[1].slot == 0 && t.runs[2].slot == 1);
+    assert_runs_cover(&t);
+    html_text_free(&t);
+
+    // @font-face 里的 font-family 在给字体本身命名，不是给正文选字体；认不出的名字同理。
+    // 两者都不该白建 run 表，否则每个块都要多记一段。
+    // A font-family inside @font-face names the face rather than selecting one for body text,
+    // and an unknown name selects nothing. Neither should build a run table, or every block
+    // would carry a useless span.
+    t = parse_faces("<p>甲</p>", "@font-face{font-family:\"A\";src:url(a.ttf)}", "甲");
+    assert(t.run_count == 0 && t.runs == NULL);
+    html_text_free(&t);
+    t = parse_faces("<p>甲</p>", ".z{font-family:Missing}", "甲");
+    assert(t.run_count == 0 && t.runs == NULL);
+    html_text_free(&t);
+
     puts("html_text_host_test: PASS");
 }

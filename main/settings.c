@@ -73,6 +73,7 @@
 #define NVS_KEY_SHELF_V22 "shelf_v22"
 #define NVS_KEY_BOOKS_DIR "books_dir"
 #define NVS_KEY_FONTS_DIR "fonts_dir"
+#define NVS_KEY_BOOK_FONTS "bk_fonts"
 #define FONT_PATH_MAX 160
 #define MEDIA_DIR_MAX 96
 
@@ -107,6 +108,10 @@ static uint8_t s_reader_keys[3] = {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, AP
 static bool s_reader_vertical_turn;
 static bool s_ble_turner;
 static bool s_shelf_recent_sort;
+// 书内自带字体默认开启：多数带字体的书排版就是靠它才对得上版。
+// Embedded book faces are on by default: most books that ship a face only typeset correctly
+// with it.
+static bool s_book_fonts = true;
 static uint8_t s_book_tracking = 2, s_book_reading_line, s_book_rule_offset = 4;
 static uint8_t s_book_indent = 2;
 static uint8_t s_book_indent_adjust = 20;
@@ -248,10 +253,11 @@ void app_settings_init(void) {
     reader_keys_repair(s_reader_keys, s_reader_hold_action);
     uint8_t vertical_turn = 0;
     if (nvs_get_u8(h, NVS_KEY_VERTICAL_TURN, &vertical_turn) == ESP_OK) s_reader_vertical_turn = vertical_turn == 1;
-    uint8_t hide_images = 0, recent_sort = 0, ble_turner = 0;
+    uint8_t hide_images = 0, recent_sort = 0, ble_turner = 0, book_fonts = 1;
     if (nvs_get_u8(h, NVS_KEY_HIDE_IMAGES, &hide_images) == ESP_OK) s_reader_hide_images = hide_images == 1;
     if (nvs_get_u8(h, NVS_KEY_BLE_TURNER, &ble_turner) == ESP_OK) s_ble_turner = ble_turner == 1;
     if (nvs_get_u8(h, NVS_KEY_SHELF_RECENT, &recent_sort) == ESP_OK) s_shelf_recent_sort = recent_sort == 1;
+    if (nvs_get_u8(h, NVS_KEY_BOOK_FONTS, &book_fonts) == ESP_OK) s_book_fonts = book_fonts == 1;
     uint8_t tracking = 2, reading_line = 0, rule_offset = 4, indent = 2, indent_adjust = 20;
     if (nvs_get_u8(h, NVS_KEY_BOOK_TRACK, &tracking) == ESP_OK && tracking <= 4)
         s_book_tracking = tracking;
@@ -524,6 +530,12 @@ void app_settings_set_reader_hide_images(bool on) {
     if (s_reader_hide_images == on) return;
     s_reader_hide_images = on;
     nvs_put_u8(NVS_KEY_HIDE_IMAGES, on ? 1 : 0);
+}
+bool app_settings_book_fonts(void) { return s_book_fonts; }
+void app_settings_set_book_fonts(bool on) {
+    if (s_book_fonts == on) return;
+    s_book_fonts = on;
+    nvs_put_u8(NVS_KEY_BOOK_FONTS, on ? 1 : 0);
 }
 bool app_settings_ble_turner(void) { return s_ble_turner; }
 app_reader_key_action_t app_settings_reader_key_action(unsigned key) {

@@ -20,6 +20,11 @@ typedef struct book_epub book_epub_t;
 esp_err_t book_epub_open(const char *path, book_epub_t **out);
 /// 关闭 ZIP 并释放目录，可传 NULL。/ Close ZIP and free the index; NULL is allowed.
 void book_epub_close(book_epub_t *book);
+/// 是否使用书内自带字体（CSS @font-face 或包内 TTF）；默认开启。关掉后正文回到系统字体，
+/// 已经装进槽的字体要等关书才还回去。/ Whether to use embedded faces (CSS @font-face or a
+/// packaged TTF); on by default. Turning it off puts body text back on the system face; faces
+/// already in a slot are handed back when the book closes.
+void book_epub_set_fonts_enabled(book_epub_t *book, bool on);
 /// 返回 spine 章节数，上限 8192。/ Return the spine chapter count, at most 8192.
 size_t book_epub_chapter_count(const book_epub_t *book);
 /// 优先列可识别的正文编号章节；识别不完整时使用书内导航，并略过书前资料；不改变 spine 进度。

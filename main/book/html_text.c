@@ -26,10 +26,11 @@ enum {
     CSS_INDENT = 1u << 1,
     CSS_BEFORE = 1u << 2,
     CSS_AFTER = 1u << 3,
+    CSS_FAMILY = 1u << 4,
 };
 
 typedef struct {
-    uint8_t mask, align, indent, before, after;
+    uint8_t mask, align, indent, before, after, family;
 } css_style_t;
 
 typedef struct {
@@ -52,10 +53,27 @@ typedef struct {
     uint8_t heading_level, block_heading_level;
     size_t depth, link_depth, auxiliary_depth;
     css_style_t current_style, block_style;
-    css_rule_t rules[CSS_RULE_MAX];
+    // 规则表是解析器里最大的一块（64 × 24B）。留在栈上的话，任何从解析回调里往下走的
+    // 长操作（解压、建表）都顶着它，主任务栈会不够用；放 PSRAM。
+    // The rule table is the parser's largest object (64 × 24B). Keeping it on the stack means
+    // any long call made from a parse callback -- inflate, table setup -- sits on top of it and
+    // overruns the main stack, so it lives in PSRAM.
+    css_rule_t* rules;
     size_t rule_count;
     css_node_t *ancestors;
     bool scoped_rules;
+    const html_font_map_t* fonts;
+    // run 表：块内字体一变就切一段，绘制时按段换字体，行宽算法不受影响。
+    // run 表存在 text 里，成功时随输出一起交出去，失败时随 free 一起回收。
+    // Run table: a new span starts wherever the face changes, so drawing can switch faces
+    // without touching the line-width math. It lives in `text` so it is handed over on
+    // success and reclaimed by the same free on failure.
+    size_t run_cap, run_start, block_run_first;
+    uint8_t family, run_slot;
+    // 内联标签也会换字体，按开标签深度逐层记下当前槽，闭标签回退上一层。
+    // Inline tags switch faces too: record the slot per open depth and fall back on close.
+    uint8_t family_at[CSS_ANCESTOR_MAX];
+    bool family_rules;
 } writer_t;
 
 static unsigned char lower(unsigned char c) {
@@ -87,7 +105,33 @@ static void css_apply(css_style_t* dst, const css_style_t* src) {
     if (src->mask & CSS_INDENT) dst->indent = src->indent;
     if (src->mask & CSS_BEFORE) dst->before = src->before;
     if (src->mask & CSS_AFTER) dst->after = src->after;
+    if (src->mask & CSS_FAMILY) dst->family = src->family;
     dst->mask |= src->mask;
+}
+
+// font-family 是候选列表，取第一个解析得出来的名字；都不认得就回落到系统字体。
+// 引号、空格、逗号都要吃掉，否则 "zdy1", serif 这种写法会整串匹配不上。
+// A font-family is a candidate list: take the first name the map knows, otherwise fall back
+// to the system face. Quotes, spaces and commas are stripped, or `"zdy1", serif` would
+// never match a name.
+static uint8_t font_family_slot(const writer_t* w, const char* value, size_t len) {
+    if (w->fonts == NULL || w->fonts->resolve == NULL) return 0;
+    for (size_t i = 0; i < len;) {
+        while (i < len && (ascii_space((unsigned char)value[i]) || value[i] == ',')) ++i;
+        size_t start = i;
+        while (i < len && value[i] != ',') ++i;
+        size_t stop = i;
+        while (stop > start && ascii_space((unsigned char)value[stop - 1])) --stop;
+        if (stop > start && (value[start] == '\'' || value[start] == '"')) {
+            char quote = value[start++];
+            if (stop > start && value[stop - 1] == quote) --stop;
+        }
+        if (stop > start) {
+            uint8_t slot = w->fonts->resolve(w->fonts->ctx, value + start, stop - start);
+            if (slot != 0) return slot;
+        }
+    }
+    return 0;
 }
 
 static uint8_t css_length_percent(const char* value, size_t len) {
@@ -111,7 +155,7 @@ static uint8_t css_length_percent(const char* value, size_t len) {
     return (uint8_t)(percent + 0.5);
 }
 
-static void css_declarations(const char* at, const char* end, css_style_t* style) {
+static void css_declarations(writer_t* w, const char* at, const char* end, css_style_t* style) {
     while (at < end) {
         while (at < end && (ascii_space((unsigned char)*at) || *at == ';')) ++at;
         const char* key = at;
@@ -135,6 +179,13 @@ static void css_declarations(const char* at, const char* end, css_style_t* style
             style->before = css_length_percent(value, vn); style->mask |= CSS_BEFORE;
         } else if (kn == 13 && !strncasecmp(key, "margin-bottom", 13)) {
             style->after = css_length_percent(value, vn); style->mask |= CSS_AFTER;
+        } else if (kn == 11 && !strncasecmp(key, "font-family", 11)) {
+            style->family = font_family_slot(w, value, vn);
+            style->mask |= CSS_FAMILY;
+            // 只有真的解析出字体才开 run 表：认得名字才值得逐段记，否则白花内存。
+            // Runs start only once a name really resolves; an unmatched family is not worth
+            // recording span by span.
+            if (style->family != 0) w->family_rules = true;
         }
     }
 }
@@ -182,7 +233,12 @@ static void css_parse_rules(writer_t* w, const char* at, const char* end) {
         const char* shut = memchr(open + 1, '}', (size_t)(end - open - 1));
         if (!shut) break;
         css_style_t style = {0};
-        css_declarations(open + 1, shut, &style);
+        // at-rule 里的 font-family 是在给字体本身命名（@font-face），不是正文选字体；
+        // 采进来只会让每个块都白记一段 run，而且选择器本来就会被下面的规则过滤掉。
+        // A font-family inside an at-rule (@font-face) names the face itself rather than
+        // selecting one for body text; taking it would add a useless run to every block, and
+        // the selector is rejected by the rule filter anyway.
+        if (*at != '@') css_declarations(w, open + 1, shut, &style);
         const char* selector = at;
         while (selector < open) {
             const char* comma = memchr(selector, ',', (size_t)(open - selector));
@@ -311,7 +367,7 @@ static bool css_scope_match(const writer_t *w, const char *s, size_t len,
 }
 static css_style_t style_for(writer_t* w, const char* tag, const char* attrs, const char* attrs_end) {
     css_style_t out = {0};
-    unsigned priorities[4] = {0};
+    unsigned priorities[5] = {0};
     for (size_t i = 0; i < w->rule_count; ++i) {
         const css_rule_t *rule = &w->rules[i];
         bool body = rule->length == 4 && !strncasecmp(rule->selector, "body", 4);
@@ -321,7 +377,7 @@ static css_style_t style_for(writer_t* w, const char* tag, const char* attrs, co
         if (!matches) continue;
         css_style_t chosen = rule->style;
         unsigned specificity = body ? 0 : rule->specificity;
-        for (unsigned bit = 0; bit < 4; ++bit) {
+        for (unsigned bit = 0; bit < 5; ++bit) {
             if (!(chosen.mask & (1u << bit))) continue;
             if (specificity < priorities[bit]) chosen.mask &= ~(1u << bit);
             else priorities[bit] = specificity;
@@ -331,7 +387,7 @@ static css_style_t style_for(writer_t* w, const char* tag, const char* attrs, co
     const char *inline_css = NULL; size_t inline_len = 0;
     if (attr_value(attrs, attrs_end, "style", &inline_css, &inline_len)) {
         css_style_t inline_style = {0};
-        css_declarations(inline_css, inline_css + inline_len, &inline_style);
+        css_declarations(w, inline_css, inline_css + inline_len, &inline_style);
         css_apply(&out, &inline_style);
     }
     return out;
@@ -343,6 +399,7 @@ void html_text_free(html_text_t* text) {
     free(text->blocks);
     for (size_t i = 0; i < text->image_count; ++i) free(text->images[i]);
     free(text->images);
+    free(text->runs);
     *text = (html_text_t){0};
 }
 
@@ -362,10 +419,38 @@ static esp_err_t reserve_text(writer_t* w, size_t extra) {
     return ESP_OK;
 }
 
+// 收一段：把当前 run 从 run_start 补到已写入的块尾。只有书里真的出现过 font-family
+// 才记，所以没有内嵌字体的书不花这份内存。
+// Close one span from run_start to the bytes already written. Runs are only recorded once a
+// font-family actually appeared, so books without embedded faces pay nothing.
+static esp_err_t run_open(writer_t* w) {
+    if (!w->family_rules) return ESP_OK;
+    if (w->text.run_count == w->run_cap) {
+        // 到顶就不再切段：run 表仍完整覆盖整块，只是整块用首段的字体。
+        // At the cap we stop splitting: the table still covers the block, which then uses the
+        // first span's face.
+        if (w->run_cap >= HTML_RUN_MAX) return ESP_OK;
+        size_t cap = w->run_cap ? w->run_cap * 2 : 64;
+        if (cap > HTML_RUN_MAX) cap = HTML_RUN_MAX;
+        html_run_t* runs = heap_caps_realloc(w->text.runs, cap * sizeof(*runs), PSRAM_CAPS);
+        if (!runs) return ESP_ERR_NO_MEM;
+        w->text.runs = runs;
+        w->run_cap = cap;
+    }
+    w->text.runs[w->text.run_count++] = (html_run_t){
+        .offset = w->run_start,
+        .len = w->text.len - w->start - w->run_start,
+        .slot = w->run_slot,
+    };
+    return ESP_OK;
+}
+
 static esp_err_t finish_block(writer_t* w) {
     w->space = false;
     if (!w->active) return ESP_OK;
     if (w->text.count == HTML_TEXT_MAX_BLOCKS) return ESP_ERR_INVALID_SIZE;
+    esp_err_t run_err = run_open(w);
+    if (run_err != ESP_OK) return run_err;
     if (w->text.count == w->block_cap) {
         size_t cap = w->block_cap ? w->block_cap * 2 : 32;
         if (cap > HTML_TEXT_MAX_BLOCKS) cap = HTML_TEXT_MAX_BLOCKS;
@@ -382,6 +467,8 @@ static esp_err_t finish_block(writer_t* w) {
         .indent_percent = w->block_style.indent,
         .margin_before_percent = w->block_style.before,
         .margin_after_percent = w->block_style.after,
+        .run_first = w->block_run_first,
+        .run_count = w->text.run_count - w->block_run_first,
     };
     w->active = false;
     return ESP_OK;
@@ -416,10 +503,19 @@ static esp_err_t emit(writer_t* w, uint32_t cp) {
         w->block_linked = true;
         w->block_auxiliary = false;
         w->block_style = w->current_style;
+        w->block_run_first = w->text.run_count;
+        w->run_start = 0;
+        w->run_slot = w->family;
     } else if (w->space) w->text.utf8[w->text.len++] = ' ';
     w->space = false;
     w->block_linked &= w->link_depth != 0;
     w->block_auxiliary |= w->auxiliary_depth != 0;
+    if (w->family != w->run_slot) {
+        esp_err_t run_err = run_open(w);
+        if (run_err != ESP_OK) return run_err;
+        w->run_start = w->text.len - w->start;
+        w->run_slot = w->family;
+    }
     memcpy(w->text.utf8 + w->text.len, bytes, n);
     w->text.len += n;
     return ESP_OK;
@@ -561,6 +657,7 @@ static esp_err_t add_image(writer_t* w, const char* path) {
 
 esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
                                           const char* css, size_t css_len,
+                                          const html_font_map_t* fonts,
                                           const char* anchor, size_t source_offset,
                                           size_t* anchor_offset, html_text_t* out) {
     if (!out) return ESP_ERR_INVALID_ARG;
@@ -569,12 +666,15 @@ esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
     if ((!html && len) || (!css && css_len)) return ESP_ERR_INVALID_ARG;
     if (len > HTML_TEXT_MAX_BYTES) return ESP_ERR_INVALID_SIZE;
     writer_t w = {0};
+    w.fonts = fonts;
+    w.rules = heap_caps_malloc(CSS_RULE_MAX * sizeof(*w.rules), PSRAM_CAPS);
+    if (w.rules == NULL) return ESP_ERR_NO_MEM;
     if (css_len) css_parse_rules(&w, css, css + css_len);
     if (len) css_parse_styles(&w, html, len);
     esp_err_t err = ESP_OK;
     if (w.scoped_rules) {
         w.ancestors = heap_caps_malloc(CSS_ANCESTOR_MAX * sizeof(*w.ancestors), PSRAM_CAPS);
-        if (!w.ancestors) return ESP_ERR_NO_MEM;
+        if (!w.ancestors) { free(w.rules); return ESP_ERR_NO_MEM; }
     }
     char skip[16] = "";
     bool resume_head = false;
@@ -630,9 +730,31 @@ esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
                     if (w.depth == w.link_depth) w.link_depth = 0;
                     if (w.depth == w.auxiliary_depth) w.auxiliary_depth = 0;
                     if (w.depth) --w.depth;
+                    if (w.family_rules && w.depth <= CSS_ANCESTOR_MAX)
+                        w.family = w.depth ? w.family_at[w.depth - 1] : 0;
                 } else if (!self_closing && !void_tag(name) &&
                            !name_equal(name, "head") && !name_equal(name, "script") && !name_equal(name, "style")) {
                     ++w.depth;
+                    // 内联标签也会换字体（<span class="num">），所以每层都算一次；本层没声明
+                    // 就继承父层。没有 font-family 规则、标签也不带 style 时整段跳过，
+                    // 正文一分钱不花；带 style 的标签只看属性、不跑整套选择器匹配。
+                    // Inline tags switch faces too, so every level resolves; a level without a
+                    // declaration inherits its parent's. With no font-family rule and no style
+                    // attribute the step is skipped and body text pays nothing; a styled tag is
+                    // only probed for the attribute instead of running the selector match.
+                    bool want_family = w.family_rules;
+                    if (!want_family && w.fonts != NULL && w.fonts->resolve != NULL) {
+                        const char* probe = NULL;
+                        size_t probe_len = 0;
+                        want_family = attr_value(html + at, html + end, "style", &probe, &probe_len);
+                    }
+                    if (want_family && w.depth <= CSS_ANCESTOR_MAX) {
+                        uint8_t parent = w.depth >= 2 ? w.family_at[w.depth - 2] : 0;
+                        css_style_t level = style_for(&w, name, html + at, html + end);
+                        w.family_at[w.depth - 1] =
+                            (level.mask & CSS_FAMILY) ? level.family : parent;
+                        w.family = w.family_at[w.depth - 1];
+                    }
                     if (w.ancestors && w.depth <= CSS_ANCESTOR_MAX) {
                         css_node_t *node = &w.ancestors[w.depth - 1];
                         memcpy(node->tag, name, sizeof(node->tag));
@@ -694,9 +816,11 @@ esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
     w.text.utf8[w.text.len] = 0;
     *out = w.text;
     free(w.ancestors);
+    free(w.rules);
     return ESP_OK;
 fail:
     free(w.ancestors);
+    free(w.rules);
     html_text_free(&w.text);
     return err;
 }
@@ -705,7 +829,7 @@ esp_err_t html_to_blocks_with_css_anchor(const char* html, size_t len,
                                           const char* css, size_t css_len,
                                           const char* anchor, size_t* anchor_offset,
                                           html_text_t* out) {
-    return html_to_blocks_with_css_target(html, len, css, css_len,
+    return html_to_blocks_with_css_target(html, len, css, css_len, NULL,
                                            anchor, SIZE_MAX, anchor_offset, out);
 }
 

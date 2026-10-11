@@ -6,6 +6,20 @@
  */
 #pragma once
 #include "epdiy.h"
+#include <stdbool.h>
+#include <stddef.h>
+#define TTF_FONT_SLOTS 4
+#define TTF_FONT_SLOT_SYSTEM 0
+/// 绘制期的字体切换点：从 offset 起改用 slot，直到下一个切换点。
+/// A face switch while drawing: bytes from `offset` use `slot` until the next switch.
+typedef struct {
+    uint32_t offset;
+    uint8_t slot;
+} ttf_run_t;
+void ttf_draw_set_runs(const ttf_run_t* runs, size_t count);
+int ttf_font_select(int slot);
+int ttf_font_selected(void);
+bool ttf_font_slot_ready(int slot);
 int ttf_text_width_px(int px, const char* text);
 int ttf_text_left_bearing_px(int px, const char* text);
 int ttf_ascender_px(int px);

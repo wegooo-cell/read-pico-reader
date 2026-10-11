@@ -16,6 +16,23 @@
 
 #define HTML_TEXT_MAX_BYTES (4u * 1024u * 1024u)
 #define HTML_TEXT_MAX_BLOCKS 16384u
+#define HTML_RUN_MAX 32768u
+
+/// 块内一段同字体的字节区间。/ A same-face byte span inside one block.
+typedef struct {
+    size_t offset; ///< 相对块起点的字节偏移 / Byte offset from the block start
+    size_t len; ///< 字节数 / Byte count
+    uint8_t slot; ///< 字体槽，0 为系统字体 / Font slot, 0 for the system face
+} html_run_t;
+
+/// 把 CSS font-family 的名字解析成字体槽；返回 0 表示用系统字体。
+/// Resolve a CSS font-family name to a font slot; 0 means the system face.
+typedef uint8_t (*html_font_resolver_fn)(void* ctx, const char* family, size_t len);
+
+typedef struct {
+    html_font_resolver_fn resolve; ///< 解析回调；NULL 时全部走系统字体 / NULL keeps every run on the system face
+    void* ctx; ///< 回调上下文 / Callback context
+} html_font_map_t;
 
 typedef struct {
     size_t offset; ///< UTF-8 字节起点 / UTF-8 byte start
@@ -31,6 +48,8 @@ typedef struct {
     uint8_t margin_before_percent; ///< 段前距，相对字号百分比 / Leading margin as a percentage of font size
     uint8_t margin_after_percent; ///< 段后距，相对字号百分比 / Trailing margin as a percentage of font size
     uint8_t heading_level; ///< 原文 h1–h6 层级，普通文字为零 / Original h1-h6 level, zero for ordinary text
+    size_t run_first; ///< 本块第一个 run 的下标 / Index of this block's first run
+    size_t run_count; ///< 本块的 run 数；零表示整块用系统字体 / Runs owned by this block; zero means the system face throughout
 } blk_t;
 
 typedef struct {
@@ -40,6 +59,8 @@ typedef struct {
     size_t count; ///< 块数 / Block count
     char** images; ///< 相对图片路径 / Relative image paths
     size_t image_count; ///< 图片数 / Image count
+    html_run_t* runs; ///< 模块分配的 run 表，被块表借用 / Owned run table, borrowed by the blocks
+    size_t run_count; ///< run 总数 / Total run count
 } html_text_t;
 
 /// 输出须为空；成功交出所有权，失败清空输出；空输入成功且零块。/ Output must be empty; success transfers ownership, failure clears output; empty input succeeds with zero blocks.
@@ -54,9 +75,12 @@ esp_err_t html_to_blocks_with_css_anchor(const char* html, size_t len,
                                           const char* anchor, size_t* anchor_offset,
                                           html_text_t* out);
 /// 目录标题没有 id 时，以原 XHTML 标签位置定位，仍在同一次排版解析中换算正文偏移。
-/// Resolve a source tag position to normalized text during the same parse.
+/// 另带字体解析：CSS font-family 命中的槽会被记进 run 表，供逐段换字体排版使用。
+/// Resolve a source tag position to normalized text during the same parse. The font map turns
+/// CSS font-family names into slots and records them as runs for per-span typesetting.
 esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
                                           const char* css, size_t css_len,
+                                          const html_font_map_t* fonts,
                                           const char* anchor, size_t source_offset,
                                           size_t* text_offset, html_text_t* out);
 /// 释放文本与块表并清零；可重复调用。/ Free text and blocks and reset; safe to repeat.

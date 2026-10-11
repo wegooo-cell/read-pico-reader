@@ -19,6 +19,12 @@
 bool book_layout_build(const char* utf8, size_t len, EpdRect rect, int px);
 /// 借用块表；标题字号加8，块间单换行；原文与块表须存活至free。/ Borrow blocks; headings add 8 px, with one newline between blocks; text and blocks must outlive layout.
 bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks, size_t count, EpdRect rect, int px);
+/// 借用字体 run 表（来自同一次 html_text 解析），绘制与测量按段换字体；传 NULL 恢复单字体。
+/// 与块表同样是借用，须存活到 free；run 表里的未装载槽自动退回系统字体。
+/// Borrow the font run table from the same html_text parse so measuring and drawing switch
+/// faces span by span; NULL restores single-face layout. It is borrowed like the block table
+/// and must outlive free; slots that never loaded fall back to the system face.
+void book_layout_set_runs(const html_run_t* runs, size_t count);
 /// 设置行高百分比与段后距离百分比，重排时生效。/ Set line height and paragraph gap percentages for the next layout.
 void book_layout_set_spacing(unsigned line_percent, unsigned paragraph_percent);
 /// 正文额外字间距为 -4/-2/0/+2/+4 像素。/ Extra body tracking is -4/-2/0/+2/+4 pixels.

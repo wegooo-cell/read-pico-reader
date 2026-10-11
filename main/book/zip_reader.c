@@ -219,9 +219,16 @@ static esp_err_t extract_impl(zip_reader_t* z, int index, void* dst, size_t cap,
     if (name_len != strlen(entry->name) || header_size > z->directory - entry->offset ||
         entry->packed > z->directory - entry->offset - header_size) return ESP_ERR_INVALID_SIZE;
     if (!(entry->flags & 8) && (u32(h + 14) != entry->crc || u32(h + 18) != entry->packed || u32(h + 22) != entry->unpacked)) return ESP_ERR_INVALID_SIZE;
-    uint8_t name[NAME_MAX_BYTES];
-    if (!read_at(z, entry->offset + 30, name, name_len) || memcmp(name, entry->name, name_len) ||
-        !extras_valid(z, entry->offset + 30 + name_len, extra_len)) return ESP_ERR_INVALID_SIZE;
+    // 名字最长 1024 字节；留在栈上的话下面的 inflate 就顶着它跑，放 PSRAM，用完立刻还。
+    // The name runs to 1024 bytes; on the stack the inflate below would sit on top of it, so it
+    // lives in PSRAM and is handed back before the inflate starts.
+    uint8_t* name = heap_caps_malloc(NAME_MAX_BYTES, PSRAM);
+    if (name == NULL) return ESP_ERR_NO_MEM;
+    bool name_ok = read_at(z, entry->offset + 30, name, name_len) &&
+                   memcmp(name, entry->name, name_len) == 0 &&
+                   extras_valid(z, entry->offset + 30 + name_len, extra_len);
+    free(name);
+    if (!name_ok) return ESP_ERR_INVALID_SIZE;
     uint32_t data_pos = entry->offset + header_size;
     size_t target = prefix && cap < entry->unpacked ? cap : entry->unpacked;
     uint8_t empty_output;

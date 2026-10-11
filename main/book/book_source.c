@@ -27,6 +27,9 @@ void book_close(void) {
     if (s_book.file) fclose(s_book.file);
     free(s_book.entries); memset(&s_book, 0, sizeof(s_book));
 }
+void book_set_embedded_fonts(bool on) {
+    if (s_epub) book_epub_set_fonts_enabled(s_epub, on);
+}
 size_t book_chapter_count(void) { return s_epub ? book_epub_chapter_count(s_epub) : s_book.count; }
 size_t book_navigation_count(void) { return s_epub ? book_epub_navigation_count(s_epub) : s_book.count; }
 size_t book_navigation_chapter(size_t position) {

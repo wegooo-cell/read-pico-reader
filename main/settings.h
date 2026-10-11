@@ -103,6 +103,11 @@ void app_settings_set_reader_immersive(bool on);
 /// 阅读时跳过书内插图页；原图仍保留在 EPUB 中。/ Skip inline illustrations while reading without changing the EPUB.
 bool app_settings_reader_hide_images(void);
 void app_settings_set_reader_hide_images(bool on);
+/// 使用书内自带 TTF（EPUB @font-face 或包内字体）；默认开启，关掉后正文回到系统字体。
+/// Use embedded book TTFs (CSS @font-face or a packaged face); on by default. Turning it off
+/// puts body text back on the system face.
+bool app_settings_book_fonts(void);
+void app_settings_set_book_fonts(bool on);
 typedef enum {
     APP_READER_KEY_PREV, ///< 上一页 / Previous page
     APP_READER_KEY_NEXT, ///< 下一页 / Next page

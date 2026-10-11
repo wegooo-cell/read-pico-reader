@@ -262,6 +262,19 @@ bool app_book_reader_body_visible(void) {
     return s_view == READING && s_text && s_reader_panel == READER_PANEL_NONE && !s_clear_confirm;
 }
 static blk_t* s_blocks;
+// 书内字体的 run 表与块表同生共死：都来自同一次 html_text 解析，排版直接借用。
+// The face run table lives and dies with the block table: both come from the same html_text
+// parse, and the layout borrows them.
+static html_run_t* s_runs;
+static size_t s_run_count;
+// 上一次排版用的书内字体开关：字体页改过之后，回阅读页要重排当前章才看得出来。
+// The embedded-face setting the current layout was built with: after the font page changes
+// it, the reader must re-typeset the chapter before the change is visible.
+static bool s_book_fonts_applied;
+// 字体开关改了之后要重排当前章，但那次重排不能在触摸回调里做：栈太深。
+// The font switch needs the current chapter re-typeset, but not from the touch callback: the
+// stack there is too deep.
+static bool s_fonts_reload_pending;
 static char** s_images;
 static size_t s_image_count;
 // PR #7 的当前页图片集合：只保留显示页的灰阶，不限制为八张。
@@ -1605,16 +1618,20 @@ static void draw_font_name_with_current_face(uint8_t* fb, int x, int y, const ch
 }
 
 // Same-height setting rows; these rectangles also define the touch targets.
-static const EpdRect s_font_card = {36, 840, 294, 92};
-static const EpdRect s_shake_card = {354, 840, 294, 92};
-static const EpdRect s_layout_card = {36, 950, 612, 92};
-static const EpdRect s_rule_card = {36, 1060, 612, 92};
+static const EpdRect s_font_card = {36, 770, 294, 92};
+static const EpdRect s_shake_card = {354, 770, 294, 92};
+static const EpdRect s_layout_card = {36, 880, 612, 92};
+static const EpdRect s_rule_card = {36, 990, 612, 92};
+// 书内自带字体开关：字体设置的最后一项，正文字体由书里样式表说了算还是只听阅读设置。
+// Embedded-face switch: the last item on the font sheet -- whether the book's own stylesheet
+// picks the body faces or the reader setting alone does.
+static const EpdRect s_bookfont_card = {36, 1100, 612, 92};
 static const EpdRect s_rule_offset_up = {36, 980, 190, 88};
 static const EpdRect s_rule_offset_reset = {246, 980, 192, 88};
 static const EpdRect s_rule_offset_down = {458, 980, 190, 88};
 
 static void draw_font_settings(uint8_t* fb) {
-    const int top = 640;
+    const int top = 580;
     draw_sheet(fb, top, "字体设置");
     int shown_px = s_reader_slider >= 0 ? s_reader_preview_px : s_px;
     char value[16]; snprintf(value, sizeof(value), "%d", shown_px);
@@ -1658,6 +1675,21 @@ static void draw_font_settings(uint8_t* fb) {
             epd_fill_rect((EpdRect){x, line_y, width, 2}, 0x50, fb);
         }
     }
+    // 书内自带字体：开则按书里样式表逐段换字体，关则整本书回到系统字体。
+    // Embedded book faces: on follows the book's stylesheet span by span, off puts the whole
+    // book back on the system face.
+    EpdRect bookfont_card = s_bookfont_card;
+    const bool book_fonts = app_settings_book_fonts();
+    ui_fill_round_rect(fb, bookfont_card, 20, 0xd8);
+    ui_draw_round_rect(fb, bookfont_card, 20, 0x70);
+    ui_text(fb, 58, bookfont_card.y + 13, 17, "书内自带字体", EPD_DRAW_ALIGN_LEFT, false);
+    ui_text(fb, 58, bookfont_card.y + 49, 20,
+            book_fonts ? "按书内样式使用" : "关闭 · 全部用系统字体", EPD_DRAW_ALIGN_LEFT, false);
+    EpdRect bookfont_toggle = {565, bookfont_card.y + 29, 62, 34};
+    ui_fill_round_rect(fb, bookfont_toggle, 17, book_fonts ? 0x50 : 0xd0);
+    int bookfont_knob = book_fonts ? bookfont_toggle.x + 45 : bookfont_toggle.x + 17;
+    epd_fill_circle(bookfont_knob, bookfont_toggle.y + 17, 13, UI_GRAY_WHITE, fb);
+    epd_draw_circle(bookfont_knob, bookfont_toggle.y + 17, 13, 0x90, fb);
 }
 
 static EpdRect rule_style_rect(int index) {
@@ -1665,7 +1697,7 @@ static EpdRect rule_style_rect(int index) {
 }
 
 static void draw_rule_settings(uint8_t *fb) {
-    const int top = 640;
+    const int top = 580;
     draw_sheet(fb, top, "阅读线");
     draw_sheet_back(fb, top);
     ui_text(fb, 42, 741, 21, "选择样式", EPD_DRAW_ALIGN_LEFT, false);
@@ -2259,10 +2291,19 @@ static void prep_task(void* arg) {
         xSemaphoreGive(s_prep_done);
     }
 }
+// 预渲染下一页只是加速功能，不该跟插图抢内存：留出解码一张插图和加载一章正文的量之后
+// 还有富余，才去占这一整页缓冲。实测这一页是 326 KB，正好是插图解码差的那一口。
+// Prefetching the next page is only a speed-up and must not compete with illustrations: the whole
+// framebuffer is taken only when there is room left after a page's illustration and a chapter of
+// text. Measured at 326 KB -- exactly the shortfall that starved image decoding.
+#define BOOK_PREP_RESERVE (1024u * 1024u)
+
 static void ensure_prep(void) {
     if (!s_draw_lock) s_draw_lock = xSemaphoreCreateMutex();
     if (!s_prep_done) s_prep_done = xSemaphoreCreateBinary();
-    if (!s_next_fb) s_next_fb = heap_caps_aligned_alloc(16, fb_bytes(), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    const size_t need = fb_bytes();
+    if (!s_next_fb && heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) > need + BOOK_PREP_RESERVE)
+        s_next_fb = heap_caps_aligned_alloc(16, need, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!s_prep_task && s_draw_lock && s_prep_done && s_next_fb) {
         if (xTaskCreatePinnedToCore(prep_task, "book_prep", 12 * 1024, NULL, 3, &s_prep_task, 1) != pdPASS)
             s_prep_task = NULL;
@@ -2546,6 +2587,7 @@ static void free_book(void) {
     s_chapter_heading_title[0] = s_chapter_heading_label[0] = 0;
     free(s_text);
     free(s_blocks);
+    free(s_runs);
     for (size_t i = 0; i < s_image_count; ++i) free(s_images[i]);
     free(s_images);
     s_images = NULL; s_image_count = 0;
@@ -2553,6 +2595,9 @@ static void free_book(void) {
     s_reader_image_refresh_pending = false;
     s_blocks = NULL;
     s_block_count = 0;
+    s_runs = NULL;
+    s_run_count = 0;
+    book_layout_set_runs(NULL, 0);
     s_text = NULL;
     s_text_len = 0;
     s_selected_toc = SIZE_MAX;
@@ -2575,21 +2620,43 @@ static void prepare_inline_image(void) {
     invalidate_prep();
     release_page_images();
     s_page_images_for = s_page; s_page_images_generation = generation;
+    // 插图不显示没有别的症状，每条失败路径以前都是静默 continue；这里把结局记下来，
+    // 免得继续靠猜。
+    // A missing illustration has no other symptom and every failure path used to be a silent
+    // continue; record the outcome instead of guessing.
     int count = reader_image_slots(s_page);
-    if (!count || count > (int)HTML_TEXT_MAX_BLOCKS) return;
+    size_t psram_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!count || count > (int)HTML_TEXT_MAX_BLOCKS) {
+        ESP_LOGI(TAG, "inline page %u: %d image slots", (unsigned)s_page, count);
+        return;
+    }
     s_page_images = heap_caps_calloc((size_t)count, sizeof(*s_page_images), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!s_page_images) return;
+    if (!s_page_images) {
+        // 分配失败时计数必须跟着归零：release_page_images 会按计数遍历这张表。
+        // The count has to follow the table to zero: release_page_images walks it by count.
+        s_page_image_count = 0;
+        ESP_LOGW(TAG, "inline page %u: no PSRAM for %d slots", (unsigned)s_page, count);
+        return;
+    }
     s_page_image_count = count;
     // 逐张解码并立即释放压缩数据；全页灰阶位图的总面积不超过正文区域。
     // Decode serially and release each encoded buffer; the page's bitmap area stays within its body.
     size_t pixels_left = (size_t)body_rect().width * body_rect().height;
+    int decoded = 0;
     for (int i = 0; i < count; ++i) {
         int index = -1, width = 0, height = 0;
         if (!reader_image_slot(s_page, i, &index, NULL, &width, &height) ||
-            index < 0 || (size_t)index >= s_image_count || width <= 0 || height <= 0) continue;
+            index < 0 || (size_t)index >= s_image_count || width <= 0 || height <= 0) {
+            ESP_LOGW(TAG, "inline %d: slot i=%d width=%d height=%d", i, index, width, height);
+            continue;
+        }
         uint8_t *encoded = NULL; size_t size = 0; bool png = false;
         esp_err_t err = book_chapter_image(s_chapter, s_images[index], &encoded, &size, &png);
-        if (err != ESP_OK) { free(encoded); continue; }
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "inline %d %s: read %s", i, s_images[index], esp_err_to_name(err));
+            free(encoded);
+            continue;
+        }
         unsigned source_w = 0, source_h = 0;
         if (book_image_dimensions(encoded, size, png, &source_w, &source_h) && source_w && source_h) {
             // 回退槽也使用真实宽高等比缩小，避免尺寸探测失败时拉伸图片。
@@ -2599,14 +2666,41 @@ static void prepare_inline_image(void) {
             if (h > (unsigned)height) { w = w * height / h; h = height; }
             width = w ? (int)w : 1; height = h ? (int)h : 1;
             size_t pixels = (size_t)width * height;
-            uint8_t *gray = pixels <= pixels_left ? heap_caps_malloc(pixels, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;
-            if (gray && book_image_grayscale(encoded, size, png, width, height, gray)) {
+            if (pixels > pixels_left) {
+                ESP_LOGW(TAG, "inline %d: %ux%u over %u px budget",
+                         i, (unsigned)width, (unsigned)height, (unsigned)pixels_left);
+                free(encoded);
+                continue;
+            }
+            uint8_t *gray = heap_caps_malloc(pixels, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (gray == NULL) {
+                ESP_LOGW(TAG, "inline %d: no PSRAM for %u px (free %u)",
+                         i, (unsigned)pixels,
+                         (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+                free(encoded);
+                continue;
+            }
+            if (book_image_grayscale(encoded, size, png, width, height, gray)) {
                 s_page_images[i] = (reader_image_t){gray, width, height};
                 pixels_left -= pixels;
-            } else free(gray);
+                ++decoded;
+            } else {
+                ESP_LOGW(TAG, "inline %d: grayscale decode failed", i);
+                free(gray);
+            }
+        } else {
+            ESP_LOGW(TAG, "inline %d: unknown dimensions (%u bytes, png=%d)", i, (unsigned)size, (int)png);
         }
         free(encoded);
         vTaskDelay(1);
+    }
+    // 只在有图没画出来时汇总：插图缺失没有别的症状，而每次都打会把日志淹掉。
+    // Summary only when something did not make it: a missing illustration has no other symptom,
+    // and logging every page would drown the console.
+    if (decoded < count) {
+        ESP_LOGW(TAG, "inline page %u: %d/%d decoded, psram %u->%u KB", (unsigned)s_page, decoded, count,
+                 (unsigned)(psram_before / 1024),
+                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024));
     }
 }
 static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
@@ -2671,11 +2765,16 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     book_layout_set_chapter_lead(lead_skip, lead_height);
     s_reader_dims_ctx = (reader_dims_ctx_t){chapter, loaded.images, loaded.image_count};
     book_layout_set_image_dims(reader_image_dims, &s_reader_dims_ctx);
+    book_layout_set_runs(loaded.runs, loaded.run_count);
     bool ok = book_layout_build_blocks(loaded.utf8, loaded.len, loaded.blocks, loaded.count, body_rect(), s_px);
     if (!ok) {
         // 回滚前恢复旧章上下文，避免尺寸回调引用已释放的新章图片。/ Restore the previous context before rollback to avoid a freed image list.
         s_reader_dims_ctx = old_dims_ctx;
         html_text_free(&loaded);
+        // run 表随 loaded 一起没了，先把排版还回旧章的那份，否则重排会读到已释放的内存。
+        // The run table dies with `loaded`, so put the previous chapter's back before the
+        // rollback layout reads freed memory.
+        book_layout_set_runs(s_runs, s_run_count);
         book_layout_set_chapter_lead(old_lead_skip, old_lead_height);
         bool restored = s_text && book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
         unlock_draw();
@@ -2689,10 +2788,13 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     }
     free(s_text);
     free(s_blocks);
+    free(s_runs);
     s_text = loaded.utf8;
     s_text_len = loaded.len;
     s_blocks = loaded.blocks;
     s_block_count = loaded.count;
+    s_runs = loaded.runs;
+    s_run_count = loaded.run_count;
     for (size_t i = 0; i < s_image_count; ++i) free(s_images[i]);
     free(s_images);
     s_images = loaded.images; s_image_count = loaded.image_count;
@@ -2713,6 +2815,15 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     s_message[0] = 0;
     unlock_draw();
     prepare_inline_image();
+    // 开书这条链上有解析、解压和字体装载，栈曾经在这里溢出过；留一个可观测的水位。
+    // 顺带量一下章节排完后的 PSRAM 余量：书内字体的装载预算要靠这个数来定，不能靠估。
+    // Parsing, inflate and face loading all ride this chain, and it overflowed once before;
+    // keep the headroom observable. The PSRAM left after a chapter is laid out is also the
+    // number the face budget should be derived from rather than guessed.
+    ESP_LOGI(TAG, "chapter %u stack free %u psram free %u largest %u", (unsigned)chapter,
+             (unsigned)uxTaskGetStackHighWaterMark(NULL),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     return true;
 }
 static bool load_chapter(app_ctx_t* ctx, size_t chapter, size_t offset, bool last_page) {
@@ -2767,11 +2878,22 @@ static bool open_book_impl(app_ctx_t* ctx, const char* path) {
     s_next_fb = NULL;
     unlock_draw();
     if (network.network_ready) ttf_font_cache_clear();
-    ESP_LOGI(TAG, "open start wifi=%d internal=%u/%u psram=%u/%u", network.network_ready,
+    // 开书前把字形缓存全还回去并量一下能腾多少：书内字体要的正是这块 PSRAM，而系统字体
+    // 的缓存是里面最容易回收的。字体本身保持装载，翻页时按需重新缓存。
+    // Hand every glyph cache back before opening and measure what that was worth: embedded
+    // faces need exactly this PSRAM, and the system face's cache is the easiest part to
+    // reclaim. The faces stay loaded and re-cache on demand.
+    size_t psram_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    size_t reclaimed = ttf_font_cache_clear_all();
+    size_t psram_after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    ESP_LOGI(TAG, "open start wifi=%d internal=%u/%u psram=%u/%u cache=%uK freed=%uK",
+             network.network_ready,
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
-             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
-             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+             (unsigned)psram_after,
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
+             (unsigned)(reclaimed / 1024),
+             (unsigned)((psram_after - psram_before) / 1024));
     if (!pending_reserve(path)) {
         copy_text(s_message, sizeof(s_message), "内存不足，无法保留待保存进度");
         return false;
@@ -2786,6 +2908,13 @@ static bool open_book_impl(app_ctx_t* ctx, const char* path) {
         return false;
     }
     esp_err_t err = book_open(path);
+    // 书源打开后再把书内字体开关接上：EPUB 才有效，TXT 是空操作。
+    // Wire the embedded-face switch only after the source is open: it only applies to EPUB,
+    // and is a no-op for TXT.
+    if (err == ESP_OK) {
+        s_book_fonts_applied = app_settings_book_fonts();
+        book_set_embedded_fonts(s_book_fonts_applied);
+    }
     if (err != ESP_OK) {
         pending_progress_t* pending = pending_find(path);
         if (pending && !pending->dirty) pending_discard(path);
@@ -3582,7 +3711,11 @@ static int reader_margin_input(EpdRect rect, int x, int current, int px, int tra
 }
 
 static EpdRect reader_slider_rect(int slider) {
-    if (slider == 0) return (EpdRect){36, 746, 612, 66};
+    // 字号滑块必须跟着字体设置面板的卡片一起上移：卡片顶在 770，滑块原来落在 746..812，
+    // 会和第一行卡片重叠。
+    // The size slider moves with the font sheet's cards: the first card starts at 770, and the
+    // slider used to sit at 746..812, overlapping it.
+    if (slider == 0) return (EpdRect){36, 686, 612, 66};
     if (slider == 1) return (EpdRect){36, 700, 294, 66};
     if (slider == 2) return (EpdRect){354, 700, 294, 66};
     if (slider == 3) return (EpdRect){36, 819, 612, 66};
@@ -3843,12 +3976,13 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
         return APP_REDRAW_PAGE;
     }
     if (s_reader_panel == READER_PANEL_FONT_SETTINGS) {
-        const int top = 640;
+        const int top = 580;
         EpdRect size = reader_slider_rect(0);
         EpdRect font = s_font_card;
         EpdRect shake = s_shake_card;
         EpdRect layout = s_layout_card;
         EpdRect rule = s_rule_card;
+        EpdRect bookfont = s_bookfont_card;
         if (ui_rect_hit(size, x, y)) {
             int px = BOOK_PX_MIN + slider_index(size, x, BOOK_PX_MAX - BOOK_PX_MIN + 1);
             return apply_reader_layout(ctx, px, s_margin, app_settings_book_line_spacing(),
@@ -3879,6 +4013,20 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
         }
         if (ui_rect_hit(rule, x, y)) {
             s_reader_panel = READER_PANEL_RULE_SETTINGS;
+            return APP_REDRAW_PAGE;
+        }
+        if (ui_rect_hit(bookfont, x, y)) {
+            // 触摸回调的栈比 on_tick 深得多：在这里直接重排一章会把主任务栈顶穿（实测溢出过一次）。
+            // 只记下意愿，交给下一轮 on_tick 在浅栈上做。
+            // The touch callback runs far deeper than on_tick, and laying a chapter out from here
+            // overran the main task stack (measured once). Record the intent and let the next
+            // on_tick do it on a shallow stack.
+            bool on = !app_settings_book_fonts();
+            app_settings_set_book_fonts(on);
+            s_book_fonts_applied = on;
+            book_set_embedded_fonts(on);
+            s_fonts_reload_pending = true;
+            invalidate_prep();
             return APP_REDRAW_PAGE;
         }
         s_reader_panel = y < top ? READER_PANEL_NONE : READER_PANEL_TOOLS;
@@ -4421,6 +4569,16 @@ static void on_enter(app_ctx_t* ctx) {
     book_layout_set_first_line_indent_adjust(app_settings_book_indent_adjust());
     book_layout_set_reading_line(app_settings_book_reading_line());
     book_layout_set_reading_line_offset(app_settings_book_reading_line_offset());
+    // 字体页可能刚改过书内字体开关；回正文时重排当前章，别让用户对着旧排版猜。
+    // The font page may have just changed the embedded-face switch; re-typeset this chapter
+    // so the reader is not left guessing at stale type.
+    bool book_fonts = app_settings_book_fonts();
+    if (book_fonts != s_book_fonts_applied) {
+        s_book_fonts_applied = book_fonts;
+        book_set_embedded_fonts(book_fonts);
+        if (s_text && book_kind() == BOOK_KIND_EPUB)
+            (void)load_chapter(ctx, s_chapter, book_layout_page_start_offset(s_page), false);
+    }
     s_reader_fullscreen = false;
     s_bookmark_edit = s_bookmark_delete_confirm = s_bookmark_delete_error = false;
     s_bookmark_selected = 0;
@@ -4929,6 +5087,15 @@ static int book_remote_direction(void) {
     return direction;
 }
 static app_redraw_t on_tick(app_ctx_t* ctx) {
+    // 字体开关留下的重排在这里做：触摸回调的栈太深，一章排下来会把主任务栈顶穿（实测溢出过）。
+    // The font switch's re-typeset happens here: the touch callback runs too deep, and laying out a
+    // chapter from there overran the main task stack (measured).
+    if (s_fonts_reload_pending) {
+        s_fonts_reload_pending = false;
+        if (s_text && book_kind() == BOOK_KIND_EPUB)
+            (void)load_chapter(ctx, s_chapter, book_layout_page_start_offset(s_page), false);
+        return APP_REDRAW_PAGE;
+    }
     if (s_view != READING || (s_toolbar && s_reader_panel != READER_PANEL_TOOLS) || s_clear_confirm || ctx->consumed) s_reader_tap.pending = false;
     else {
         int tap = book_reader_tap_tick(&s_reader_tap, ctx->now_ms, ctx->touch && ctx->touch->touched);

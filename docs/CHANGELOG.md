@@ -3,6 +3,17 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## 未发布 / Unreleased
+
+- 阅读 EPUB 时按样式表使用书内自带字体：`@font-face` 声明并被打包进来的 TTF 按 CSS 指定的位置逐段换字体，行高、字距与两端对齐的算法不变；字体按需解压进 PSRAM，装载失败、装不下或槽位用完时该段回退系统字体。字体设置面板最下面新增“书内自带字体”开关，默认开启，关掉后整本书回到系统字体。TXT 与不含字体的 EPUB 不受影响。
+  EPUB reading now honours a book's own fonts: TTFs declared in `@font-face` and shipped in the package switch span by span exactly where the stylesheet asks, leaving line height, tracking and justification untouched. Faces are inflated into PSRAM on demand, and one that fails, does not fit or finds no free slot falls back to the system face for that span. The font sheet gains an “embedded book fonts” switch, on by default; turning it off puts the whole book back on the system face. TXT and EPUBs without faces are unaffected.
+- 书内字体支持 CFF/OpenType（OTTO）轮廓——章节标题常用的正是这种格式，以前会被静默跳过。字体按剩余内存排队装载：装不下的那一种回退系统字体，而不是让整本书加载失败。
+  Embedded faces now include CFF/OpenType (OTTO) outlines, the format heading faces often ship in and which used to be skipped in silence. Faces load in the order PSRAM can hold; one that does not fit falls back to the system face rather than failing the whole book.
+- 修掉两处重启：打开带内嵌字体的书、以及关掉「书内自带字体」开关，都会把主任务栈顶穿。EPUB 索引的标题与锚点改为变长存储，3884 章的索引少占约 1.4 MB 内存。
+  Fixed two reboots: opening a book with embedded faces, and switching the embedded-face toggle off, both overran the main task stack. EPUB index titles and anchors are also stored variable-length now, saving roughly 1.4 MB on a 3884-chapter book.
+- 插图与字形缓存、下一页预渲染共用 PSRAM：字形缓存改为所有字体槽共享一笔预算，下一页预渲染只在留够「一张插图解码 + 一章正文」之后才占用整页缓冲。此前翻几页之后插图会整页消失。
+  Illustrations now share PSRAM with the glyph cache and the page prefetch: the glyph cache is one budget across every font slot, and prefetching the next page takes its full framebuffer only when a page's illustration and a chapter of text still fit. Previously illustrations vanished after a few page turns.
+
 ## 官网说明书 / 2026-10-10
 
 - 上线 21 章、135 项操作、30 幅界面图解的详细说明书和 69 页 PDF；新增「问说明书」，支持关键词、口语问句与模糊检索，直接定位到操作步骤。保留旧说明书链接及 PDF 下载地址，固件仍为 rc90。

@@ -7,6 +7,7 @@
  * Frozen: The caller frees loaded text; no UI dependencies.
  */
 #pragma once
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
@@ -19,6 +20,10 @@ typedef enum {
 esp_err_t book_open(const char *path);
 /// 关闭书源并释放目录。/ Close the source and free its index.
 void book_close(void);
+/// 当前书是 EPUB 时切换书内自带字体；TXT 无事发生。改动在下一章解析时生效。
+/// Toggle embedded faces when the open book is an EPUB; a no-op for TXT. The change takes
+/// effect when the next chapter is parsed.
+void book_set_embedded_fonts(bool on);
 /// 返回章节数。/ Return the chapter count.
 size_t book_chapter_count(void);
 /// 可见目录优先采用正文编号题头，仍映射到原始 spine 章节；进度继续使用 spine 索引。

@@ -72,9 +72,93 @@ static const blk_t* block_at(size_t off) {
     }
     return &s_blocks[lo];
 }
+
+// 字体 run 表由调用方借用（和块表同一份 html_text），绘制时按段换字体。
+// The run table is borrowed from the caller's html_text, next to the block table, so drawing
+// can switch faces span by span.
+static const html_run_t* s_runs;
+static size_t s_run_count;
+
+// 一行最多切几段字体。屏上一行十几个字，段数只由内联标签决定。
+// How many face spans one line may carry: a line holds a dozen glyphs and spans only come
+// from inline tags.
+#define LINE_RUN_MAX 64u
+static ttf_run_t s_line_runs[LINE_RUN_MAX];
+static size_t s_line_run_count;
+
+void book_layout_set_runs(const html_run_t* runs, size_t count) {
+    s_runs = (runs != NULL && count > 0) ? runs : NULL;
+    s_run_count = s_runs != NULL ? count : 0;
+}
+
+// 该字节属于哪个字体槽。没有 run 表就一律系统字体，排版与从前完全一致。
+// Which face owns this byte. Without a run table everything is the system face and the
+// layout behaves exactly as before.
+static uint8_t slot_at(size_t off) {
+    if (s_runs == NULL) return TTF_FONT_SLOT_SYSTEM;
+    const blk_t* block = block_at(off);
+    if (block == NULL || block->run_count == 0 || off < block->offset) return TTF_FONT_SLOT_SYSTEM;
+    size_t rel = off - block->offset;
+    size_t last = block->run_first + block->run_count;
+    if (last > s_run_count) last = s_run_count;
+    uint8_t slot = TTF_FONT_SLOT_SYSTEM;
+    for (size_t i = block->run_first; i < last; ++i) {
+        if (s_runs[i].offset > rel) break;
+        slot = s_runs[i].slot;
+    }
+    return slot;
+}
+
+// 装载失败或没装载的槽一律退回系统字体：拿一张空字体去量宽会得到零。
+// A slot that failed to load, or never loaded, falls back to the system face; measuring an
+// empty face would return zero.
+static uint8_t slot_ready_or_system(uint8_t slot) {
+    if (slot != TTF_FONT_SLOT_SYSTEM && !ttf_font_slot_ready(slot)) return TTF_FONT_SLOT_SYSTEM;
+    return slot;
+}
+
+static void slot_select_for(size_t off) {
+    uint8_t slot = slot_ready_or_system(slot_at(off));
+    if (slot != (uint8_t)ttf_font_selected()) ttf_font_select(slot);
+}
+
+static void line_run_push(size_t offset, uint8_t slot) {
+    if (offset > UINT32_MAX) return;
+    if (s_line_run_count) {
+        ttf_run_t* prev = &s_line_runs[s_line_run_count - 1];
+        if (prev->slot == slot) return;
+        if (prev->offset == (uint32_t)offset) {
+            prev->slot = slot;
+            return;
+        }
+    }
+    if (s_line_run_count >= LINE_RUN_MAX) return;
+    s_line_runs[s_line_run_count].offset = (uint32_t)offset;
+    s_line_runs[s_line_run_count].slot = slot;
+    ++s_line_run_count;
+}
+
+// 把块内 run 平移到 s_line 的坐标系：s_line 从 visible_off 起，只覆盖这一行。
+// Shift the block's runs into s_line coordinates; s_line starts at visible_off and covers
+// this line only.
+static void line_runs_build(const blk_t* block, size_t visible_off, size_t line_end) {
+    s_line_run_count = 0;
+    if (s_runs == NULL || block == NULL || block->run_count == 0) return;
+    size_t block_end = block->offset + block->len;
+    if (visible_off < block->offset || line_end > block_end || line_end <= visible_off) return;
+    size_t base = visible_off - block->offset, stop = line_end - block->offset;
+    size_t last = block->run_first + block->run_count;
+    if (last > s_run_count) last = s_run_count;
+    for (size_t i = block->run_first; i < last; ++i) {
+        size_t from = s_runs[i].offset, to = from + s_runs[i].len;
+        if (to <= base) continue;
+        if (from >= stop) break;
+        line_run_push(from > base ? from - base : 0, slot_ready_or_system(s_runs[i].slot));
+    }
+}
+
 // 拒绝截断、过长编码、代理项和嵌入零字节。/ Reject truncation, overlong encodings, surrogates and embedded NUL.
-static size_t codepoint_size(const char* text, size_t remaining) {
-    if (!remaining) return 0;
+static size_t codepoint_size(const char* text, size_t remaining) {    if (!remaining) return 0;
     const unsigned char* p = (const unsigned char*)text;
     if (p[0] > 0 && p[0] < 0x80) return 1;
     size_t n = p[0] >= 0xc2 && p[0] <= 0xdf ? 2 :
@@ -335,6 +419,7 @@ static bool take_line(size_t off, size_t* next, bool* paragraph_end, int* px, bo
     if (first_line && !*heading && !*align) {
         // 缩进按当前字体真实全角字宽和字间距计算，不把行高当字宽。
         // Indent by actual full-width advances plus tracking, not by the font's line height.
+        slot_select_for(off);
         int advance = ttf_text_width_px(*px, "　");
         if (advance <= 0) advance = ttf_text_width_px(*px, "一");
         if (advance <= 0) advance = *px;
@@ -372,6 +457,7 @@ static bool take_line(size_t off, size_t* next, bool* paragraph_end, int* px, bo
                 // 段首开标点自身常有半字留白，向缩进区悬挂，保持可见左边缘对齐。
                 // Hang an opener's own leading whitespace into the indent, keeping its ink edge aligned.
                 char glyph[5]; memcpy(glyph, s_text + visible_off, n); glyph[n] = 0;
+                slot_select_for(visible_off);
                 int bearing = ttf_text_left_bearing_px(*px, glyph);
                 if (bearing > *indent) bearing = *indent;
                 if (bearing > 0) *indent -= bearing;
@@ -396,6 +482,10 @@ static bool take_line(size_t off, size_t* next, bool* paragraph_end, int* px, bo
         char glyph[5];
         memcpy(glyph, s_text + end, n);
         glyph[n] = 0;
+        // 每个字都按自己那一段的字体量宽：行宽、字距和对齐算法一个字没改。
+        // Every glyph is measured in its own span's face; width, tracking and alignment math
+        // are untouched.
+        slot_select_for(end);
         int64_t candidate = width + ttf_text_width_px(*px, glyph) +
                             (end > visible_off && !*heading ? s_tracking_px : 0);
         if (candidate < 0) return false;
@@ -455,6 +545,7 @@ static bool take_line(size_t off, size_t* next, bool* paragraph_end, int* px, bo
         s_line[end - visible_off + n] = 0;
         end += n;
     }
+    line_runs_build(block, visible_off, end);
     *line_width = (int)width;
     *next = end;
     if (end < s_len && (s_text[end] == '\r' || s_text[end] == '\n')) {
@@ -561,8 +652,13 @@ bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks,
         if (paragraph_end) used += gap_for(line_height, heading) + margin_after;
         off = next;
     }
+    // 测量会按 run 移动游标；还回去，后面的界面与状态栏仍从系统字体起。
+    // Measuring moves the cursor across spans; hand it back so the UI and status bar still
+    // start from the system face.
+    ttf_font_select(TTF_FONT_SLOT_SYSTEM);
     return true;
 fail:
+    ttf_font_select(TTF_FONT_SLOT_SYSTEM);
     book_layout_free();
     return false;
 }
@@ -640,10 +736,18 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
             int available = rect.width - indent;
             if (align == 1) x += (available - line_width) / 2;
             else if (align == 2) x += available - line_width;
+            // 行基线整行共用，取行首那一段的字体，免得同一行上下浮动。
+            // The baseline is shared by the whole line, so take it from the span the line
+            // starts in and keep the line from floating.
+            slot_select_for(off);
             int baseline = rect.y + (int)used + ttf_ascender_px(line_px);
             const blk_t *line_block = block_at(off);
             bool final_line = paragraph_end || next >= s_len ||
                 (line_block && next >= line_block->offset + line_block->len);
+            // 绘制按 run 换字体：行宽、字距、两端对齐的算法一个字没动，只有取字形的槽跟着走。
+            // Drawing follows the runs: width, tracking and justification math are untouched,
+            // only the slot each glyph comes from changes.
+            ttf_draw_set_runs(s_line_run_count ? s_line_runs : NULL, s_line_run_count);
             if (!heading && !align && (!final_line || line_width > available)) {
                 // 完整正文行对齐到统一右边界；悬挂标点最多使用少量右侧留白。
                 // Justify complete body lines; a hanging closer may use a small part of the right margin.
@@ -656,6 +760,11 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
                 ttf_draw_text_px_spaced(fb, x, baseline, line_px, s_line, s_tracking_px, 0, 15);
             else
                 ttf_draw_text_px(fb, x, baseline, line_px, s_line, EPD_DRAW_ALIGN_LEFT, 0, 15);
+            // 画完把游标还回去：页面其它文字、界面和状态栏都按系统字体走。
+            // Hand the cursor back: every other page, the UI and the status bar use the system
+            // face.
+            ttf_draw_set_runs(NULL, 0);
+            ttf_font_select(TTF_FONT_SLOT_SYSTEM);
         }
         used += line_height;
         if (paragraph_end) used += gap_for(line_height, heading) + margin_after;

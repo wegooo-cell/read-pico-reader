@@ -43,6 +43,26 @@ int test_guide_segments;
 int test_guide_first_y;
 int test_guide_height;
 uint8_t test_guide_gray;
+// 宿主假字体：一个可配置就绪位的槽表 + 一个可配置的当前槽，用来验证按 run 换字体。
+// Host stand-in font: a slot table with configurable readiness plus a current slot, enough to
+// check that measuring follows the runs.
+static unsigned test_slot_ready_mask = 1u;
+static int test_slot;
+// 每个槽每字额外加宽，用来把“量宽到底走了哪个槽”变成看得见的折行差异。
+// Extra per-glyph width per slot, so which slot measured a glyph shows up as a wrap change.
+static int test_slot_advance[TTF_FONT_SLOTS];
+void ttf_draw_set_runs(const ttf_run_t* runs, size_t count) {
+    if (runs != NULL && count > 0) ttf_font_select(runs[0].slot);
+}
+int ttf_font_select(int slot) {
+    int previous = test_slot;
+    if (slot >= 0 && slot < TTF_FONT_SLOTS) test_slot = slot;
+    return previous;
+}
+int ttf_font_selected(void) { return test_slot; }
+bool ttf_font_slot_ready(int slot) {
+    return slot >= 0 && slot < TTF_FONT_SLOTS && (test_slot_ready_mask & (1u << slot)) != 0;
+}
 int ttf_text_width_px(int px, const char* text) {
     int n = 0, width = 0;
     for (; *text; text++) if (((unsigned char)*text & 0xc0) != 0x80) {
@@ -52,7 +72,7 @@ int ttf_text_width_px(int px, const char* text) {
     }
     measured_codepoints += (size_t)n;
     measure_calls++;
-    return width;
+    return width + n * test_slot_advance[test_slot];
 }
 int ttf_ascender_px(int px) { return px; }
 int ttf_text_left_bearing_px(int px, const char* text) {
@@ -462,6 +482,45 @@ int main(void) {
     assert(book_layout_build_blocks(composed.utf8,composed.len,composed.blocks,composed.count,mixed_box,10));
     assert(book_layout_page_count()==1&&book_layout_page_image(0)==-1&&!book_layout_page_image_count(0));
     book_layout_set_images_visible(true);html_text_free(&composed);
+
+    // 按 run 换字体：槽 2 的每个字更宽。量宽没跟着 run 走的话，三个字仍然挤在一行里。
+    // Per-run faces: slot 2 is wider per glyph. If measuring ignored the runs, all three
+    // glyphs would still fit on one line.
+    {
+        const char* runs_text = "甲甲乙";
+        blk_t run_block = {.offset = 0, .len = 9, .image = -1, .run_first = 0, .run_count = 2};
+        html_run_t run_spans[] = {{0, 3, 1}, {3, 6, 2}};
+        EpdRect run_box = {40, 0, 80, 60};
+        const int old_cjk = test_cjk_advance;
+        test_cjk_advance = 10;
+        test_slot_ready_mask = 0x7u;
+        // 槽 2 单字 75px：一行 80px 只放得下一个，槽 1 的 10px 三个都放得下。
+        // Slot 2 is 75 px per glyph: only one fits an 80 px line, whereas all three 10 px
+        // glyphs of slot 1 fit easily.
+        test_slot_advance[2] = 65;
+        book_layout_set_spacing(150, 0);
+        book_layout_set_chapter_lead(0, 0);
+        book_layout_set_first_line_indent(0);
+        book_layout_set_typography(0);
+        book_layout_set_runs(NULL, 0);
+        capture_lines = true; captured_count = 0;
+        assert(book_layout_build_blocks(runs_text, 9, &run_block, 1, run_box, 10));
+        for (size_t page = 0; page < book_layout_page_count(); ++page)
+            book_layout_draw_page(&fb, page, run_box, 10);
+        assert(captured_count == 1 && !strcmp(captured[0], "甲甲乙"));
+        captured_count = 0;
+        book_layout_set_runs(run_spans, 2);
+        assert(book_layout_build_blocks(runs_text, 9, &run_block, 1, run_box, 10));
+        for (size_t page = 0; page < book_layout_page_count(); ++page)
+            book_layout_draw_page(&fb, page, run_box, 10);
+        assert(captured_count == 3 && !strcmp(captured[0], "甲") &&
+               !strcmp(captured[1], "甲") && !strcmp(captured[2], "乙"));
+        capture_lines = false;
+        book_layout_set_runs(NULL, 0);
+        test_slot_ready_mask = 1u;
+        test_slot_advance[2] = 0;
+        test_cjk_advance = old_cjk;
+    }
 
     // 多图同页、比例缩小与未知尺寸回退，正文前后不遗漏。
     // Cover multiple images, aspect-fit and unknown-size fallback without losing adjacent prose.
