@@ -7,20 +7,30 @@
 #include "ui_wifi_qr.h"
 #include <string.h>
 #include "qrcode.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 
-#define QR_SIDE_MAX 57
-static uint8_t s_modules[(QR_SIDE_MAX * QR_SIDE_MAX + 7) / 8];
+// 绑定信封约 500-700 字节，需要 40 版二维码；点阵放 PSRAM，避免占内部 RAM。
+// The bind envelope is ~500-700 bytes and needs version 40; keep the bitmap in PSRAM.
+#define QR_SIDE_MAX 177
+static uint8_t* s_modules;
 static int s_side;
+
+static bool modules_ensure(void) {
+    if (!s_modules)
+        s_modules = heap_caps_calloc((QR_SIDE_MAX * QR_SIDE_MAX + 7) / 8, 1,
+                                     MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return s_modules != NULL;
+}
 
 void ui_wifi_qr_clear(void) {
     s_side = 0;
-    memset(s_modules, 0, sizeof(s_modules));
+    if (s_modules) memset(s_modules, 0, (QR_SIDE_MAX * QR_SIDE_MAX + 7) / 8);
 }
 
 static void cache_qr(esp_qrcode_handle_t qr) {
     int side = esp_qrcode_get_size(qr);
-    if (side > QR_SIDE_MAX) return;
+    if (side > QR_SIDE_MAX || !modules_ensure()) return;
     s_side = side;
     for (int y = 0; y < side; ++y)
         for (int x = 0; x < side; ++x) {
@@ -40,6 +50,7 @@ static char* escape_field(char* out, const char* in) {
 static bool prepare_payload(const char* payload) {
     esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT();
     cfg.display_func = cache_qr;
+    cfg.max_qrcode_version = 40;
     // 组件默认会打印载荷；编码期间保留错误日志，不输出连接口令。
     // The component logs payloads by default; retain errors without printing the connection password.
     esp_log_level_t previous = esp_log_level_get("QRCODE");
@@ -91,9 +102,21 @@ bool ui_wifi_qr_prepare_url(const char* url) {
     return prepare_payload(url);
 }
 
+bool ui_wifi_qr_prepare_text(const char* text) {
+    ui_wifi_qr_clear();
+    if (!text) return false;
+    size_t length = strnlen(text, 1000);
+    if (!length || length >= 1000) return false;
+    for (size_t i = 0; i < length; ++i) {
+        unsigned char c = (unsigned char)text[i];
+        if (c < 0x20 || c > 0x7e) return false;
+    }
+    return prepare_payload(text);
+}
+
 void ui_wifi_qr_draw(uint8_t* fb, EpdRect area) {
     epd_fill_rect(area, 0xff, fb);
-    if (!s_side) return;
+    if (!s_side || !s_modules) return;
     int width = area.width < area.height ? area.width : area.height;
     int scale = width / (s_side + 8);
     if (scale < 1) return;

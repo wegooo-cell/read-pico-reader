@@ -57,6 +57,9 @@
 
 ## 未发布 · Pico
 
+- 新增「导入图书 → 云同步」入口：未绑定时显示 AES-256-GCM 绑定二维码；绑定后显示云端图书列表，点一本下载一本（不再自动全量下载），支持刷新列表与解绑；每行书名下显示下载进度条，并标明「下载失败 / 校验失败 / 已导入」。令牌只保存在 TF 卡并在过期时用签名静默换新；下载完成并通过 EPUB 校验后才上架；未配置 WiFi 或时间未同步时给出明确提示，离页会取消并等待后台任务退出。内建字体重新生成，补充「曈」等云同步界面用字。
+  Add an "import books → cloud sync" entry: an AES-256-GCM bind QR while unbound, then the cloud book list with per-book download (no automatic full sync) plus refresh and unbind. Tokens stay on the SD card, and a book reaches the shelf only after download plus EPUB verification. Clear messages cover missing WiFi or unsynced time, and leaving the page cancels and joins the worker.
+
 - 系统与阅读字体列表由24款扩展到128款，只增加名称与路径索引，按需加载字库；保留两处选择器的分页和大字号布局。
   Expand system and reading font catalogues from24 to128 entries using metadata only, retaining on-demand font loading, paging and large-text layouts.
 

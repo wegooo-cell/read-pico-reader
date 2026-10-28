@@ -13,6 +13,8 @@
 bool ui_wifi_qr_prepare(const char* ssid, const char* password);
 /// 预编码设备HTTP IPv4网址；失败清空旧码。/ Pre-encode the device HTTP IPv4 URL; failure clears old code.
 bool ui_wifi_qr_prepare_url(const char* url);
+/// 预编码任意 ASCII 文本（绑定信封）；失败清空旧码。/ Pre-encode arbitrary ASCII text (bind envelope); failure clears old code.
+bool ui_wifi_qr_prepare_text(const char* text);
 /// 丢弃缓存，供网络停止或切换时调用。/ Discard cached code when networking stops or changes.
 void ui_wifi_qr_clear(void);
 /// 纯绘制，整数缩放且保留四模块静区。/ Paint only, with integer scaling and a four-module quiet zone.
