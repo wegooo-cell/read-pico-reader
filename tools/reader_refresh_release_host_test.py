@@ -30,8 +30,9 @@ enum {MODE_DU,MODE_GL16,MODE_GC16,APP_PAGE_REFRESH_MODE=MODE_GL16};
 #define UI_BAR_TOP (UI_LOCK_HEIGHT-24-UI_BAR_H)
 #define READER_FULLSCREEN_PROGRESS_TOP (UI_LOCK_HEIGHT-12)
 static int E0470_WAVEFORM,E0470_FULL_WAVEFORM,E0470_FOLLOW_WAVEFORM;
-static int reader_waveform;
+static int reader_waveform,soft_turn_waveform;
 static const int *display_main_gray_waveform(void){return &reader_waveform;}
+static const int *display_reader_soft_turn_waveform(void){return &soft_turn_waveform;}
 static bool s_reader_clock_pending,s_input_settle,s_shelf_feedback_pending,s_cover_batch_present_pending,s_shelf_page_pending;
 static bool s_reader_image_refresh_pending,s_reader_cleanup,s_reader_turn_pending,s_water_turn_pending,s_clear_confirm,s_reader_fullscreen,s_reader_footer_pending,s_reader_text_frame;
 static bool s_toolbar;
@@ -132,14 +133,13 @@ int main(void){
  present(&ctx,APP_REDRAW_DONE);assert(!calls&&s_turns==7&&s_presented_view==SHELF);
  ctx.request_app=true;present(&ctx,APP_REDRAW_PAGE);
  assert(!calls&&s_turns==7&&s_presented_view==SHELF);ctx.request_app=false;
- // 正文和真实页脚几何合并，一次原灰阶差分；保留沉浸/非沉浸的顶部边界。
- // Fuse actual body/footer geometry in one original gray difference, preserving both top insets.
+ // 普通翻页整屏推白：一次柔和差分覆盖整屏白底（含页脚），黑字/中灰保持。
+ // Ordinary turns whiten the whole panel in one soft difference, footer included.
  for(int full=0;full<2;++full)for(int hide_status=0;hide_status<2;++hide_status){
   reset();s_reader_fullscreen=full;immersive=hide_status;s_reader_footer_pending=!full;s_area=reader_area();
   assert(present(&ctx,APP_REDRAW_AREA));
-  assert(calls==1&&selected==13&&modes[0]==MODE_GL16&&waves[0]==&reader_waveform&&s_reader_text_frame);
-  same_area(areas[0],(EpdRect){0,full?(hide_status?0:80):160,684,
-             (full?1216:1192)-(full?(hide_status?0:80):160)});
+  assert(calls==1&&selected==13&&modes[0]==MODE_GL16&&waves[0]==&soft_turn_waveform&&s_reader_text_frame);
+  same_area(areas[0],(EpdRect){0,0,684,1216});
   assert(!s_reader_footer_pending&&!s_reader_cleanup);
  }
  for(int full=0;full<2;++full){
@@ -153,21 +153,23 @@ int main(void){
  reset();s_reader_turn_pending=false;present(&ctx,APP_REDRAW_PAGE);assert(calls==1&&selected==13&&rendered==1);
  reset();fail=1;s_reader_footer_pending=false;
  present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==13&&!s_reader_text_frame);
- // 非翻页局部、背景和图片继续走既有分支，不误合并到文字波形。
- // Other local, background and image updates retain their paths rather than using the text waveform.
+ // 非翻页局部、背景和图片同样只推真实差分；未变化像素不驱动，DU 继续用跟随表。
+ // Other local, background and image updates also present true differences only;
+ // unchanged pixels are not driven and DU keeps the follow table.
  reset();s_reader_turn_pending=false;s_reader_footer_pending=false;
- present(&ctx,APP_REDRAW_AREA);assert(calls==2&&selected==13&&waves[0]==&E0470_WAVEFORM);
+ present(&ctx,APP_REDRAW_AREA);assert(calls==2&&selected==13&&waves[0]==&soft_turn_waveform&&modes[0]==MODE_GL16);
  same_area(areas[0],reader_area());same_area(areas[1],reader_fullscreen_progress_area());
  reset();background=true;s_reader_turn_pending=false;s_reader_footer_pending=false;
- present(&ctx,APP_REDRAW_AREA);assert(calls==2&&waves[0]==&E0470_WAVEFORM&&!s_reader_text_frame);
+ present(&ctx,APP_REDRAW_AREA);assert(calls==2&&waves[0]==&soft_turn_waveform&&!s_reader_text_frame);
  reset();s_reader_turn_pending=false;s_mode=MODE_DU;s_reader_footer_pending=false;
- present(&ctx,APP_REDRAW_AREA);assert(calls==2&&modes[0]==MODE_DU&&waves[0]==&E0470_WAVEFORM);
+ present(&ctx,APP_REDRAW_AREA);assert(calls==2&&modes[0]==MODE_DU&&waves[0]==&E0470_FOLLOW_WAVEFORM);
  reset();s_water_turn_pending=true;s_reader_footer_pending=false;
  present(&ctx,APP_REDRAW_AREA);assert(selected==13&&calls==2&&!s_water_turn_pending);
  reset();images=1;s_reader_image_refresh_pending=true;s_reader_footer_pending=false;
- present(&ctx,APP_REDRAW_AREA);assert(selected==13&&calls==2&&!s_reader_text_frame);
+ present(&ctx,APP_REDRAW_AREA);assert(selected==13&&calls==1&&waves[0]==&soft_turn_waveform&&!s_reader_text_frame);
+ same_area(areas[0],(EpdRect){0,0,684,1216});
  reset();images=1;s_reader_image_refresh_pending=true;s_reader_footer_pending=false;tick=1;
- present(&ctx,APP_REDRAW_AREA);assert(selected==13&&calls==2&&!s_reader_text_frame);tick=0;
+ present(&ctx,APP_REDRAW_AREA);assert(selected==13&&calls==1&&waves[0]==&soft_turn_waveform&&!s_reader_text_frame);tick=0;
  reset();s_reader_clock_pending=true;s_reader_fullscreen=false;s_reader_turn_pending=false;
  s_reader_clock_painted_minute=321;
  present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==13&&s_reader_clock_minute==321&&!s_reader_clock_pending);

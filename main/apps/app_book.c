@@ -3700,7 +3700,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         if (redraw==APP_REDRAW_AREA && reader_status_visible()) {
             // 时钟单独短刷，不准备插图、不预排正文，也不累计正文全刷次数。
             // Update status alone, without image preparation, pagination, or reader cleanup counters.
-            enum EpdDrawError err=update_display_area_diff_with(ctx->hl,&E0470_WAVEFORM,MODE_GL16,reader_status_area());
+            enum EpdDrawError err=update_display_area_diff_with(ctx->hl,display_main_gray_waveform(),MODE_GL16,reader_status_area());
             if (err==EPD_DRAW_SUCCESS) s_reader_clock_minute=s_reader_clock_painted_minute;
             guard_draw_result(ctx->hl,err);
             return true;
@@ -3753,21 +3753,23 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
                                          (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT});
     else
     if (image_gray_refresh && redraw == APP_REDRAW_AREA && !s_reader_cleanup && s_presented_view == (int)READING) {
-        // 灰阶只驱动正文，避免每张插图都把整屏先清白再闪回。
-        // Drive the grayscale body from the current frame instead of clearing the whole screen to white.
-        err = app_settings_reader_turn_effect() == 1
-            ? update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, reader_area())
-            : update_display_area_with(ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16, reader_area());
-        if (err == EPD_DRAW_SUCCESS && s_reader_footer_pending)
-            err = update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, progress_rect());
-        if (err == EPD_DRAW_SUCCESS && s_reader_fullscreen)
-            err = update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16,
-                                                reader_fullscreen_progress_area());
+        // 图文页也走真实差分：只驱动变化的像素，未变黑区保持；整屏白底末尾统一补擦白。
+        // Text-plus-image pages use true differences too: only changed pixels drive, unchanged
+        // black holds, and every white target on the whole panel gets the trailing erase.
+        err = update_display_area_diff_with(ctx->hl, display_reader_soft_turn_waveform(), MODE_GL16,
+                                            (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT});
+        // 整屏差分已含页脚与全屏进度，不再追加第二次局部输出。
+        // The whole-panel difference already covers the footer and full-screen progress.
     }
-    else if (image_gray_refresh) err = app_settings_reader_turn_effect() == 1 &&
-        redraw != APP_REDRAW_FULL && !s_reader_cleanup
-        ? update_display_mode_diff(ctx->hl, MODE_GL16)
-        : update_display_with(ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16);
+    else if (image_gray_refresh) {
+        // 图片页整页重绘同样只推变化像素；KEY2 等显式全刷仍走完整 GC16。
+        // Whole-page image repaints also drive changed pixels only; explicit full refreshes still run
+        // the complete GC16.
+        err = redraw != APP_REDRAW_FULL && !s_reader_cleanup
+            ? update_display_area_diff_with(ctx->hl, display_reader_soft_turn_waveform(), MODE_GL16,
+                                            (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT})
+            : update_display_with(ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16);
+    }
     else if (s_reader_cleanup && redraw != APP_REDRAW_FULL)
         // 周期清理使用完整原厂灰阶定稿，保留饱和驱动；一次输出，不叠加擦白或文字补刷。
         // Periodic cleanup retains the complete vendor settling/saturation phases in one output, without erase or text replay.
@@ -3788,8 +3790,9 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         // 翻页动画与页脚刷新独立：全屏没有页脚，仍使用用户选择的水波纹。
         // The turn effect is independent of the footer: full-screen turns still use the selected water effect.
         EpdRect turn_area=s_area;
-        // 普通文字保留校准GL16完整擦除，正文与进度共用一次输出；图片、水波纹和清屏保留独立规则。
-        // Retain calibrated GL16 erasure for ordinary text and present body/progress once; images, ripple and cleanup retain their own paths.
+        // 普通翻页只用真实差分：正文、页脚和图片页共用柔和等灰表，未变化像素不驱动。
+        // Ordinary turns use true differences only: body, footer and image pages share the soft
+        // equal-hold table, and unchanged pixels are not driven.
         const bool fused_footer=s_reader_turn_pending&&!s_water_turn_pending&&s_mode==MODE_GL16;
         if(fused_footer) {
             EpdRect footer=s_reader_fullscreen?reader_fullscreen_progress_area():progress_rect();
@@ -3807,14 +3810,25 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
             // 普通翻页与全屏阅读都只驱动变化像素；设置面板等局部绘制保留原路径。
             // Ordinary turns and full-screen reading drive changed pixels only; other local UI keeps its path.
             : (s_reader_fullscreen || s_reader_turn_pending) && s_mode == MODE_GL16
-                ? update_display_area_diff_with(ctx->hl,
-                    s_reader_turn_pending ? display_main_gray_waveform() : &E0470_WAVEFORM, s_mode, turn_area)
-                : update_display_area_with(ctx->hl, &E0470_WAVEFORM, s_mode, s_area);
+                // 普通翻页用柔和差分：厂商 GL16 原序、中灰对角线保持，末尾四相同相整理对比度——
+                // 整屏目标白的像素擦白、目标黑的像素压黑，白底干净且黑字不发灰。
+                // Ordinary turns use soft differences: vendor GL16 order with equal midgrays
+                // held, then four contrast phases that whiten every white target and darken
+                // every black target across the panel, keeping blanks clean and text inky.
+                ? update_display_area_diff_with(ctx->hl, display_reader_soft_turn_waveform(),
+                    s_mode, s_reader_turn_pending
+                        ? (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT} : turn_area)
+                // 其余局部正文刷新（图片页之后、换章首帧、灰阶回落）也只驱动变化像素。
+                // Other local body updates (after an image page, the first frame of a new chapter,
+                // gray fallbacks) also drive changed pixels only.
+                : update_display_area_diff_with(ctx->hl,
+                    s_mode == MODE_DU ? &E0470_FOLLOW_WAVEFORM : display_reader_soft_turn_waveform(),
+                    s_mode, s_area);
         if (s_water_turn_pending) e0470_page_turn_set_tick_us(prior_tick);
         if (s_reader_fullscreen && !fused_footer && err == EPD_DRAW_SUCCESS) {
             // 百分比不变时差分直接跳过；变化时只驱动最底部的少量像素。
             // Skip unchanged percentages; otherwise update only the small bottom strip.
-            err = update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16,
+            err = update_display_area_diff_with(ctx->hl, display_main_gray_waveform(), MODE_GL16,
                                                 reader_fullscreen_progress_area());
         }
         if (s_reader_footer_pending && !fused_footer) {

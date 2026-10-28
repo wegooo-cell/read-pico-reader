@@ -126,6 +126,43 @@ int main(void) {
     }
     assert(held==16&&edge_runs>=10);
     puts("PASS: reader ripple holds all 16 unchanged grays and reduces at least ten gray-edge dark runs; existing text profile, targets and 37 phases unchanged");
+    // 普通翻页柔和档：厂商 GL16 原序，仅黑→黑置零，四相对比度插在末尾定稿保持之前。
+    // Soft ordinary turn: vendor GL16 phases, only black-on-black zeroed, and four contrast
+    // phases inserted before the vendor's trailing settle holds.
+    const EpdWaveform* soft_turn = display_reader_soft_turn_waveform();
+    assert(soft_turn == display_reader_soft_turn_waveform() && soft_turn != &E0470_WAVEFORM);
+    const EpdWaveformPhases* st = e0470_waveform_phases(soft_turn, MODE_GL16);
+    const EpdWaveformPhases* vendor = e0470_waveform_phases(&E0470_WAVEFORM, MODE_GL16);
+    assert(vendor && st && !st->phase_times && !vendor->phase_times);
+    assert(st->phases == vendor->phases + 4);
+    const int drive = vendor->phases - 3;
+    unsigned equal_gray_refreshes = 0;
+    for (int from = 0; from < 16; ++from)
+        for (int to = 0; to < 16; ++to)
+            for (int f = 0; f < drive; ++f) {
+                const int a = e0470_phase_action(vendor, f, to, from);
+                const int b = e0470_phase_action(st, f, to, from);
+                if (to == 0 && from == 0) {
+                    assert(b == 0);
+                    continue;
+                }
+                assert(b == a);
+                if (to == from && a != 0) ++equal_gray_refreshes;
+            }
+    assert(equal_gray_refreshes > 0);
+    for (int f = drive; f < drive + 4; ++f)
+        for (int from = 0; from < 16; ++from)
+            for (int to = 0; to < 16; ++to)
+                assert(e0470_phase_action(st, f, to, from) ==
+                       (to == 15 ? 2 : (to == 0 ? 1 : 0)));
+    for (int i = 0; i < 3; ++i)
+        for (int from = 0; from < 16; ++from)
+            for (int to = 0; to < 16; ++to) {
+                assert(e0470_phase_action(st, drive + 4 + i, to, from) ==
+                       e0470_phase_action(vendor, drive + i, to, from));
+                assert(e0470_phase_action(st, drive + 4 + i, to, from) == 0);
+            }
+    puts("PASS: soft ordinary turn zeroes only black-on-black, keeps the vendor equal-gray refresh pulses for antialiased edges, inserts four contrast phases before the vendor's three settle holds, and skips driving unchanged black");
     puts("PASS: all 256 pairs, endpoints, holds, first/final actions, pulse counts, 37-frame timing and original LUT retained; optical validation pending");
     return 0;
 }
