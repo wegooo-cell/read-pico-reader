@@ -23,6 +23,8 @@ jobs:
         shell: bash
         run: |
           python3 tools/license_notices_host_test.py
+          python3 tools/tls_bundle_host_test.py
+          python3 tools/ota_tls_host_test.py
           python3 tools/pr59_driver_baseline_host_test.py
           python3 tools/board_layer_host_test.py
           python3 tools/board_selection_host_test.py

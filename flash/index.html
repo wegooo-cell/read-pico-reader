@@ -5,6 +5,12 @@
   <meta name="theme-color" content="#ffffff">
   <meta name="description" content="kiikoread：为墨水屏打造的阅读固件。预览阅读界面、了解功能，在线刷机或下载 TF 卡升级 Bin。">
   <title>kiikoread · 把阅读留给自己</title>
+  <script>
+    if (location.hostname === 'wegooo-cell.github.io' &&
+        /^\/read-pico-reader\/(?:index\.html)?$/.test(location.pathname)) {
+      location.replace('https://kiikoread.com/' + location.search + location.hash);
+    }
+  </script>
   <link rel="stylesheet" href="./site.css?v=dual-device-thanks-mobile-20261021">
   <script src="./installer-bridge.js"></script>
   <script src="./site.js?v=dual-device-20261024" defer></script>
