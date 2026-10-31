@@ -122,26 +122,27 @@ static bool trailing_whitespace(const uint8_t* data, size_t len) {
     return true;
 }
 
+// 尾部容忍：空白（历史行为）、短打包器标记，以及 Metalio 用户书中已知的 [*AT*]+32 hex。
+// Trailing tolerance: whitespace (existing), a short packer tag, and the known Metalio
+// [*AT*]+32-hex marker. Central-directory/entry bounds and CRC checks are unchanged.
+#define TRAILING_PADDING_MAX 64U
+static bool trailing_padding(const uint8_t* data, size_t len) {
+    if (trailing_whitespace(data, len)) return true;
+    if (len <= TRAILING_PADDING_MAX) return true;
 #if KIIKO_BOARD_METALIO47
-// 用户提供的EPUB在EOCD后附加[*AT*]+32位十六进制标记；仅兼容这一有界格式。
-// The supplied EPUB appends [*AT*]+32 hex digits after EOCD; accept only this bounded format.
-// 中央目录/条目范围、压缩方式和CRC仍完整校验，不接受任意尾部二进制内容。
-// Central/local bounds, compression and CRC checks remain; arbitrary binary trailers are rejected.
-static bool trailing_metadata(const uint8_t* data,size_t len) {
-    if(trailing_whitespace(data,len)) return true;
-    if(len>TRAILING_WHITESPACE_MAX) return false;
-    size_t at=0;
-    while(at<len && (data[at]==' '||data[at]=='\t'||data[at]=='\r'||data[at]=='\n')) ++at;
-    if(len-at<38 || memcmp(data+at,"[*AT*]",6)) return false;
-    for(size_t i=at+6;i<at+38;i++) {
-        uint8_t c=data[i];
-        if(!((c>='0'&&c<='9')||(c>='a'&&c<='f')||(c>='A'&&c<='F'))) return false;
+    if (len > TRAILING_WHITESPACE_MAX) return false;
+    size_t at = 0;
+    while (at < len && (data[at] == ' ' || data[at] == '\t' || data[at] == '\r' || data[at] == '\n')) ++at;
+    if (len - at < 38 || memcmp(data + at, "[*AT*]", 6)) return false;
+    for (size_t i = at + 6; i < at + 38; i++) {
+        uint8_t c = data[i];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) return false;
     }
-    return trailing_whitespace(data+at+38,len-at-38);
-}
-
+    return trailing_whitespace(data + at + 38, len - at - 38);
 #else
+    return false;
 #endif
+}
 void zip_close(zip_reader_t* z) {
     if (!z) return;
 #if KIIKO_BOARD_METALIO47
@@ -207,11 +208,7 @@ esp_err_t zip_open(const char* path, zip_reader_t** out) {
         if (u32(tail + end) == UINT32_C(0x06054b50)) {
             size_t declared_end = end + 22U + u16(tail + end + 20);
             if (declared_end <= tail_len &&
-#if KIIKO_BOARD_METALIO47
-                trailing_metadata(tail + declared_end, tail_len - declared_end)) break;
-#else
-                trailing_whitespace(tail + declared_end, tail_len - declared_end)) break;
-#endif
+                trailing_padding(tail + declared_end, tail_len - declared_end)) break;
         }
         if (!end) goto fail;
         --end;
