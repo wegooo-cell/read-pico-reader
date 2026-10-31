@@ -1117,11 +1117,7 @@ static void draw_shelf_furniture(uint8_t* fb) {
             EpdRect acrylic = {20, top + 136, 644, 90};
             draw_shelf_guard(fb, acrylic, row);
         } else if (style == 6) {
-            // 液态玻璃底板加深到与封面下沿重叠 72px：玻璃要在有内容的画面上才有可见的折射，
-            // 薄薄一条压在空白上等于没有折射。
-            // The liquid-glass base plate reaches 72px into the covers: refraction only shows over
-            // real content, and a thin strip over blank space reads as no refraction at all.
-            draw_shelf_guard(fb, (EpdRect){20, top + 142, 644, 88}, row);
+            draw_shelf_guard(fb, (EpdRect){20, top + 188, 644, 42}, row);
         }
     }
 }

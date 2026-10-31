@@ -1,9 +1,12 @@
 # 版本变更 / Changelog
 
-## 未发布 / Unreleased — 最新功能界面 / Latest interface
+## Pico 0.3.3-rc103 / Metalio S31 0.3.3-rc108 — 2026-10-31
 
-- 合入PR55–58：Pico普通与图文翻页采用全像素GL16，保留手动/周期GC16；两板液态玻璃书架加深折射，支持静态WebP封面、插图及TF图片。Pico渐进式JPEG按内存预算使用lowzag完整解码并修复插图缩放复位，S31保留原生JPEG硬解与libjpeg路径。
-  Merge PR55–58: full-pixel GL16 for Pico ordinary/image turns with manual/periodic GC16 retained; deepen liquid-shelf refraction and add static WebP covers/illustrations/TF images on both boards. Pico gains budgeted full progressive JPEG via lowzag and stable image zoom; S31 retains native hardware/libjpeg decoding.
+- 保留正式版HTTPS升级兼容性：两板启用交叉签名证书链验证，构建时核对SDK回调；真实证书日期、主机名和签名校验保持有效。官网刷机入口仍仅kiikoread.com。
+  Retain published HTTPS update compatibility with cross-signed chain verification and checked SDK callbacks on both boards; preserve real certificate dates, hostname and signature validation. Web flashing remains at kiikoread.com.
+
+- 合入PR55–58：Pico普通与图文翻页采用全像素GL16，保留手动/周期GC16；两板液态玻璃书架按用户要求恢复此前底板与折射样式，支持静态WebP封面、插图及TF图片。Pico渐进式JPEG按内存预算使用lowzag完整解码并修复插图缩放复位，S31保留原生JPEG硬解与libjpeg路径。
+  Merge PR55–58: full-pixel GL16 for Pico ordinary/image turns with manual/periodic GC16 retained; restore the prior liquid-shelf plate/refraction style as requested and add static WebP covers/illustrations/TF images on both boards. Pico gains budgeted full progressive JPEG via lowzag and stable image zoom; S31 retains native hardware/libjpeg decoding.
 
 - 合入PR59双板统一源码，底层驱动、供电/睡眠与阅读波形按PR原实现；接入最新功能界面，Pico/S31各用独立后端、配置和产物。
   Merge PR59's unified tree with its original drivers, power/sleep and reader waveforms, integrating the latest interface with isolated board backends/configs/packages.

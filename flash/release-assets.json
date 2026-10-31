@@ -1,39 +1,49 @@
 {
   "schema": 1,
-  "tag": "v0.3.3-rc102",
+  "tag": "v0.3.3-rc103",
   "files": {
     "bootloader.bin": {
-      "asset": "bootloader-0.3.3-rc102.bin",
+      "asset": "bootloader-0.3.3-rc103.bin",
       "size": 21232,
-      "sha256": "8206d83f6d1d5f4969572bfb89eab5d1775fe31117fb6b1f76cbbd989b5f66cb"
+      "sha256": "80d6c09e07c52c20b5ba35aab2210b32835a740ac2054291b8f9a32e5089b8e2"
     },
     "partitions.bin": {
-      "asset": "partitions-0.3.3-rc102.bin",
+      "asset": "partitions-0.3.3-rc103.bin",
       "size": 3072,
       "sha256": "edba9d92e5fc51c706c12f4b4a5d5d23728ba8fb0fbc00be654f1eccef404bda"
     },
     "firmware.bin": {
-      "asset": "kiikoread-0.3.3-rc102.bin",
-      "size": 3467584,
-      "sha256": "ae141d72793eaf319d64bc7b4f8593494ff4aad1c52d63ffb27ce461101a3c03"
+      "asset": "kiikoread-0.3.3-rc103.bin",
+      "size": 3648864,
+      "sha256": "08ce0928d78626116fa27019015e5506a35c4edaf717e66720e8c38e3e534edf"
     },
     "ota_data_initial.bin": {
-      "asset": "ota-data-0.3.3-rc102.bin",
+      "asset": "ota-data-0.3.3-rc103.bin",
       "size": 8192,
       "sha256": "7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f"
     },
     "Pico-update.bin": {
-      "asset": "kiikoread-0.3.3-rc102.bin",
-      "size": 3467584,
-      "sha256": "ae141d72793eaf319d64bc7b4f8593494ff4aad1c52d63ffb27ce461101a3c03"
+      "asset": "kiikoread-0.3.3-rc103.bin",
+      "size": 3648864,
+      "sha256": "08ce0928d78626116fa27019015e5506a35c4edaf717e66720e8c38e3e534edf"
     },
-    "Pico-update-0.3.3-rc102.bin": {
-      "asset": "kiikoread-0.3.3-rc102.bin",
-      "size": 3467584,
-      "sha256": "ae141d72793eaf319d64bc7b4f8593494ff4aad1c52d63ffb27ce461101a3c03"
+    "Pico-update-0.3.3-rc103.bin": {
+      "asset": "kiikoread-0.3.3-rc103.bin",
+      "size": 3648864,
+      "sha256": "08ce0928d78626116fa27019015e5506a35c4edaf717e66720e8c38e3e534edf"
     }
   },
   "historical": [
+    {
+      "tag": "v0.3.3-rc102",
+      "files": {
+        "Pico-update-0.3.3-rc102.bin": {
+          "asset": "kiikoread-0.3.3-rc102.bin",
+          "size": 3467584,
+          "sha256": "ae141d72793eaf319d64bc7b4f8593494ff4aad1c52d63ffb27ce461101a3c03"
+        }
+      }
+    },
     {
       "tag": "v0.3.3-rc90",
       "files": {

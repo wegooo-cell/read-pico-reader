@@ -5,7 +5,7 @@
   "project": "Read_Pico",
   "image_chip_id": 9,
   "bootloader_offset": 0,
-  "version": "0.3.3-rc102",
+  "version": "0.3.3-rc103",
   "sdkconfig": "sdkconfig.defaults",
   "partitions": "partitions.csv",
   "settings_namespace": "read_pico",

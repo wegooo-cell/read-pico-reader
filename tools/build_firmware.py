@@ -210,7 +210,16 @@ def build_one(board, args):
     if args.dry_run:
         print(json.dumps({'board': board, 'sdk': str(sdk), 'experimental_early_power_key':early_key, 'command': command}, ensure_ascii=False))
         return None
+    # Retain the published HTTPS trust behavior on both boards, including real certificate dates.
+    from prepare_tls_bundle import prepare
+    prepare(sdk)
     materialize(ROOT, source, board)
+    path = work / 'sdkconfig'
+    if path.exists():
+        key = 'CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY'
+        lines = [line for line in path.read_text().splitlines()
+                 if not line.startswith(key + '=') and line != '# ' + key + ' is not set']
+        path.write_text('\n'.join(lines + [key + '=y']) + '\n')
     if board=='metalio47':
         # Only a private feature flag; SDK RTC reserve sizes/ABI remain unchanged.
         path=work/'sdkconfig'

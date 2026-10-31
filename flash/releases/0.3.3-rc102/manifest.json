@@ -1,0 +1,49 @@
+{
+  "name": "kiikoread",
+  "version": "0.3.3-rc102",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "improv": false,
+      "parts": [
+        {
+          "path": "bootloader.bin",
+          "offset": 0,
+          "size": 21232,
+          "sha256": "8206d83f6d1d5f4969572bfb89eab5d1775fe31117fb6b1f76cbbd989b5f66cb"
+        },
+        {
+          "path": "partitions.bin",
+          "offset": 32768,
+          "size": 3072,
+          "sha256": "edba9d92e5fc51c706c12f4b4a5d5d23728ba8fb0fbc00be654f1eccef404bda"
+        },
+        {
+          "path": "../../Pico-update-0.3.3-rc102.bin",
+          "offset": 65536,
+          "size": 3467584,
+          "sha256": "ae141d72793eaf319d64bc7b4f8593494ff4aad1c52d63ffb27ce461101a3c03"
+        },
+        {
+          "path": "ota_data_initial.bin",
+          "offset": 13697024,
+          "size": 8192,
+          "sha256": "7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f"
+        }
+      ]
+    }
+  ],
+  "pico_ota": {
+    "layout": "pico-dual-4m-v1",
+    "base_version": "0.3.3-rc102",
+    "minimum_base_version": "0.3.3-rc72",
+    "online_ota_base_version": "0.3.3-rc79",
+    "rollback": true
+  },
+  "updated_at": "2026-10-29T11:21:13+08:00",
+  "previous_version": "0.3.3-rc101",
+  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc102/kiikoread-0.3.3-rc102-TF.zip",
+  "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc102/kiikoread-0.3.3-rc102-USB.zip",
+  "release_source_commit": "bf742b16ab9d481709ac3390fd18164057a2925c"
+}

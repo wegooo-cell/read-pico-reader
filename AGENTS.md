@@ -10,6 +10,15 @@ Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Takin
 
 ## 当前工作：双板型本地整合 / Current work: local multi-board integration
 
+用户2026-10-31再次明确：网页刷机只在kiikoread.com，保留原有GitHub首页跳转；GitHub Pages仍仅承担既有默认OTA来源，不新增独立备用刷机入口。
+User2026-10-31 reconfirms kiikoread.com as the only web-flashing entry; retain the existing GitHub homepage redirect and the existing Pages OTA origin.
+
+用户2026-10-31确认将当前书架回退版推送在线刷机：正式发布Pico rc103与S31 rc108，同步GitHub Release、官网与Pages OTA，保留Pico rc102/S31 rc107原版刷机与下载入口。
+User2026-10-31 approves online publication of the shelf rollback build: release Pico rc103 and S31 rc108 to GitHub Releases, the official flasher and Pages OTA, retaining original Pico rc102/S31 rc107 install/download entries.
+
+用户2026-10-31要求液态玻璃书架恢复PR56前样式：Pico与S31底板/折射参数回退，其余PR55/57/58与S31底层保留；先做本地测试包。
+User2026-10-31 restores the pre-PR56 liquid shelf on Pico/S31, retaining PR55/57/58 and native S31 drivers; deliver a local test build.
+
 用户2026-10-31批准合并PR55–58：Pico阅读按PR55更新，S31硬件/阅读波形仍以PR59为准；图片与书架功能适配双板源码。
 User2026-10-31 approves PR55–58: adopt PR55 for Pico reader timing, retain PR59 S31 hardware/waveforms, and adapt shared image/shelf features to both boards.
 

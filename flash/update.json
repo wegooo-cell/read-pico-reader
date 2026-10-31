@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "version": "0.3.3-rc102",
+  "version": "0.3.3-rc103",
   "project": "Read_Pico",
   "board": "RDP-G01-W",
   "layout": "pico-dual-4m-v1",
   "minimum_base_version": "0.3.3-rc72",
-  "url": "https://wegooo-cell.github.io/read-pico-reader/Pico-update-0.3.3-rc102.bin",
-  "size": 3467584,
-  "sha256": "ae141d72793eaf319d64bc7b4f8593494ff4aad1c52d63ffb27ce461101a3c03",
-  "notes": "1. 书架切换补8相、其他主页面补6相擦白\n2. 改善列表和阅读水波纹残影\n3. 液态玻璃书架、英文断词对齐\n4. TXT分卷目录、快速选卷\n5. 文件看图可设壁纸或透明书封\n保留设置，rc101可回退。"
+  "url": "https://wegooo-cell.github.io/read-pico-reader/Pico-update-0.3.3-rc103.bin",
+  "size": 3648864,
+  "sha256": "08ce0928d78626116fa27019015e5506a35c4edaf717e66720e8c38e3e534edf",
+  "notes": "1. 普通与图文翻页统一全像素GL16\n2. 支持WebP及渐进式JPEG，修复图片缩放\n3. 更新引导、语言、文件和书架管理\n4. 液态玻璃书架恢复此前样式\n保留设置，rc102原版可回退。"
 }
