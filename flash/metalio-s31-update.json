@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "version": "0.3.3-rc107",
+  "version": "0.3.3-rc108",
   "project": "Kiikoread_Metalio_S31",
   "board": "Metalio-EINK4-Plus-S31",
   "layout": "metalio-s31-dual-5m-v1",
   "minimum_base_version": "0.3.3-rc98",
-  "url": "https://wegooo-cell.github.io/read-pico-reader/Metalio-S31-update-0.3.3-rc107.bin",
-  "size": 4822512,
-  "sha256": "f6246ad953b988e40578e83f59078fc590f27dd3439685d2cc8b8bd7492934bd",
-  "notes": "1. 主页快刷、水波纹和列表背景维护优化\n2. 阅读刷新调度与整页白底一致性改进\n3. 液态玻璃书架、英文断词、TXT分卷目录\n仅S31；支持保留数据，rc106原包可回退。"
+  "url": "https://wegooo-cell.github.io/read-pico-reader/Metalio-S31-update-0.3.3-rc108.bin",
+  "size": 4993872,
+  "sha256": "936ab26bc025190ce0914a196a007cd996ae6ca2908d3da1f1e984ae9be419b8",
+  "notes": "1. 底层、供电睡眠与阅读刷新采用已合并版本\n2. 支持WebP封面与插图\n3. 更新引导、语言、文件和书架管理\n4. 液态玻璃书架恢复此前样式\n仅S31；保留设置，rc107原版可回退。"
 }
