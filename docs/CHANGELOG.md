@@ -14,6 +14,9 @@
 - 新开书默认标准模式及工具栏，中间单击切换全屏，沉浸偏好独立决定全屏样式。切换保留阅读锚点、翻页保留模式，信息栏空闲后局刷，手动与周期清理保留。四个根页、文件管理、设置和引导操作栏同步最新布局；EPUB标准封面缺失时按明确文件名回退。
   New books open with standard tools; centre taps toggle fullscreen independently of the immersive style. Preserve anchors/modes, update metadata locally after idle and retain manual/periodic cleanup. Update root/file/settings/setup layouts and add explicit-filename EPUB cover fallback.
 
+- Pico 与 S31 阅读翻页保留整屏擦白清残留，并增加擦白轮次、补重推黑：Pico 普通/图文翻页插入 12 相擦白 + 4 相重推黑（水波纹保持 4 相），S31 普通与水波纹插入 16 相擦白 + 4 相重推黑，原厂 GC48/GL48/DU20 表不改。强光下黑字不再被整屏白推冲淡。
+  Pico and S31 reader turns keep the whole-panel erase that clears ghosting but add extra erase rounds with a black re-drive: Pico ordinary/image turns insert twelve white phases plus four black re-drive phases (the ripple keeps four), and S31 ordinary turns and ripple insert sixteen white phases plus four black re-drive phases, with the vendor GC48/GL48/DU20 tables untouched. The extra white push no longer washes the black ink out in strong light.
+
 ## 双板型源码并入 main / Unified two-board source in main
 
 - 本仓库 main 现在同时维护 Pico 与 Metalio S31：`boards/<板型>/` 保存板级身份、sdkconfig、分区表、依赖锁和硬件后端，统一构建入口为 `tools/build_firmware.py --board pico|metalio47`（Windows 用 `tools/build_board.ps1`）。共享 `main/`、`components/` 只保留一份，固件仍不能跨板型刷写；官网发布范围与第三方许可不变。
