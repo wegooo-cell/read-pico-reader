@@ -52,7 +52,7 @@ int main(int argc,char **argv){
  if(argc==3){
   rotation=1;style=6;fast=false;FILE *in=fopen(argv[1],"rb");assert(in);memset(frame,255,BYTES);
   for(int y=0;y<1216;++y)for(int x=0;x<684;++x){int c=fgetc(in);assert(c>=0);epd_draw_pixel(x,y,(uint8_t)c,frame);}assert(fgetc(in)==EOF);fclose(in);
-  for(int row=0;row<3;++row)draw_shelf_guard(frame,(EpdRect){20,192+row*282+142,644,88},row);
+  for(int row=0;row<3;++row)draw_shelf_guard(frame,(EpdRect){20,192+row*282+188,644,42},row);
   FILE *out=fopen(argv[2],"wb");assert(out);
   for(int y=0;y<1216;++y)for(int x=0;x<684;++x)assert(fputc(ui_read_pixel(frame,x,y)*17,out)!=EOF);
   assert(!fclose(out));release_guard_cache();return 0;
@@ -61,7 +61,7 @@ int main(int argc,char **argv){
  for(style=2;style<=6;style+=4)for(rotation=0;rotation<4;++rotation)for(int mode=0;mode<2;++mode){
   fast=mode;release_guard_cache();
   for(int row=0;row<3;++row){
-   EpdRect rect={20,328+row*104,644,style==6?88:90};
+   EpdRect rect={20,328+row*104,644,style==6?42:90};
    seed(row);memcpy(again,frame,BYTES);memcpy(saved,frame,BYTES);reference(rect);
    draw_shelf_guard(frame,rect,row);assert(!memcmp(frame,saved,BYTES));
    memcpy(frame,again,BYTES);int before=guard_draws;draw_shelf_guard(frame,rect,row);
@@ -75,7 +75,7 @@ int main(int argc,char **argv){
  release_guard_cache();rotation=3;fast=true;
  for(style=2;style<=6;style+=4)for(int failure=0;failure<2;++failure){
   release_guard_cache();oom=failure==0;free_psram=failure?100000:5u*1024u*1024u;
-  EpdRect rect={20,328,644,style==6?88:90};seed(42);memcpy(saved,frame,BYTES);reference(rect);draw_shelf_guard(frame,rect,0);
+  EpdRect rect={20,328,644,style==6?42:90};seed(42);memcpy(saved,frame,BYTES);reference(rect);draw_shelf_guard(frame,rect,0);
   assert(!s_guard_cache&&!memcmp(frame,saved,BYTES));
  }
  release_guard_cache();oom=false;free_psram=5u*1024u*1024u;fast=false;

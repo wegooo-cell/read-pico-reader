@@ -254,7 +254,7 @@ void ui_draw_acrylic_guard(uint8_t *fb, EpdRect rect) { draw_frosted(fb, rect, f
 void ui_draw_frosted_pocket(uint8_t *fb, EpdRect rect) { draw_frosted(fb, rect, true); }
 
 void ui_draw_liquid_shelf_rail(uint8_t *fb, EpdRect rect) {
-    if (!fb || rect.width < 64 || rect.height < 24 || rect.height > 96 ||
+    if (!fb || rect.width < 64 || rect.height < 24 || rect.height > 64 ||
         rect.x < 0 || rect.y < 0 || rect.width > epd_rotated_display_width() ||
         rect.height > epd_rotated_display_height() ||
         rect.x > epd_rotated_display_width() - rect.width ||
@@ -262,11 +262,9 @@ void ui_draw_liquid_shelf_rail(uint8_t *fb, EpdRect rect) {
     EpdRect glass = rect; glass.height -= 8;
     int radius = glass.height / 2;
     if (radius > 14) radius = 14;
-    // 书架底板用更明显的玻璃：更薄的白层（15%）让封面内容透上来，折射拉到上限 200%，
-    // 边缘位移与折射带宽都更大；工作区仍按整块底板申请，分配失败保留可辨认的实色挡条。
-    // Shelf plate uses a more visible glass: thinner white layer (15%) so cover content shows
-    // through and refraction at the cap (200%) for wider bands and larger edge displacement.
-    if (!ui_glass_panel(fb, glass, radius, 15, 200)) {
+    // 复用菜单的七抽头模糊与折射，工作区最多644×41字节；分配失败保留可辨认的实色挡条。
+    // Reuse menu blur/refraction, at most644×41 workspace bytes for a full rail; OOM retains a readable solid rail.
+    if (!ui_glass_panel(fb, glass, radius, 30, 55)) {
         ui_fill_round_rect(fb, glass, radius, 0xd0);
     } else {
         // 书夹没有文字控件，补回菜单玻璃为可读性压暗的白位，书间白底不变成灰块。
