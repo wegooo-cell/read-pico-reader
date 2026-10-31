@@ -47,8 +47,8 @@
     }
   ],
   "previous_version": "0.3.3-rc107",
-  "release_source_commit": "1c13fb9da88a30f2a339607f847e2a96d8e0b6a7",
-  "updated_at": "2026-10-31T22:21:07+08:00",
+  "release_source_commit": "1d97f2790aea65d3f78800e8d99586736e01c5b8",
+  "updated_at": "2026-10-31T22:26:14+08:00",
   "pico_ota": {
     "layout": "metalio-s31-dual-5m-v1",
     "base_version": "0.3.3-rc108",

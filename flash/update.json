@@ -6,7 +6,7 @@
   "layout": "pico-dual-4m-v1",
   "minimum_base_version": "0.3.3-rc72",
   "url": "https://wegooo-cell.github.io/read-pico-reader/Pico-update-0.3.3-rc103.bin",
-  "size": 3649824,
-  "sha256": "549b0c29798e847f8be9bcf23759f33586e3a7d044b6bb9469d0017a7b01b859",
+  "size": 3648864,
+  "sha256": "08ce0928d78626116fa27019015e5506a35c4edaf717e66720e8c38e3e534edf",
   "notes": "1. 普通与图文翻页统一全像素GL16\n2. 支持WebP及渐进式JPEG，修复图片缩放\n3. 更新引导、语言、文件和书架管理\n4. 液态玻璃书架恢复此前样式\n保留设置，rc102原版可回退。"
 }

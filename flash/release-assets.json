@@ -14,8 +14,8 @@
     },
     "firmware.bin": {
       "asset": "kiikoread-0.3.3-rc103.bin",
-      "size": 3649824,
-      "sha256": "549b0c29798e847f8be9bcf23759f33586e3a7d044b6bb9469d0017a7b01b859"
+      "size": 3648864,
+      "sha256": "08ce0928d78626116fa27019015e5506a35c4edaf717e66720e8c38e3e534edf"
     },
     "ota_data_initial.bin": {
       "asset": "ota-data-0.3.3-rc103.bin",
@@ -24,13 +24,13 @@
     },
     "Pico-update.bin": {
       "asset": "kiikoread-0.3.3-rc103.bin",
-      "size": 3649824,
-      "sha256": "549b0c29798e847f8be9bcf23759f33586e3a7d044b6bb9469d0017a7b01b859"
+      "size": 3648864,
+      "sha256": "08ce0928d78626116fa27019015e5506a35c4edaf717e66720e8c38e3e534edf"
     },
     "Pico-update-0.3.3-rc103.bin": {
       "asset": "kiikoread-0.3.3-rc103.bin",
-      "size": 3649824,
-      "sha256": "549b0c29798e847f8be9bcf23759f33586e3a7d044b6bb9469d0017a7b01b859"
+      "size": 3648864,
+      "sha256": "08ce0928d78626116fa27019015e5506a35c4edaf717e66720e8c38e3e534edf"
     }
   },
   "historical": [
