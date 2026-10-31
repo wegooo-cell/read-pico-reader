@@ -31,13 +31,13 @@ def hydrate(source: Path, output: Path) -> None:
         seen.add(expected)
         _hydrate_files(source, output, historical)
 
-def _hydrate_files(source: Path, output: Path, release: dict) -> None:
+def _hydrate_files(source: Path, output: Path, release: dict, maximum: int = 0x400000) -> None:
     fetched = {}
     for name, info in release['files'].items():
         assert re.fullmatch(r'[A-Za-z0-9_.-]+\.bin', name)
         asset = info['asset']
         assert re.fullmatch(r'[A-Za-z0-9_.-]+\.bin', asset)
-        assert re.fullmatch(r'[a-f0-9]{64}', info['sha256']) and 0 < info['size'] <= 0x400000
+        assert re.fullmatch(r'[a-f0-9]{64}', info['sha256']) and 0 < info['size'] <= maximum
         target = output / name
         local = source / name
         if local.is_file() and local.stat().st_size == info['size'] and hashlib.sha256(local.read_bytes()).hexdigest() == info['sha256']:
