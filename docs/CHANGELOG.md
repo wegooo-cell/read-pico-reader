@@ -41,6 +41,9 @@
 
 ## 未发布 / Unreleased — 阅读翻页擦白 / Reader turn erase
 
+- Pico普通及图文翻页只对阅读内容区执行原GL16，顶部状态/标题与底部章节、百分比、进度条不再每页跟着擦白；三种模式均在停下800ms后局刷页脚，保留入书、手动和周期清理。
+  Pico ordinary/image turns keep their GL16 within reading content, avoiding per-turn erasure of status/title and chapter/percentage/progress. All three modes defer footer updates until800ms idle; retain entry/manual/periodic cleanup.
+
 - Pico 普通/图文翻页保留整屏 GL16 白刷，定稿保持前变白相由 4 相增至 12 相并补 4 相重推黑；水波纹保持 4 相，手动/周期全刷不变。
   Pico ordinary/image turns keep the whole-panel GL16 erase, growing the changed-white phases from four to twelve plus four black re-drive phases before the settle holds; the ripple keeps four and manual/periodic refresh is unchanged.
 

@@ -27,6 +27,8 @@
  * User2026-10-30 follow-up: crop body turns independently, defer exact metadata updates until idle, and thicken the progress bar downward at its existing position.
  * 用户2026-10-31合并PR55：Pico普通/图文翻页全像素GL16并同轮提交信息栏，速读/水波纹仍保留独立元数据。
  * User2026-10-31 merges PR55: Pico ordinary/image turns use full-pixel GL16 with metadata; Fast BW/ripple retain deferred metadata.
+ * 用户2026-11-01追加：普通/图文翻页保留正文GL16，但排除顶部状态/标题和底部章节进度；对齐其他模式，页脚800ms空闲后独立局刷。
+ * User2026-11-01 follow-up: retain body GL16 for ordinary/image turns, excluding status/title/footer; align other modes with independent footer updates after800ms idle.
  * 三键单击及中键长按可自定义，提供翻页/工具栏及首页/全屏/工具栏两套推荐；中键长按默认返回主页，阅读页不画右下角菜单图标。
  * 用户授权基础管理：长按书架先看完整详情，清进度与删文件分别确认；失败保留待重试记录，不自动回收其他书进度。
  * 用户2026-11-01确认预览：管理页改为搜索、书架排序、列表/图标及四向分页；点击选择或长按才显示圆形勾选和四项底部操作，返回先退出选择。分页/排序/视图切换保留勾选，应用搜索清空选择。
@@ -3959,11 +3961,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         s_reader_panel == READER_PANEL_NONE && !s_toolbar && !s_clear_confirm;
     const bool reader_entry=s_view==READING&&s_text&&s_presented_view!=(int)READING;
     const EpdRect body_area=reader_area();
-    const bool full_reader_frame=image_gray_refresh||(s_reader_turn_pending&&!s_water_turn_pending&&s_mode==MODE_GL16&&
-        !(app_settings_reader_turn_effect()==2&&s_view==READING&&s_presented_view==(int)READING&&
-          s_reader_panel==READER_PANEL_NONE&&!s_toolbar&&!s_clear_confirm&&
-          !book_layout_page_image_count(s_page)&&!app_settings_book_background_path()[0]));
-    const bool separate_metadata=!full_reader_frame&&s_view==READING&&s_text&&s_reader_fullscreen&&
+    const bool separate_metadata=s_view==READING&&s_text&&
         s_reader_panel==READER_PANEL_NONE&&!s_toolbar&&!s_clear_confirm&&!s_reader_cleanup&&
         !reader_entry&&redraw==APP_REDRAW_AREA&&s_area.x==body_area.x&&s_area.y==body_area.y&&
         s_area.width==body_area.width&&s_area.height==body_area.height;
@@ -3974,9 +3972,9 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
                                          (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT});
     else
     if (image_gray_refresh && redraw == APP_REDRAW_AREA && !s_reader_cleanup && s_presented_view == (int)READING) {
-        // Pico图文翻页用完整GL16一次提交正文与信息栏。/ Pico image turns present body and metadata in one full-pixel GL16 scan.
+        // 图文翻页只擦白内容区；界面操作仍可提交完整目标页。/ Image turns erase content only; UI changes retain complete target-page output.
         err=update_display_area_full_with(ctx->hl,display_reader_soft_turn_waveform(),MODE_GL16,
-                                         (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT});
+                                         separate_metadata?body_area:(EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT});
     }
     else if (image_gray_refresh) {
         // 图片页整页重绘同样只推变化像素；KEY2 等显式全刷仍走完整 GC16。
@@ -4014,11 +4012,11 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
               s_reader_panel == READER_PANEL_NONE && !s_toolbar && !s_clear_confirm &&
               !book_layout_page_image_count(s_page) && !app_settings_book_background_path()[0]
                 ? update_display_text_turn(ctx->hl, turn_area, E0470_TURN_RTL)
-            // 普通Pico翻页使用PR55全像素GL16；局部控件继续真实差分。
-            // Ordinary Pico turns use PR55 full-pixel GL16; local controls retain true differences.
+            // 普通翻页沿用正文GL16，和水波纹/速读共用内容范围；信息栏独立局刷。
+            // Ordinary turns retain body GL16 with the ripple/Fast BW content extent; metadata updates independently.
             : s_reader_turn_pending && s_mode == MODE_GL16
                 ? update_display_area_full_with(ctx->hl,display_reader_soft_turn_waveform(),s_mode,
-                                                (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT})
+                                                turn_area)
                 : update_display_area_diff_with(ctx->hl,
                     s_mode == MODE_DU ? &E0470_FOLLOW_WAVEFORM : display_reader_soft_turn_waveform(),
                     s_mode, s_area);
