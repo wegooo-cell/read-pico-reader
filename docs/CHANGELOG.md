@@ -104,6 +104,10 @@ Retain original Pico rc103/S31 rc108 web/TF entries, kiikoread.com as the sole w
 
 ## 未发布 / Unreleased
 
+- 阅读页脚右侧改为页码（本章第几页/本章共几页）加全书进度，翻页时数字会变化；此前显示的是章节序号和百分比，容易被当成不更新的页码。
+  The reader footer now shows the page within the chapter plus whole-book progress, so the number changes on every turn; the old field showed chapter index and percentage, which read like a frozen page number.
+
+
 - S31本地残影优化：主页面切换涉及书架补八相变白，其余补六相，保留原灰阶、固定底栏和两相释放；设置/蓝牙列表使用黑白装饰、灰阶字缘/头像，列表滚动采用本机完整48相加八相擦白及两相释放，一次区域输出，不在松手后补刷。列表优先清残影、反馈会比原黑白快刷慢，光学效果待实屏确认；阅读模式保持独立。
   S31 local ghosting work: root changes add eight changed-white phases involving the shelf or six otherwise, retaining native grays, navigation and two release holds. Settings/BLE lists use BW decoration and gray glyphs/avatars; scrolling uses native48 plus eight whites/two releases in one regional pass without release-time output. Lists favor cleanup over prior BW latency; optical acceptance remains pending and reading modes stay independent.
 

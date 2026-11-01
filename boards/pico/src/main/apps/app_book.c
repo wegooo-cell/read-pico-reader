@@ -3611,7 +3611,11 @@ static void draw_reader_images(uint8_t *fb, size_t page, EpdRect body) {
     }
 }
 static void reader_footer_progress(char *text,size_t cap,size_t page) {
-    size_t total=book_chapter_count(),current=total?(s_chapter<total?s_chapter+1:total):0;
+    // 右侧显示页码（本章第几页/本章共几页）加全书进度；章节号不会随翻页变化，用户会误当成页码。
+    // Show the page number within this chapter plus whole-book progress; the chapter counter never
+    // changes while turning pages and reads like a frozen page number.
+    size_t total=book_layout_page_count();
+    size_t current=total?(page<total?page+1:total):0;
     snprintf(text,cap,"%u/%u  %u%%",(unsigned)current,(unsigned)total,percent(page));
 }
 // 独立绘制信息栏，先清理预读帧中的旧字形；物理刷新仍由正文/空闲局刷各自控制。
