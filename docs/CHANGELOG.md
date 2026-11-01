@@ -9,6 +9,10 @@
 
 ## 未发布 / Unreleased
 
+- EPUB 正文内嵌 GIF 现在按首帧显示（透明背景合成白底），不再报“此插图暂无法显示”。
+  Inline EPUB GIFs now render their first frame with transparency composited on white instead of failing.
+
+
 - 阅读默认非全屏，顶部恢复时间、签名和电量，章节与进度放在工具栏上方；进入即显示工具栏。中间单击只进入全屏，底部上滑退出全屏并显示工具栏，保留阅读锚点及原全屏样式。
   Standard reading restores time/signature/battery with chapter/progress above visible tools. Centre taps only enter fullscreen; bottom swipes return to standard with tools, preserving the reading anchor and both fullscreen styles.
 
