@@ -1,6 +1,6 @@
 {
   "name": "kiikoread",
-  "version": "0.3.3-rc103",
+  "version": "0.3.3-rc104",
   "board": "pico",
   "experimental_pie_pixels": false,
   "experimental_text_ripple": false,
@@ -23,7 +23,7 @@
           "path": "bootloader.bin",
           "offset": 0,
           "size": 21232,
-          "sha256": "80d6c09e07c52c20b5ba35aab2210b32835a740ac2054291b8f9a32e5089b8e2"
+          "sha256": "539efd5c3d529f79c69d9d73d1561985667590d915657857a5c22c943d22dc92"
         },
         {
           "path": "partitions.bin",
@@ -34,8 +34,8 @@
         {
           "path": "firmware.bin",
           "offset": 65536,
-          "size": 3648864,
-          "sha256": "08ce0928d78626116fa27019015e5506a35c4edaf717e66720e8c38e3e534edf"
+          "size": 3659856,
+          "sha256": "281a21ffe26e9dfb4283165146e96896d1da4f6d2516ac4d8e1c5391ae427173"
         },
         {
           "path": "ota_data_initial.bin",
@@ -46,16 +46,16 @@
       ]
     }
   ],
-  "previous_version": "0.3.3-rc102",
-  "release_source_commit": "1d97f2790aea65d3f78800e8d99586736e01c5b8",
-  "updated_at": "2026-10-31T22:26:11+08:00",
+  "previous_version": "0.3.3-rc103",
+  "release_source_commit": "ae015054589f10d1d12e78feafc7fe9470d0d547",
+  "updated_at": "2026-11-01T17:52:38+08:00",
   "pico_ota": {
     "layout": "pico-dual-4m-v1",
-    "base_version": "0.3.3-rc103",
+    "base_version": "0.3.3-rc104",
     "minimum_base_version": "0.3.3-rc72",
     "online_ota_base_version": "0.3.3-rc79",
     "rollback": true
   },
-  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc103/kiikoread-0.3.3-rc103-TF.zip",
-  "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc103/kiikoread-0.3.3-rc103-USB.zip"
+  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc104/kiikoread-0.3.3-rc104-TF.zip",
+  "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc104/kiikoread-0.3.3-rc104-USB.zip"
 }

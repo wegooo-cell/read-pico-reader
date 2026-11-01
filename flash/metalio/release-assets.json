@@ -1,29 +1,39 @@
 {
   "schema": 1,
-  "tag": "metalio-s31-v0.3.3-rc108",
+  "tag": "metalio-s31-v0.3.3-rc109",
   "files": {
     "bootloader.bin": {
-      "asset": "Metalio-S31-bootloader-0.3.3-rc108.bin",
+      "asset": "Metalio-S31-bootloader-0.3.3-rc109.bin",
       "size": 22448,
-      "sha256": "2d161fdceb299636839bc441182d0cf09d9998b0e5b2af2c18db6d53edfc7cfd"
+      "sha256": "e7624055ba9f878d51b85fa093014a72561b4748554e848afd301ca9a5a1a9ab"
     },
     "partitions.bin": {
-      "asset": "Metalio-S31-partitions-0.3.3-rc108.bin",
+      "asset": "Metalio-S31-partitions-0.3.3-rc109.bin",
       "size": 3072,
       "sha256": "6a5500c826a7957e06233d2a580e8378106ce88a31db2857ccb5333a3c5f84bc"
     },
     "firmware.bin": {
-      "asset": "kiikoread-metalio47-0.3.3-rc108.bin",
-      "size": 4993872,
-      "sha256": "936ab26bc025190ce0914a196a007cd996ae6ca2908d3da1f1e984ae9be419b8"
+      "asset": "kiikoread-metalio47-0.3.3-rc109.bin",
+      "size": 5004960,
+      "sha256": "d5dfc25f624edb7181af893ca036d5eb24d9ef73f4e9bd7110c1d0d57bf9d171"
     },
     "ota_data_initial.bin": {
-      "asset": "Metalio-S31-ota-data-0.3.3-rc108.bin",
+      "asset": "Metalio-S31-ota-data-0.3.3-rc109.bin",
       "size": 8192,
       "sha256": "7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f"
     }
   },
   "historical": [
+    {
+      "tag": "metalio-s31-v0.3.3-rc108",
+      "files": {
+        "Metalio-S31-update-0.3.3-rc108.bin": {
+          "asset": "kiikoread-metalio47-0.3.3-rc108.bin",
+          "size": 4993872,
+          "sha256": "936ab26bc025190ce0914a196a007cd996ae6ca2908d3da1f1e984ae9be419b8"
+        }
+      }
+    },
     {
       "tag": "metalio-s31-v0.3.3-rc107",
       "files": {

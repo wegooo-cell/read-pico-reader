@@ -1,0 +1,61 @@
+{
+  "name": "kiikoread",
+  "version": "0.3.3-rc103",
+  "board": "pico",
+  "experimental_pie_pixels": false,
+  "experimental_text_ripple": false,
+  "experimental_reader_panel37": false,
+  "experimental_shelf37": false,
+  "experimental_fast_reader_panels": false,
+  "experimental_du14": false,
+  "experimental_main_clean": false,
+  "experimental_network_probe": false,
+  "local_transfer_start_test": false,
+  "experimental_early_power_key": false,
+  "requires_bootloader_update": false,
+  "project": "Read_Pico",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "bootloader.bin",
+          "offset": 0,
+          "size": 21232,
+          "sha256": "80d6c09e07c52c20b5ba35aab2210b32835a740ac2054291b8f9a32e5089b8e2"
+        },
+        {
+          "path": "partitions.bin",
+          "offset": 32768,
+          "size": 3072,
+          "sha256": "edba9d92e5fc51c706c12f4b4a5d5d23728ba8fb0fbc00be654f1eccef404bda"
+        },
+        {
+          "path": "../../Pico-update-0.3.3-rc103.bin",
+          "offset": 65536,
+          "size": 3648864,
+          "sha256": "08ce0928d78626116fa27019015e5506a35c4edaf717e66720e8c38e3e534edf"
+        },
+        {
+          "path": "ota_data_initial.bin",
+          "offset": 13697024,
+          "size": 8192,
+          "sha256": "7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f"
+        }
+      ]
+    }
+  ],
+  "previous_version": "0.3.3-rc102",
+  "release_source_commit": "1d97f2790aea65d3f78800e8d99586736e01c5b8",
+  "updated_at": "2026-10-31T22:26:11+08:00",
+  "pico_ota": {
+    "layout": "pico-dual-4m-v1",
+    "base_version": "0.3.3-rc103",
+    "minimum_base_version": "0.3.3-rc72",
+    "online_ota_base_version": "0.3.3-rc79",
+    "rollback": true
+  },
+  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc103/kiikoread-0.3.3-rc103-TF.zip",
+  "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc103/kiikoread-0.3.3-rc103-USB.zip"
+}

@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "version": "0.3.3-rc103",
+  "version": "0.3.3-rc104",
   "project": "Read_Pico",
   "board": "RDP-G01-W",
   "layout": "pico-dual-4m-v1",
   "minimum_base_version": "0.3.3-rc72",
-  "url": "https://wegooo-cell.github.io/read-pico-reader/Pico-update-0.3.3-rc103.bin",
-  "size": 3648864,
-  "sha256": "08ce0928d78626116fa27019015e5506a35c4edaf717e66720e8c38e3e534edf",
-  "notes": "1. 普通与图文翻页统一全像素GL16\n2. 支持WebP及渐进式JPEG，修复图片缩放\n3. 更新引导、语言、文件和书架管理\n4. 液态玻璃书架恢复此前样式\n保留设置，rc102原版可回退。"
+  "url": "https://wegooo-cell.github.io/read-pico-reader/Pico-update-0.3.3-rc104.bin",
+  "size": 3659856,
+  "sha256": "281a21ffe26e9dfb4283165146e96896d1da4f6d2516ac4d8e1c5391ae427173",
+  "notes": "1. 普通翻页只刷正文，信息栏空闲后局刷\n2. 非全屏上下操作栏联动，修复工具栏点击\n3. 优化书架管理和选择图标\n4. 支持GIF首帧、脚注与JPEG兜底\n保留设置，可回退rc103。"
 }
