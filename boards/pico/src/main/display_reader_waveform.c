@@ -67,7 +67,8 @@ const EpdWaveform* display_reader_text_waveform(void) {
     return &s_waveform;
 }
 
-#define READER_SOFT_TURN_SETTLE_EXTRA 4
+#define READER_SOFT_TURN_SETTLE_EXTRA 12
+#define READER_SOFT_TURN_BLACK_EXTRA 4
 #define READER_SOFT_TURN_HOLD_PHASES 3
 static uint8_t s_soft_data[64][16][4];
 static EpdWaveformPhases s_soft_phases = {
@@ -89,17 +90,22 @@ static void soft_set_action(int phase, int to, int from, int action) {
 }
 
 // 官方阅读翻页时序：整块全像素走厂商 GL16（右对齐、擦除+饱和+灰阶尾+定稿保持）。
-// 改动：等值“黑→黑”去掉擦白相只保留压黑相；并在厂商 3 相定稿保持之前插入 4 相
-// “全屏擦白”（所有目标为白的像素，含本来也白的空白区），翻页后白底擦得更狠；
+// 改动：等值“黑→黑”去掉擦白相只保留压黑相；并在厂商 3 相定稿保持之前插入 12 相
+// “全屏擦白”（三轮，所有目标为白的像素，含本来也白的空白区），翻页后白底擦得更狠；
+// 擦白之后再加 4 相“重推黑”（所有目标为黑的像素），抵消整屏白推对黑字的冲淡；
 // 其余所有迁移（灰阶、变黑、变白）完全按厂商原序列。
 // Official reader turn timing: full-pixel vendor GL16. Equal black-on-black drops the erase
-// phases and keeps the darken phases, and four extra white phases are inserted before the
-// vendor's three settle holds so every white target (including already-white blanks) is
-// erased harder after a page turn. All other transitions stay vendor-original.
+// phases and keeps the darken phases; twelve extra white phases (three full erase rounds) are
+// inserted before the vendor's three settle holds so every white target (including already-white
+// blanks) is erased harder after a page turn, then four extra black re-drive phases darken every
+// black target to compensate for the whole-panel white push. All other transitions stay
+// vendor-original.
 const EpdWaveform* display_reader_soft_turn_waveform(void) {
     if (s_soft_ready) return &s_soft_waveform;
     const EpdWaveformPhases* gl = e0470_waveform_phases(&E0470_WAVEFORM, MODE_GL16);
-    if (!gl || !gl->luts || gl->phase_times || gl->phases + 8 > 64) return &E0470_WAVEFORM;
+    if (!gl || !gl->luts || gl->phase_times ||
+        gl->phases + READER_SOFT_TURN_SETTLE_EXTRA + READER_SOFT_TURN_BLACK_EXTRA > 64)
+        return &E0470_WAVEFORM;
     int hold = 0;
     while (hold < gl->phases) {
         const int f = gl->phases - 1 - hold;
@@ -112,16 +118,19 @@ const EpdWaveform* display_reader_soft_turn_waveform(void) {
     }
     if (hold < 1) return &E0470_WAVEFORM;
     const int drive = gl->phases - hold;
-    const int extra = 4;
+    const int extra = READER_SOFT_TURN_SETTLE_EXTRA;
+    const int black = READER_SOFT_TURN_BLACK_EXTRA;
     memcpy(s_soft_data, gl->luts, (size_t)drive * 16 * 4);
-    memset(s_soft_data + drive, 0, (size_t)extra * 16 * 4);
-    memcpy(s_soft_data + drive + extra, (const uint8_t*)gl->luts + (size_t)drive * 16 * 4,
-           (size_t)hold * 16 * 4);
+    memset(s_soft_data + drive, 0, (size_t)(extra + black) * 16 * 4);
+    memcpy(s_soft_data + drive + extra + black,
+           (const uint8_t*)gl->luts + (size_t)drive * 16 * 4, (size_t)hold * 16 * 4);
     for (int f = 0; f < gl->phases; ++f)
         if (e0470_phase_action(gl, f, 0, 0) == 2) soft_set_action(f, 0, 0, 0);
     for (int i = 0; i < extra; ++i)
         for (int from = 0; from < 16; ++from) soft_set_action(drive + i, 15, from, 2);
-    s_soft_phases = (EpdWaveformPhases){gl->phases + extra, (const uint8_t*)s_soft_data, NULL};
+    for (int i = 0; i < black; ++i)
+        for (int from = 0; from < 16; ++from) soft_set_action(drive + extra + i, 0, from, 1);
+    s_soft_phases = (EpdWaveformPhases){gl->phases + extra + black, (const uint8_t*)s_soft_data, NULL};
     s_soft_waveform.temp_intervals = E0470_WAVEFORM.temp_intervals;
     s_soft_ready = true;
     return &s_soft_waveform;
