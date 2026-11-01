@@ -47,6 +47,30 @@ int jpegdec_gray_progressive(const uint8_t *data, int size, JPEG_DRAW_CALLBACK *
 }
 
 
+// 基线/任意帧的 RAM 内灰阶解码，可按 1/2/4/8 缩小；用于 ROM 解码器失败时的兜底。
+// RAM grayscale decode for baseline or any frame with optional 1/2/4/8 scaling; a fallback when
+// the ROM decoder path fails.
+int jpegdec_gray_ram(const uint8_t *data, int size, int divisor, JPEG_DRAW_CALLBACK *draw,
+                     void *user, int *drawn_width, int *drawn_height) {
+    if (!data || size <= 0 || !draw || divisor < 1) return 0;
+    if (divisor > 8) divisor = 8;
+    JPEGDEC *jpeg = new (std::nothrow) JPEGDEC();
+    if (!jpeg) return 0;
+    int ok = 0;
+    if (jpeg->openRAM(const_cast<uint8_t *>(data), size, draw)) {
+        const int option = divisor >= 8 ? JPEG_SCALE_EIGHTH : divisor >= 4 ? JPEG_SCALE_QUARTER
+                          : divisor >= 2 ? JPEG_SCALE_HALF : 0;
+        if (drawn_width) *drawn_width = (jpeg->getWidth() + divisor - 1) / divisor;
+        if (drawn_height) *drawn_height = (jpeg->getHeight() + divisor - 1) / divisor;
+        jpeg->setPixelType(EIGHT_BIT_GRAYSCALE);
+        jpeg->setUserPointer(user);
+        ok = jpeg->decode(0, 0, option) != 0;
+    }
+    jpeg->close();
+    delete jpeg;
+    return ok;
+}
+
 static int32_t file_read(JPEGFILE *file, uint8_t *buf, int32_t size) {
     if (!file || !file->fHandle || size < 0) return 0;
     int32_t got = (int32_t)fread(buf, 1, (size_t)size, (FILE *)file->fHandle);

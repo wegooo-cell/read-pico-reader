@@ -184,6 +184,8 @@ static int jpegdec_collect(JPEGDRAW *draw) {
 // Under ESP-IDF JPEGDEC only offers the C++ class; the component wraps it with C linkage.
 extern int jpegdec_gray_progressive(const uint8_t *data, int size, JPEG_DRAW_CALLBACK *draw,
                                     void *user, int *drawn_width, int *drawn_height);
+extern int jpegdec_gray_ram(const uint8_t *data, int size, int divisor, JPEG_DRAW_CALLBACK *draw,
+                            void *user, int *drawn_width, int *drawn_height);
 
 // JPEGDEC 回传的小平面（按 divisor 缩放）→ 目标灰度：长边铺满、居中裁剪、双线性。
 // Map the JPEGDEC plane (scaled by divisor) to the target: fill the longer side, centre-crop, bilinear.
@@ -211,6 +213,32 @@ static bool jpegdec_plane_gray(const uint8_t *plane, unsigned stride, unsigned h
     free(xmap);
     free(ymap);
     return true;
+}
+
+// ROM 解码器失败时的兜底：JPEGDEC 直接解 1/2..1/8 小平面，内存占用远低于整幅 RGB565。
+// Fallback when the ROM decoder path fails: JPEGDEC decodes a 1/2..1/8 plane directly, far
+// less memory than a full RGB565 frame.
+static bool jpegdec_gray_fallback(const uint8_t *data, size_t size, unsigned frame_width,
+                                  unsigned frame_height, unsigned out_width, unsigned out_height,
+                                  uint8_t *out) {
+    if (!data || size < 4 || size > INT32_MAX || !frame_width || !frame_height) return false;
+    unsigned divisor = 1;
+    while (divisor < 8 && frame_width / (divisor * 2) >= out_width &&
+           frame_height / (divisor * 2) >= out_height) divisor *= 2;
+    jpegdec_plane_t plane = {
+        .stride = (frame_width + divisor - 1) / divisor,
+        .height = (frame_height + divisor - 1) / divisor,
+    };
+    if (plane.stride > 4096 || plane.height > 4096) return false;
+    plane.plane = cover_alloc((size_t)plane.stride * plane.height);
+    if (!plane.plane) return false;
+    memset(plane.plane, 0xFF, (size_t)plane.stride * plane.height);
+    const bool decoded = jpegdec_gray_ram(data, (int)size, (int)divisor, jpegdec_collect, &plane,
+                                          NULL, NULL) != 0;
+    const bool ok = decoded && jpegdec_plane_gray(plane.plane, plane.stride, plane.height,
+                                                  out_width, out_height, out);
+    free(plane.plane);
+    return ok;
 }
 
 // 渐进式只取 DC 扫描，JPEGDEC 因此固定输出 1/8 分辨率；平面尺寸由帧头算出，
@@ -477,7 +505,8 @@ static bool jpeg_gray(const uint8_t *data, size_t size, unsigned out_width,
     if (size > UINT32_MAX) return false;
     uint8_t sof = 0;
     unsigned frame_width = 0, frame_height = 0;
-    if (book_jpeg_frame(data, size, &sof, &frame_width, &frame_height) && sof == 0xC2) {
+    const bool have_frame = book_jpeg_frame(data, size, &sof, &frame_width, &frame_height);
+    if (have_frame && sof == 0xC2) {
 #ifdef KIIKO_USE_LOWZAG
         if(lowzag_gray(data,size,out_width,out_height,out))return true;
 #endif
@@ -491,7 +520,10 @@ static bool jpeg_gray(const uint8_t *data, size_t size, unsigned out_width,
     bool decoded = false;
     for (int scale = JPEG_IMAGE_SCALE_0; scale <= JPEG_IMAGE_SCALE_1_8; ++scale) {
         cfg.out_scale = scale;
-        if (esp_jpeg_get_image_info(&cfg, &info) != ESP_OK) return false;
+        // 取信息失败或整幅 RGB565 超预算时继续尝试更小的缩放，最后交给 JPEGDEC 兜底。
+        // On info failure or an over-budget RGB565 frame, try a smaller scale and finally the
+        // JPEGDEC fallback instead of giving up.
+        if (esp_jpeg_get_image_info(&cfg, &info) != ESP_OK) break;
         if (!info.width || !info.height || !info.output_len || info.output_len > limit) continue;
         uint8_t *pixels = cover_alloc(info.output_len);
         if (!pixels) continue;
@@ -502,7 +534,11 @@ static bool jpeg_gray(const uint8_t *data, size_t size, unsigned out_width,
         free(pixels);
         if (decoded) break;
     }
-    return decoded;
+    if (decoded) return true;
+    // 大尺寸 Exif JPEG 在部分基线上会让 ROM 解码器失败；JPEGDEC 直接解 1/2..1/8 小平面。
+    // Large Exif baseline JPEGs can defeat the ROM decoder; let JPEGDEC decode a 1/2..1/8 plane.
+    return have_frame && jpegdec_gray_fallback(data, size, frame_width, frame_height,
+                                               out_width, out_height, out);
 }
 
 // WebP：先整幅/限幅解成 RGB565 平面，再走与基线 JPEG 相同的裁剪缩放。

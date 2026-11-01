@@ -9,6 +9,10 @@
 
 ## 未发布 / Unreleased
 
+- 部分大尺寸或带 Exif 的 JPEG 插图在 ROM 解码器失败时改用 JPEGDEC 小平面兜底解码，避免整页插图缺失。
+  Large or Exif JPEG illustrations now fall back to a 1/2..1/8 JPEGDEC plane when the ROM decoder fails, so pages no longer lose their artwork.
+
+
 - EPUB 正文内嵌 GIF 现在按首帧显示（透明背景合成白底），不再报“此插图暂无法显示”。
   Inline EPUB GIFs now render their first frame with transparency composited on white instead of failing.
 
