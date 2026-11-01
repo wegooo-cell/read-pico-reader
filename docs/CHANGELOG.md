@@ -41,6 +41,10 @@ Retain original Pico rc103/S31 rc108 web/TF entries, kiikoread.com as the sole w
   EPUB footnotes become a popup card anchored near the marker instead of jumping to the chapter end; inline 1em markers follow the book CSS, and the card uses the reading font at body size minus 5 px.
 
 
+- Pico 阅读水波纹翻页补上残影清理：在定稿保持前加入 12 相全屏擦白和 4 相重推黑，和普通翻页一致，减少翻页后的淡墨与残影。
+  Pico water-ripple page turns now run the same ghost cleanup as ordinary turns: twelve whole-panel erase phases plus four black re-drive phases before the settle holds.
+
+
 - 阅读默认非全屏，顶部恢复时间、签名和电量，章节与进度放在工具栏上方；进入即显示工具栏。中间单击只进入全屏，底部上滑退出全屏并显示工具栏，保留阅读锚点及原全屏样式。
   Standard reading restores time/signature/battery with chapter/progress above visible tools. Centre taps only enter fullscreen; bottom swipes return to standard with tools, preserving the reading anchor and both fullscreen styles.
 

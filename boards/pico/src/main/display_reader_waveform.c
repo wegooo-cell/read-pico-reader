@@ -181,11 +181,14 @@ bool display_reader_fast_text_prepare(EpdiyHighlevelState* hl, EpdRect area) {
     return true;
 }
 
-// User revision 2026-10-29: retain every reader-ripple gray phase and insert
-// four changed-white drives before the existing three settle holds.
-#define READER_WATER_WHITE 4
+// User revision: ripple turns get the same ghost fix as ordinary reader turns -- twelve extra
+// whole-panel white phases (three erase rounds) followed by four black re-drive phases, both
+// inserted before the original three settle holds. The ripple animation's own gray phases are
+// untouched; only the trailing erase/redrive changes.
+#define READER_WATER_WHITE 12
+#define READER_WATER_BLACK 4
 #define READER_WATER_HOLDS 3
-#define READER_WATER_PHASES (E0470_GL16_FRAMES + READER_WATER_WHITE)
+#define READER_WATER_PHASES (E0470_GL16_FRAMES + READER_WATER_WHITE + READER_WATER_BLACK)
 static uint8_t s_water_data[READER_WATER_PHASES][16][4];
 static const EpdWaveformPhases s_water_phases = {
     READER_WATER_PHASES, (const uint8_t*)s_water_data, NULL
@@ -198,6 +201,13 @@ static EpdWaveform s_water_waveform = {
 };
 static bool s_water_ready;
 
+static void water_set_action(int phase, int to, int from, int action) {
+    const int shift = 6 - 2 * (from % 4);
+    s_water_data[phase][to][from / 4] = (uint8_t)(
+        (s_water_data[phase][to][from / 4] & ~(3u << shift)) | ((unsigned)action << shift)
+    );
+}
+
 const EpdWaveform* display_reader_water_waveform(void) {
     if (s_water_ready) return &s_water_waveform;
     const EpdWaveform* source=display_reader_text_waveform();
@@ -208,12 +218,19 @@ const EpdWaveform* display_reader_water_waveform(void) {
     for (int f=drive;f<phases->phases;++f)
         for(int i=0;i<64;++i) if(phases->luts[f*64+i]) return source;
     memcpy(s_water_data,phases->luts,(size_t)drive*64);
-    memset(s_water_data+drive,0,READER_WATER_WHITE*64);
-    memcpy(s_water_data+drive+READER_WATER_WHITE,phases->luts+(size_t)drive*64,
-           READER_WATER_HOLDS*64);
+    memset(s_water_data+drive,0,(READER_WATER_WHITE+READER_WATER_BLACK)*64);
+    memcpy(s_water_data+drive+READER_WATER_WHITE+READER_WATER_BLACK,
+           phases->luts+(size_t)drive*64,READER_WATER_HOLDS*64);
+    // 12 相全屏擦白：所有目标为白的像素（含本来就白的空白区）都推白，消除上次残留。
+    // Twelve full-panel white phases push every white target, including already-white blanks.
     for(int f=drive;f<drive+READER_WATER_WHITE;++f)
-        for(int from=0;from<15;++from)
-            s_water_data[f][15][from/4]|=(uint8_t)(2u<<(6-2*(from%4)));
+        for(int from=0;from<=15;++from)
+            water_set_action(f,15,from,2);
+    // 4 相重推黑：所有目标为黑的像素补黑，抵消整屏白推造成的淡墨。
+    // Four black re-drive phases darken every black target after the whole-panel white push.
+    for(int f=drive+READER_WATER_WHITE;f<drive+READER_WATER_WHITE+READER_WATER_BLACK;++f)
+        for(int from=0;from<=15;++from)
+            water_set_action(f,0,from,1);
     s_water_waveform.temp_intervals=source->temp_intervals;
     s_water_ready=true;
     return &s_water_waveform;
