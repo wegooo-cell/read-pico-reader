@@ -177,6 +177,25 @@ int e0470_waveform_white_boost(uint8_t (*data)[16][4], int frames, int extra) {
     return applied;
 }
 
+// 在末尾 hold 相之前补 extra 帧压黑（只写目标 0 这一行，所有起点都压向黑），不增加相数。
+// 原厂黑目标在饱和段之后有保持相把墨固定住；裁剪砍短了饱和段。若把压黑写在最后的保持相上，
+// 扫描结束在驱动而不是保持，颗粒会回弹、强光下就发淡；所以这里保留末尾 hold 相（黑固定），
+// 只在它们之前补压黑。
+// / Add `extra` darken pulses before the trailing hold window on the black-target row only,
+// without new phases. The vendor fixes black with trailing holds after saturation; trimming
+// shortens that saturation run. Writing the extra darkening onto the last holds would end the
+// scan on a drive instead of a hold and the particles relax pale in strong light, so keep the
+// trailing hold phases (black fixing) and insert the extra darkening just before them.
+int e0470_waveform_black_boost(uint8_t (*data)[16][4], int frames, int extra, int hold) {
+    if (hold < 0) hold = 0;
+    int applied = 0;
+    for (int i = 0; i < extra && frames - hold - 1 - i >= 0; i++) {
+        for (int from = 0; from < 16; from++) lut_or(data, frames - hold - 1 - i, 0, from, 1);
+        applied++;
+    }
+    return applied;
+}
+
 /* ---- 完整表 / Full tables ---- */
 // DU 20 相，GC16 48 相；GL16 用 RAM 副本以便白底补 1 帧。
 // / DU 20, GC16 48; GL16 uses a RAM copy so the white-bg tick can be added.
@@ -346,5 +365,14 @@ void e0470_waveform_init(void) {
         }
     }
     e0470_waveform_white_boost(e0470_textturn_gl16_data, E0470_GL16_FRAMES, 2);
+#if E0470_WAVEFORM_TRIM
+    // 裁剪砍短黑饱和段；在末尾 hold 相之前补压黑，末尾 3 相仍保持，黑目标才能固定住。
+    // Trim shortens the black saturation run; add the darkening just before the trailing holds,
+    // keeping the final three phases as holds so black targets stay fixed.
+    e0470_waveform_black_boost(e0470_gc16_data, E0470_GC16_FRAMES, 2, E0470_TRIM_HOLD);
+    e0470_waveform_black_boost(e0470_gl16_data, E0470_GL16_FRAMES, 3, E0470_TRIM_HOLD);
+    e0470_waveform_black_boost(e0470_full_gl16_live, E0470_FULL_GL16_FRAMES, 3, 3);
+    e0470_waveform_black_boost(e0470_textturn_gl16_data, E0470_GL16_FRAMES, 3, E0470_TRIM_HOLD);
+#endif
 
 }

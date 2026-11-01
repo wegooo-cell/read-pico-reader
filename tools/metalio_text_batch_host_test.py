@@ -136,18 +136,18 @@ static void check_crop(void){
 int main(void){
  EpdiyHighlevelState hl={.front_fb=front,.back_fb=back,.difference_fb=diff,.dirty_lines=rows,.dirty_columns=columns};
  e0470_waveform_init();const EpdWaveformPhases*p=e0470_waveform_phases(&E0470_TEXTTURN_WAVEFORM,MODE_GL16);
- uint8_t raw[48*64];memcpy(raw,p->luts,sizeof(raw));rotation=EPD_ROT_INVERTED_PORTRAIT;
+ uint8_t raw[E0470_GL16_FRAMES*64];memcpy(raw,p->luts,sizeof(raw));rotation=EPD_ROT_INVERTED_PORTRAIT;
  for(int from=0;from<16;++from)for(int to=0;to<16;++to){
   memset(front,to|(to<<4),BYTES);memset(back,from|(from<<4),BYTES);memcpy(saved,back,BYTES);reset();fail_at=0;
-  int first=0;while(first<48&&!e0470_phase_action(p,first,to,from))++first;
-  int skip=first==48?47:first?first-1:0;
+  int first=0;while(first<p->phases&&!e0470_phase_action(p,first,to,from))++first;
+  int skip=first==p->phases?p->phases-1:first?first-1:0;
   assert(e0470_text_turn_with_waveform(&hl,logical(),E0470_TURN_RTL,&E0470_TEXTTURN_WAVEFORM)==EPD_DRAW_SUCCESS);
-  assert(calls==1&&first_seen==skip&&scans==48-skip&&!memcmp(front,back,BYTES)&&!s_scan_active);
-  for(int phase=0;phase<48;++phase){assert(phase_hits[phase]==(unsigned)(phase>=skip));if(phase<skip)assert(!e0470_phase_action(p,phase,to,from));}
+  assert(calls==1&&first_seen==skip&&scans==p->phases-skip&&!memcmp(front,back,BYTES)&&!s_scan_active);
+  for(int phase=0;phase<p->phases;++phase){assert(phase_hits[phase]==(unsigned)(phase>=skip));if(phase<skip)assert(!e0470_phase_action(p,phase,to,from));}
  }
  for(int rot=0;rot<4;++rot){
   rotation=rot;
-  for(int fail=1;fail<=48;++fail){
+  for(int fail=1;fail<=p->phases;++fail){
    memset(front,0x57,BYTES);memset(back,0xff,BYTES);memcpy(saved,back,BYTES);reset();fail_at=fail;
    enum EpdDrawError err=e0470_text_turn_with_waveform(&hl,logical(),E0470_TURN_LTR,&E0470_TEXTTURN_WAVEFORM);
    if(fail<=scans)assert(err==EPD_DRAW_EMPTY_LINE_QUEUE&&!memcmp(back,saved,BYTES));else assert(err==EPD_DRAW_SUCCESS);
@@ -253,7 +253,7 @@ int main(void){
  puts("PASS: actual26-phase panel batch/all old grays into both midgrays including equal/white targets,one scan,four rotations/odd crop masks exact,all26 failed phases preserve back");
  reset();fail_at=0;int before=calls;
  assert(epd_draw_base_from_phase(epd_full_screen(),diff,epd_full_screen(),MODE_PACKING_1PPB_DIFFERENCE|MODE_GL16,25,rows,columns,&E0470_TEXTTURN_WAVEFORM,-1)==EPD_DRAW_INVALID_CROP);
- assert(epd_draw_base_from_phase(epd_full_screen(),diff,epd_full_screen(),MODE_PACKING_1PPB_DIFFERENCE|MODE_GL16,25,rows,columns,&E0470_TEXTTURN_WAVEFORM,48)==EPD_DRAW_INVALID_CROP);
+ assert(epd_draw_base_from_phase(epd_full_screen(),diff,epd_full_screen(),MODE_PACKING_1PPB_DIFFERENCE|MODE_GL16,25,rows,columns,&E0470_TEXTTURN_WAVEFORM,p->phases)==EPD_DRAW_INVALID_CROP);
  assert(calls==before);
  s_leading_skip_enabled=true;auto_skip=2;
  assert(epd_draw_base(epd_full_screen(),diff,epd_full_screen(),MODE_PACKING_1PPB_DIFFERENCE|MODE_GL16,25,rows,columns,&E0470_TEXTTURN_WAVEFORM)==EPD_DRAW_SUCCESS&&first_seen==2);

@@ -86,7 +86,7 @@ int main(int argc,char **argv){
 #else
     assert(!wave&&!allocations);
     for(int n=0;n<10;++n)assert(!display_reader_panel37_waveform());
-    assert(!allocations);puts("PASS: experiment OFF has no LUT allocation and requires native48 fallback");
+    assert(!allocations);puts("PASS: experiment OFF has no LUT allocation and requires the active default fallback");
 #endif
     assert(!memcmp(raw_gl,my_gl_25_0.luts,sizeof(raw_gl)));
     assert(!memcmp(raw_gc,my_gc_25_0.luts,sizeof(raw_gc)));

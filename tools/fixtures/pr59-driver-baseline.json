@@ -220,10 +220,28 @@
   },
   "approved_overrides": {
     "boards/pico/src/main/display_reader_waveform.c": {
-      "sha256": "403636026803edc56729c3050fbb61b06bfbdde8f52b8d03fd50654ffd378a6f",
-      "pull_request": 55,
-      "source_commit": "95bf1e09f03efb50ee7a048e3e83af071a5a92e0",
-      "reason": "User2026-10-31 approved Pico reader timing from PR55; S31 remains PR59."
+      "sha256": "e535449d9d50badfd32b2d0b2dfc5cfab46af45a333067a4df6f919188115895",
+      "pull_request": 62,
+      "source_commit": "02e0982c0442b5a8e208ef1c847fe5de051e4470",
+      "reason": "User2026-11-01 explicitly approved PR62 as authored, superseding the previous derived-waveform pin for this file."
+    },
+    "boards/metalio47/src/main/display_reader_waveform.c": {
+      "sha256": "72429e4b6a613243753a043379e2449e773999353fd780836035a6f7516f76ab",
+      "pull_request": 62,
+      "source_commit": "02e0982c0442b5a8e208ef1c847fe5de051e4470",
+      "reason": "User2026-11-01 explicitly approved PR62 as authored, superseding the previous derived-waveform pin for this file."
+    },
+    "boards/metalio47/src/components/e0470_epaper_waveform/e0470_epaper_waveform.c": {
+      "sha256": "7bca54a95fbc652f6bd2cf6732cc8927688e8ea1cecda3bd1381ad8d65aa45b5",
+      "pull_request": 64,
+      "source_commit": "b80785528c69a10004f4a6b02b4d6dd212ae3940",
+      "reason": "User2026-11-01 explicitly approved PR64 as authored, superseding the previous derived-waveform pin for this file."
+    },
+    "components/e0470_epaper_waveform/include/e0470_epaper_waveform.h": {
+      "sha256": "5956d33621a1c64e30d22fd3c1698732267dd8b3b0eed40ba351e6ff44cd95e0",
+      "pull_request": 64,
+      "source_commit": "b80785528c69a10004f4a6b02b4d6dd212ae3940",
+      "reason": "User2026-11-01 explicitly approved PR64 as authored, superseding the previous derived-waveform pin for this file."
     }
   }
 }

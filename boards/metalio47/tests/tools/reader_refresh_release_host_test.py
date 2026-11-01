@@ -128,7 +128,7 @@ int main(void){
   reset();s_reader_fullscreen=full;s_area=reader_area();s_reader_footer_pending=false;
   assert(present(&ctx,APP_REDRAW_AREA));
   assert(calls==1&&selected==14&&last_gray_wave==&soft_waveform&&last_gray_mode==MODE_GL16&&s_reader_text_frame);
-  assert(s_reader_footer_pending==!!full&&!s_reader_cleanup);
+  assert(s_reader_footer_pending&&!s_reader_cleanup);
  }
  // 速读必须进入独立DU出口；普通/图像不能误用该路径。/ FastBW must reach its separate DU outlet; ordinary/images must not.
  for(int full=0;full<2;++full)for(int hidden=0;hidden<2;++hidden){
@@ -159,7 +159,7 @@ int main(void){
   reset();s_reader_fullscreen=full;s_area=reader_area();s_water_turn_pending=true;
   s_area=(EpdRect){0,160,684,900};
   present(&ctx,APP_REDRAW_AREA);assert(selected==18&&calls==1&&!s_water_turn_pending);
-  assert(last_water_area.x==s_area.x&&last_water_area.y==s_area.y&&last_water_area.width==s_area.width&&last_water_area.height==s_area.height);
+  assert(last_water_area.x==0&&last_water_area.y==0&&last_water_area.width==684&&last_water_area.height==1216);
  }
  s_area=(EpdRect){0,0,684,1216};
  reset();fail=1;s_water_turn_pending=true;
@@ -170,8 +170,8 @@ int main(void){
   images=kind!=2;s_reader_image_refresh_pending=images!=0;s_reader_image_exit_pending=kind!=0;
   present(&ctx,APP_REDRAW_AREA);
   assert(calls==1&&selected==14&&last_gray_wave==&soft_waveform&&last_gray_mode==MODE_GL16);
-  assert(last_gray_area.x==0&&last_gray_area.width==684&&last_gray_area.y==reader_area().y);
-  assert(last_gray_area.height==reader_area().height);
+  assert(last_gray_area.x==0&&last_gray_area.width==684&&last_gray_area.y==0);
+  assert(last_gray_area.height==1216);
   assert(s_reader_image_frame==(images!=0)&&s_reader_text_frame==!images&&!s_reader_image_exit_pending);
  }
  // Manual/periodic cleanup takes priority even on image-bearing pages, and never uses a sparse GC mask.

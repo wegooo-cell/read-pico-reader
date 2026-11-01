@@ -108,15 +108,15 @@ int main(void) {
                 i==2&&(to==0||to==15)?(f<20?e0470_phase_action(bw,f,to,from):0):e0470_phase_action(gray_table,f,to,from)));
     }
     const EpdWaveformPhases* ordinary=e0470_waveform_phases(display_main_normal_waveform(),MODE_GL16);
-    for(int f=0;f<48;++f)for(int from=0;from<16;++from){
+    for(int f=0;f<ordinary->phases;++f)for(int from=0;from<16;++from){
         int white=e0470_phase_action(ordinary,f,15,from);
         assert(white==0||white==2);
     }
     assert(!memcmp(saved_bw,bw->luts,sizeof(saved_bw))&&!memcmp(saved_gray,gray_table->luts,sizeof(saved_gray)));
     const EpdWaveform* soft=display_main_shelf_soft_waveform();
     const EpdWaveformPhases* chrome=e0470_waveform_phases(soft,MODE_GL16);
-    assert(soft!=&E0470_WAVEFORM&&chrome&&chrome->phases==48);
-    for(int f=0;f<48;++f)for(int to=0;to<16;++to)for(int from=0;from<16;++from){
+    assert(soft!=&E0470_WAVEFORM&&chrome&&chrome->phases==E0470_GL16_FRAMES);
+    for(int f=0;f<E0470_GL16_FRAMES;++f)for(int to=0;to<16;++to)for(int from=0;from<16;++from){
         int expected=to==from?0:(to==0||to==15)?(f<20?e0470_phase_action(bw,f,to,from):0):e0470_phase_action(gray_table,f,to,from);
         assert(e0470_phase_action(chrome,f,to,from)==expected);
     }
@@ -124,19 +124,26 @@ int main(void) {
         const EpdWaveform* shelf=display_main_shelf_waveform(mode);
         const EpdWaveformPhases* table=e0470_waveform_phases(shelf,mode);
         const EpdWaveformPhases* original=e0470_waveform_phases(&E0470_FULL_WAVEFORM,mode);
-        assert(table&&table->phases==48&&shelf==display_main_shelf_waveform(mode));
-        for(int f=0;f<48;++f)for(int to=0;to<16;++to)for(int from=0;from<16;++from){
+        assert(table&&original&&shelf==display_main_shelf_waveform(mode));
+        // PR64默认短表不能容纳完整48相图层时，沿用作者既有的默认表回退。
+        // PR64's shorter chrome cannot contain 48-phase art; retain the author's existing default-table fallback.
+        if(original->phases>chrome->phases){
+            assert(shelf==&E0470_WAVEFORM&&table==e0470_waveform_phases(&E0470_WAVEFORM,mode));
+            continue;
+        }
+        assert(table->phases==original->phases);
+        for(int f=0;f<table->phases;++f)for(int to=0;to<16;++to)for(int from=0;from<16;++from){
             int action=e0470_phase_action(table,f,to,from);
-            assert(action==e0470_phase_action(to==15?(from==15?gray_table:chrome):original,f,to,from));
+            assert(action==e0470_phase_action(to==15?(from==15?e0470_waveform_phases(&E0470_FULL_WAVEFORM,MODE_GL16):chrome):original,f,to,from));
             if(to==15)assert(action==0||action==2);
         }
     }
     assert(!memcmp(saved_bw,bw->luts,sizeof(saved_bw))&&!memcmp(saved_gray,gray_table->luts,sizeof(saved_gray)));
-    puts("PASS: shelf GL/GC48 art, DU20 endpoints without extra pushes, equal-held chrome, white-only erase and original LUTs");
+    puts("PASS: shelf native art or approved default fallback, DU20 endpoints without extra pushes, equal-held chrome, white-only erase and original LUTs");
     const EpdWaveformPhases* page=e0470_waveform_phases(display_main_page_gray_waveform(),MODE_GL16);
     const EpdWaveformPhases* binary=e0470_waveform_phases(display_main_page_bw_waveform(),MODE_DU);
     int white_pushes=0,binary_white=0;
-    for(int f=0;f<48;++f)for(int to=0;to<16;++to)for(int from=0;from<16;++from){
+    for(int f=0;f<page->phases;++f)for(int to=0;to<16;++to)for(int from=0;from<16;++from){
         int action=e0470_phase_action(page,f,to,from);
         assert(action==(to==from&&to!=15?0:e0470_phase_action(gray_table,f,to,from)));
         if(to==15&&from==15){assert(action==0||action==2);white_pushes+=action==2;}

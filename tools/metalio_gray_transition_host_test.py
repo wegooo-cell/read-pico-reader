@@ -64,12 +64,13 @@ int main(void){
  e0470_waveform_init();EpdiyHighlevelState h={.front_fb=front,.back_fb=back};
  const EpdWaveform *soft=display_main_shelf_soft_waveform(),*bw=display_main_bw_waveform();
  const EpdWaveformPhases *g=e0470_waveform_phases(soft,MODE_GL16),*d=e0470_waveform_phases(bw,MODE_DU);
- const EpdWaveformPhases *native_g=e0470_waveform_phases(&E0470_FULL_WAVEFORM,MODE_GL16);
+ const EpdWaveformPhases *native_g=e0470_waveform_phases(&E0470_WAVEFORM,MODE_GL16);
  const EpdWaveformPhases *native_d=e0470_waveform_phases(&E0470_FULL_WAVEFORM,MODE_DU);
- assert(g&&d&&g->phases==48&&d->phases==20);
- // Every unchanged tone holds. All changed middle-tone pulses are byte-for-byte native GL48;
+ assert(g&&d&&g->phases==E0470_GL16_FRAMES&&d->phases==20);
+ // 用户批准PR64默认灰阶；等值保持，中灰逐相对照该默认表。
+ // User-approved PR64 default grays: equal targets hold; compare changed middle tones phase by phase.
  // black/white endpoints in the source remain the complete native DU20 followed by holds.
- for(int from=0;from<16;++from)for(int to=0;to<16;++to)for(int f=0;f<48;++f){
+ for(int from=0;from<16;++from)for(int to=0;to<16;++to)for(int f=0;f<E0470_GL16_FRAMES;++f){
   int action=e0470_phase_action(g,f,to,from);
   assert(action==(from==to?0:to==0||to==15?(f<20?e0470_phase_action(native_d,f,to,from):0):e0470_phase_action(native_g,f,to,from)));
   if(f<20)assert(e0470_phase_action(d,f,to,from)==(from==to?0:e0470_phase_action(e0470_waveform_phases(&E0470_WAVEFORM,MODE_DU),f,to,from)));
@@ -123,7 +124,7 @@ int main(void){
   force_full=true;calls=fulls=0;
   assert(update_display_gray_transition(&h,a)==fail&&!calls&&fulls==1&&s_main_fault==!!error&&s_system_binary&&!depth&&!latency);
  }
- puts("PASS:1024 native-size old/target gray pairs; same-pass two white drives on image/exit only; every original DU20/GL48 action and release tail preserved; equal pairs hold; four rotations/crop; one output/no quantization/no framebuffer overwrite; OTA/full/failure guards");
+ puts("PASS:1024 native-size old/target gray pairs; same-pass two white drives on image/exit only; every approved DU20/default-GL action and release tail preserved; equal pairs hold; four rotations/crop; one output/no quantization/no framebuffer overwrite; OTA/full/failure guards");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s31-gray-transition-') as folder:

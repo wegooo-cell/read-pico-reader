@@ -175,7 +175,9 @@ int main(void) {
     assert(water_wave->temp_intervals==display_reader_text_waveform()->temp_intervals && !water->phase_times);
     const EpdWaveformPhases* water_src=e0470_waveform_phases(display_reader_text_waveform(),MODE_GL16);
     assert(water_src && water_src->phases==E0470_GL16_FRAMES);
-    const int water_drive=E0470_GL16_FRAMES-3-4;
+    // 源表仅移出末尾三相保持；新增四相擦白不属于源表长度。
+    // Only the three source holds move; the four added white phases are outside its length.
+    const int water_drive=E0470_GL16_FRAMES-3;
     for(int from=0;from<16;++from)for(int to=0;to<16;++to){
         for(int f=0;f<water_drive;++f)
             assert(e0470_phase_action(water,f,to,from)==e0470_phase_action(water_src,f,to,from));
