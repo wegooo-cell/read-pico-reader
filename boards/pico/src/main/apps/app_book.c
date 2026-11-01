@@ -375,6 +375,10 @@ static char s_message[128], s_storage[128], s_path[BOOK_STORE_PATH_MAX], s_title
 static html_note_t *s_notes;
 static size_t s_note_count;
 static int s_footnote_note = -1;
+// 纯插图 spine 文档沿用前一章页码：进入时把上一章的页数累加进来，避免插图页显示 1/1。
+// Illustration-only spine documents continue the previous chapter's page numbering instead of
+// restarting at 1/1.
+static size_t s_footer_page_base;
 // 打开卡片时点中的注号位置：卡片靠近它弹出，而不是永远居中。
 // Marker rect of the opened note: the card pops near it instead of always centring.
 static EpdRect s_footnote_marker;
@@ -3611,11 +3615,14 @@ static void draw_reader_images(uint8_t *fb, size_t page, EpdRect body) {
     }
 }
 static void reader_footer_progress(char *text,size_t cap,size_t page) {
-    // 右侧显示页码（本章第几页/本章共几页）加全书进度；章节号不会随翻页变化，用户会误当成页码。
-    // Show the page number within this chapter plus whole-book progress; the chapter counter never
-    // changes while turning pages and reads like a frozen page number.
-    size_t total=book_layout_page_count();
-    size_t current=total?(page<total?page+1:total):0;
+    // 页码 = 本章页数（纯插图文档累加前一章页数，不再从 1/1 开始）+ 全书进度百分比。
+    // Page number = pages in this chapter, with illustration-only documents continuing the
+    // previous chapter's count instead of restarting at 1/1; the percentage is whole-book progress.
+    size_t pages=book_layout_page_count();
+    size_t total=pages+s_footer_page_base;
+    size_t current=total?(page<pages?page+1:pages):0;
+    current+=s_footer_page_base;
+    if(current>total)current=total;
     snprintf(text,cap,"%u/%u  %u%%",(unsigned)current,(unsigned)total,percent(page));
 }
 // 独立绘制信息栏，先清理预读帧中的旧字形；物理刷新仍由正文/空闲局刷各自控制。
@@ -4418,6 +4425,9 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     unsigned old_lead_height = s_chapter_lead_height;
     unsigned old_lead_width = s_chapter_lead_width;
     reader_dims_ctx_t old_dims_ctx = s_reader_dims_ctx;
+    const size_t old_footer_base = s_footer_page_base;
+    const size_t old_chapter_pages = book_layout_page_count();
+    const size_t old_chapter_index = s_chapter;
     lock_draw();
     invalidate_prep();
     // 题头几何按当前模式重算，横排留顶部行高、竖排留右侧列宽，绘制与预留不会错开。
@@ -4432,6 +4442,7 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     if (!ok) {
         // 回滚前恢复旧章上下文，避免尺寸回调引用已释放的新章图片。/ Restore the previous context before rollback to avoid a freed image list.
         s_reader_dims_ctx = old_dims_ctx;
+        s_footer_page_base = old_footer_base;
         book_layout_set_inline_images(s_notes, s_note_count);
         html_text_free(&loaded);
         // 新章尚未接管旧脚注；失败时保留旧章所有权及行内映射。/ Keep old-note ownership and inline mapping until the new chapter succeeds.
@@ -4474,6 +4485,13 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     s_images = loaded.images; s_image_count = loaded.image_count;
     release_page_images();
     s_chapter = chapter;
+    // 纯插图章节（正文只有图片占位符）如果紧跟上一章，页码接着上一章累加，避免 1/1。
+    // An illustration-only chapter that immediately follows the previous one continues its page
+    // numbering; otherwise numbering restarts with this chapter.
+    if (s_text_len <= 16 && chapter == old_chapter_index + 1)
+        s_footer_page_base = old_footer_base + old_chapter_pages;
+    else
+        s_footer_page_base = 0;
     s_chapter_jump_undo.valid = false;
     if (clear_toc) s_selected_toc = SIZE_MAX;
     s_chapter_lead_skip = lead_skip;
