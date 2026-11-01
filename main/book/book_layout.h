@@ -68,6 +68,12 @@ typedef bool (*book_layout_image_dims_fn)(void* ctx, int image, int* width, int*
 /// / Register the dimensions callback; NULL clears it. Layout borrows it, the caller owns it.
 void book_layout_set_image_dims(book_layout_image_dims_fn fn, void* ctx);
 
+/// 注册行内注号图标表：正文 U+FFFC 占位符按注表的 marker_offset 对应图片序号，
+/// 排版把图标宽度算进行宽并记录行内 x。
+/// Register the inline footnote icon table: U+FFFC placeholders in the text map to note images by
+/// marker_offset, and layout charges the icon width to the line and records its inline x.
+void book_layout_set_inline_images(const html_note_t* notes, size_t count);
+
 /// 插图通栏宽度（整屏像素宽）。设成屏宽后插图按整屏等比缩放、不再受正文边距约束；
 /// 0 关闭，退回正文栏宽。它是面板常量，改边距或字号后的重排不必重新调用。
 /// Full-bleed width for illustrations in panel pixels. Set to the panel width, illustrations
@@ -86,6 +92,9 @@ int book_layout_page_image_count(size_t page);
 /// 取本页第 i 张图：序号、页内 y、显示宽高。越界返回 false。
 /// / Image i of this page: index, y within the page, and display width/height.
 bool book_layout_page_image_at(size_t page, int i, int* image, int* y, int* width, int* height);
+/// 取本页第 i 张图的原始 x：行内注号图标给出行末 x，块级插图为 -1（水平居中）。
+/// Raw x of image i: the row-end x for inline footnote icons, -1 for block images (centred).
+bool book_layout_page_image_rect(size_t page, int i, int* image, int* x, int* y, int* width, int* height);
 
 int book_layout_page_image(size_t page);
 /// 布局代次，重排或释放后改变，用于使页内位图缓存失效。/ Layout generation changes after rebuild/free, invalidating page bitmap caches.

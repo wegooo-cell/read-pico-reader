@@ -53,6 +53,16 @@ typedef struct {
     size_t run_count; ///< 本块的 run 数；零表示整块用系统字体 / Runs owned by this block; zero means the system face throughout
 } blk_t;
 
+/// 脚注：正文里 #note 引用所在的正文字节位置与同章注释文本切片；image 为图标序号，-1 表示文字注号。
+/// Footnote: normalized text offset of the #note reference, plus the same-chapter note text slice;
+/// `image` is the marker icon index, or -1 when the marker is text.
+typedef struct {
+    size_t marker_offset; ///< 注号在规范化正文中的位置 / Reference offset in normalized text
+    size_t text_start; ///< 注释文本起点 / Note text start
+    size_t text_len; ///< 注释文本长度 / Note text length
+    int image; ///< 注号图标序号，文字注号为 -1 / Marker image index, -1 for a text marker
+} html_note_t;
+
 typedef struct {
     char* utf8; ///< 模块分配且零结尾的文本 / Owned NUL-terminated text
     size_t len; ///< 不含结尾零的字节数 / Bytes excluding terminating NUL
@@ -62,6 +72,8 @@ typedef struct {
     size_t image_count; ///< 图片数 / Image count
     html_run_t* runs; ///< 模块分配的 run 表，被块表借用 / Owned run table, borrowed by the blocks
     size_t run_count; ///< run 总数 / Total run count
+    html_note_t* notes; ///< 模块分配的脚注表 / Owned footnote table
+    size_t note_count; ///< 脚注数 / Footnote count
 } html_text_t;
 
 /// 输出须为空；成功交出所有权，失败清空输出；空输入成功且零块。/ Output must be empty; success transfers ownership, failure clears output; empty input succeeds with zero blocks.

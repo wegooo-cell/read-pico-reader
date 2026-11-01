@@ -63,13 +63,22 @@ typedef struct {
     int16_t y;
     int16_t width;
     int16_t height;
+    int16_t x; ///< 行内图标为行末 x；-1 表示块级图居中 / Inline icon row-end x; -1 centres block images
 } layout_image_t;
 
 static layout_image_t* s_images;
 static size_t s_image_count;
 static size_t s_image_capacity;
 static uint32_t* s_page_img_start;
+// 上一行文字的结束 x 与该行顶部，用于把行内注号图标贴到字后。
+// End x and top of the previous text line, used to attach inline footnote icons to the text.
+static int s_last_line_x_end, s_last_line_used;
 
+// 行内注号图标：正文占位符 U+FFFC 对应的注表，排版把图标宽度算进行宽、记录精确 x。
+// Inline footnote icons: the note table behind U+FFFC placeholders, so layout can charge the
+// icon width to the line and record its exact x.
+static const html_note_t* s_inline_notes;
+static size_t s_inline_note_count;
 static book_layout_image_dims_fn s_dims_fn;
 static void* s_dims_ctx;
 
@@ -326,6 +335,10 @@ void book_layout_set_chapter_lead(size_t skip_bytes, unsigned height_px) {
     s_lead_height = height_px;
 }
 
+void book_layout_set_inline_images(const html_note_t* notes, size_t count) {
+    s_inline_notes = notes;
+    s_inline_note_count = count;
+}
 void book_layout_set_image_dims(book_layout_image_dims_fn fn, void* ctx) {
     s_dims_fn = fn;
     s_dims_ctx = ctx;
@@ -370,7 +383,23 @@ static bool image_display_size(int image, int* out_w, int* out_h) {
     return true;
 }
 
-static bool record_page_image(int image, int y, int w, int h) {
+// 按正文偏移找行内注号图标的大小；不是注号或取不到尺寸时返回 false。
+// Look up an inline footnote icon by text offset; false when not a marker or no dimensions.
+static bool inline_icon_at(size_t offset, int* image, int* w, int* h) {
+    for (size_t i = 0; i < s_inline_note_count; ++i) {
+        if (s_inline_notes[i].marker_offset != offset) continue;
+        int iw = 0, ih = 0;
+        if (!s_dims_fn || !s_dims_fn(s_dims_ctx, s_inline_notes[i].image, &iw, &ih) || iw <= 0 || ih <= 0)
+            return false;
+        if (image) *image = s_inline_notes[i].image;
+        if (w) *w = iw;
+        if (h) *h = ih;
+        return true;
+    }
+    return false;
+}
+
+static bool record_page_image(int image, int x, int y, int w, int h) {
     if (s_image_count == s_image_capacity) {
         size_t cap = s_image_capacity ? s_image_capacity * 2 : 16;
         if (cap > PAGE_MAX * 4) return false;
@@ -381,6 +410,7 @@ static bool record_page_image(int image, int y, int w, int h) {
     }
     layout_image_t* rec = &s_images[s_image_count++];
     rec->image = (int16_t)image;
+    rec->x = (int16_t)x;
     rec->y = (int16_t)y;
     rec->width = (int16_t)w;
     rec->height = (int16_t)h;
@@ -399,6 +429,21 @@ bool book_layout_page_image_at(size_t page, int i, int* image, int* y, int* widt
     if ((uint32_t)i >= s_page_img_start[page + 1] - a) return false;
     const layout_image_t* rec = &s_images[a + (uint32_t)i];
     if (image) *image = rec->image;
+    if (y) *y = rec->y;
+    if (width) *width = rec->width;
+    if (height) *height = rec->height;
+    return true;
+}
+
+// 取本页第 i 张图的原始 x（行内图标为行末坐标，块级图为 -1）。越界返回 false。
+// Raw x of image i on the page (row-end x for inline icons, -1 for block images); false when out of range.
+bool book_layout_page_image_rect(size_t page, int i, int* image, int* x, int* y, int* width, int* height) {
+    if (page >= s_count || !s_page_img_start || i < 0) return false;
+    uint32_t a = s_page_img_start[page];
+    if ((uint32_t)i >= s_page_img_start[page + 1] - a) return false;
+    const layout_image_t* rec = &s_images[a + (uint32_t)i];
+    if (image) *image = rec->image;
+    if (x) *x = rec->x;
     if (y) *y = rec->y;
     if (width) *width = rec->width;
     if (height) *height = rec->height;
@@ -440,6 +485,8 @@ static bool append_page(size_t off) {
         s_capacity = cap;
     }
     s_pages[s_count] = off;
+    s_last_line_x_end = 0;
+    s_last_line_used = 0;
     s_page_img_start[s_count] = (uint32_t)s_image_count;
     ++s_count;
     s_page_img_start[s_count] = (uint32_t)s_image_count;
@@ -665,6 +712,30 @@ static bool take_line(size_t off, int advance_limit, int hang_margin, size_t* ne
         char glyph[5];
         memcpy(glyph, s_text + end, n);
         glyph[n] = 0;
+        // 行内注号占位符按图标宽度算进行宽；超出可用宽度时把图标移到下一行。
+        // Charge the inline marker's icon width to the line; when it does not fit, move the icon
+        // to the next line.
+        if (cp == 0xFFFC) {
+            int iw = 0, ih = 0;
+            if (!inline_icon_at(end, NULL, &iw, &ih)) iw = *px;
+            int64_t cand = width + iw + (end > visible_off && !*heading ? s_tracking_px : 0);
+            if (cand < 0) return false;
+            if (cand > available && end != visible_off) {
+                s_line[end - visible_off] = 0;
+                break;
+            }
+            last_width = width;
+            width = cand;
+            ++glyph_count;
+            last_start = end;
+            last_cp = cp;
+            if (!line_append(end - visible_off, glyph, n)) return false;
+            end += n;
+            before_last_ink = ink_end; before_last_ink_width = ink_width;
+            ink_end = end; ink_width = width; ink_stretch = stretch; ink_shrink = shrink;
+            previous_word = false;
+            continue;
+        }
         // 每个字都按自己那一段的字体量宽：行宽、字距和对齐算法一个字没改。
         // Every glyph is measured in its own span's face; width, tracking and alignment math
         // are untouched.
@@ -806,7 +877,7 @@ static bool build_vertical(size_t len) {
             bool heading_band = s_count == 1 && s_lead_height > 0;
             if (image_display_size(block->image, &img_w, &img_h)) {
                 if ((used || heading_band) && !append_page(off)) return false;
-                if (!record_page_image(block->image, 0, img_w, img_h)) return false;
+                if (!record_page_image(block->image, -1, 0, img_w, img_h)) return false;
                 off = block->offset + block->len;
                 if (off < len && s_text[off] == '\n') ++off;
                 // 图后另起一页给正文，图页自己只剩这一张图。
@@ -906,15 +977,27 @@ bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks,
         if (block && block->image >= 0 && off == block->offset) {
             int img_w = 0, img_h = 0;
             if (image_display_size(block->image, &img_w, &img_h)) {
-                // 图是页面流里的一个块：放得下就留在本页，文字接着图下面排；放不下才翻页。
-                // An image is one block in the page flow: keep it on this page when it fits and
-                // let the text continue below it; only start a new page when it does not fit.
-                if (used && used + img_h > s_image_rect.height) {
-                    if (!append_page(off)) goto fail;
-                    used = 0;
+                // 小图标（注号等）贴着上一行末尾画，不占新行；其余插图按块级流排。
+                // Small icons (footnote markers) attach to the end of the previous line instead of
+                // claiming a new line; other illustrations stay block-level.
+                const bool inline_icon = s_last_line_x_end > 0 && line_height > 0 &&
+                    img_h <= line_height * 2 && img_w <= s_rect.width / 2 &&
+                    s_last_line_x_end + img_w + 4 <= s_rect.x + s_rect.width;
+                if (inline_icon) {
+                    int iy = s_last_line_used + (line_height - img_h) / 2;
+                    if (iy < 0) iy = 0;
+                    if (!record_page_image(block->image, s_last_line_x_end + 2, iy, img_w, img_h)) goto fail;
+                } else {
+                    // 图是页面流里的一个块：放得下就留在本页，文字接着图下面排；放不下才翻页。
+                    // An image is one block in the page flow: keep it on this page when it fits and
+                    // let the text continue below it; only start a new page when it does not fit.
+                    if (used && used + img_h > s_image_rect.height) {
+                        if (!append_page(off)) goto fail;
+                        used = 0;
+                    }
+                    if (!record_page_image(block->image, -1, (int)used, img_w, img_h)) goto fail;
+                    used += img_h + px / 2;  // 图下留半个行高 / half a line under the image
                 }
-                if (!record_page_image(block->image, (int)used, img_w, img_h)) goto fail;
-                used += img_h + px / 2;  // 图下留半个行高 / half a line under the image
             } else {
                 // 取不到尺寸时退回整页显示，保证纯插图章节仍可被跨章跳过逻辑识别。
                 // Without dimensions, fall back to a whole-page image so an image-only chapter
@@ -941,6 +1024,27 @@ bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks,
             used = 0;
             leading = 0;
         }
+        // 记下这一行里的行内注号图标：x 用行内前缀宽度估算，y 落在该行内。
+        // Record inline markers on this line: x from the measured prefix, y inside the line.
+        for (size_t p = off; p + 3 <= next; ++p) {
+            if ((uint8_t)s_text[p] != 0xEF || (uint8_t)s_text[p + 1] != 0xBF || (uint8_t)s_text[p + 2] != 0xBC)
+                continue;
+            int image = -1, iw = 0, ih = 0;
+            if (!inline_icon_at(p, &image, &iw, &ih)) continue;
+            char prefix[256];
+            size_t plen = p - off;
+            if (plen >= sizeof(prefix)) plen = sizeof(prefix) - 1;
+            memcpy(prefix, s_text + off, plen);
+            prefix[plen] = 0;
+            int px_w = 0;
+            if (plen) { slot_select_for(off); px_w = ttf_text_width_px(line_px, prefix); }
+            int icon_x = rect.x + indent + px_w;
+            int icon_y = (int)used + leading + (line_height - ih) / 2;
+            if (icon_y < 0) icon_y = 0;
+            if (!record_page_image(image, icon_x, icon_y, iw, ih)) goto fail;
+        }
+        s_last_line_used = (int)used + leading;
+        s_last_line_x_end = s_rect.x + indent + line_width;
         used += leading + line_height;
         if (paragraph_end) used += gap_for(line_height, heading) + margin_after;
         off = next;
@@ -1126,6 +1230,51 @@ static void draw_vertical_page(uint8_t* fb, size_t page, EpdRect rect) {
     }
 }
 
+// 构造带行内注号图标的行：按占位符切段绘字，图标位置留给 app 覆盖绘制。
+// Draw a line that carries inline footnote icons: split at placeholders and leave the icon gaps.
+static void draw_line_with_icons(uint8_t* fb, int x, int baseline, int line_px,
+                                 size_t off, size_t next) {
+    static char seg[512];
+    const char *p = s_line;
+    size_t source = off;
+    int cursor = x;
+    while (*p) {
+        const char *q = strstr(p, "\xEF\xBF\xBC");
+        size_t len = q ? (size_t)(q - p) : strlen(p);
+        if (len) {
+            if (len >= sizeof(seg)) len = sizeof(seg) - 1;
+            memcpy(seg, p, len);
+            seg[len] = 0;
+            int width = ttf_text_width_px(line_px, seg);
+            int points = 0;
+            for (size_t i = 0; i < len; ++i)
+                if (((unsigned char)seg[i] & 0xc0) != 0x80) ++points;
+            if (points > 1) width += s_tracking_px * (points - 1);
+            ttf_draw_text_px(fb, cursor, baseline, line_px, seg, EPD_DRAW_ALIGN_LEFT, 0, 15);
+            cursor += width;
+        }
+        if (!q) break;
+        // 占位符在正文里的位置按顺序对应注表，图标宽度取排版同一次探测的结果。
+        // Placeholders map to the note table in order; the icon width comes from the same probe.
+        size_t icon_off = SIZE_MAX;
+        while (source + 3 <= next) {
+            if ((uint8_t)s_text[source] == 0xEF && (uint8_t)s_text[source + 1] == 0xBF &&
+                (uint8_t)s_text[source + 2] == 0xBC) {
+                icon_off = source;
+                source += 3;
+                break;
+            }
+            ++source;
+        }
+        int iw = 0, ih = 0;
+        if (icon_off != SIZE_MAX && inline_icon_at(icon_off, NULL, &iw, &ih)) cursor += iw;
+        else cursor += line_px;
+        p = q + 3;
+    }
+}
+
+static bool line_has_inline_icon(const char* line) { return strstr(line, "\xEF\xBF\xBC") != NULL; }
+
 void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
     if (!fb || page >= s_count || px != s_px || rect.width != s_rect.width ||
         rect.height != s_rect.height || rect.x < 0 || rect.y < 0 ||
@@ -1218,7 +1367,9 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
             // Drawing follows the runs: width, tracking and justification math are untouched,
             // only the slot each glyph comes from changes.
             ttf_draw_set_runs(s_line_run_count ? s_line_runs : NULL, s_line_run_count);
-            if (fitted)
+            if (line_has_inline_icon(s_line))
+                draw_line_with_icons(fb, x, baseline, line_px, off, next);
+            else if (fitted)
                 ttf_draw_text_px_fitted(fb, x, baseline, line_px, s_line, s_tracking_px,
                                         line_extent, 0, 15);
             else if (s_tracking_px && !heading)
