@@ -173,8 +173,10 @@ const EpdWaveform* display_reader_panel_gray4_waveform(bool erase_underlay) {
  * GL48无全保持尾时额外保留三相释放；等黑/灰仍保持，不回退到重驱原表。
  * Ordinary retains Moku's GL37 plus six white-target phases including equal whites, before its original holds.
  * GL48 without trailing holds adds three release phases; equal black/grays still hold instead of falling back to the re-driving raw table.
+ * 用户2026-11-01：普通翻页擦白由四相增至八相，仍保留原定稿保持。
+ * User2026-11-01: ordinary-turn white erase grows from four to eight phases before the original holds.
  */
-#define READER_SOFT_TURN_EXTRA 4
+#define READER_SOFT_TURN_EXTRA 8
 static uint8_t s_soft_turn[E0470_FULL_GL16_FRAMES + READER_SOFT_TURN_EXTRA + 3][16][4];
 static EpdWaveformPhases s_soft_turn_phases;
 static const EpdWaveformPhases* s_soft_turn_ranges[1];
@@ -209,8 +211,8 @@ const EpdWaveform* display_reader_soft_turn_waveform(void){
     }
     if(hold<1)return &E0470_WAVEFORM;
     const int drive=gl->phases-hold;
-    // 官方全像素时序 + 等黑去掉擦白 + “变成白/本来白”末尾补四相擦白（插在定稿保持前）。
-    // Official full-pixel timing, equal black drops its erase phases, and four extra white
+    // 官方全像素时序 + 等黑去掉擦白 + “变成白/本来白”末尾补八相擦白（插在定稿保持前）。
+    // Official full-pixel timing, equal black drops its erase phases, and eight extra white
     // phases (for every white target, blanks included) are inserted before the settle holds.
     memcpy(s_soft_turn,gl->luts,(size_t)drive*16*4);
     memcpy(s_soft_turn+drive+READER_SOFT_TURN_EXTRA,(const uint8_t*)gl->luts+(size_t)drive*16*4,

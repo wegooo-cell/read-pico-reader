@@ -126,16 +126,16 @@ int main(void) {
     }
     assert(held==16&&edge_runs>=10);
     puts("PASS: reader ripple holds all 16 unchanged grays and reduces at least ten gray-edge dark runs; existing text profile, targets and 37 phases unchanged");
-    // 普通翻页柔和档：厂商 GL16 原序，等灰全保持，只为“变成白”补四相擦白，
-    // 四相插在末尾定稿保持之前。
-    // Soft ordinary turn: vendor GL16 phases, every equal pair held, four whitening phases
-    // only for pixels turning white, inserted before the vendor's trailing settle holds.
+    // 普通翻页柔和档：厂商 GL16 原序，等灰全保持；末尾定稿保持之前补十二相整屏擦白，
+    // 再补四相重推黑，抵消整屏白推对黑字的冲淡。
+    // Soft ordinary turn: vendor GL16 phases, every equal pair held, twelve whole-panel white
+    // phases plus four black re-drive phases inserted before the vendor's trailing settle holds.
     const EpdWaveform* soft_turn = display_reader_soft_turn_waveform();
     assert(soft_turn == display_reader_soft_turn_waveform() && soft_turn != &E0470_WAVEFORM);
     const EpdWaveformPhases* st = e0470_waveform_phases(soft_turn, MODE_GL16);
     const EpdWaveformPhases* vendor = e0470_waveform_phases(&E0470_WAVEFORM, MODE_GL16);
     assert(vendor && st && !st->phase_times && !vendor->phase_times);
-    assert(st->phases == vendor->phases + 4);
+    assert(st->phases == vendor->phases + 16);
     const int drive = vendor->phases - 3;
     unsigned equal_gray_refreshes = 0;
     for (int from = 0; from < 16; ++from)
@@ -151,31 +151,39 @@ int main(void) {
                 if (to == from && a != 0) ++equal_gray_refreshes;
             }
     assert(equal_gray_refreshes > 0);
-    for (int f = drive; f < drive + 4; ++f)
+    for (int f = drive; f < drive + 12; ++f)
         for (int from = 0; from < 16; ++from)
             for (int to = 0; to < 16; ++to)
                 assert(e0470_phase_action(st, f, to, from) ==
                        (to == 15 ? 2 : 0));
+    for (int f = drive + 12; f < drive + 16; ++f)
+        for (int from = 0; from < 16; ++from)
+            for (int to = 0; to < 16; ++to)
+                assert(e0470_phase_action(st, f, to, from) ==
+                       (to == 0 ? 1 : 0));
     for (int i = 0; i < 3; ++i)
         for (int from = 0; from < 16; ++from)
             for (int to = 0; to < 16; ++to) {
-                assert(e0470_phase_action(st, drive + 4 + i, to, from) ==
+                assert(e0470_phase_action(st, drive + 16 + i, to, from) ==
                        e0470_phase_action(vendor, drive + i, to, from));
-                assert(e0470_phase_action(st, drive + 4 + i, to, from) == 0);
+                assert(e0470_phase_action(st, drive + 16 + i, to, from) == 0);
             }
-    puts("PASS: soft ordinary turn keeps vendor sequences and equal-gray refresh, drops only black-on-black erase phases, inserts four whole-white phases before the vendor settle holds");
+    puts("PASS: soft ordinary turn keeps vendor sequences and equal-gray refresh, drops only black-on-black erase phases, inserts twelve whole-white phases and four black re-drive phases before the vendor settle holds");
     const EpdWaveform* water_wave=display_reader_water_waveform();
     const EpdWaveformPhases* water=e0470_waveform_phases(water_wave,MODE_GL16);
-    assert(water_wave==display_reader_water_waveform() && water && water->phases==soft->phases+4);
+    assert(water_wave==display_reader_water_waveform() && water && water->phases==E0470_GL16_FRAMES+4);
     assert(water_wave->temp_intervals==display_reader_text_waveform()->temp_intervals && !water->phase_times);
-    const int water_drive=soft->phases-3;
+    const EpdWaveformPhases* water_src=e0470_waveform_phases(display_reader_text_waveform(),MODE_GL16);
+    assert(water_src && water_src->phases==E0470_GL16_FRAMES);
+    const int water_drive=E0470_GL16_FRAMES-3-4;
     for(int from=0;from<16;++from)for(int to=0;to<16;++to){
         for(int f=0;f<water_drive;++f)
-            assert(e0470_phase_action(water,f,to,from)==e0470_phase_action(soft,f,to,from));
+            assert(e0470_phase_action(water,f,to,from)==e0470_phase_action(water_src,f,to,from));
         for(int f=water_drive;f<water_drive+4;++f)
             assert(e0470_phase_action(water,f,to,from)==(to==15&&from!=15?2:0));
         for(int f=0;f<3;++f){
-            assert(e0470_phase_action(water,water_drive+4+f,to,from)==e0470_phase_action(soft,water_drive+f,to,from));
+            assert(e0470_phase_action(water,water_drive+4+f,to,from)==
+                   e0470_phase_action(water_src,water_drive+f,to,from));
             assert(e0470_phase_action(water,water_drive+4+f,to,from)==0);
         }
         if(from==to)for(int f=0;f<water->phases;++f)assert(e0470_phase_action(water,f,to,from)==0);

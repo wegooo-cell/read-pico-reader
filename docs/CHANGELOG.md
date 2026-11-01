@@ -1,5 +1,13 @@
 # 版本变更 / Changelog
 
+## 未发布 / Unreleased — 阅读翻页擦白 / Reader turn erase
+
+- Pico 普通/图文翻页保留整屏 GL16 白刷，定稿保持前变白相由 4 相增至 12 相并补 4 相重推黑；水波纹保持 4 相，手动/周期全刷不变。
+  Pico ordinary/image turns keep the whole-panel GL16 erase, growing the changed-white phases from four to twelve plus four black re-drive phases before the settle holds; the ripple keeps four and manual/periodic refresh is unchanged.
+
+- S31 阅读翻页恢复 PR59 的整屏输出：普通、图文、水波纹、速读都按整屏区域提交，顶栏与页脚同轮擦白，不再沿用 PR60 的正文裁剪导致上下积灰；普通翻页派生波形擦白由 4 相增至 8 相（GL37 原表已含六相目标白），原厂 GC48/GL48/DU20 表不改。
+  S31 reader turns restore the PR59 whole-screen presentation: ordinary, image, ripple and Fast BW all present the full screen so the status bar and footer are erased in the same pass instead of accumulating ghost from PR60's body crop; the ordinary derived waveform grows from four to eight white phases (the GL37 table already carries six white-target phases), with the vendor GC48/GL48/DU20 tables untouched.
+
 ## Pico 0.3.3-rc103 / Metalio S31 0.3.3-rc108 — 2026-10-31
 
 - 保留正式版HTTPS升级兼容性：两板启用交叉签名证书链验证，构建时核对SDK回调；真实证书日期、主机名和签名校验保持有效。官网刷机入口仍仅kiikoread.com。
