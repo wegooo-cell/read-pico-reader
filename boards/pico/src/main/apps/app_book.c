@@ -25,7 +25,8 @@
  * User2026-10-31 merges PR55: Pico ordinary/image turns use full-pixel GL16 with metadata; Fast BW/ripple retain deferred metadata.
  * 三键单击及中键长按可自定义，提供翻页/工具栏及首页/全屏/工具栏两套推荐；中键长按默认返回主页，阅读页不画右下角菜单图标。
  * 用户授权基础管理：长按书架先看完整详情，清进度与删文件分别确认；失败保留待重试记录，不自动回收其他书进度。
- * 用户修订：单本管理为书架弹窗；管理页用于批量操作。分页和排序保留勾选，筛选/应用搜索及重扫清除勾选。
+ * 用户2026-11-01确认预览：管理页改为搜索、书架排序、列表/图标及四向分页；点击选择或长按才显示圆形勾选和四项底部操作，返回先退出选择。分页/排序/视图切换保留勾选，应用搜索清空选择。
+ * User2026-11-01 approves the preview: management uses search, shelf order, list/grid and four-way paging; Select or hold reveals circular marks and four footer actions; Back first leaves selection. Paging/sort/view retain marks; applied search clears them.
  * 失败进度仅按变更路径失效；删除后的清理重试保留到本次开机结束，不随切页释放。
  * 卡失效时先保存进度并关闭阅读资源，再由主循环回退字体；禁止自动续读失效挂载。
  * 用户最新修订：书架保留深色书轨、亚克力及新增液态玻璃，每页九本；收录导入及读过的书，移出仅隐藏，再读重新上架。
@@ -275,6 +276,7 @@ static int s_count, s_visible_count, s_filter;
 static bool s_recent_sort;
 static uint8_t s_shelf_order;
 static bool s_sort_menu;
+static bool s_bulk_selecting,s_bulk_grid;
 // 目录记录有界增长；同一开机周期按完整路径保存两种布局的页码。
 // Bounded folder records retain pages by full path for the two layouts during this boot.
 #define SHELF_CATEGORY_LIMIT 128
@@ -632,7 +634,10 @@ static int reader_margin_for_level(int level, int current, int px, int tracking_
     return level == reader_margin_level_for(current, px, tracking_px) ? current : values[level];
 }
 static EpdRect progress_rect(void) { return ui_reader_footer_for(s_reader_fullscreen,app_settings_reader_immersive()); }
-static int shelf_rows(void) { if(s_view==BULK)return BOOK_BULK_ROWS; return s_view == SHELF && app_settings_shelf_style() == 5 ? 4 : BOOK_GRID_ROWS; }
+static int shelf_rows(void) {
+    if(s_view==BULK)return ui_book_manage_rows(s_bulk_grid);
+    return s_view==SHELF&&app_settings_shelf_style()==5?4:BOOK_GRID_ROWS;
+}
 #define SHELF_BOOK_LIFT_PX 16
 #define SHELF_LIST_BOUNCE_PX 8
 #define SHELF_FAST_COVER_WIDTH 164
@@ -689,11 +694,11 @@ static EpdRect row_rect(int row) {
         int cell = (ui_content_width() - 2 * UI_GAP) / 3;
         return (EpdRect){UI_MARGIN + col * (cell + UI_GAP), (s_view == SHELF ? 192 : 224) + line * 282, cell, 260};
     }
-    return ui_book_manage_row(row);
+    return ui_book_manage_entry(s_bulk_grid,row);
 }
 static EpdRect shelf_cover_image(int row) {
     EpdRect card = row_rect(row);
-    if(s_view==BULK)return (EpdRect){card.x+48,card.y+12,76,104};
+    if(s_view==BULK)return ui_book_manage_cover(s_bulk_grid,row);
     if (s_view != SHELF || app_settings_shelf_style() != 5)
         return (EpdRect){card.x + (card.width - 164) / 2, card.y, 164, 214};
     // 列表所有封面统一尺寸；原图按比例铺满并居中裁切。/ Uniform list boxes use aspect fill and center crop.
@@ -1129,7 +1134,7 @@ static EpdRect tool_rect(int i) {
 static int leaves(void) {
     if (s_view == TOC) return book_toc_pages(book_navigation_count());
     int count = s_visible_count;
-    int rows = s_view == BULK ? BOOK_BULK_ROWS : shelf_rows();
+    int rows = shelf_rows();
     return count ? 1 + (count - 1) / rows : 1;
 }
 static EpdRect shelf_manage_rect(void) { return (EpdRect){442, 94, 97, 54}; }
@@ -1288,14 +1293,15 @@ static EpdRect manage_rect(int index, int count) {
     EpdRect panel = manage_panel();
     return ui_row_rect(index, count, panel.y + panel.height - 94, 76);
 }
-// 六个批量按钮排成两行各三格：上排选择与重扫，下排三个需要二次确认的操作。
-// Six batch controls in two rows of three: selection and rescan on top, the three actions that
-// ask for confirmation below.
+// 选择模式四格操作栏；前三项仍需二次确认。
+// Four selection-mode actions; the first three still require confirmation.
 static EpdRect batch_rect(int id) {
     return ui_book_manage_action(id);
 }
 static EpdRect manage_back_rect(void) { return (EpdRect){534, 80, 114, 58}; }
-static EpdRect bulk_filter_rect(int id) { return (EpdRect){36 + id * 208, 176, 196, 64}; }
+static EpdRect bulk_filter_rect(int id) {
+    return id==0?ui_book_manage_layout():id==1?ui_book_manage_sort():ui_book_manage_search();
+}
 static EpdRect search_rect(int id) {
     if (id < 40) {
         int width = (ui_content_width() - 54) / 10;
@@ -1314,9 +1320,6 @@ static void clear_selection(void) {
 }
 static void toggle_selection(int index) {
     if (index >= 0 && index < s_visible_count) s_shelf[index].selected = !s_shelf[index].selected;
-}
-static void select_page(int page) {
-    for (int i = page * BOOK_BULK_ROWS; i < s_visible_count && i < (page + 1) * BOOK_BULK_ROWS; ++i) s_shelf[i].selected = true;
 }
 
 static void search_begin(void) {
@@ -1601,13 +1604,8 @@ static void draw_batch_confirmation(uint8_t* fb) {
     draw_control(fb, ui_row_rect(1, 2, 620, UI_BTN_H), "确认", 601);
 }
 
-static EpdRect bulk_nav_rect(int i) {
-    return i == 1 ? manage_back_rect() : (EpdRect){36 + (i == 2 ? 416 : 0), 1014, 196, 64};
-}
-static int bulk_nav_hit(int x, int y) {
-    for (int i=0;i<3;++i) if(ui_rect_hit(bulk_nav_rect(i),x,y)) return i;
-    return -1;
-}
+static EpdRect bulk_nav_rect(int i) { return ui_pager_rect_at(i,1006); }
+static int bulk_nav_hit(int x,int y) { return ui_pager_hit_at(x,y,1006); }
 static EpdRect bulk_sort_rect(int i) {
     if (i < 3) return (EpdRect){60, 342 + i * 112, 564, 100};
     if (i < 5) return (EpdRect){60 + (i - 3) * 290, 700, 274, 66};
@@ -1648,52 +1646,7 @@ static void draw_bulk_sort(uint8_t *fb) {
     EpdRect done=bulk_sort_rect(5);ui_fill_round_rect(fb,done,18,UI_GRAY_BLACK);
     ui_text_box(fb,ui_inset_rect(done,8),27,"完成",EPD_DRAW_ALIGN_CENTER,true);
 }
-static void draw_bulk(uint8_t* fb, int leaf) {
-    ui_clear_page(fb); ui_nav_status(fb);
-    ui_text_box(fb,(EpdRect){36,80,470,76},52,"书架管理",EPD_DRAW_ALIGN_LEFT,false);
-    draw_control(fb,manage_back_rect(),"完成",711);
-    const char *order=shelf_order_mode()==0?"名称":shelf_order_mode()==1?"最近阅读":"添加时间";
-    char order_label[64];snprintf(order_label,sizeof(order_label),"排序：%s %s",order,shelf_order_desc()?"↓":"↑");
-    const char *filters[]={s_filter==0?"全部来源":s_filter==1?"TF 卡":"内置",order_label,s_query[0]?"搜索中":"搜索"};
-    for(int i=0;i<3;++i)draw_control(fb,bulk_filter_rect(i),filters[i],110+i);
-    const char *selection[]={"本页全选","清除勾选","重新扫描"};
-    for(int i=0;i<3;++i)draw_control(fb,batch_rect(i),selection[i],610+i);
-    for(int row=0;row<BOOK_BULK_ROWS;++row){
-        int index=leaf*BOOK_BULK_ROWS+row;
-        if(index>=s_visible_count)break;
-        EpdRect r=row_rect(row);const shelf_entry_t *item=&s_shelf[index];
-        if(item->selected)ui_fill_round_rect(fb,r,13,0xee);
-        EpdRect mark={r.x+7,r.y+50,28,28};
-        ui_draw_control_frame(fb,mark,7,0xa0);
-        if(item->selected)epd_fill_circle(mark.x+14,mark.y+14,7,0x28,fb);
-        EpdRect image=shelf_cover_image(row);ui_root_shadow(fb,image,2);
-        ui_fill_rect_fast(image,UI_GRAY_WHITE,fb);
-        if(s_covers[row].index==index&&s_covers[row].gray){
-            book_crop_t crop=book_cover_crop(s_covers[row].width,s_covers[row].height,image.width,image.height);
-            for(int y=0;y<image.height;++y)for(int x=0;x<image.width;++x){
-                int sx=crop.x+x*crop.width/image.width,sy=crop.y+y*crop.height/image.height;
-                uint8_t tone=ui_contrast_gray(s_covers[row].gray[sy*s_covers[row].width+sx]);
-                epd_draw_pixel(image.x+x,image.y+y,ui_image_dither_gray(tone,image.x+x,image.y+y),fb);
-            }
-        }else ui_draw_icon(fb,image.x+image.width/2,image.y+image.height/2,30,UI_ICON_BOOK_OPEN,0x70);
-        ui_draw_control_frame(fb,image,2,0xb0);
-        char title[256];copy_text(title,sizeof(title),item->name);fit_text(title,27,r.width-160);
-        ui_text_box(fb,(EpdRect){r.x+144,r.y+16,r.width-160,46},27,title,EPD_DRAW_ALIGN_LEFT,false);
-        char detail[80];snprintf(detail,sizeof(detail),"%s · %s %u%%",item->is_flash?"内置":"TF 卡",item->has_progress?"已读":"未读",item->pct);
-        ui_text_box(fb,(EpdRect){r.x+144,r.y+69,r.width-160,40},20,detail,EPD_DRAW_ALIGN_LEFT,false);
-        ui_hairline(fb,r.y+r.height-1,r.x,r.width,0xdc);
-    }
-    if(!s_visible_count)ui_text_vc(fb,342,540,26,s_message[0]?s_message:"当前筛选没有图书",EPD_DRAW_ALIGN_CENTER,false);
-    char page[80];snprintf(page,sizeof(page),"%d/%d 页 · 已选 %u 本",leaf+1,leaves(),(unsigned)selected_count());
-    ui_text_box(fb,(EpdRect){240,1014,204,64},20,page,EPD_DRAW_ALIGN_CENTER,false);
-    draw_control(fb,bulk_nav_rect(0),"上一页",100);
-    draw_control(fb,bulk_nav_rect(2),"下一页",102);
-    const char *actions[]={"删除文件","清进度","移出书架"};
-    for(int i=3;i<6;++i)draw_control(fb,batch_rect(i),actions[i-3],610+i);
-    if(s_batch_message[0])ui_text_box(fb,(EpdRect){36,984,612,28},18,s_batch_message,EPD_DRAW_ALIGN_CENTER,false);
-    draw_batch_confirmation(fb);
-    if(s_sort_menu)draw_bulk_sort(fb);
-}
+#include "book_manage_ui.h"
 static void save_progress(void) {
     if (!s_text || !s_path[0] || !book_layout_page_count()) return;
     bool was_failed = s_save_failed;
@@ -6234,112 +6187,108 @@ static void batch_apply(app_ctx_t* ctx) {
         snprintf(s_batch_message, sizeof(s_batch_message), "成功 %u 本，失败 %u 本%s",
                  done, failed, failed ? "；所选可重试" : "");
 }
-static app_redraw_t batch_action(app_ctx_t* ctx, uint16_t x, uint16_t y) {
-    if (s_batch_confirm) {
-        if (ui_rect_hit(ui_row_rect(0, 2, 620, UI_BTN_H), x, y)) {
-            s_batch_confirm = false;
-            return APP_REDRAW_PAGE;
-        }
-        if (ui_rect_hit(ui_row_rect(1, 2, 620, UI_BTN_H), x, y)) {
-            batch_apply(ctx);
-            return APP_REDRAW_PAGE;
-        }
+static app_redraw_t batch_action(app_ctx_t* ctx,uint16_t x,uint16_t y) {
+    if(s_batch_confirm){
+        if(ui_rect_hit(ui_row_rect(0,2,620,UI_BTN_H),x,y)){s_batch_confirm=false;return APP_REDRAW_PAGE;}
+        if(ui_rect_hit(ui_row_rect(1,2,620,UI_BTN_H),x,y)){batch_apply(ctx);return APP_REDRAW_PAGE;}
         return APP_REDRAW_NONE;
     }
-    for (int i = 0; i < 6; ++i) if (ui_rect_hit(batch_rect(i), x, y)) {
-        s_batch_message[0] = 0;
-        if (!i) select_page(ctx->leaf);
-        else if (i == 1) clear_selection();
-        else if (i == 2) { clear_selection(); s_batch_message[0] = 0; scan_shelf(ctx); }
-        else if (selected_count()) {
-            s_batch_kind = i == 3 ? BATCH_DELETE : i == 4 ? BATCH_CLEAR : BATCH_UNSHELF;
-            s_batch_confirm = true;
-        }
-        else copy_text(s_batch_message, sizeof(s_batch_message), "请先选择图书");
+    if(!s_bulk_selecting)return APP_REDRAW_NONE;
+    for(int i=3;i<7;++i)if(ui_rect_hit(batch_rect(i),x,y)){
+        s_batch_message[0]=0;
+        if(i==6){s_bulk_selecting=false;clear_selection();return APP_REDRAW_PAGE;}
+        if(selected_count()){
+            s_batch_kind=i==3?BATCH_DELETE:i==4?BATCH_CLEAR:BATCH_UNSHELF;
+            s_batch_confirm=true;
+        }else copy_text(s_batch_message,sizeof(s_batch_message),"请先选择图书");
         return APP_REDRAW_PAGE;
     }
     return APP_REDRAW_NONE;
 }
-static app_redraw_t bulk_turn_page(app_ctx_t* ctx, int direction) {
-    int next = ctx->leaf + direction;
-    if (s_scan_pending || s_batch_confirm || next < 0 || next >= leaves()) return APP_REDRAW_NONE;
-    ctx->leaf = next;
-    return APP_REDRAW_PAGE;
+static app_redraw_t bulk_turn_page(app_ctx_t* ctx,int direction) {
+    int next=ctx->leaf+direction;
+    if(s_scan_pending||s_sort_menu||s_batch_confirm||next==ctx->leaf||next<0||next>=leaves())return APP_REDRAW_NONE;
+    ctx->leaf=next;return APP_REDRAW_PAGE;
 }
 static app_redraw_t bulk_finish(app_ctx_t* ctx) {
-    int first = ctx->leaf * BOOK_BULK_ROWS;
-    clear_selection();
-    s_batch_message[0] = 0;
-    s_batch_confirm = false;
-    s_view = SHELF;
-    ctx->leaf = first / shelf_rows();
-    if (ctx->leaf >= leaves()) ctx->leaf = leaves() - 1;
+    int first=ctx->leaf*shelf_rows();
+    clear_selection();s_bulk_selecting=false;s_sort_menu=false;
+    s_batch_message[0]=0;s_batch_confirm=false;s_view=SHELF;
+    ctx->leaf=first/shelf_rows();if(ctx->leaf>=leaves())ctx->leaf=leaves()-1;
     return APP_REDRAW_FULL;
 }
 // 批量管理单独路由，不复用带示例菜单的旧底栏。
 // Route batch management independently of the legacy bar and demo menu.
-static app_redraw_t bulk_action(app_ctx_t* ctx, uint16_t x, uint16_t y) {
+// 长按只进入选择并选中目标；分页、排序和视图切换按书籍身份保留选择。
+// Holds enter selection and select the target; paging, sorting and view changes retain book identities.
+static app_redraw_t bulk_select_row(app_ctx_t *ctx,int row){
+    int index=ctx->leaf*shelf_rows()+row;
+    if(s_view!=BULK||s_scan_pending||s_batch_confirm||s_sort_menu||row<0||row>=shelf_rows()||index>=s_visible_count)return APP_REDRAW_NONE;
+    s_bulk_selecting=true;s_shelf[index].selected=true;s_batch_message[0]=0;return APP_REDRAW_PAGE;
+}
+static app_redraw_t bulk_action(app_ctx_t* ctx,uint16_t x,uint16_t y) {
     if(s_sort_menu){
         if(!ui_rect_hit((EpdRect){36,230,612,710},x,y)||ui_rect_hit(bulk_sort_rect(5),x,y))s_sort_menu=false;
         else for(int i=0;i<5;++i)if(ui_rect_hit(bulk_sort_rect(i),x,y)){
             int mode=i<3?i:shelf_order_mode();bool desc=i<3?shelf_order_desc():i==4;
             s_shelf_order=mode==0?(desc?2:0):mode==1?(desc?1:3):(desc?5:4);
-            s_recent_sort=mode==1;app_settings_set_shelf_order(s_shelf_order);
-            sort_shelf(ctx);break;
+            s_recent_sort=mode==1;app_settings_set_shelf_order(s_shelf_order);sort_shelf(ctx);break;
         }
         return APP_REDRAW_PAGE;
     }
-
-    if (ui_rect_hit(manage_back_rect(), x, y)) {
-        if (s_batch_confirm) { s_batch_confirm = false; return APP_REDRAW_PAGE; }
-        return bulk_finish(ctx);
+    if(s_batch_confirm)return batch_action(ctx,x,y);
+    if(s_scan_pending)return APP_REDRAW_NONE;
+    if(ui_rect_hit(ui_book_manage_select(),x,y)){
+        s_bulk_selecting=!s_bulk_selecting;clear_selection();s_batch_message[0]=0;return APP_REDRAW_PAGE;
     }
-    app_redraw_t result = batch_action(ctx, x, y);
-    if (result != APP_REDRAW_NONE || s_batch_confirm || s_scan_pending) return result;
-    for (int i = 0; i < 3; ++i) if (ui_rect_hit(bulk_filter_rect(i), x, y)) {
-        if (i == 2) { search_begin(); return APP_REDRAW_PAGE; }
-        if (i == 0) s_filter = (s_filter + 1) % 3;
-        else { s_sort_menu = true; return APP_REDRAW_PAGE; }
-        clear_selection(); s_batch_message[0] = 0;
-        sort_shelf(ctx);
+    if(ui_rect_hit(bulk_filter_rect(0),x,y)){
+        int first=ctx->leaf*shelf_rows();s_bulk_grid=!s_bulk_grid;ctx->leaf=first/shelf_rows();
+        s_batch_message[0]=0;return APP_REDRAW_PAGE;
+    }
+    if(ui_rect_hit(bulk_filter_rect(1),x,y)){s_sort_menu=true;return APP_REDRAW_PAGE;}
+    if(ui_rect_hit(bulk_filter_rect(2),x,y)){
+        if(s_query[0]&&x>=600){s_query[0]=0;refresh_search_matches();clear_selection();sort_shelf(ctx);}
+        else search_begin();
+        s_batch_message[0]=0;return APP_REDRAW_PAGE;
+    }
+    if(!s_bulk_selecting){
+        int tab=ui_nav_hit(x,y);
+        if(tab==1)return bulk_finish(ctx);
+        if(tab>=0){ui_nav_request(ctx,tab);return APP_REDRAW_NONE;}
+    }
+    app_redraw_t result=batch_action(ctx,x,y);if(result!=APP_REDRAW_NONE)return result;
+    int nav=bulk_nav_hit(x,y);
+    if(nav>=0)return bulk_turn_page(ctx,ui_pager_target(nav,ctx->leaf,leaves())-ctx->leaf);
+    for(int row=0;row<shelf_rows();++row){
+        int index=ctx->leaf*shelf_rows()+row;
+        if(index>=s_visible_count||!ui_rect_hit(row_rect(row),x,y))continue;
+        s_batch_message[0]=0;
+        if(s_bulk_selecting)toggle_selection(index);
+        else if(s_shelf[index].removed){
+            s_managed=s_shelf[index];s_view=MANAGE;s_file_removed=s_delete_confirm=true;s_clear_confirm=false;
+            copy_text(s_manage_message,sizeof(s_manage_message),"文件已删除，进度清理失败，请重试");
+        }else {s_reader_return_home=false;open_book(ctx,s_shelf[index].path);}
         return APP_REDRAW_PAGE;
-    }
-    int nav = bulk_nav_hit(x, y);
-    if (nav == 1) return bulk_finish(ctx);
-    if (nav == 0 || nav == 2) return bulk_turn_page(ctx, nav == 0 ? -1 : 1);
-    for (int row = 0; row < BOOK_BULK_ROWS; ++row) {
-        int index = ctx->leaf * BOOK_BULK_ROWS + row;
-        if (index < s_visible_count && ui_rect_hit(row_rect(row), x, y)) {
-            toggle_selection(index); s_batch_message[0] = 0;
-            return APP_REDRAW_PAGE;
-        }
     }
     return APP_REDRAW_NONE;
 }
-static int bulk_control_at(app_ctx_t* ctx, uint16_t x, uint16_t y, EpdRect* rect) {
+static int bulk_control_at(app_ctx_t* ctx,uint16_t x,uint16_t y,EpdRect* rect) {
     if(s_sort_menu){for(int i=0;i<6;++i){*rect=bulk_sort_rect(i);if(ui_rect_hit(*rect,x,y))return 760+i;}return -1;}
-    *rect = manage_back_rect();
-    if (ui_rect_hit(*rect, x, y)) return 711;
-    if (s_batch_confirm) {
-        for (int i = 0; i < 2; ++i) {
-            *rect = ui_row_rect(i, 2, 620, UI_BTN_H);
-            if (ui_rect_hit(*rect, x, y)) return 600 + i;
-        }
+    if(s_batch_confirm){
+        for(int i=0;i<2;++i){*rect=ui_row_rect(i,2,620,UI_BTN_H);if(ui_rect_hit(*rect,x,y))return 600+i;}
         return -1;
     }
-    for (int i = 0; i < 3; ++i) {
-        *rect = bulk_filter_rect(i);
-        if (ui_rect_hit(*rect, x, y)) return 110 + i;
-        *rect = bulk_nav_rect(i);
-        if (ui_rect_hit(*rect, x, y)) return 100 + i;
+    for(int i=0;i<3;++i){*rect=bulk_filter_rect(i);if(ui_rect_hit(*rect,x,y))return 110+i;}
+    *rect=ui_book_manage_select();if(ui_rect_hit(*rect,x,y))return 113;
+    for(int i=UI_PAGER_FIRST;i<=UI_PAGER_LAST;++i){*rect=bulk_nav_rect(i);if(ui_rect_hit(*rect,x,y))return 100+i;}
+    if(s_bulk_selecting){
+        for(int i=3;i<7;++i){*rect=batch_rect(i);if(ui_rect_hit(*rect,x,y))return 610+i;}
+    }else {
+        int tab=ui_nav_hit(x,y);if(tab>=0){*rect=(EpdRect){tab*684/4,1096,(tab+1)*684/4-tab*684/4,120};return 120+tab;}
     }
-    for (int i = 0; i < 6; ++i) {
-        *rect = batch_rect(i);
-        if (ui_rect_hit(*rect, x, y)) return 610 + i;
-        if (i < BOOK_BULK_ROWS && ctx->leaf * BOOK_BULK_ROWS + i < s_visible_count) {
-            *rect = row_rect(i);
-            if (ui_rect_hit(*rect, x, y)) return i;
-        }
+    for(int row=0;row<shelf_rows();++row){
+        if(ctx->leaf*shelf_rows()+row>=s_visible_count)break;
+        *rect=row_rect(row);if(ui_rect_hit(*rect,x,y))return row;
     }
     return -1;
 }
@@ -6557,6 +6506,7 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
             s_batch_confirm = false;
             s_batch_message[0] = 0;
             s_view = BULK;
+            s_bulk_selecting=false;s_filter=0;sort_shelf(ctx);
             ctx->leaf = 0;
             return APP_REDRAW_PAGE;
         }
@@ -6566,7 +6516,7 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         }
     }
     if (s_message[0] && !((s_view == SHELF || s_view == BULK) && s_visible_count)) return APP_REDRAW_NONE;
-    int rows = s_view == BULK ? BOOK_BULK_ROWS : shelf_rows();
+    int rows = shelf_rows();
     for (int row = 0; row < rows; ++row) if (ui_rect_hit(row_rect(row), x, y)) {
         int i = ctx->leaf * rows + row;
         if (s_view == SHELF && i < s_visible_count) {
@@ -6622,6 +6572,7 @@ static void on_enter(app_ctx_t* ctx) {
     s_bookmark_selected = 0;
     clear_selection();
     s_view = s_requested_manage ? BULK : SHELF;
+    s_bulk_selecting=false;s_filter=0;
     s_reader_return_home = false;
     s_requested_manage = false;
     s_presented_view = -1;
@@ -6798,7 +6749,7 @@ static int control_at(app_ctx_t* ctx, uint16_t x, uint16_t y, EpdRect* rect) {
         }
     }
     if (s_message[0] && !((s_view == SHELF || s_view == BULK) && s_visible_count)) return -1;
-    int rows = s_view == BULK ? BOOK_BULK_ROWS : shelf_rows();
+    int rows = shelf_rows();
     int count = s_visible_count;
     for (int row = 0; row < rows && ctx->leaf * rows + row < count; ++row) {
         *rect = row_rect(row);
@@ -6867,7 +6818,7 @@ static app_redraw_t reader_tools_swipe(app_ctx_t *ctx, const ui_gesture_event_t 
     s_reader_panel = READER_PANEL_TOOLS;
     s_stats_activity_ms = ctx->now_ms;
     ctx->user_activity = true;
-    pause_reader_prep();
+    invalidate_prep();
     return redraw;
 }
 static int reader_swipe_direction(ui_gesture_type_t type, bool vertical) {
@@ -7255,6 +7206,7 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
     bool decorated = s_pressed_control >= 0;
     s_pressed_control = -1;
     if (ev->type == UI_GESTURE_LONG_PRESS && start == end) {
+        if(s_view==BULK)return bulk_select_row(ctx,start);
         if (s_view == SHELF && start >= 0 && start < shelf_rows() && !s_clear_confirm) {
             s_managed = s_shelf[ctx->leaf * shelf_rows() + start];
             s_view = MANAGE;
@@ -7342,7 +7294,10 @@ static app_redraw_t on_key(app_ctx_t* ctx, int key) {
         if (s_view == SEARCH) { search_finish(ctx, false); return APP_REDRAW_PAGE; }
         if (s_batch_confirm) { s_batch_confirm = false; return APP_REDRAW_PAGE; }
         if (s_view == MANAGE || s_view == BULK || s_view == IMPORT) {
-            if (s_view == BULK) return bulk_finish(ctx);
+            if (s_view == BULK) {
+                if(s_bulk_selecting){s_bulk_selecting=false;clear_selection();s_batch_message[0]=0;return APP_REDRAW_PAGE;}
+                return bulk_finish(ctx);
+            }
             s_view = SHELF; return APP_REDRAW_PAGE;
         }
         if (s_view == SHELF) { ui_nav_request(ctx, 0); return APP_REDRAW_NONE; }

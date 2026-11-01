@@ -39,8 +39,16 @@ int main(void){
  for(int row=0;row<UI_FILES_ROWS;++row){EpdRect r={36,UI_FILES_LIST_TOP+row*UI_FILES_ROW_HEIGHT,612,UI_FILES_ROW_HEIGHT};bounds(r);assert(!overlaps(r,footer));assert(r.y+r.height<=1006);}
  for(int i=0;i<4;++i){EpdRect r=ui_files_batch_rect(i);bounds(r);assert(hit(r,r.x+r.width/2,1150));for(int j=0;j<i;++j)assert(!overlaps(r,ui_files_batch_rect(j)));}
  for(int i=0;i<3;++i){bounds(ui_files_category_rect(i));bounds(ui_files_transfer_rect(i));assert(!overlaps(ui_files_storage_rect(),ui_files_category_rect(i)));}
- for(int row=0;row<5;++row){EpdRect r=ui_book_manage_row(row);bounds(r);assert(r.y+r.height<=984);for(int i=3;i<6;++i)assert(!overlaps(r,ui_book_manage_action(i)));}
- for(int i=3;i<6;++i){EpdRect action=ui_book_manage_action(i);bounds(action);assert(action.y>=1096&&action.y+action.height<=1192);assert(!overlaps(action,(EpdRect){36,1014,612,64}));}
+ for(int grid=0;grid<2;++grid){
+  for(int row=0;row<ui_book_manage_rows(grid);++row){
+   EpdRect r=ui_book_manage_entry(grid,row),cover=ui_book_manage_cover(grid,row);bounds(r);bounds(cover);
+   assert(r.y+r.height<1006&&cover.x>=r.x&&cover.x+cover.width<=r.x+r.width&&cover.y>=r.y&&cover.y+cover.height<=r.y+r.height);
+   for(int j=0;j<row;++j)assert(!overlaps(r,ui_book_manage_entry(grid,j)));
+  }
+ }
+ EpdRect controls[]={ui_book_manage_search(),ui_book_manage_layout(),ui_book_manage_sort(),ui_book_manage_select()};
+ for(int i=0;i<4;++i){bounds(controls[i]);for(int j=0;j<i;++j)assert(!overlaps(controls[i],controls[j]));}
+ for(int i=3;i<7;++i){EpdRect action=ui_book_manage_action(i);bounds(action);assert(action.y==1096&&action.height==120);assert(!overlaps(action,(EpdRect){36,1006,612,50}));for(int j=3;j<i;++j)assert(!overlaps(action,ui_book_manage_action(j)));}
  puts("PASS: no reader/header/footer intersection, immediate centre mode tap, retained image side zoom, 7 file rows/4 actions, 5 shelf rows and separated pager/actions");
 }
 ''')

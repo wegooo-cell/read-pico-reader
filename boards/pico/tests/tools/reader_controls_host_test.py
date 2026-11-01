@@ -28,7 +28,6 @@ static struct {bool pending;} s_reader_tap;
 static int64_t s_stats_activity_ms,s_reader_notice_until;
 static unsigned invalidations;
 static void invalidate_prep(void){++invalidations;}
-static void pause_reader_prep(void){++invalidations;}
 static bool locked,aa=true,raster_aa=true,save_fail;
 static void lock_draw(void){assert(!locked);locked=true;}
 static void unlock_draw(void){assert(locked);locked=false;}

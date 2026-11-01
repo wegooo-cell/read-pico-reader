@@ -10,6 +10,12 @@ Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Takin
 
 ## 当前工作：双板型本地整合 / Current work: local multi-board integration
 
+用户2026-11-01明确要求直接合并PR61、62、64并按照作者实现：EPUB兼容按PR61，Pico/S31阅读输出按PR62，S31裁剪及补黑按PR64。此指令取代PR59/55在对应派生波形文件上的固定限制；原始表、板型隔离和供电/睡眠保护继续保留。界面与阅读交互保留本机最新改动，测试和基线按实际合入代码同步，不私自改写作者波形。
+User2026-11-01 explicitly approves merging PR61/62/64 as authored: PR61 EPUB compatibility, PR62 Pico/S31 reader output, and PR64 S31 trimming/black boost. This supersedes PR59/55 pins for the affected derived-waveform files; retain raw tables, board isolation and power/sleep protections. Preserve the latest local UI/reader interactions; align tests/baselines without silently rewriting the author's waveforms.
+
+用户2026-11-01确认书架管理预览并要求修改固件：沿用文件管理搜索/分页，列表和图标切换，数量、书架排序与选择同排；长按书籍或点击选择才显示圆形标记及删除书籍/清理进度/移出书架/返回。排序标识改为“书架排序”，不再显示来源筛选；分页和排序保留选择。暂不交付测试包，不合并仅要求审查的PR。
+User2026-11-01 approves implementing the management preview: file-style search/paging, list/grid switching, count/order/select on one row; long presses or Select reveal circular marks and delete/clear/remove/back actions. Label the sort “书架排序”, remove source filtering, retain selections over paging/sorting. No test bundle yet; review-only PR requests do not authorize merging.
+
 用户2026-11-01要求：开书为非全屏，顶部时间/签名/电量，章节与进度置于底部工具栏上方，工具栏进入即显示；中间单击只进入全屏，底部上滑退出全屏并显示工具栏；原全屏两种样式和硬件波形保留。
 User2026-11-01: open standard with time/signature/battery and chapter/progress above visible tools; centre taps only enter fullscreen, bottom swipes leave it and show tools; retain both fullscreen styles and native waveforms.
 

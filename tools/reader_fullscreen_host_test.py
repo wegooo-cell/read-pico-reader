@@ -125,7 +125,6 @@ enum {UI_GESTURE_SWIPE_U,UI_GESTURE_TAP};
 typedef struct {int type;unsigned x0,y0,x,y;} ui_gesture_event_t;
 static bool s_scan_pending;
 static int s_pressed_control;
-static void pause_reader_prep(void){}
 '''
 unit += function('reader_tools_swipe', BOOK) + '\n'
 unit += r'''
