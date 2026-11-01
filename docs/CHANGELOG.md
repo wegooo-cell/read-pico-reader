@@ -12,6 +12,14 @@
 - 阅读默认非全屏，顶部恢复时间、签名和电量，章节与进度放在工具栏上方；进入即显示工具栏。中间单击只进入全屏，底部上滑退出全屏并显示工具栏，保留阅读锚点及原全屏样式。
   Standard reading restores time/signature/battery with chapter/progress above visible tools. Centre taps only enter fullscreen; bottom swipes return to standard with tools, preserving the reading anchor and both fullscreen styles.
 
+## 未发布 / Unreleased — 阅读翻页擦白 / Reader turn erase
+
+- Pico 普通/图文翻页保留整屏 GL16 白刷，定稿保持前变白相由 4 相增至 12 相并补 4 相重推黑；水波纹保持 4 相，手动/周期全刷不变。
+  Pico ordinary/image turns keep the whole-panel GL16 erase, growing the changed-white phases from four to twelve plus four black re-drive phases before the settle holds; the ripple keeps four and manual/periodic refresh is unchanged.
+
+- S31 阅读翻页恢复 PR59 的整屏输出：普通、图文、水波纹、速读都按整屏区域提交，顶栏与页脚同轮擦白，不再沿用 PR60 的正文裁剪导致上下积灰；普通翻页派生波形擦白由 4 相增至 8 相（GL37 原表已含六相目标白），原厂 GC48/GL48/DU20 表不改。
+  S31 reader turns restore the PR59 whole-screen presentation: ordinary, image, ripple and Fast BW all present the full screen so the status bar and footer are erased in the same pass instead of accumulating ghost from PR60's body crop; the ordinary derived waveform grows from four to eight white phases (the GL37 table already carries six white-target phases), with the vendor GC48/GL48/DU20 tables untouched.
+
 ## Pico 0.3.3-rc103 / Metalio S31 0.3.3-rc108 — 2026-10-31
 
 - 保留正式版HTTPS升级兼容性：两板启用交叉签名证书链验证，构建时核对SDK回调；真实证书日期、主机名和签名校验保持有效。官网刷机入口仍仅kiikoread.com。
@@ -28,6 +36,9 @@
   Files adds recursive search/counting, list/grid views, persistent multiselection, destination moves and confirmed deletion, with no overwrite and failed-item retries. Shelf management sorts by name/recent/first-added in either direction with consistent thumbnails. Save eight private Wi-Fi profiles and reconnect the most recent Bluetooth peer on enable.
 - 新开书默认标准模式及工具栏，中间单击切换全屏，沉浸偏好独立决定全屏样式。切换保留阅读锚点、翻页保留模式，信息栏空闲后局刷，手动与周期清理保留。四个根页、文件管理、设置和引导操作栏同步最新布局；EPUB标准封面缺失时按明确文件名回退。
   New books open with standard tools; centre taps toggle fullscreen independently of the immersive style. Preserve anchors/modes, update metadata locally after idle and retain manual/periodic cleanup. Update root/file/settings/setup layouts and add explicit-filename EPUB cover fallback.
+
+- 修复两类 EPUB 打不开：ZIP 的 EOCD 之后带少量非空白尾部标记（如 `0x04` 填充）会被误判为损坏；以及 EPUB3 的 `<spine>` 省略 `toc` 属性（目录只由 nav 文档提供）时被拒绝。尾部标记现在只接受有界填充，ZIP 目录/条目边界与 CRC 校验不变。
+  Fix two EPUB open failures: a ZIP with a short non-whitespace trailer after the EOCD (for example `0x04` padding) was rejected as corrupt, and an EPUB3 `<spine>` without the optional `toc` attribute failed even though the nav document supplies the TOC. Trailing padding is now accepted only within a bounded budget; central-directory/entry bounds and CRC checks are unchanged.
 
 ## 双板型源码并入 main / Unified two-board source in main
 

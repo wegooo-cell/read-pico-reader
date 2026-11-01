@@ -681,9 +681,11 @@ static esp_err_t package_parse(book_epub_t *book, const char *opf, char ncx[EPUB
         while (xml_next(&xml, &t)) {
             if (t.kind == XML_OPEN && local_name(t.name, "spine")) {
                 if (seen_spine) { err = ESP_ERR_INVALID_ARG; break; }
-                seen_spine = true; spine_depth = t.depth; char toc[EPUB_ID_CAP];
-                if (!attribute(t, "toc", toc, sizeof(toc))) { err = ESP_ERR_INVALID_ARG; break; }
-                int index = item_find(items, slots, slot_count - 1, toc);
+                seen_spine = true; spine_depth = t.depth; char toc[EPUB_ID_CAP] = {0};
+                // EPUB3 的目录来自 nav 文档，spine 的 toc 属性可以缺省。
+                // EPUB3 navigation comes from the nav document, so the spine toc attribute is optional.
+                const bool has_toc = attribute(t, "toc", toc, sizeof(toc));
+                int index = has_toc ? item_find(items, slots, slot_count - 1, toc) : -1;
                 const char *name = index >= 0 ? zip_entry_name(book->zip, items[index].zip_index) : NULL;
                 if (name && items[index].ncx) strcpy(ncx, name);
             }

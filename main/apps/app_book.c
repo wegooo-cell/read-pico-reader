@@ -4281,9 +4281,11 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         if (redraw == APP_REDRAW_AREA) {
             image_area = reader_area();
         }
-        // 图文翻页同样只刷新正文，底部信息等待空闲局刷。/ Image turns also crop to the body and defer metadata.
-        image_area=redraw==APP_REDRAW_AREA?reader_area():image_area;
-        err=reader_soft_present(ctx,image_area);
+        // 图文翻页恢复 PR59 的整屏输出：顶栏与页脚同轮驱动，不再只裁正文。
+        // Image turns restore the PR59 whole-screen output: drive the status bar and footer
+        // in the same pass instead of cropping to the body.
+        (void)image_area;
+        err=reader_soft_present(ctx,(EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT});
     }
 #else
     else if (image_gray_refresh && redraw == APP_REDRAW_AREA && !s_reader_cleanup && s_presented_view == (int)READING) {
@@ -4335,15 +4337,15 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
 #endif
         err = s_water_turn_pending
 #if KIIKO_BOARD_METALIO47
-            ? update_display_water_turn(ctx->hl,turn_area,s_water_turn_dir)
+            ? update_display_water_turn(ctx->hl,(EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT},s_water_turn_dir)
 #else
             ? update_display_water_turn(ctx->hl, s_area, s_water_turn_dir)
 #endif
 #if KIIKO_BOARD_METALIO47
             : s_reader_turn_pending && s_mode==MODE_GL16 && app_settings_reader_turn_effect()==2
-                ? update_display_text_turn(ctx->hl,turn_area,E0470_TURN_RTL)
+                ? update_display_text_turn(ctx->hl,(EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT},E0470_TURN_RTL)
             : s_reader_turn_pending && s_mode==MODE_GL16
-                ? reader_soft_present(ctx,turn_area)
+                ? reader_soft_present(ctx,(EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT})
 #else
             : s_reader_turn_pending && s_mode == MODE_GL16 && app_settings_reader_turn_effect() == 2 &&
               s_view == READING && s_presented_view == (int)READING &&
@@ -4357,7 +4359,8 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
             // Retain ordinary difference transitions; S31 whole-page targets maintain uniform white while local controls keep their paths.
             : (s_reader_fullscreen || s_reader_turn_pending) && s_mode == MODE_GL16
 #if KIIKO_BOARD_METALIO47
-                ? reader_soft_present(ctx,turn_area)
+                ? reader_soft_present(ctx,s_reader_turn_pending?
+                    (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT}:turn_area)
 #else
                 ? update_display_area_diff_with(ctx->hl,
                     s_reader_turn_pending ? display_main_gray_waveform() : &E0470_WAVEFORM, s_mode, turn_area)
