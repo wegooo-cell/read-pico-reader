@@ -222,8 +222,8 @@ static void assign_bands(
 }
 
 static bool build_luts(const EpdWaveformPhases* gl) {
-    // Pico最多45相LUT按需放PSRAM；根页八相补白不截断，不增加内部帧缓冲。
-    // Allocate at most45 KiB in PSRAM on demand; preserve all root-white phases without another internal framebuffer.
+    // Pico按需把最多64相LUT放PSRAM；根页八相补白不截断，不增加内部帧缓冲。
+    // Allocate at most64 KiB in PSRAM on demand; preserve all root-white phases without another internal framebuffer.
     if (!s_lut) {
         s_lut = heap_caps_aligned_alloc(16, sizeof(uint8_t[TURN_PHASE_CAP][1024]),
                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
