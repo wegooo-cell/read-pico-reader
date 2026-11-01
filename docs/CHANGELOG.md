@@ -1,6 +1,11 @@
 # 版本变更 / Changelog
 
-## 未发布 / Unreleased — 阅读状态栏 / Reader status bar
+## Pico 0.3.3-rc104 / Metalio S31 0.3.3-rc109 — 2026-11-01
+
+保留上一正式版Pico rc103与S31 rc108的原版刷机和TF下载入口；网页刷机仍仅kiikoread.com，沿用兼容双槽布局及默认保留设置。
+Retain original Pico rc103/S31 rc108 web/TF entries, kiikoread.com as the sole web flasher, compatible dual slots and data preservation by default.
+
+### 阅读状态栏 / Reader status bar
 
 - 修复从目录或设置返回后，常驻阅读工具栏可见但点击无反应；工具栏绘制、命中与操作共用可见状态。
   Fix inert persistent tools after returning from TOC or settings by sharing toolbar visibility across paint, hit testing and actions.
@@ -11,7 +16,7 @@
 - 关闭“全屏沉浸”时，全屏顶部恢复时间、状态栏签名及电量，不再显示书名；顶部预留完整状态栏，支持原有分钟更新。底部章节与进度、全屏沉浸开启时的铺屏样式保持。
   With fullscreen immersion off, show time, status signature and battery instead of the book title, reserving the complete status row with existing minute updates. Retain bottom chapter/progress and the immersion-on full-page style.
 
-## 未发布 / Unreleased — 书架管理 / Bookshelf management
+### 书架管理 / Bookshelf management
 
 - 选择模式底栏的删除书籍、清理进度、移出书架图标统一使用黑色，修复刚进入选择时图标过浅的问题。
   Use black for Delete, Clear progress and Remove from shelf icons in the selection footer, fixing pale icons on entry.
@@ -21,7 +26,7 @@
 - 分页复用文件管理的首页、上一页、下一页、末页控件；列表每页五本、图标每页六本，两板共享绘制与命中几何，不调整阅读波形。
   Reuse the Files first/previous/next/last pager; five list or six grid books per page, with shared paint/hit geometry on both boards and unchanged reader waveforms.
 
-## 未发布 / Unreleased
+### 插图、脚注与兼容 / Illustrations, footnotes and compatibility
 
 - 部分大尺寸或带 Exif 的 JPEG 插图在 ROM 解码器失败时改用 JPEGDEC 小平面兜底解码，避免整页插图缺失。
   Large or Exif JPEG illustrations now fall back to a 1/2..1/8 JPEGDEC plane when the ROM decoder fails, so pages no longer lose their artwork.
@@ -39,7 +44,7 @@
 - 阅读默认非全屏，顶部恢复时间、签名和电量，章节与进度放在工具栏上方；进入即显示工具栏。中间单击只进入全屏，底部上滑退出全屏并显示工具栏，保留阅读锚点及原全屏样式。
   Standard reading restores time/signature/battery with chapter/progress above visible tools. Centre taps only enter fullscreen; bottom swipes return to standard with tools, preserving the reading anchor and both fullscreen styles.
 
-## 未发布 / Unreleased — 阅读翻页擦白 / Reader turn erase
+### 阅读翻页擦白 / Reader turn erase
 
 - Pico普通及图文翻页只对阅读内容区执行原GL16，顶部状态/标题与底部章节、百分比、进度条不再每页跟着擦白；三种模式均在停下800ms后局刷页脚，保留入书、手动和周期清理。
   Pico ordinary/image turns keep their GL16 within reading content, avoiding per-turn erasure of status/title and chapter/percentage/progress. All three modes defer footer updates until800ms idle; retain entry/manual/periodic cleanup.
@@ -50,7 +55,7 @@
 - S31 阅读翻页恢复 PR59 的整屏输出：普通、图文、水波纹、速读都按整屏区域提交，顶栏与页脚同轮擦白，不再沿用 PR60 的正文裁剪导致上下积灰；普通翻页派生波形擦白由 4 相增至 8 相（GL37 原表已含六相目标白），原厂 GC48/GL48/DU20 表不改。
   S31 reader turns restore the PR59 whole-screen presentation: ordinary, image, ripple and Fast BW all present the full screen so the status bar and footer are erased in the same pass instead of accumulating ghost from PR60's body crop; the ordinary derived waveform grows from four to eight white phases (the GL37 table already carries six white-target phases), with the vendor GC48/GL48/DU20 tables untouched.
 
-## 未发布 / Unreleased — S31 灰阶裁剪实验 / S31 gray-table trim experiment
+### S31 灰阶裁剪 / S31 gray-table trimming
 
 - S31 默认灰阶表改用与 Pico 相同的裁剪参数（GC36/GL37，erase 11 / sat 5 / white_sat 0 / hold 3），原始 48 相表层仍完整保留，开关置 0 即回退；不跨屏搬运 Pico 的 A01 表数据。
   S31 switches its default gray tables to Pico's trim profile (GC36/GL37 with erase 11 / sat 5 / white_sat 0 / hold 3); the original 48-phase tables stay intact and the switch can be set back to 0. Pico's A01 table data is not copied across panels.

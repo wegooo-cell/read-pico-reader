@@ -10,6 +10,9 @@ Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Takin
 
 ## 当前工作：双板型本地整合 / Current work: local multi-board integration
 
+用户2026-11-01明确要求推送在线刷机：本轮正式发布Pico rc104与S31 rc109，包含此前已测试的合并、书架及阅读交互修复和Pico普通翻页信息栏分离；同步GitHub Release、kiikoread.com与既有Pages OTA，保留rc103/rc108原字节及上一版本刷机/TF入口。本次指令取代本轮此前仅本地、不发布的限制。
+User2026-11-01 explicitly authorizes online publication: release Pico rc104/S31 rc109 with the tested merges, shelf/reader fixes and Pico ordinary-turn metadata separation. Synchronize GitHub Releases, kiikoread.com and existing Pages OTA; retain original rc103/rc108 bytes and previous-version web/TF entries. This supersedes the earlier local-only restriction for this release.
+
 用户2026-11-01追加：Pico普通翻页的信息栏对齐水波纹/速读，正常正文和图文翻页只输出阅读内容区域，顶部状态/标题和底部章节进度不再跟随擦白；页脚停下800ms后局刷。此要求取代PR55/62在Pico的信息栏合并范围，正文派生波形、手动/周期/入书清理及S31保持。
 User2026-11-01 follow-up: align Pico ordinary metadata with ripple/Fast BW. Ordinary text/image turns present the reading-content region, excluding top status/title and bottom chapter/progress; update the footer after800ms idle. This supersedes PR55/62's Pico metadata scan extent, retaining body waveforms, manual/periodic/entry cleanup and S31 behavior.
 
