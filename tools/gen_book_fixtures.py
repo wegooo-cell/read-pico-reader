@@ -188,15 +188,22 @@ def main():
         ("河边记事_nav.epub", "nav", False),
         ("河边记事_div.epub", "nav", True),
         ("河边记事_尾部空白.epub", "nav", False),
+        ("河边记事_尾部标记.epub", "nav", False),
     ]:
         path = books / name
         make_epub(path, navigation, div_heavy)
         if "尾部空白" in name:
             with path.open("ab") as archive:
                 archive.write(b"\r\n")
+        elif "尾部标记" in name:
+            # 某些打包工具在 EOCD 之后追加少量非空白标记；解析器允许有界尾部填充。
+            # Some packagers append a short non-whitespace marker after the EOCD; bounded padding is tolerated.
+            with path.open("ab") as archive:
+                archive.write(b"\x04\x04\x04\x04")
         check_epub(path, navigation, div_heavy)
         manifest.append(dict(file=f"books/{name}", encoding="utf-8", chapters=TITLES, navigation=navigation,
-                             purpose="Trailing CRLF after ZIP directory" if "尾部空白" in name else
+                             purpose="Bounded non-whitespace padding after the ZIP EOCD" if "尾部标记" in name else
+                             "Trailing CRLF after ZIP directory" if "尾部空白" in name else
                              "Nested div paragraph boundaries" if div_heavy else f"{navigation} TOC and spine order"))
     for item in manifest:
         data = (args.output / item["file"]).read_bytes()

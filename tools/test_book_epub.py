@@ -84,6 +84,10 @@ def main():
             return lambda files: files.__setitem__('OPS/pkg/book.opf', files['OPS/pkg/book.opf'].replace(old, new))
 
         case('good_paths')
+        # EPUB3 的 <spine> 可以没有 toc 属性，目录由 nav 文档或兜底规则提供。
+        # An EPUB3 spine may omit the toc attribute; the nav document or fallback supplies the TOC.
+        case('good_paths_no_toc', lambda f: f.__setitem__('OPS/pkg/book.opf',
+            f['OPS/pkg/book.opf'].replace(' toc="toc"', '')))
         def bounded_cover(files):
             files['OPS/pkg/book.opf'] = files['OPS/pkg/book.opf'].replace(
                 '</manifest>', '<item id="image-cover" href="../covers/test.png" '
