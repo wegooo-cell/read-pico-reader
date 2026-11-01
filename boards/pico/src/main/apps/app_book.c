@@ -6687,6 +6687,27 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         // 点在插图上时不切全屏：留给双击缩放的判定，否则中间单击会在双击前先把全屏切走。
         // Never toggle fullscreen when the tap lands on an illustration; leave it to the
         // double-tap zoom recognizer, or the first centre tap would consume the gesture.
+        // 已放大时双击退出：整页插图回 1:1，正文插图退出缩放模式；单击先记位置不动作。
+        // While zoomed, a double tap exits: whole-page images return to 1:1 and inline images
+        // leave zoom mode; a single tap only records the spot.
+        if (s_zoom_active || (s_image_zoom_page == s_page && s_image_zoom > READER_IMAGE_ZOOM_MIN)) {
+            static int64_t s_zoom_exit_ms;
+            static int s_zoom_exit_x, s_zoom_exit_y;
+            const int64_t now_exit = ctx->now_ms;
+            const int dx = (int)x - s_zoom_exit_x, dy = (int)y - s_zoom_exit_y;
+            if (s_zoom_exit_ms && now_exit >= s_zoom_exit_ms &&
+                now_exit - s_zoom_exit_ms <= BOOK_READER_DOUBLE_MS &&
+                dx * dx + dy * dy <= 120 * 120) {
+                s_zoom_exit_ms = 0;
+                if (s_zoom_active) return inline_zoom_toggle(ctx, x, y);
+                return zoom_jump(ctx, READER_IMAGE_ZOOM_MIN, x, y);
+            }
+            s_zoom_exit_ms = now_exit;
+            s_zoom_exit_x = (int)x;
+            s_zoom_exit_y = (int)y;
+            s_reader_tap.pending = false;
+            return APP_REDRAW_NONE;
+        }
         // 双击插图恢复缩放：第一击只记位置，第二击落在附近才放大；避免被中间单击全屏抢走。
         // Restore double-tap illustration zoom: the first tap records the spot and the second one
         // nearby zooms, so the centre single-tap fullscreen toggle cannot steal the gesture.
