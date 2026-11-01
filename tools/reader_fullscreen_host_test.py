@@ -18,7 +18,7 @@ unit = r'''
 #include <stdlib.h>
 #include "book/book_file_path.h"
 typedef struct {int x,y,width,height;} EpdRect;
-typedef struct {int64_t now_ms;int leaf;} app_ctx_t;
+typedef struct {int64_t now_ms;int leaf;bool consumed,user_activity;} app_ctx_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL} app_redraw_t;
 enum {READING,TOC,SHELF,READER_PANEL_NONE,READER_PANEL_TOOLS};
 #define BOOK_TOC_ROWS 7
@@ -119,6 +119,16 @@ for name in ('reader_zoom_reset', 'app_book_request_open', 'app_book_request_ope
              'toggle_reader_fullscreen', 'apply_reader_option', 'reader_turn_chrome', 'turn_page'):
     unit += function(name, BOOK) + '\n'
 unit += r'''
+#define UI_LOCK_WIDTH 684
+#define UI_LOCK_HEIGHT 1216
+enum {UI_GESTURE_SWIPE_U,UI_GESTURE_TAP};
+typedef struct {int type;unsigned x0,y0,x,y;} ui_gesture_event_t;
+static bool s_scan_pending;
+static int s_pressed_control;
+static void pause_reader_prep(void){}
+'''
+unit += function('reader_tools_swipe', BOOK) + '\n'
+unit += r'''
 static void reset(bool full,bool tools,size_t page,size_t chapter){
  immersive=persisted_immersive=false;style_saves=0;s_text="text";s_view=READING;s_reader_fullscreen=full;layout_span=full?150:100;s_page=page;s_chapter=chapter;
  s_reader_panel=tools?READER_PANEL_TOOLS:READER_PANEL_NONE;s_reader_slider=2;
@@ -186,6 +196,18 @@ int main(void){
  assert(s_text&&!s_reader_fullscreen&&layout_span==100&&s_page==2&&reflows==2&&!saves);
  reset(false,true,2,0);failed_reflows=2;assert(toggle_reader_fullscreen(&ctx)==APP_REDRAW_PAGE);
  assert(!s_text&&s_view==SHELF&&!paints&&!s_stats_pending_turns&&s_message[0]);
+ // Real fullscreen exit/reflow plus tools must preserve the source anchor in one gesture.
+ for(int style=0;style<2;++style){
+  reset(true,false,3,0);immersive=style;layout_span=style?180:150;
+  size_t before=book_layout_page_start_offset(s_page);bool handled=false;
+  ui_gesture_event_t swipe={UI_GESTURE_SWIPE_U,342,1180,342,980};
+  assert(reader_tools_swipe(&ctx,&swipe,&handled)==APP_REDRAW_FULL&&handled);
+  assert(!s_reader_fullscreen&&s_reader_panel==READER_PANEL_TOOLS&&reflows==1&&saves==1);
+  assert(book_layout_page_start_offset(s_page)<=before&&before<book_layout_page_start_offset(s_page+1));
+  reset(true,false,3,0);failed_reflows=1;
+  assert(reader_tools_swipe(&ctx,&swipe,&handled)==APP_REDRAW_NONE&&handled);
+  assert(s_reader_fullscreen&&s_reader_panel==READER_PANEL_NONE&&s_page==3&&reflows==2&&!saves);
+ }
  // 沉浸偏好独立保存：非全屏不重排，全屏改样式保留字节锚点。/ Persist style independently: no nonfullscreen reflow; preserve fullscreen byte anchors.
  reset(false,true,2,0);assert(apply_reader_option(&ctx,1)==APP_REDRAW_PAGE);
  assert(!s_reader_fullscreen&&immersive&&persisted_immersive&&style_saves==1&&!reflows&&s_page==2);

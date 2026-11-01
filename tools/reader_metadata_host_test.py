@@ -30,7 +30,8 @@ static const char *s_text="body";
 static char s_book_title[128]="Book title";
 static size_t s_chapter=36,total_chapters=48;
 static int64_t s_reader_footer_due_ms;
-static int calls,guards,text_calls,bar_calls,fill_calls;
+static int calls,guards,text_calls,bar_calls,fill_calls,status_calls;
+static void ui_nav_status(uint8_t *fb){(void)fb;++status_calls;}
 
 static enum EpdDrawError error;
 static const char *expected_chapter="Chapter name";
@@ -40,38 +41,44 @@ static void copy_text(char *out,size_t cap,const char *text){snprintf(out,cap,"%
 static void fit_fixed_text(char *text,int px,int width){assert(px>0&&width>0);(void)text;}
 static int ui_text_fixed_width_px(int px,const char *text){return (int)strlen(text)*px/2;}
 static void reader_footer_chapter_name(char *text,size_t cap){snprintf(text,cap,"%s",expected_chapter);}
-static void ui_fill_rect_fast(EpdRect r,int color,uint8_t *fb){(void)fb;assert(color==255);if(immersive)assert(r.y==1204&&r.height==12);else assert(r.y==0||r.y==1168);++fill_calls;}
+static void ui_fill_rect_fast(EpdRect r,int color,uint8_t *fb){(void)fb;assert(color==255);if(s_reader_fullscreen&&immersive)assert(r.y==1204&&r.height==12);else assert(r.y==0||r.y==(s_reader_fullscreen?1168:1048));++fill_calls;}
 static void ui_reader_background_paint(uint8_t *fb,EpdRect r,bool overlay){(void)fb;(void)r;assert(overlay);}
 static void ui_text_fixed(uint8_t *fb,int x,int y,int px,const char *text,int align,bool inverted){
  (void)fb;assert(x==32&&y==16&&px==25&&!strcmp(text,s_book_title)&&align==EPD_DRAW_ALIGN_LEFT&&!inverted);++text_calls;
 }
 static void ui_text_fixed_vc(uint8_t *fb,int x,int y,int px,const char *text,int align,bool inverted){
- (void)fb;assert(y==1180&&px==21&&!inverted);
+ (void)fb;assert(y==(s_reader_fullscreen?1180:1060)&&px==21&&!inverted);
  if(x==652){assert(align==EPD_DRAW_ALIGN_RIGHT&&!strcmp(text,"37/48  74%"));}
  else assert(x==32&&align==EPD_DRAW_ALIGN_LEFT&&!strcmp(text,expected_chapter));
  ++text_calls;
 }
 static void ui_fill_round_rect(uint8_t *fb,EpdRect r,int radius,int color){
- (void)fb;int width=immersive?612:648;
- assert(r.x==(immersive?36:18)&&r.y==(immersive?1207:1194)&&r.height==(immersive?3:6)&&radius==(immersive?1:3));
+ (void)fb;int width=(s_reader_fullscreen&&immersive)?612:648;
+ assert(r.x==((s_reader_fullscreen&&immersive)?36:18)&&r.y==((s_reader_fullscreen&&immersive)?1207:(s_reader_fullscreen?1194:1074))&&r.height==((s_reader_fullscreen&&immersive)?3:6)&&radius==((s_reader_fullscreen&&immersive)?1:3));
  assert(r.width==(color?width:width*74/100));++bar_calls;
 }
 static enum EpdDrawError reader_present_crop(void *hl,const int *wave,int mode,EpdRect area,bool full){
  (void)hl;assert(wave==&E0470_FOLLOW_WAVEFORM&&mode==MODE_DU&&!full);
- assert(area.x==0&&area.y==(immersive?1204:1168)&&area.width==684&&area.height==(immersive?12:48));++calls;return error;
+ assert(area.x==0&&area.y==((s_reader_fullscreen&&immersive)?1204:(s_reader_fullscreen?1168:1048))&&area.width==684&&area.height==((s_reader_fullscreen&&immersive)?12:48));++calls;return error;
 }
 
 static void guard_draw_result(void *hl,enum EpdDrawError result){(void)hl;assert(result==error);++guards;}
 '''
-for name in ['progress_rect','reader_footer_progress', 'draw_reader_metadata', 'reader_metadata_tick','reader_status_visible']:
+for name in ['draw_reader_header','progress_rect','reader_footer_progress', 'draw_reader_metadata', 'reader_metadata_tick','reader_status_visible']:
     unit += function(name, source)+'\n'
 unit += r'''
 int main(void){
  char text[48];reader_footer_progress(text,sizeof(text),74);assert(!strcmp(text,"37/48  74%"));
  total_chapters=0;reader_footer_progress(text,sizeof(text),0);assert(!strcmp(text,"0/0  0%"));total_chapters=48;
  s_chapter=99;reader_footer_progress(text,sizeof(text),100);assert(!strcmp(text,"48/48  100%"));s_chapter=36;
- s_reader_fullscreen=false;uint8_t none=0;draw_reader_metadata(&none,74);assert(!fill_calls&&reader_status_visible());
- app_ctx_t empty={0};s_reader_footer_pending=true;assert(reader_metadata_tick(&empty)==APP_REDRAW_NONE&&!s_reader_footer_pending);
+ s_reader_fullscreen=false;uint8_t none=0;
+ for(int style=0;style<2;++style){
+  immersive=style;text_calls=bar_calls=fill_calls=status_calls=0;
+  draw_reader_header(&none);draw_reader_metadata(&none,74);
+  assert(status_calls==1&&text_calls==2&&bar_calls==2&&fill_calls==1&&reader_status_visible());
+  app_ctx_t ctx={.now_ms=1000};s_reader_footer_pending=true;s_reader_footer_due_ms=900;
+  assert(reader_metadata_tick(&ctx)==APP_REDRAW_DONE&&!s_reader_footer_pending);
+ }
  for(int full=0;full<2;++full){
  s_reader_fullscreen=true;immersive=full;s_reader_footer_pending=false;s_view=READING;calls=guards=text_calls=bar_calls=fill_calls=0;
  assert(!reader_status_visible());

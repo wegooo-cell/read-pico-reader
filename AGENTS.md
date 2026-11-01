@@ -10,6 +10,9 @@ Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Takin
 
 ## 当前工作：双板型本地整合 / Current work: local multi-board integration
 
+用户2026-11-01要求：开书为非全屏，顶部时间/签名/电量，章节与进度置于底部工具栏上方，工具栏进入即显示；中间单击只进入全屏，底部上滑退出全屏并显示工具栏；原全屏两种样式和硬件波形保留。
+User2026-11-01: open standard with time/signature/battery and chapter/progress above visible tools; centre taps only enter fullscreen, bottom swipes leave it and show tools; retain both fullscreen styles and native waveforms.
+
 用户2026-10-31再次明确：网页刷机只在kiikoread.com，保留原有GitHub首页跳转；GitHub Pages仍仅承担既有默认OTA来源，不新增独立备用刷机入口。
 User2026-10-31 reconfirms kiikoread.com as the only web-flashing entry; retain the existing GitHub homepage redirect and the existing Pages OTA origin.
 
@@ -164,7 +167,7 @@ Defined in [`main/app/app.h`](main/app/app.h). The loop presents via `app_presen
 - `on_power_short()` 可选：页面可消费电源键短按；返回 `APP_REDRAW_NONE` 时主循环继续锁屏。阅读正文的“电源键翻页”开关开启后短按翻下一页，长按由主循环锁屏；其他页面保留原电源键逻辑。/ Optional short-power callback may consume the press; `APP_REDRAW_NONE` keeps the lock path. With reader power-turn enabled, short presses advance in the reader body and long presses lock; other pages keep their usual power behavior.
 - `on_media_ready()` 可选：首次插卡、显式重挂或Pico后台恢复完成时通知当前页面更新目录；不得绕过失效后的句柄清理。/ Optional callback refreshes page listings after insertion, explicit remount or Pico background recovery; it must not bypass handle cleanup after invalidation.
 - `on_gesture()` 可选；提供后不再接收 `on_touch()`。主循环负责识别与全局中断取消，页面解释动作。/ Optional gesture callback replaces `on_touch`; the loop recognizes and cancels, the page interprets.
-- `on_key()` 默认只收 `UI_KEY_1`；`owns_keys` 页面在菜单关闭时接收三键。主页面按用户2026-10-16修订：左右键循环切换四个主页，中键长按全刷；书架中键短按切换分页控制并沿左右箭头轮廓描边，可通过导航随时打断。系统子页仍左返回、中首页、右返回；阅读正文三键短按可自定义，两套推荐默认上一页/工具栏/下一页；底部上滑固定呼出工具栏，三键短按和中键长按不强制工具栏映射；中键长按可自定义，默认返回首页，用户2026-10-30改为中间单击切换全屏，沉浸偏好独立控制全屏样式；新开书默认标准模式及底部工具栏，不画进度信息，翻页保留模式；沉浸模式左上书名、下方章节和百分比及贴边进度。/ Normally KEY1 only; `owns_keys` pages receive all three outside the menu. Product system pages use Back/Home/Back; reader short actions are configurable, defaulting to previous/tools/next; bottom-edge swipes always open the toolbar without a required short/hold mapping; middle holds are configurable and default to home the user revised this on 2026-10-30: centre taps toggle fullscreen independently of the saved immersive style; new books open standard with tools and no footer metadata, turns retain the mode, and immersive reading has a top-left title and edge chapter/percentage/progress.
+- `on_key()` 默认只收 `UI_KEY_1`；`owns_keys` 页面在菜单关闭时接收三键。主页面按用户2026-10-16修订：左右键循环切换四个主页，中键长按全刷；书架中键短按切换分页控制并沿左右箭头轮廓描边，可通过导航随时打断。系统子页仍左返回、中首页、右返回；阅读正文三键短按可自定义，两套推荐默认上一页/工具栏/下一页；底部上滑固定呼出工具栏，三键短按和中键长按不强制工具栏映射；中键长按可自定义，默认返回首页，用户2026-11-01改为中间单击只进入全屏；底部上滑退出全屏并显示工具栏。新开书默认非全屏，顶部时间/签名/电量，工具栏上方显示章节/进度；工具栏进入即显示，翻页保留模式。原全屏两种样式保留。/ Normally KEY1 only; `owns_keys` pages receive all three outside the menu. Product system pages use Back/Home/Back; reader short actions are configurable, defaulting to previous/tools/next; bottom-edge swipes always open the toolbar without a required short/hold mapping; middle holds are configurable and default to home the user revised this on 2026-11-01: centre taps only enter fullscreen; bottom swipes exit and show tools. Standard entry shows time/signature/battery and chapter/progress above visible tools. Turns retain the mode; both existing fullscreen styles remain.
 
 标志：
 

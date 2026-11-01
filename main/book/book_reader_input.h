@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0
  * 中文：正文两侧单击翻页、中间单击全屏；插图两侧保留双击缩放；页面负责取消离页/锁屏/滑动后的等待。
- * English: Side taps turn, centre taps toggle immersion and image side double taps zoom; pages cancel pending taps on exit, lock or swipe.
+ * English: Side taps turn, centre taps enter fullscreen and image side double taps zoom; pages cancel pending taps on exit, lock or swipe.
  */
 #pragma once
 #include <stdbool.h>

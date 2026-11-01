@@ -1172,5 +1172,11 @@
   "子文件夹搜索完成，共 %u 项": "Folder search complete: %u items",
   "正在搜索子文件夹，已找到 %u 项": "Searching subfolders: %u items found",
   "无法搜索当前文件夹": "Cannot search this folder",
-  "当前文件夹": "Current folder"
+  "当前文件夹": "Current folder",
+  "中间单击进入全屏 · 上滑返回": "Tap centre for fullscreen; swipe up to return",
+  "中间单击进入全屏，底部上滑返回并显示工具栏": "Tap centre for fullscreen; swipe up for tools",
+  "TTF / OTF 放入 TF 卡 fonts 文件夹后选择": "Place TTF / OTF files in the TF card fonts folder, then select one",
+  "U 盘模式导入字体": "Import fonts in USB drive mode",
+  "未导入字体，阅读界面可能出现方格字": "No font imported; some reading text may appear as boxes",
+  "通过 U 盘或 Wi-Fi 导入 TF 卡": "Transfer to the TF card via USB or Wi-Fi"
 }

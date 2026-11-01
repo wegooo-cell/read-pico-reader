@@ -1,11 +1,11 @@
 /* SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
- * 中文：非全屏保留系统题头与工具栏，全屏再独立选择信息栏或铺屏细线。
- * English: Nonfullscreen keeps status/header/tools; fullscreen independently selects metadata or full-page text with a thin progress line.
+ * 中文：非全屏显示系统状态及章节进度，底部保留工具栏，全屏再独立选择信息栏或铺屏细线。
+ * English: Nonfullscreen keeps status/footer with bottom tools; fullscreen independently selects metadata or full-page text with a thin progress line.
  */
 #pragma once
 #include <stdbool.h>
 #include "epdiy.h"
-enum { UI_READER_STANDARD_TOP=176, UI_READER_STANDARD_BOTTOM=1076,
+enum { UI_READER_STANDARD_TOP=80, UI_READER_STANDARD_BOTTOM=1048,
        UI_READER_METADATA_TOP=52, UI_READER_METADATA_BOTTOM=1168,
        UI_READER_FULLSCREEN_TOP=0, UI_READER_FULLSCREEN_BOTTOM=1204,
        UI_READER_FOOTER_TEXT_Y=1180, UI_READER_FOOTER_TEXT_PX=21,
@@ -28,8 +28,8 @@ static inline EpdRect ui_reader_footer(void){return (EpdRect){0,1168,684,48};}
 static inline EpdRect ui_reader_progress(void){return (EpdRect){18,1194,648,6};}
 static inline EpdRect ui_reader_fullscreen_footer(void){return (EpdRect){0,1204,684,12};}
 static inline EpdRect ui_reader_fullscreen_progress(void){return (EpdRect){36,1207,612,3};}
-static inline EpdRect ui_reader_footer_for(bool fullscreen,bool immersive){return !fullscreen?(EpdRect){0}:immersive?ui_reader_fullscreen_footer():ui_reader_footer();}
+static inline EpdRect ui_reader_footer_for(bool fullscreen,bool immersive){return !fullscreen?(EpdRect){0,UI_READER_STANDARD_BOTTOM,684,48}:immersive?ui_reader_fullscreen_footer():ui_reader_footer();}
 _Static_assert(UI_READER_METADATA_BOTTOM+48==1216,"Reader metadata stays on screen");
 _Static_assert(UI_READER_FULLSCREEN_BOTTOM+12==1216,"Fullscreen keeps only the release progress strip");
 
-_Static_assert(UI_READER_STANDARD_BOTTOM+20==UI_READER_TOOLS_TOP,"Reader tools stay outside the body");
+_Static_assert(UI_READER_STANDARD_BOTTOM+48==UI_READER_TOOLS_TOP,"Standard metadata fits above the tools");

@@ -20,6 +20,7 @@ int main(void){
  for(int full=0;full<2;++full)for(int immersive=0;immersive<2;++immersive)for(int vertical=0;vertical<2;++vertical)for(int margin=0;margin<=48;++margin){
   EpdRect body=ui_reader_body(full,immersive,margin,vertical);bounds(body);
   EpdRect controls=full?ui_reader_footer_for(full,immersive):(EpdRect){0,1096,684,120};bounds(controls);assert(!overlaps(body,controls));
+  if(!full) { EpdRect footer=ui_reader_footer_for(false,immersive);bounds(footer);assert(!overlaps(body,footer)&&!overlaps(footer,controls));assert(controls.y==UI_READER_TOOLS_TOP); }
   assert(body.y>= (!full?UI_READER_STANDARD_TOP:immersive?UI_READER_FULLSCREEN_TOP:UI_READER_METADATA_TOP));assert(body.y+body.height<= (!full?UI_READER_STANDARD_BOTTOM:immersive?UI_READER_FULLSCREEN_BOTTOM:UI_READER_METADATA_BOTTOM));
   book_reader_tap_t tap={0};
   for(int y=body.y;y<body.y+body.height;++y){

@@ -1,5 +1,10 @@
 # 版本变更 / Changelog
 
+## 未发布 / Unreleased
+
+- 阅读默认非全屏，顶部恢复时间、签名和电量，章节与进度放在工具栏上方；进入即显示工具栏。中间单击只进入全屏，底部上滑退出全屏并显示工具栏，保留阅读锚点及原全屏样式。
+  Standard reading restores time/signature/battery with chapter/progress above visible tools. Centre taps only enter fullscreen; bottom swipes return to standard with tools, preserving the reading anchor and both fullscreen styles.
+
 ## Pico 0.3.3-rc103 / Metalio S31 0.3.3-rc108 — 2026-10-31
 
 - 保留正式版HTTPS升级兼容性：两板启用交叉签名证书链验证，构建时核对SDK回调；真实证书日期、主机名和签名校验保持有效。官网刷机入口仍仅kiikoread.com。

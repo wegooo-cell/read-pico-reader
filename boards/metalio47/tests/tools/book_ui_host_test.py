@@ -580,8 +580,8 @@ int main(void) {
     for(int im=0;im<2;++im){
         test_reader_immersive=im;s_reader_fullscreen=false;
         EpdRect reading_body=reader_area(),text_body=body_rect(),footer=progress_rect();
-        assert(reading_body.y==176&&reading_body.height==900&&text_body.y==176&&text_body.height==900);
-        assert(!footer.width&&!footer.height);
+        assert(reading_body.y==80&&reading_body.height==968&&text_body.y==80&&text_body.height==968);
+        assert(footer.y==1048&&footer.height==48);
         s_reader_fullscreen=true;reading_body=reader_area();text_body=body_rect();footer=progress_rect();
         assert(reading_body.y==(im?0:52)&&reading_body.y+reading_body.height==(im?1204:1168));
         assert(text_body.y==(im?24:52)&&text_body.y+text_body.height==(im?1202:1168));
