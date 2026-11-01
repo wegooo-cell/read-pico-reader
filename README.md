@@ -117,6 +117,8 @@ To back up personal settings, open **Settings → Save & restore → Save to TF 
 
 EPUB metadata is allocated for the actual book size. ZIP entries and chapters each have an 8,192-item limit; covers, images, and navigation also consume ZIP entries. A book may exceed 32 MB overall, while each XHTML resource remains limited to 4 MB and each decompressed image to 8 MB; available device memory and standard ZIP limits also apply.
 
+EPUB GIF illustrations display their first frame on white; JPEGDEC supplies a reduced-size fallback when ROM JPEG decoding fails. Supported same-chapter footnote image markers open a nearby card; tap again to close it without changing the reading position.
+
 EPUB body chapters begin on a new page, keeping the title with the opening text when it fits. This also applies to recognized chapter headings within one XHTML resource. TOC links, introductory information and copyright metadata are excluded from body chapter detection; ordinary subheadings continue on the current page. Detection uses authored navigation, standalone numbered headings and body structure; books without reliable markers may still need individual compatibility fixes.
 
 ## Boot diagnostics and panel repair

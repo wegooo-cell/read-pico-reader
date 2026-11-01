@@ -15,6 +15,9 @@
 
 - EPUB 正文内嵌 GIF 现在按首帧显示（透明背景合成白底），不再报“此插图暂无法显示”。
   Inline EPUB GIFs now render their first frame with transparency composited on white instead of failing.
+- 修正 GIF 截断头、缺失像素及画布外偏移的解码边界；脚注重排失败保留旧章数据，设置面板优先响应点击。
+  Reject truncated GIF headers/pixels and clip off-canvas frames; retain old notes on failed chapter reflow and prioritize settings-panel taps.
+
 - EPUB 脚注改为弹窗：点正文注号在原处附近弹卡片显示注释，不再跳到章末；注号图标按书内 CSS 行内排进句子，卡片字号比正文小 5px 并跟随当前阅读字体。
   EPUB footnotes become a popup card anchored near the marker instead of jumping to the chapter end; inline 1em markers follow the book CSS, and the card uses the reading font at body size minus 5 px.
 

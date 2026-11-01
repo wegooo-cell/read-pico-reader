@@ -171,6 +171,7 @@ jobs:
           python3 tools/shelf_guard_cache_host_test.py
           python3 tools/management_layout_host_test.py
           python3 tools/webp_host_test.py
+          python3 tools/gif_host_test.py
           python3 tools/reader_metadata_host_test.py
           python3 tools/setup_state_host_test.py
           python3 tools/setup_navigation_host_test.py

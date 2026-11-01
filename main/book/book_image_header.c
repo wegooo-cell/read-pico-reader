@@ -122,7 +122,7 @@ bool book_webp_frame(const uint8_t *data, size_t size, unsigned *width, unsigned
 /* ---- GIF 头 / GIF header ---- */
 
 bool book_gif_is(const uint8_t *data, size_t size) {
-    return data && size >= 10 &&
+    return data && size >= 13 &&
         (!memcmp(data, "GIF87a", 6) || !memcmp(data, "GIF89a", 6));
 }
 

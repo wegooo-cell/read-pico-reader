@@ -1099,5 +1099,22 @@ int main(void) {
     assert(!book_layout_build(zero_width,6000,(EpdRect){0,0,600,1000},10));
     test_heap_fail_after=-1;test_zero_width=false;book_layout_free();
     english_wrap_tests(&fb);
+    // 行内注号占位与绘制共享坐标；释放章节前清除借用的脚注表。/ Inline markers share layout/draw coordinates; clear borrowed notes before releasing the chapter.
+    const char *note_html="<p>AB<a href='#note'><img src='note.gif'/></a>CD</p><aside id='note'>Explanation</aside>";
+    html_text_t notes={0};
+    assert(html_to_blocks(note_html,strlen(note_html),&notes)==ESP_OK&&notes.note_count==1);
+    book_layout_set_typography(0);book_layout_set_spacing(150,25);book_layout_set_chapter_lead(0,0);
+    book_layout_set_image_dims(probe_image,&image_probe_count);
+    book_layout_set_inline_images(notes.notes,notes.note_count);
+    EpdRect note_box={40,20,400,300};
+    assert(book_layout_build_blocks(notes.utf8,notes.len,notes.blocks,notes.count,note_box,10));
+    assert(book_layout_page_count()==1&&book_layout_page_image_count(0)==1);
+    int note_image=-1,note_x=-1,note_y=-1,note_w=0,note_h=0;
+    assert(book_layout_page_image_rect(0,0,&note_image,&note_x,&note_y,&note_w,&note_h));
+    assert(note_image==0&&note_x>=note_box.x&&note_x+note_w<=note_box.x+note_box.width);
+    assert(note_y>=0&&note_y+note_h<=note_box.height);
+    drawn[0]=0;book_layout_draw_page(&fb,0,note_box,10);
+    assert(!strcmp(drawn,"ABCDExplanation"));
+    book_layout_free();book_layout_set_inline_images(NULL,0);html_text_free(&notes);
     puts("book_layout_host_test: PASS; English word wrapping/hyphens, source offsets, idle rows/columns and bounded large chapters");
 }

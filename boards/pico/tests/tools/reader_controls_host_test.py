@@ -63,8 +63,9 @@ static bool tools_swipe(app_ctx_t *ctx,const ui_gesture_event_t *ev){
 
 unit+=function('book_reader_center',ROOT/'main/book/book_reader_input.h')+'\n'
 unit+='static EpdRect body_rect(void){return(EpdRect){0,80,684,968};}\n'
+unit+='static int s_footnote_note=-1,footnote_candidate=-1;static EpdRect s_footnote_marker;\nstatic int reader_footnote_hit(int x,int y,EpdRect *r){(void)x;(void)y;(void)r;return footnote_candidate;}\n'
 center=function('action_at',book)
-a=center.index('        if ((s_reader_panel == READER_PANEL_NONE || s_reader_panel == READER_PANEL_TOOLS)')
+a=center.index('        if (s_footnote_note >= 0)')
 b=center.index('        if ((s_toolbar ||',a)
 unit+='static app_redraw_t center_action(app_ctx_t *ctx,int x,int y){'+center[a:b]+'return APP_REDRAW_NONE;}\n'
 action=function('reader_panel_action',book)
@@ -73,6 +74,7 @@ b=action.index('        if (ui_rect_hit(layout, x, y)) {',a)
 unit+='static app_redraw_t tap_aa(int x,int y){\n'+action[a:b]+'return APP_REDRAW_NONE;}\n'
 unit+=r'''
 static void reset(app_ctx_t *ctx){
+ s_footnote_note=footnote_candidate=-1;
  s_view=READING;s_text="text";s_reader_panel=READER_PANEL_NONE;s_clear_confirm=s_scan_pending=false;
  s_reader_tap.pending=true;s_reader_slider=3;s_pressed_control=2;invalidations=0;
  s_reader_fullscreen=fail_mode_change=false;mode_changes=0;
@@ -112,6 +114,16 @@ int main(void){
   s_reader_tap.pending=true;
   assert(center_action(&ctx,342,500)==APP_REDRAW_NONE&&s_reader_fullscreen&&mode_changes==1&&!s_reader_tap.pending);
  }
+ // 工具栏正文注号可开关卡片，其他面板与确认框保有点击优先权。/ Body markers open/close cards while modal panels retain tap priority.
+ for(int panel=READER_PANEL_NONE;panel<=READER_PANEL_BACKGROUND_PREVIEW;++panel){
+  reset(&ctx);footnote_candidate=0;s_reader_panel=panel;
+  bool allowed=panel==READER_PANEL_NONE||panel==READER_PANEL_TOOLS;
+  assert(center_action(&ctx,100,300)==(allowed?APP_REDRAW_PAGE:APP_REDRAW_NONE));
+  assert(s_footnote_note==(allowed?0:-1)&&!mode_changes);
+  if(allowed)assert(center_action(&ctx,100,300)==APP_REDRAW_PAGE&&s_footnote_note==-1&&!mode_changes);
+ }
+ reset(&ctx);s_clear_confirm=true;footnote_candidate=0;
+ assert(center_action(&ctx,100,300)==APP_REDRAW_NONE&&s_footnote_note==-1);
  const EpdRect cards[]={s_font_card,s_weight_card,s_bookfont_card,s_layout_card,s_rule_card,s_antialias_card};
  for(unsigned i=0;i<6;++i){EpdRect r=cards[i];assert(r.x>=36&&r.y>=580&&r.x+r.width<=648&&r.y+r.height<1141);
   for(unsigned j=0;j<i;++j){EpdRect q=cards[j];assert(r.x+r.width<=q.x||q.x+q.width<=r.x||r.y+r.height<=q.y||q.y+q.height<=r.y);}}

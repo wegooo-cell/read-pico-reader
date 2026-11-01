@@ -3773,7 +3773,7 @@ static void draw_reader_footnote_card(uint8_t *fb, size_t page, EpdRect body) {
     EpdRect card = {card_x, card_y, card_w, height};
     ui_fill_round_rect(fb, card, 16, UI_GRAY_WHITE);
     ui_draw_control_frame(fb, card, 16, 0x60);
-    ui_text(fb, card.x + 24, card.y + 10, 18, "脚注", EPD_DRAW_ALIGN_LEFT);
+    ui_text(fb, card.x + 24, card.y + 10, 18, "脚注", EPD_DRAW_ALIGN_LEFT, false);
     int y = card.y + 42;
     const int ascender = ttf_ascender_px(px);
     for (int i = 0; i < lines && y + line_h <= card.y + card.height - 6; ++i) {
@@ -3822,7 +3822,8 @@ static void draw_reader_images(uint8_t *fb, size_t page, EpdRect body) {
         EpdRect band = book_layout_image_rect();
         for (int i = 0; i < reader_image_slots(page); ++i) {
             int index = -1, raw_x = -1, y, width, height;
-            if (!book_layout_page_image_rect(page, i, &index, &raw_x, &y, &width, &height)) continue;
+            if (!book_layout_page_image_rect(page, i, &index, &raw_x, &y, &width, &height) &&
+                !reader_image_slot(page, i, &index, &y, &width, &height)) continue;
             const reader_image_t *image = s_page_images && i < s_page_image_count ? &s_page_images[i] : NULL;
             if (image && image->gray) {
                 int left = raw_x >= 0 ? raw_x : band.x + (band.width - image->width) / 2;
@@ -4992,11 +4993,10 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     if (!ok) {
         // 回滚前恢复旧章上下文，避免尺寸回调引用已释放的新章图片。/ Restore the previous context before rollback to avoid a freed image list.
         s_reader_dims_ctx = old_dims_ctx;
-        book_layout_set_inline_images(NULL, 0);
+        book_layout_set_inline_images(s_notes, s_note_count);
         html_text_free(&loaded);
-        // loaded.notes 随 html_text_free 释放；回滚后不能再指向它，否则下一次 free 会再次释放。
-        // loaded.notes dies with html_text_free; clear the adopted pointer so the rollback never frees it twice.
-        s_notes = NULL; s_note_count = 0; s_footnote_note = -1;
+        // 新章尚未接管旧脚注；失败时保留旧章所有权及行内映射。/ Keep old-note ownership and inline mapping until the new chapter succeeds.
+        s_footnote_note = -1;
         // run 表随 loaded 一起没了，先把排版还回旧章的那份，否则重排会读到已释放的内存。
         // The run table dies with `loaded`, so put the previous chapter's back before the
         // rollback layout reads freed memory.
@@ -7339,7 +7339,7 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         // With the card open any tap closes it; otherwise a tap on a note marker opens the card
         // without jumping anywhere.
         if (s_footnote_note >= 0) { s_footnote_note = -1; return APP_REDRAW_PAGE; }
-        {
+        if (!s_clear_confirm && (s_reader_panel == READER_PANEL_NONE || s_reader_panel == READER_PANEL_TOOLS)) {
             int note = reader_footnote_hit(x, y, &s_footnote_marker);
             if (note >= 0) { s_footnote_note = note; return APP_REDRAW_PAGE; }
         }

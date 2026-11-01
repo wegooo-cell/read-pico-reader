@@ -3563,7 +3563,8 @@ static void draw_reader_images(uint8_t *fb, size_t page, EpdRect body) {
         EpdRect band = book_layout_image_rect();
         for (int i = 0; i < reader_image_slots(page); ++i) {
             int index = -1, raw_x = -1, y, width, height;
-            if (!book_layout_page_image_rect(page, i, &index, &raw_x, &y, &width, &height)) continue;
+            if (!book_layout_page_image_rect(page, i, &index, &raw_x, &y, &width, &height) &&
+                !reader_image_slot(page, i, &index, &y, &width, &height)) continue;
             const reader_image_t *image = s_page_images && i < s_page_image_count ? &s_page_images[i] : NULL;
             if (image && image->gray) {
                 // 行内注号图标用排版给的行末 x，块级插图继续水平居中。
@@ -4414,9 +4415,10 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     if (!ok) {
         // 回滚前恢复旧章上下文，避免尺寸回调引用已释放的新章图片。/ Restore the previous context before rollback to avoid a freed image list.
         s_reader_dims_ctx = old_dims_ctx;
-        book_layout_set_inline_images(NULL, 0);
+        book_layout_set_inline_images(s_notes, s_note_count);
         html_text_free(&loaded);
-        s_notes = NULL; s_note_count = 0; s_footnote_note = -1;
+        // 新章尚未接管旧脚注；失败时保留旧章所有权及行内映射。/ Keep old-note ownership and inline mapping until the new chapter succeeds.
+        s_footnote_note = -1;
         // run 表随 loaded 一起没了，先把排版还回旧章的那份，否则重排会读到已释放的内存。
         // The run table dies with `loaded`, so put the previous chapter's back before the
         // rollback layout reads freed memory.
@@ -6634,7 +6636,7 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         // 脚注卡片打开时任意点击先关闭；否则点中注号图标直接弹卡片，不参与翻页判定。
         // Any tap closes an open card; otherwise a marker tap opens the card and never turns the page.
         if (s_footnote_note >= 0) { s_footnote_note = -1; return APP_REDRAW_PAGE; }
-        {
+        if (!s_clear_confirm && (s_reader_panel == READER_PANEL_NONE || s_reader_panel == READER_PANEL_TOOLS)) {
             int note = reader_footnote_hit(x, y, &s_footnote_marker);
             if (note >= 0) { s_footnote_note = note; return APP_REDRAW_PAGE; }
         }

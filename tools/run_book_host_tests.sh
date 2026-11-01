@@ -26,3 +26,4 @@ build/book-tests/gesture
 build/book-tests/ui_kit
 gcc "${flags[@]}" -Itools/html_text_stubs tools/html_text_host_test.c main/book/html_text.c -o build/book-tests/html
 build/book-tests/html
+python3 tools/gif_host_test.py

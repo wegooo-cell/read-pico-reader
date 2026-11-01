@@ -10,6 +10,9 @@ Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Takin
 
 ## 当前工作：双板型本地整合 / Current work: local multi-board integration
 
+用户2026-11-01明确要求直接合并新PR65、66、67：采用GIF首帧、脚注卡片及JPEGDEC兜底，补齐解码边界和脚注状态回滚验证；保留当前书架、阅读手势和已确认的双板波形，不发布官网固件。
+User2026-11-01 explicitly approves merging new PR65/66/67: GIF first frames, footnote cards and JPEGDEC fallback, with decoder boundary and footnote rollback checks. Preserve current shelf/reader gestures and approved board waveforms; do not publish website firmware.
+
 用户2026-11-01明确要求直接合并PR61、62、64并按照作者实现：EPUB兼容按PR61，Pico/S31阅读输出按PR62，S31裁剪及补黑按PR64。此指令取代PR59/55在对应派生波形文件上的固定限制；原始表、板型隔离和供电/睡眠保护继续保留。界面与阅读交互保留本机最新改动，测试和基线按实际合入代码同步，不私自改写作者波形。
 User2026-11-01 explicitly approves merging PR61/62/64 as authored: PR61 EPUB compatibility, PR62 Pico/S31 reader output, and PR64 S31 trimming/black boost. This supersedes PR59/55 pins for the affected derived-waveform files; retain raw tables, board isolation and power/sleep protections. Preserve the latest local UI/reader interactions; align tests/baselines without silently rewriting the author's waveforms.
 

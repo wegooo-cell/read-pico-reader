@@ -20,13 +20,14 @@ size_t measured_fread(void *p,size_t n,size_t m,FILE *f){size_t got=fread(p,n,m,
 int ttf_font_open_mem(uint8_t *p,size_t n,const char *label){(void)n;(void)label;free(p);return -1;}
 void ttf_font_close_embedded(void){}
 static book_epub_t *book;
-typedef struct{size_t chapter;char **images;size_t count;}reader_dims_ctx_t;
+typedef struct{size_t chapter;char **images;size_t count;const html_note_t *notes;size_t note_count;}reader_dims_ctx_t;
+static int s_px=20;
 static int book_chapter_image_dimensions(size_t ch,const char *src,unsigned *w,unsigned *h){++probes;return book_epub_image_dimensions(book,ch,src,w,h);}
 '''+function('reader_image_dims',ROOT/'main/apps/app_book.c')+r'''
 int main(int argc,char **argv){assert(argc==3&&book_epub_open(argv[1],&book)==ESP_OK);book_epub_set_fonts_enabled(book,false);
  uint64_t total_reads=0,full_bytes=0,checksum=0;unsigned images=0;
  for(size_t ch=0;ch<book_epub_chapter_count(book);++ch){html_text_t text={0};assert(book_epub_load(book,ch,&text)==ESP_OK);
-  reader_dims_ctx_t ctx={ch,text.images,text.image_count};assert(!reader_image_dims(NULL,0,NULL,NULL));assert(!reader_image_dims(&ctx,-1,NULL,NULL));assert(!reader_image_dims(&ctx,(int)text.image_count,NULL,NULL));
+  reader_dims_ctx_t ctx={ch,text.images,text.image_count,text.notes,text.note_count};assert(!reader_image_dims(NULL,0,NULL,NULL));assert(!reader_image_dims(&ctx,-1,NULL,NULL));assert(!reader_image_dims(&ctx,(int)text.image_count,NULL,NULL));
   for(size_t i=0;i<text.image_count;++i){unsigned w=0,h=0;int pw=0,ph=0;
    read_bytes=0;assert(reader_image_dims(&ctx,(int)i,&pw,&ph));total_reads+=read_bytes;
    uint8_t *data=NULL;size_t n=0;bool png=false;

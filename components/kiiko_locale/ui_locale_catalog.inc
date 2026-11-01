@@ -941,6 +941,7 @@ static const ui_locale_pair_t s_pairs[] = {
     {"联网下载字体","Download fonts"},
     {"背景","Background"},
     {"背景预览","Background preview"},
+    {"脚注","Footnote"},
     {"自动休眠锁屏","Auto lock"},
     {"自动全刷","Full refresh"},
     {"自定义三键","Customise keys"},

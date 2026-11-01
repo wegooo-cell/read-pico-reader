@@ -258,5 +258,21 @@ int main(void) {
     assert(t.run_count == 0 && t.runs == NULL);
     html_text_free(&t);
 
+    // 注号图标映射到同章脚注，回链和缺失目标不生成悬空记录。/ Map inline markers to same-chapter notes, excluding backlinks and missing targets.
+    t = parse("<p>A<a href='#note1'><img src='note.gif'/></a>B</p>"
+              "<aside id='note1'><p>Explanation<a href='#noteref1'>back</a></p></aside>",
+              "A\xef\xbf\xbc" "B\nExplanationback");
+    assert(t.note_count == 1 && t.image_count == 1);
+    assert(t.notes[0].marker_offset == 1 && t.notes[0].image == 0);
+    assert(t.notes[0].text_start + t.notes[0].text_len <= t.len);
+    assert(t.notes[0].text_len == strlen("Explanationback"));
+    assert(!memcmp(t.utf8 + t.notes[0].text_start, "Explanationback", t.notes[0].text_len));
+    html_text_free(&t);
+    assert(!t.notes && !t.note_count);
+    html_text_free(&t);
+    t = parse("<p><a href='#missing'><img src='note.gif'/></a></p>", "\xef\xbf\xbc");
+    assert(!t.notes && !t.note_count);
+    html_text_free(&t);
+
     puts("html_text_host_test: PASS");
 }

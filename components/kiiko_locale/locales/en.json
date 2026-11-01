@@ -1184,5 +1184,6 @@
   "共 %u 本 · 已选 %u 本": "%u books · %u selected",
   "删除书籍": "Delete books",
   "搜索书籍": "Search books",
-  "清理进度": "Clear progress"
+  "清理进度": "Clear progress",
+  "脚注": "Footnote"
 }

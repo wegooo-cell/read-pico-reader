@@ -643,7 +643,8 @@ static bool gif_lzw_decode(const uint8_t *data, size_t size, size_t start, int m
         prev = code_in;
     }
     free(dict);
-    return true;
+    // 结束码不能代替缺失像素，否则会读取未初始化的索引。/ An end code cannot stand in for missing pixels.
+    return row == height && x == 0;
 }
 
 static bool gif_gray(const uint8_t *data, size_t size, unsigned out_width, unsigned out_height,
@@ -656,6 +657,7 @@ static bool gif_gray(const uint8_t *data, size_t size, unsigned out_width, unsig
     const int gct_size = gct ? (2 << (data[10] & 7)) : 0;
     const uint8_t *gct_ptr = gct ? data + 13 : NULL;
     size_t at = gct ? 13 + (size_t)gct_size * 3 : 13;
+    if (at > size) return false;
     int transparent = -1;
     while (at < size) {
         const uint8_t tag = data[at++];
@@ -716,7 +718,7 @@ static bool gif_gray(const uint8_t *data, size_t size, unsigned out_width, unsig
         unsigned pass = 0, target_row = 0;
         for (unsigned yy = 0; yy < fh; ++yy) {
             const unsigned draw_y = interlace ? target_row : yy;
-            if (draw_y < gh) {
+            if (top + draw_y < gh) {
                 for (unsigned xx = 0; xx < fw; ++xx) {
                     const uint8_t index = idx[(size_t)yy * fw + xx];
                     if ((int)index == transparent) continue;
