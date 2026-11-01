@@ -3629,6 +3629,11 @@ static void zoom_bits_build(uint8_t *bits, EpdRect phys, EpdRect band, int iw, i
 
 // 命中页内注号图标：返回当前章节脚注下标，-1 表示没点中。
 // Hit-test a page footnote marker image: return the current chapter's note index, or -1.
+// 交互参考 whiteos（https://github.com/446599/whiteos，固件源码 Apache-2.0）的 EPUB 脚注卡片：
+// 点击注号在其附近弹卡片、点击空白关闭；本仓库未复制其源码，实现为独立编写。
+// Interaction reference: whiteos (https://github.com/446599/whiteos, firmware source Apache-2.0)
+// pops a note card near the marker and closes on blank taps; no source was copied and this
+// implementation is written independently.
 static int reader_footnote_hit(uint16_t x, uint16_t y, EpdRect *marker) {
     if (!s_notes || !s_note_count) return -1;
     EpdRect band = book_layout_image_rect();
