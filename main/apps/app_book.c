@@ -393,6 +393,12 @@ static int64_t s_shelf_key_until;
 static int64_t s_reader_clock_minute = -1, s_reader_clock_painted_minute = -1;
 static bool s_reader_clock_pending;
 static char s_message[128], s_storage[128], s_path[BOOK_STORE_PATH_MAX], s_title[128];
+// 当前章节脚注（不复制文本，注释文本切片指向 s_text）与打开的注号。
+// Current chapter footnotes (no text copies; slices point into s_text) and the opened marker.
+static html_note_t *s_notes;
+static size_t s_note_count;
+static int s_footnote_note = -1;
+static EpdRect s_footnote_marker;
 static char s_book_title[128];
 static char s_chapter_heading_title[128], s_chapter_heading_label[32];
 static size_t s_chapter_lead_skip;
@@ -3621,6 +3627,159 @@ static void zoom_bits_build(uint8_t *bits, EpdRect phys, EpdRect band, int iw, i
     }
 }
 
+// 命中页内注号图标：返回当前章节脚注下标，-1 表示没点中。
+// Hit-test a page footnote marker image: return the current chapter's note index, or -1.
+static int reader_footnote_hit(uint16_t x, uint16_t y, EpdRect *marker) {
+    if (!s_notes || !s_note_count) return -1;
+    EpdRect band = book_layout_image_rect();
+    // 热区比 1em 图标大一圈：上下各留约 1/2 字号，左右各留约 1 字号，手指好点。
+    // Hotspot pads the 1em icon by ~half a font above/below and ~one font left/right.
+    const int pad_x = s_px > 0 ? s_px : 20;
+    const int pad_y = s_px > 0 ? s_px / 2 : 10;
+    for (int i = 0; i < reader_image_slots(s_page); ++i) {
+        int index = -1, raw_x = -1, slot_y = 0, width = 0, height = 0;
+        if (!book_layout_page_image_rect(s_page, i, &index, &raw_x, &slot_y, &width, &height)) continue;
+        int left = raw_x >= 0 ? raw_x : band.x + (band.width - width) / 2;
+        int top = band.y + slot_y;
+        if (slot_y == 0) top = reader_area().y;
+        EpdRect rect = {left, top, width, height};
+        EpdRect hot = {left - pad_x, top - pad_y, width + pad_x * 2, height + pad_y * 2};
+        if (!ui_rect_hit(hot, x, y)) continue;
+        for (size_t n = 0; n < s_note_count; ++n) {
+            if (s_notes[n].image != index) continue;
+            if (marker) *marker = rect;
+            return (int)n;
+        }
+        return -1;
+    }
+    return -1;
+}
+// 脚注卡片：中央白底卡片显示注释，点击任意处关闭；不改阅读位置。
+// Footnote card: a white card in the body centre; any tap closes it and the reading position never moves.
+static void draw_reader_footnote_card(uint8_t *fb, size_t page, EpdRect body) {
+    (void)page;
+    if (s_footnote_note < 0 || !s_text) return;
+    if ((size_t)s_footnote_note >= s_note_count) { s_footnote_note = -1; return; }
+    const html_note_t *note = &s_notes[s_footnote_note];
+    if (!note->text_len || note->text_start + note->text_len > s_text_len) return;
+    static char text[1024];
+    // 注释里常夹零宽字符（U+200B 等），直接画会变成缺字方框；先清洗掉再折行。
+    // EPUB notes often carry zero-width characters (U+200B etc.); drawing them raw shows tofu
+    // boxes, so strip them before wrapping.
+    size_t len = 0;
+    for (size_t i = 0; i < note->text_len && len + 4 < sizeof(text);) {
+        unsigned char c = (unsigned char)s_text[note->text_start + i];
+        size_t n = 1;
+        if (c >= 0xf0) n = 4;
+        else if (c >= 0xe0) n = 3;
+        else if (c >= 0xc0) n = 2;
+        if (i + n > note->text_len) break;
+        uint32_t cp = c;
+        if (n == 2) cp = ((uint32_t)(c & 0x1f) << 6) | ((unsigned char)s_text[note->text_start + i + 1] & 0x3f);
+        else if (n == 3) cp = ((uint32_t)(c & 0x0f) << 12) |
+            (((unsigned char)s_text[note->text_start + i + 1] & 0x3f) << 6) |
+            ((unsigned char)s_text[note->text_start + i + 2] & 0x3f);
+        else if (n == 4) cp = ((uint32_t)(c & 0x07) << 18) |
+            (((unsigned char)s_text[note->text_start + i + 1] & 0x3f) << 12) |
+            (((unsigned char)s_text[note->text_start + i + 2] & 0x3f) << 6) |
+            ((unsigned char)s_text[note->text_start + i + 3] & 0x3f);
+        i += n;
+        if (cp == 0x200b || cp == 0x200c || cp == 0x200d || cp == 0x2060 || cp == 0xfeff || cp == 0x00ad)
+            continue;
+        if (cp == '\n' || cp == '\r' || cp == '\t') cp = ' ';
+        if (cp < 0x20) continue;
+        if (cp < 0x80) {
+            text[len++] = (char)cp;
+        } else if (cp < 0x800) {
+            text[len++] = (char)(0xc0 | (cp >> 6));
+            text[len++] = (char)(0x80 | (cp & 0x3f));
+        } else if (cp < 0x10000) {
+            text[len++] = (char)(0xe0 | (cp >> 12));
+            text[len++] = (char)(0x80 | ((cp >> 6) & 0x3f));
+            text[len++] = (char)(0x80 | (cp & 0x3f));
+        } else {
+            text[len++] = (char)(0xf0 | (cp >> 18));
+            text[len++] = (char)(0x80 | ((cp >> 12) & 0x3f));
+            text[len++] = (char)(0x80 | ((cp >> 6) & 0x3f));
+            text[len++] = (char)(0x80 | (cp & 0x3f));
+        }
+    }
+    text[len] = 0;
+    while (len && text[len - 1] == ' ') text[--len] = 0;
+    if (!text[0]) return;
+    // 注释字号比正文小 5px；按阅读字体自身宽度折行，再用同一 TTF 逐行绘制，
+    // 这样卡片跟随用户选择的阅读字体，也不会被单行控件缩字。
+    // Notes run 5 px below the body. Wrap with the reading face's own metrics and draw lines
+    // with the same TTF, so the card follows the selected reading font without shrinking.
+    int px = s_px - 5;
+    if (px < 14) px = 14;
+    const int card_w = body.width - 48;
+    const int inner_w = card_w - 48;
+    const int line_h = px + 8;
+    enum { FOOTNOTE_MAX_LINES = 24 };
+    uint16_t line_at[FOOTNOTE_MAX_LINES];
+    uint16_t line_len[FOOTNOTE_MAX_LINES];
+    int lines = 0;
+    int cursor = 0;
+    while (text[cursor] && lines < FOOTNOTE_MAX_LINES) {
+        int start_byte = cursor;
+        int width = 0;
+        while (text[cursor]) {
+            size_t n = 1;
+            while (text[cursor + (int)n] && ((unsigned char)text[cursor + (int)n] & 0xc0) == 0x80) ++n;
+            char glyph[8];
+            if (n >= sizeof(glyph)) break;
+            memcpy(glyph, text + cursor, n);
+            glyph[n] = 0;
+            int advance = ttf_text_width_px(px, glyph);
+            if (advance <= 0) advance = px;
+            if (width + advance > inner_w && cursor > start_byte) break;
+            width += advance;
+            cursor += (int)n;
+            if (width >= inner_w) break;
+        }
+        if (cursor == start_byte) {
+            int n = 1;
+            while (text[start_byte + n] && ((unsigned char)text[start_byte + n] & 0xc0) == 0x80) ++n;
+            cursor = start_byte + n;
+        }
+        line_at[lines] = (uint16_t)start_byte;
+        line_len[lines] = (uint16_t)(cursor - start_byte);
+        ++lines;
+        while (text[cursor] == ' ') ++cursor;
+    }
+    if (!lines) return;
+    int height = 46 + lines * line_h + 26;
+    const int max_h = body.height - 40;
+    if (height > max_h) height = max_h;
+    if (height < 120) height = 120;
+    // 卡片贴着注号弹出：优先下方，放不下翻到上方，水平以注号为中心并夹在正文栏内。
+    // Attach the card to the marker: below when it fits, otherwise above, centred and clamped.
+    const EpdRect marker = s_footnote_marker;
+    int card_x = marker.x + marker.width / 2 - card_w / 2;
+    const int left_limit = body.x + 12, right_limit = body.x + body.width - card_w - 12;
+    if (card_x < left_limit) card_x = left_limit;
+    if (card_x > right_limit) card_x = right_limit;
+    int card_y = marker.y + marker.height + 14;
+    if (card_y + height > body.y + body.height - 12) {
+        card_y = marker.y - height - 14;
+        if (card_y < body.y + 12) card_y = body.y + 12;
+    }
+    EpdRect card = {card_x, card_y, card_w, height};
+    ui_fill_round_rect(fb, card, 16, UI_GRAY_WHITE);
+    ui_draw_control_frame(fb, card, 16, 0x60);
+    ui_text(fb, card.x + 24, card.y + 10, 18, "脚注", EPD_DRAW_ALIGN_LEFT);
+    int y = card.y + 42;
+    const int ascender = ttf_ascender_px(px);
+    for (int i = 0; i < lines && y + line_h <= card.y + card.height - 6; ++i) {
+        char saved = text[line_at[i] + line_len[i]];
+        text[line_at[i] + line_len[i]] = 0;
+        ttf_draw_text_px(fb, card.x + 24, y + ascender, px, text + line_at[i],
+                         EPD_DRAW_ALIGN_LEFT, 0, 15);
+        text[line_at[i] + line_len[i]] = saved;
+        y += line_h;
+    }
+}
 static void draw_reader_images(uint8_t *fb, size_t page, EpdRect body) {
     // 位图和布局代次必须匹配；预渲染另一页不能复用当前页插图。
     // Match page and layout generation; a prefetched page must never borrow current-page bitmaps.
@@ -3657,12 +3816,13 @@ static void draw_reader_images(uint8_t *fb, size_t page, EpdRect body) {
         // panel and no longer carries the body margins.
         EpdRect band = book_layout_image_rect();
         for (int i = 0; i < reader_image_slots(page); ++i) {
-            int y, width, height;
-            if (!reader_image_slot(page, i, NULL, &y, &width, &height)) continue;
+            int index = -1, raw_x = -1, y, width, height;
+            if (!book_layout_page_image_rect(page, i, &index, &raw_x, &y, &width, &height)) continue;
             const reader_image_t *image = s_page_images && i < s_page_image_count ? &s_page_images[i] : NULL;
             if (image && image->gray) {
-                int left = band.x + (band.width - image->width) / 2;
+                int left = raw_x >= 0 ? raw_x : band.x + (band.width - image->width) / 2;
                 int top = band.y + y + (height - image->height) / 2;
+                if (raw_x >= 0) top = band.y + y;
                 // 页首插图贴到阅读区顶端：正文上方那点呼吸空间只属于正文，不该把插图压下来。
                 // A page-start illustration sits at the top of the reading area: the inset above
                 // body text belongs to text and must not push the illustration down.
@@ -3742,6 +3902,7 @@ static void draw_reader_outer(uint8_t *fb,size_t page) {
     if (s_reader_panel != READER_PANEL_BACKGROUND_PREVIEW)
         ui_reader_background_paint(fb, (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT}, true);
     draw_reader_images(fb, page, body);
+    draw_reader_footnote_card(fb, page, body);
     draw_reader_metadata(fb,page);
     if (s_reader_notice[0]) {
         EpdRect notice = {218, 160, 248, 48};
@@ -4490,6 +4651,8 @@ typedef struct {
     size_t chapter;
     char** images;
     size_t count;
+    const html_note_t* notes;
+    size_t note_count;
 } reader_dims_ctx_t;
 static reader_dims_ctx_t s_reader_dims_ctx;
 
@@ -4501,6 +4664,17 @@ static bool reader_image_dims(void* ctx, int image, int* width, int* height) {
     unsigned w = 0, h = 0;
     if (book_chapter_image_dimensions(c->chapter, c->images[image], &w, &h) != ESP_OK ||
         !w || !h || w > INT_MAX || h > INT_MAX) return false;
+    // 书内 CSS 把注号图标限制为 1em 宽；按正文字号缩到一行高，不再用原图 150x220。
+    // The book CSS limits the note icon to 1em wide; scale to the body font size instead of 150x220.
+    for (size_t i = 0; i < c->note_count; ++i) {
+        if (c->notes[i].image != image) continue;
+        unsigned box = s_px > 0 ? (unsigned)s_px : 20u;
+        unsigned nh = (unsigned)((uint64_t)h * box / w);
+        if (nh < 1) nh = 1;
+        if (width) *width = (int)box;
+        if (height) *height = (int)nh;
+        return true;
+    }
     if (width) *width = (int)w;
     if (height) *height = (int)h;
     return true;
@@ -4560,6 +4734,8 @@ static void free_book(void) {
     free(s_text);
     free(s_blocks);
     free(s_runs);
+    book_layout_set_inline_images(NULL, 0);
+    free(s_notes); s_notes = NULL; s_note_count = 0; s_footnote_note = -1;
     for (size_t i = 0; i < s_image_count; ++i) free(s_images[i]);
     free(s_images);
     s_images = NULL; s_image_count = 0;
@@ -4803,14 +4979,19 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     // Recompute the heading geometry for the current mode -- rows at the top horizontally,
     // columns at the right vertically -- so drawing and reservation cannot drift apart.
     apply_chapter_lead(heading, label, lead_skip, lead_height);
-    s_reader_dims_ctx = (reader_dims_ctx_t){chapter, loaded.images, loaded.image_count};
+    s_reader_dims_ctx = (reader_dims_ctx_t){chapter, loaded.images, loaded.image_count, loaded.notes, loaded.note_count};
     book_layout_set_image_dims(reader_image_dims, &s_reader_dims_ctx);
     book_layout_set_runs(loaded.runs, loaded.run_count);
+    book_layout_set_inline_images(loaded.notes, loaded.note_count);
     bool ok = book_layout_build_blocks(loaded.utf8, loaded.len, loaded.blocks, loaded.count, body_rect(), s_px);
     if (!ok) {
         // 回滚前恢复旧章上下文，避免尺寸回调引用已释放的新章图片。/ Restore the previous context before rollback to avoid a freed image list.
         s_reader_dims_ctx = old_dims_ctx;
+        book_layout_set_inline_images(NULL, 0);
         html_text_free(&loaded);
+        // loaded.notes 随 html_text_free 释放；回滚后不能再指向它，否则下一次 free 会再次释放。
+        // loaded.notes dies with html_text_free; clear the adopted pointer so the rollback never frees it twice.
+        s_notes = NULL; s_note_count = 0; s_footnote_note = -1;
         // run 表随 loaded 一起没了，先把排版还回旧章的那份，否则重排会读到已释放的内存。
         // The run table dies with `loaded`, so put the previous chapter's back before the
         // rollback layout reads freed memory.
@@ -4836,6 +5017,8 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     free(s_text);
     free(s_blocks);
     free(s_runs);
+    free(s_notes);
+    s_notes = loaded.notes; s_note_count = loaded.note_count; s_footnote_note = -1;
     s_text = loaded.utf8;
     s_text_len = loaded.len;
     s_blocks = loaded.blocks;
@@ -7147,6 +7330,14 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         return APP_REDRAW_NONE;
     }
     if (s_view == READING) {
+        // 脚注卡片打开时，点任意处先关闭；否则点中注号图标直接弹卡片，不跳转。
+        // With the card open any tap closes it; otherwise a tap on a note marker opens the card
+        // without jumping anywhere.
+        if (s_footnote_note >= 0) { s_footnote_note = -1; return APP_REDRAW_PAGE; }
+        {
+            int note = reader_footnote_hit(x, y, &s_footnote_marker);
+            if (note >= 0) { s_footnote_note = note; return APP_REDRAW_PAGE; }
+        }
         if ((s_reader_panel == READER_PANEL_NONE || s_reader_panel == READER_PANEL_TOOLS) &&
             book_reader_center(body_rect(), x, y)) {
             s_reader_tap.pending = false;

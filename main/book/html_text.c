@@ -74,6 +74,17 @@ typedef struct {
     // Inline tags switch faces too: record the slot per open depth and fall back on close.
     uint8_t family_at[CSS_ANCESTOR_MAX];
     bool family_rules;
+    // 脚注：正文 <a href="#id"> 注号 + 同章带 id 的注释文本；解析完成后再对齐文本切片。
+    // Footnotes: body <a href="#id"> markers plus same-chapter id elements; align text slices after parsing.
+    struct { char id[24]; size_t marker; int image; } note_refs[12];
+    size_t note_ref_count;
+    struct { char id[24]; size_t start, end, depth; } note_ids[16];
+    size_t note_id_count;
+    bool note_open;
+    size_t note_depth;
+    size_t note_marker;
+    int note_image;
+    char note_target[24];
 } writer_t;
 
 static unsigned char lower(unsigned char c) {
@@ -400,6 +411,7 @@ void html_text_free(html_text_t* text) {
     for (size_t i = 0; i < text->image_count; ++i) free(text->images[i]);
     free(text->images);
     free(text->runs);
+    free(text->notes);
     *text = (html_text_t){0};
 }
 
@@ -647,10 +659,10 @@ static bool image_attr(const char* at, const char* end, bool object,
     return used != 0;
 }
 
-static esp_err_t add_image(writer_t* w, const char* path) {
+// 追加图片条目，返回序号；调用方决定它是块级图还是行内注号。
+// Append an image entry and return its index; the caller decides block image vs inline marker.
+static esp_err_t add_image_entry(writer_t* w, const char* path, int* index) {
     if (w->text.image_count == HTML_IMAGE_MAX) return ESP_OK;
-    esp_err_t err = finish_block(w, false);
-    if (err != ESP_OK) return err;
     char** images = heap_caps_realloc(w->text.images, (w->text.image_count + 1) * sizeof(char*), PSRAM_CAPS);
     if (!images) return ESP_ERR_NO_MEM;
     w->text.images = images;
@@ -659,12 +671,37 @@ static esp_err_t add_image(writer_t* w, const char* path) {
     if (!copy) return ESP_ERR_NO_MEM;
     memcpy(copy, path, n);
     w->text.images[w->text.image_count] = copy;
-    int index = (int)w->text.image_count++;
+    if (index) *index = (int)w->text.image_count;
+    ++w->text.image_count;
+    return ESP_OK;
+}
+
+static esp_err_t add_image(writer_t* w, const char* path) {
+    if (w->text.image_count == HTML_IMAGE_MAX) return ESP_OK;
+    esp_err_t err = finish_block(w, false);
+    if (err != ESP_OK) return err;
+    int index = 0;
+    err = add_image_entry(w, path, &index);
+    if (err != ESP_OK) return err;
     err = emit(w, 0xfffc);
     if (err != ESP_OK) return err;
     err = finish_block(w, false);
     if (err == ESP_OK) w->text.blocks[w->text.count - 1].image = index;
     return err;
+}
+
+// 行内注号：图片不拆段，只在正文流里放占位符，排版把它当 1em 行内图标。
+// Inline footnote marker: keep the paragraph, emit a placeholder so layout reserves 1em in the line.
+static esp_err_t add_inline_image(writer_t* w, const char* path) {
+    if (w->text.image_count == HTML_IMAGE_MAX) return ESP_OK;
+    int index = 0;
+    esp_err_t err = add_image_entry(w, path, &index);
+    if (err != ESP_OK) return err;
+    w->note_marker = w->text.len;
+    err = emit(w, 0xfffc);
+    if (err != ESP_OK) return err;
+    if (w->note_open && w->note_image < 0) w->note_image = index;
+    return ESP_OK;
 }
 
 esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
@@ -739,6 +776,21 @@ esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
                 // 在块结束之前保留其来源；关闭容器后不影响后面的正文块。
                 // Preserve provenance until the block ends; closing a container must not taint later body text.
                 if (closing) {
+                    if (w.note_open && w.depth == w.note_depth && w.note_ref_count < 12) {
+                        char *target = w.note_refs[w.note_ref_count].id;
+                        memcpy(target, w.note_target, sizeof(w.note_refs[0].id));
+                        target[sizeof(w.note_refs[0].id) - 1] = 0;
+                        w.note_refs[w.note_ref_count].marker = w.note_marker;
+                        w.note_refs[w.note_ref_count].image = w.note_image;
+                        ++w.note_ref_count;
+                        w.note_open = false;
+                    }
+                    // 记录 id 元素的结束位置；条目保留到解析完成，供注号引用查找。
+                    // Record the id element end; keep entries until parsing finishes so refs can resolve.
+                    for (size_t q = w.note_id_count; q-- > 0;) {
+                        if (w.note_ids[q].depth == w.depth && w.note_ids[q].end == SIZE_MAX)
+                            w.note_ids[q].end = w.text.len;
+                    }
                     if (w.depth == w.link_depth) w.link_depth = 0;
                     if (w.depth == w.auxiliary_depth) w.auxiliary_depth = 0;
                     if (w.depth) --w.depth;
@@ -778,12 +830,37 @@ esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
                     if (!w.link_depth && name_equal(name, "a") &&
                         attr_value(html + at, html + end, "href", &href, &href_len) && href_len)
                         w.link_depth = w.depth;
+                    // 以 # 开头的链接视为注号引用；同章带 id 的元素稍后给出注释文本。
+                    // A '#fragment' link is a footnote reference; a same-chapter id supplies the note text.
+                    if (!w.note_open && name_equal(name, "a") && href && href_len > 1 && href[0] == '#') {
+                        size_t n = href_len - 1;
+                        if (n >= sizeof(w.note_target)) n = sizeof(w.note_target) - 1;
+                        memcpy(w.note_target, href + 1, n);
+                        w.note_target[n] = 0;
+                        w.note_open = true;
+                        w.note_depth = w.depth;
+                        w.note_marker = w.text.len;
+                        w.note_image = -1;
+                    }
+                    if (w.note_id_count < 16) {
+                        const char* idv = NULL; size_t idlen = 0;
+                        if (attr_value(html + at, html + end, "id", &idv, &idlen) && idlen &&
+                            idlen < sizeof(w.note_ids[0].id)) {
+                            memcpy(w.note_ids[w.note_id_count].id, idv, idlen);
+                            w.note_ids[w.note_id_count].id[idlen] = 0;
+                            w.note_ids[w.note_id_count].start = w.text.len;
+                            w.note_ids[w.note_id_count].end = SIZE_MAX;
+                            w.note_ids[w.note_id_count].depth = w.depth;
+                            ++w.note_id_count;
+                        }
+                    }
                 }
                 if (!closing && (name_equal(name, "img") || name_equal(name, "image") ||
                                  name_equal(name, "svg:image") || name_equal(name, "object"))) {
                     char path[HTML_IMAGE_PATH_MAX + 1];
                     if (image_attr(html + at, html + end, name_equal(name, "object"), path)) {
-                        err = add_image(&w, path);
+                        const bool inline_marker = w.note_open && w.note_image < 0;
+                        err = inline_marker ? add_inline_image(&w, path) : add_image(&w, path);
                         if (err != ESP_OK) goto fail;
                     }
                     continue;
@@ -833,6 +910,37 @@ esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
     if (err == ESP_OK) err = reserve_text(&w, 0);
     if (err != ESP_OK) goto fail;
     w.text.utf8[w.text.len] = 0;
+    if (w.note_ref_count) {
+        html_note_t *notes = heap_caps_malloc(w.note_ref_count * sizeof(*notes), PSRAM_CAPS);
+        if (notes) memset(notes, 0, w.note_ref_count * sizeof(*notes));
+        if (notes) {
+            size_t used = 0;
+            for (size_t r = 0; r < w.note_ref_count; ++r) {
+                // 注释文本里指回注号的链接不是脚注引用；范围自包含的也跳过。
+                // Back-links inside a note ("noteref") are not footnote refs, nor are self-containing ranges.
+                if (!strncmp(w.note_refs[r].id, "noteref", 7)) continue;
+                for (size_t i = 0; i < w.note_id_count; ++i) {
+                    if (strcmp(w.note_refs[r].id, w.note_ids[i].id)) continue;
+                    size_t start = w.note_ids[i].start, end = w.note_ids[i].end == SIZE_MAX ? w.text.len : w.note_ids[i].end;
+                    while (start < end && (w.text.utf8[start] == ' ' || w.text.utf8[start] == '\n' ||
+                                           w.text.utf8[start] == '\r' || w.text.utf8[start] == '\t')) ++start;
+                    while (end > start && (w.text.utf8[end - 1] == ' ' || w.text.utf8[end - 1] == '\n' ||
+                                           w.text.utf8[end - 1] == '\r' || w.text.utf8[end - 1] == '\t')) --end;
+                    if (end <= start) break;
+                    if (w.note_refs[r].marker >= start && w.note_refs[r].marker < end) break;
+                    if (end - start > 2048) break;
+                    notes[used].marker_offset = w.note_refs[r].marker;
+                    notes[used].text_start = start;
+                    notes[used].text_len = end - start;
+                    notes[used].image = w.note_refs[r].image;
+                    ++used;
+                    break;
+                }
+            }
+            if (used) { w.text.notes = notes; w.text.note_count = used; }
+            else free(notes);
+        }
+    }
     *out = w.text;
     free(w.ancestors);
     free(w.rules);

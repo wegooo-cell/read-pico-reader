@@ -9,6 +9,10 @@
 
 ## 未发布 / Unreleased
 
+- EPUB 脚注改为弹窗：点正文注号在原处附近弹卡片显示注释，不再跳到章末；注号图标按书内 CSS 行内排进句子，卡片字号比正文小 5px 并跟随当前阅读字体。
+  EPUB footnotes become a popup card anchored near the marker instead of jumping to the chapter end; inline 1em markers follow the book CSS, and the card uses the reading font at body size minus 5 px.
+
+
 - 阅读默认非全屏，顶部恢复时间、签名和电量，章节与进度放在工具栏上方；进入即显示工具栏。中间单击只进入全屏，底部上滑退出全屏并显示工具栏，保留阅读锚点及原全屏样式。
   Standard reading restores time/signature/battery with chapter/progress above visible tools. Centre taps only enter fullscreen; bottom swipes return to standard with tools, preserving the reading anchor and both fullscreen styles.
 
