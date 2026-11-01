@@ -4484,25 +4484,31 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     free(s_images);
     s_images = loaded.images; s_image_count = loaded.image_count;
     release_page_images();
+    // 纯插图 spine 文档紧跟上一章时视为续页：页码累加，并保留上一章标题和目录选中，
+    // 不让读者以为进入了一个只有一张图的新章节。
+    // An illustration-only spine document right after the previous chapter is treated as a
+    // continuation: page count accumulates and the previous chapter's title/TOC selection stay,
+    // so it does not look like a new one-image chapter.
+    const bool continued_illustration = s_text_len <= 16 && chapter == old_chapter_index + 1;
     s_chapter = chapter;
-    // 纯插图章节（正文只有图片占位符）如果紧跟上一章，页码接着上一章累加，避免 1/1。
-    // An illustration-only chapter that immediately follows the previous one continues its page
-    // numbering; otherwise numbering restarts with this chapter.
-    if (s_text_len <= 16 && chapter == old_chapter_index + 1)
+    if (continued_illustration)
         s_footer_page_base = old_footer_base + old_chapter_pages;
     else
         s_footer_page_base = 0;
     s_chapter_jump_undo.valid = false;
-    if (clear_toc) s_selected_toc = SIZE_MAX;
-    s_chapter_lead_skip = lead_skip;
-    s_chapter_lead_row_height = lead_height;
-    copy_text(s_chapter_heading_title, sizeof(s_chapter_heading_title), heading);
-    copy_text(s_chapter_heading_label, sizeof(s_chapter_heading_label), label);
+    if (clear_toc && !continued_illustration) s_selected_toc = SIZE_MAX;
+    s_chapter_lead_skip = continued_illustration ? 0 : lead_skip;
+    s_chapter_lead_row_height = continued_illustration ? 0 : lead_height;
+    if (!continued_illustration) {
+        copy_text(s_chapter_heading_title, sizeof(s_chapter_heading_title), heading);
+        copy_text(s_chapter_heading_label, sizeof(s_chapter_heading_label), label);
+    }
     s_page = last_page ? book_layout_page_count() - 1 :
              book_layout_page_for_offset(anchor || source_offset != SIZE_MAX ? anchor_offset : offset);
     s_jump_offset = anchor || source_offset != SIZE_MAX ? anchor_offset : SIZE_MAX;
     s_jump_page = s_page;
-    if (book_chapter_title(chapter, s_title, sizeof(s_title)) != ESP_OK) s_title[0] = 0;
+    if (!continued_illustration &&
+        book_chapter_title(chapter, s_title, sizeof(s_title)) != ESP_OK) s_title[0] = 0;
     copy_text(s_font_path, sizeof(s_font_path), ttf_font_path());
     s_message[0] = 0;
     unlock_draw();
