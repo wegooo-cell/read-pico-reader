@@ -1,5 +1,13 @@
 # 版本变更 / Changelog
 
+## 未发布 / Unreleased — S31 灰阶裁剪实验 / S31 gray-table trim experiment
+
+- S31 默认灰阶表改用与 Pico 相同的裁剪参数（GC36/GL37，erase 11 / sat 5 / white_sat 0 / hold 3），原始 48 相表层仍完整保留，开关置 0 即回退；不跨屏搬运 Pico 的 A01 表数据。
+  S31 switches its default gray tables to Pico's trim profile (GC36/GL37 with erase 11 / sat 5 / white_sat 0 / hold 3); the original 48-phase tables stay intact and the switch can be set back to 0. Pico's A01 table data is not copied across panels.
+
+- 裁剪会砍短黑目标饱和段，强光下黑字发淡；新增“保持相之前补压黑”（只写目标黑行，不增加相数），保留末尾 3 相 hold 作黑固定，应用到 GC16/GL16/完整 GL16 与文字翻页表，保持裁剪后的翻页速度。
+  Trimming shortens the black-target saturation run and leaves pale ink in strong light; extra darken pulses are inserted just before the trailing hold window (black-target row only, no extra phases), keeping the final three hold phases as the vendor's black fixing. Applied to GC16/GL16/full GL16 and the text-turn table, keeping the trimmed turn speed.
+
 ## Pico 0.3.3-rc103 / Metalio S31 0.3.3-rc108 — 2026-10-31
 
 - 保留正式版HTTPS升级兼容性：两板启用交叉签名证书链验证，构建时核对SDK回调；真实证书日期、主机名和签名校验保持有效。官网刷机入口仍仅kiikoread.com。
