@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
- * 中文：双板共享已确认的书架管理绘制；只绘图，操作由所属页面回调处理。
- * English: Approved bookshelf-management painting shared by both boards; actions stay in page callbacks.
+ * 中文：双板共享已确认的书架管理绘制；选择模式底栏图标统一黑色，只绘图，操作由所属页面回调处理。
+ * English: Approved bookshelf-management painting shared by both boards; selection-footer icons stay black and actions stay in page callbacks.
  */
 #pragma once
 static void bulk_draw_title(uint8_t *fb,const char *name,EpdRect box,int preferred,bool grid,uint8_t background){
@@ -20,11 +20,10 @@ static void bulk_draw_footer(uint8_t *fb){
     ui_fill_rect_fast((EpdRect){0,1096,684,120},0xe0,fb);ui_hairline(fb,1096,0,684,0xa0);
     const char *labels[]={"删除书籍","清理进度","移出书架","返回"};
     const ui_icon_t icons[]={UI_ICON_TRASH,UI_ICON_ROTATE_CW,UI_ICON_LIBRARY_BIG,UI_ICON_CHEVRON_LEFT};
-    bool any=selected_count()!=0;
     for(int i=0;i<4;++i){
         EpdRect r=batch_rect(i+3);int cx=r.x+r.width/2;
         if(s_pressed_control==613+i)ui_fill_rect_fast(r,0xc0,fb);
-        ui_draw_icon(fb,cx,1141,44,icons[i],i<3&&!any?0x90:UI_GRAY_BLACK);
+        ui_draw_icon(fb,cx,1141,44,icons[i],UI_GRAY_BLACK);
         ui_text_box(fb,(EpdRect){r.x,1170,r.width,30},17,labels[i],EPD_DRAW_ALIGN_CENTER,false);
     }
 }

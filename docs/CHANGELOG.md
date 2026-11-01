@@ -7,6 +7,9 @@
 
 ## 未发布 / Unreleased — 书架管理 / Bookshelf management
 
+- 选择模式底栏的删除书籍、清理进度、移出书架图标统一使用黑色，修复刚进入选择时图标过浅的问题。
+  Use black for Delete, Clear progress and Remove from shelf icons in the selection footer, fixing pale icons on entry.
+
 - 书架管理对齐文件管理：常驻搜索、书籍数量、「书架排序」与选择，右上切换列表/图标，移除来源筛选。普通点按开书；长按或点击选择才出现圆形标记及删除书籍、清理进度、移出书架、返回四项操作。分页、排序和切换视图保留选择；批量操作继续确认，返回先退出选择。
   Align management with Files: search, count, Shelf order, Select and a list/grid toggle, without a source filter. Normal taps open books; holds or Select reveal circular marks and delete/clear/remove/back actions. Paging, sorting and view changes retain selections; batch actions still require confirmation and Back leaves selection first.
 - 分页复用文件管理的首页、上一页、下一页、末页控件；列表每页五本、图标每页六本，两板共享绘制与命中几何，不调整阅读波形。

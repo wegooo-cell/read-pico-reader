@@ -586,8 +586,8 @@ int main(void) {
         assert(reading_body.y==80&&reading_body.height==968&&text_body.y==80&&text_body.height==968);
         assert(footer.y==1048&&footer.height==48);
         s_reader_fullscreen=true;reading_body=reader_area();text_body=body_rect();footer=progress_rect();
-        assert(reading_body.y==(im?0:52)&&reading_body.y+reading_body.height==(im?1204:1168));
-        assert(text_body.y==(im?24:52)&&text_body.y+text_body.height==(im?1202:1168));
+        assert(reading_body.y==(im?0:80)&&reading_body.y+reading_body.height==(im?1204:1168));
+        assert(text_body.y==(im?24:80)&&text_body.y+text_body.height==(im?1202:1168));
         assert(footer.y==(im?1204:1168)&&footer.height==(im?12:48));
         EpdRect fullscreen_progress=reader_fullscreen_progress_area();assert(fullscreen_progress.y==1204&&fullscreen_progress.height==12);
     }
