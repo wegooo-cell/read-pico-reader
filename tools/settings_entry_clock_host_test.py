@@ -58,6 +58,7 @@ static int s_view=READING;
 static char *s_text="book";
 static char s_reader_notice[64];
 static bool s_reader_fullscreen,immersive,s_reader_clock_pending,wallpaper;
+static bool app_settings_reader_immersive(void){return immersive;}
 static int64_t s_reader_clock_minute=-1,s_reader_clock_painted_minute=-1,minute=100;
 enum {READER_PANEL_NONE,READER_PANEL_BACKGROUND_PREVIEW};
 static int s_reader_panel;
@@ -148,6 +149,9 @@ int main(void){
  ++minute;touch_t touch={true};ctx.touch=&touch;
  assert(reader_clock_tick(&ctx)==APP_REDRAW_NONE);ctx.touch=NULL;
  s_reader_fullscreen=immersive=true;assert(reader_clock_tick(&ctx)==APP_REDRAW_NONE);
+ immersive=false;assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA&&s_reader_clock_pending);
+ assert(clock_present(&ctx,APP_REDRAW_AREA)&&s_reader_clock_minute==101);
+ s_reader_clock_minute=100;
  s_reader_fullscreen=immersive=false;wallpaper=true;
  assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA&&background_paints==1&&fb[0]==29);
  failed=1;assert(clock_present(&ctx,APP_REDRAW_AREA)&&s_reader_clock_minute==100);

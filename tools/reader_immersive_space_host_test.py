@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
-"""中文：真实排版在默认字号/行距增加一行，保持页脚间隔。/ English: Actual default-size layout gains a line without footer overlap."""
+"""中文：真实排版预留完整状态栏，保持正文与页脚间隔。/ English: Actual layout reserves the complete status row without body/footer overlap."""
 from pathlib import Path
 import subprocess,tempfile
 R=Path(__file__).resolve().parents[1]
@@ -20,10 +20,10 @@ int main(void){
  assert(book_layout_build(text,11999,now,48));captured_count=0;drawn[0]=0;book_layout_draw_page(fb,0,now,48);
  assert(UI_READER_HEADER_TEXT_PX==25&&UI_READER_FOOTER_TEXT_PX==21);
  assert(ui_reader_progress().y==1194&&ui_reader_progress().height==6&&UI_READER_FOOTER_TEXT_Y==1180);
- assert(captured_count==before+1);assert(now.y+now.height==ui_reader_footer().y);
+ assert(captured_count==before&&now.y==80);assert(now.y+now.height==ui_reader_footer().y);
  assert(UI_READER_FOOTER_TEXT_Y-UI_READER_FOOTER_TEXT_PX/2>=ui_reader_footer().y);
  assert(UI_READER_FOOTER_TEXT_Y+UI_READER_FOOTER_TEXT_PX/2<ui_reader_progress().y);
- printf("PASS: real layout at48px/130%% grows from%u to%u lines; body, metadata and progress remain disjoint\n",before,captured_count);
+ printf("PASS: real layout at48px/130%% reserves80px status row with%u/%u lines; body, metadata and progress remain disjoint\n",before,captured_count);
  EpdRect full=ui_reader_body(true,true,24,false);
  assert(full.y==24&&full.y+full.height==1202);
  assert(book_layout_build(text,11999,full,48));captured_count=0;drawn[0]=0;book_layout_draw_page(fb,0,full,48);

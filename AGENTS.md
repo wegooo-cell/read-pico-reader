@@ -10,6 +10,9 @@ Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Takin
 
 ## 当前工作：双板型本地整合 / Current work: local multi-board integration
 
+用户2026-11-01追加：全屏且关闭“全屏沉浸”时，顶部恢复时间、状态栏签名与电量，不再显示书名；预留完整状态栏，分钟更新与缓存翻页沿用原状态栏路径。沉浸开启时继续保留原铺屏样式。
+User2026-11-01 follow-up: fullscreen with immersion off shows time, status signature and battery instead of the book title. Reserve the complete status row and retain its existing minute/cached-turn updates; immersion on retains the existing full-page style.
+
 用户2026-11-01明确要求直接合并新PR65、66、67：采用GIF首帧、脚注卡片及JPEGDEC兜底，补齐解码边界和脚注状态回滚验证；保留当前书架、阅读手势和已确认的双板波形，不发布官网固件。
 User2026-11-01 explicitly approves merging new PR65/66/67: GIF first frames, footnote cards and JPEGDEC fallback, with decoder boundary and footnote rollback checks. Preserve current shelf/reader gestures and approved board waveforms; do not publish website firmware.
 

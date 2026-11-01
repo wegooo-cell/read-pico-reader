@@ -1,5 +1,10 @@
 # 版本变更 / Changelog
 
+## 未发布 / Unreleased — 阅读状态栏 / Reader status bar
+
+- 关闭“全屏沉浸”时，全屏顶部恢复时间、状态栏签名及电量，不再显示书名；顶部预留完整状态栏，支持原有分钟更新。底部章节与进度、全屏沉浸开启时的铺屏样式保持。
+  With fullscreen immersion off, show time, status signature and battery instead of the book title, reserving the complete status row with existing minute updates. Retain bottom chapter/progress and the immersion-on full-page style.
+
 ## 未发布 / Unreleased — 书架管理 / Bookshelf management
 
 - 书架管理对齐文件管理：常驻搜索、书籍数量、「书架排序」与选择，右上切换列表/图标，移除来源筛选。普通点按开书；长按或点击选择才出现圆形标记及删除书籍、清理进度、移出书架、返回四项操作。分页、排序和切换视图保留选择；批量操作继续确认，返回先退出选择。

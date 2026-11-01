@@ -22,6 +22,8 @@
  * User2026-10-29: S31 ordinary/image turns retain Moku GL37 plus six whites; separate FastBW DU adds four, with independent ripple/GC48.
  * 用户2026-11-01修订：新开书默认非全屏并显示工具栏，顶部时间/签名/电量、底部章节/进度；中间单击仅进入全屏，底部上滑退出全屏并显示工具栏，全屏样式保留。
  * User2026-11-01: open standard with status/footer and tools visible; centre taps only enter fullscreen, bottom swipes exit fullscreen and show tools, retaining both fullscreen styles.
+ * 用户2026-11-01追加：非沉浸全屏顶栏改为时间、签名及电量，不再显示书名；完整预留状态栏并保留分钟更新。
+ * User2026-11-01 follow-up: nonimmersive fullscreen restores time/signature/battery instead of the book title, with full status-row space and minute updates.
  * 用户2026-10-30追加：正文与书名/章数/进度独立，停下后精确局刷信息栏；进度条位置不动，仅向下加粗。
  * User2026-10-30 follow-up: crop body turns independently, defer exact metadata updates until idle, and thicken the progress bar downward at its existing position.
  * 三键单击及中键长按可自定义，提供翻页/工具栏及首页/全屏/工具栏两套推荐；中键长按默认返回主页，阅读页不画右下角菜单图标。
@@ -3866,10 +3868,8 @@ static void draw_reader_metadata(uint8_t *fb,size_t page) {
     } else {
         if (s_reader_fullscreen) {
             ui_fill_rect_fast(ui_reader_header(),UI_GRAY_WHITE,fb);
+            draw_reader_header(fb);
             ui_reader_background_paint(fb,ui_reader_header(),true);
-            char title[sizeof(s_book_title)];copy_text(title,sizeof(title),s_book_title);
-            fit_fixed_text(title,UI_READER_HEADER_TEXT_PX,620);
-            ui_text_fixed(fb,32,16,UI_READER_HEADER_TEXT_PX,title,EPD_DRAW_ALIGN_LEFT,false);
         }
         char chapter[128];reader_footer_chapter_name(chapter,sizeof(chapter));
         char progress[48];reader_footer_progress(progress,sizeof(progress),page);
@@ -4203,9 +4203,9 @@ static app_redraw_t reader_metadata_tick(app_ctx_t *ctx) {
 }
 static EpdRect reader_status_area(void) { return (EpdRect){0,0,UI_LOCK_WIDTH,80}; }
 static bool reader_status_visible(void) {
-    // 非全屏显示系统状态栏；全屏两种样式都不接受分钟覆盖。
-    // Nonfullscreen shows system status; neither fullscreen style admits minute overwrites.
-    return s_view==READING && s_text && !s_reader_fullscreen;
+    // 标准与非沉浸全屏共用状态栏；沉浸全屏不接受分钟覆盖。
+    // Standard and nonimmersive fullscreen share the status row; immersive fullscreen rejects minute overwrites.
+    return s_view==READING && s_text && (!s_reader_fullscreen || !app_settings_reader_immersive());
 }
 static void reader_status_paint(uint8_t *fb) {
     EpdRect area=reader_status_area();
