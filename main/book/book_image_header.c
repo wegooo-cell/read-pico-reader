@@ -40,6 +40,12 @@ bool book_image_dimensions(const uint8_t *data, size_t size, bool png,
         if (!book_webp_frame(data, size, width, height)) return false;
         return *width > 0 && *height > 0 && *width <= 8192 && *height <= 8192;
     }
+    // 内嵌 GIF（正文图标/小插图）用逻辑屏幕尺寸参与排版；gif 到达时 png=false。
+    // Inline GIFs use the logical screen size for pagination; they arrive with png=false.
+    if (book_gif_is(data, size)) {
+        if (!book_gif_frame(data, size, width, height)) return false;
+        return *width > 0 && *height > 0 && *width <= 8192 && *height <= 8192;
+    }
     if (png) {
         static const uint8_t signature[8] = {137,80,78,71,13,10,26,10};
         if (size < 24 || memcmp(data, signature, 8) || memcmp(data + 12, "IHDR", 4)) return false;
@@ -111,4 +117,24 @@ bool book_webp_frame(const uint8_t *data, size_t size, unsigned *width, unsigned
         at = next;
     }
     return false;
+}
+
+/* ---- GIF 头 / GIF header ---- */
+
+bool book_gif_is(const uint8_t *data, size_t size) {
+    return data && size >= 10 &&
+        (!memcmp(data, "GIF87a", 6) || !memcmp(data, "GIF89a", 6));
+}
+
+// 逻辑屏幕描述符紧跟 6 字节签名，宽高为小端 16 位，不解帧数据。
+// The logical screen descriptor follows the 6-byte signature; width/height are little-endian
+// 16-bit values and no frame data is decoded.
+bool book_gif_frame(const uint8_t *data, size_t size, unsigned *width, unsigned *height) {
+    if (!book_gif_is(data, size)) return false;
+    const unsigned w = data[6] | ((unsigned)data[7] << 8);
+    const unsigned h = data[8] | ((unsigned)data[9] << 8);
+    if (!w || !h || w > 8192 || h > 8192) return false;
+    if (width) *width = w;
+    if (height) *height = h;
+    return true;
 }

@@ -45,6 +45,12 @@ bool book_webp_is(const uint8_t *data, size_t size);
 /// WebP header dimensions without decoding; accepts VP8X, VP8 and VP8L chunks.
 bool book_webp_frame(const uint8_t *data, size_t size, unsigned *width, unsigned *height);
 
+/// 是否是 GIF（GIF87a/GIF89a）。书内正文常有内嵌 GIF 小图。
+/// Whether the bytes are GIF (GIF87a/GIF89a); inline book illustrations/icons are often GIF.
+bool book_gif_is(const uint8_t *data, size_t size);
+/// 从 GIF 逻辑屏幕描述符取画布宽高，不解码帧数据。/ GIF canvas dimensions from the logical screen descriptor, no frame decode.
+bool book_gif_frame(const uint8_t *data, size_t size, unsigned *width, unsigned *height);
+
 /// 列表封面缓存保留完整原比例；输出不超过176×240，宽高返回有效像素区。/ Cache uncropped list covers, bounded to 176x240, returning the valid pixel dimensions.
 bool book_cover_load_list_gray(const char *path, const char *title, const char *author,
                                uint8_t out[BOOK_COVER_W * BOOK_COVER_H], bool allow_decode,

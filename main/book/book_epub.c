@@ -2005,7 +2005,8 @@ esp_err_t book_epub_image(book_epub_t *book, size_t chapter, const char *src,
     bool is_png = n >= 8 && !memcmp(image, "\x89PNG\r\n\x1a\n", 8);
     bool is_jpeg = n >= 3 && image[0] == 0xff && image[1] == 0xd8 && image[2] == 0xff;
     bool is_webp = book_webp_is(image, n);
-    if (!is_png && !is_jpeg && !is_webp) {
+    bool is_gif = book_gif_is(image, n);
+    if (!is_png && !is_jpeg && !is_webp && !is_gif) {
         // 许多中文 EPUB 用 SVG 只包一张 JPEG/PNG。解析这一层引用即可复用现有低内存解码器。
         // Many Chinese EPUBs wrap one JPEG/PNG in SVG. Resolve that one reference and reuse the bounded decoder.
         char nested[EPUB_PATH_CAP] = {0};
@@ -2037,7 +2038,8 @@ esp_err_t book_epub_image(book_epub_t *book, size_t chapter, const char *src,
         is_png = n >= 8 && !memcmp(image, "\x89PNG\r\n\x1a\n", 8);
         is_jpeg = n >= 3 && image[0] == 0xff && image[1] == 0xd8 && image[2] == 0xff;
         is_webp = book_webp_is(image, n);
-        if (!is_png && !is_jpeg && !is_webp) { free(image); return ESP_ERR_NOT_SUPPORTED; }
+        is_gif = book_gif_is(image, n);
+        if (!is_png && !is_jpeg && !is_webp && !is_gif) { free(image); return ESP_ERR_NOT_SUPPORTED; }
     }
     *data = image; *size = n; *png = is_png;
     return ESP_OK;
