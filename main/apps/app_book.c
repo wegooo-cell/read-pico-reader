@@ -24,6 +24,8 @@
  * User2026-11-01: open standard with status/footer and tools visible; centre taps only enter fullscreen, bottom swipes exit fullscreen and show tools, retaining both fullscreen styles.
  * 用户2026-11-01追加：非沉浸全屏顶栏改为时间、签名及电量，不再显示书名；完整预留状态栏并保留分钟更新。
  * User2026-11-01 follow-up: nonimmersive fullscreen restores time/signature/battery instead of the book title, with full status-row space and minute updates.
+ * 用户2026-11-01追加：非全屏在状态栏下恢复返回/书名/收藏行，底部上滑退出全屏并显示此布局和工具栏。
+ * User2026-11-01 follow-up: standard mode restores Back/title/Favorite below status; bottom swipes leave fullscreen and reveal this layout with tools.
  * 用户2026-10-30追加：正文与书名/章数/进度独立，停下后精确局刷信息栏；进度条位置不动，仅向下加粗。
  * User2026-10-30 follow-up: crop body turns independently, defer exact metadata updates until idle, and thicken the progress bar downward at its existing position.
  * 三键单击及中键长按可自定义，提供翻页/工具栏及首页/全屏/工具栏两套推荐；中键长按默认返回主页，阅读页不画右下角菜单图标。
@@ -644,6 +646,10 @@ static enum EpdDrawError reader_present_crop(EpdiyHighlevelState *hl,const EpdWa
                                             enum EpdDrawMode mode,EpdRect area,bool full) {
     return full?update_display_area_full_with(hl,wave,mode,area):
         update_display_area_diff_with(hl,wave,mode,area);
+}
+// 常驻工具栏与显式呼出共用可见性和点击判定。/ Persistent and explicitly opened tools share paint/hit visibility.
+static bool reader_tools_visible(void) {
+    return !s_reader_fullscreen&&(s_reader_panel==READER_PANEL_TOOLS||s_reader_panel==READER_PANEL_NONE);
 }
 static EpdRect reader_area(void) { return ui_reader_area(s_reader_fullscreen,app_settings_reader_immersive()); }
 static EpdRect reader_fullscreen_progress_area(void) { return ui_reader_fullscreen_footer(); }
@@ -3156,7 +3162,7 @@ static void draw_reader_panel(uint8_t* fb) {
     if(fast_panel.height)ui_fill_rect_fast(fast_panel,UI_GRAY_WHITE,fb);
 #endif
     ui_text_set_system_scale(true);
-    if (s_reader_panel == READER_PANEL_TOOLS || (!s_reader_fullscreen && s_reader_panel == READER_PANEL_NONE)) {
+    if (reader_tools_visible()) {
         ui_fill_rect_fast((EpdRect){0, 1096, UI_LOCK_WIDTH, 120}, UI_GRAY_WHITE, fb);
         ui_hairline(fb, 1096, 0, UI_LOCK_WIDTH, 0x98);
         const char* labels[] = {"目录", "书签", "阅读统计", "阅读设置", "字体设置"};
@@ -3197,6 +3203,15 @@ static uint8_t inline_ink_gray(uint8_t gray) {
 
 static void draw_reader_header(uint8_t *fb) {
     ui_nav_status(fb);
+    if (s_reader_fullscreen) return;
+    ui_nav_back(fb,36,79);
+    char header[128];
+    const char *sample=s_book_title[0]?s_book_title:s_title;
+    copy_text(header,sizeof(header),sample);
+    int title_px=ui_text_title_fit(header,32,450,sample);
+    ui_text_title_vc(fb,UI_LOCK_WIDTH/2,114,title_px,header,sample,EPD_DRAW_ALIGN_CENTER);
+    ui_draw_icon(fb,620,114,48,s_reader_favorite?UI_ICON_ANIMATE_BOOKMARK_PLUS:UI_ICON_BOOKMARK,0x38);
+    ui_hairline(fb,151,36,612,UI_GRAY_LIGHT);
 }
 // 竖排章节题头：右列是编号（第三章），左列是章名，读序依旧自右向左；两列整体留出列宽，
 // 排版用同一个宽度在首页右边缘预留，绘制与预留因此不会错位。
@@ -6569,7 +6584,7 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
         return reader_background_action(x, y);
     if (s_reader_panel == READER_PANEL_STATS || s_reader_panel == READER_PANEL_CHAPTER_JUMP)
         return reader_chapter_jump_action(ctx, x, y);
-    if (s_reader_panel == READER_PANEL_TOOLS) {
+    if (reader_tools_visible()) {
         for (int i = 0; i < BOOK_TOOL_COUNT; ++i) if (ui_rect_hit(tool_rect(i), x, y)) {
             pause_reader_prep();
             if (i == 0) {
@@ -7245,6 +7260,34 @@ static app_redraw_t inline_zoom_toggle(app_ctx_t* ctx, uint16_t x, uint16_t y) {
     return zoom_jump(ctx, 2000, x, y);
 }
 
+// 标题栏只接管非全屏的正文/工具栏，弹窗仍保留自身点击优先权。
+// The title row handles standard body/tools only; modal panels keep their own tap priority.
+static app_redraw_t reader_header_action(app_ctx_t *ctx,uint16_t x,uint16_t y,bool *handled) {
+    *handled=false;
+    if(s_reader_fullscreen||s_clear_confirm||s_footnote_note>=0||
+       (s_reader_panel!=READER_PANEL_NONE&&s_reader_panel!=READER_PANEL_TOOLS))return APP_REDRAW_NONE;
+    if(ui_rect_hit(ui_reader_back_control(),x,y)){
+        *handled=true;s_reader_tap.pending=false;
+        return reader_return(ctx);
+    }
+    EpdRect favorite=ui_reader_favorite_control();
+    if(!ui_rect_hit(favorite,x,y))return APP_REDRAW_NONE;
+    *handled=true;s_reader_tap.pending=false;
+    bool next=!s_reader_favorite;
+    if(!favorite_save(s_path,next)){
+        copy_text(s_reader_notice,sizeof(s_reader_notice),"收藏保存失败");
+        s_reader_notice_until=esp_timer_get_time()/1000+1800;
+        return APP_REDRAW_PAGE;
+    }
+    s_reader_favorite=next;
+    for(int i=0;i<s_count;++i)
+        if(!strcmp(s_shelf[i].path,s_path))s_shelf[i].favorite=next;
+    sort_shelf(ctx);
+    render(ctx,ctx->fb);
+    s_area=favorite;s_mode=MODE_GL16;
+    return APP_REDRAW_AREA;
+}
+
 static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
     if (s_view == BULK) return bulk_action(ctx, x, y);
     if (s_view == IMPORT) {
@@ -7335,6 +7378,9 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         return APP_REDRAW_NONE;
     }
     if (s_view == READING) {
+        bool header_handled;
+        app_redraw_t header_redraw=reader_header_action(ctx,x,y,&header_handled);
+        if(header_handled)return header_redraw;
         // 脚注卡片打开时，点任意处先关闭；否则点中注号图标直接弹卡片，不跳转。
         // With the card open any tap closes it; otherwise a tap on a note marker opens the card
         // without jumping anywhere.
@@ -7654,7 +7700,7 @@ static int control_at(app_ctx_t* ctx, uint16_t x, uint16_t y, EpdRect* rect) {
         return -1;
     }
     if (s_view == READING) {
-        if (s_reader_panel == READER_PANEL_TOOLS) for (int i = 0; i < BOOK_TOOL_COUNT; ++i) {
+        if (reader_tools_visible()) for (int i = 0; i < BOOK_TOOL_COUNT; ++i) {
             *rect = tool_rect(i);
             if (ui_rect_hit(*rect, x, y)) return 200 + i;
         }
@@ -7728,7 +7774,8 @@ static app_redraw_t paint_control(app_ctx_t* ctx, EpdRect rect) {
 // Bottom swipes leave fullscreen and overlay tools; modal pages retain their gestures.
 static app_redraw_t reader_tools_swipe(app_ctx_t *ctx, const ui_gesture_event_t *ev, bool *handled) {
     *handled = false;
-    if (s_view != READING || !s_text || s_reader_panel != READER_PANEL_NONE ||
+    if (s_view != READING || !s_text || (s_reader_panel != READER_PANEL_NONE &&
+        (s_reader_panel != READER_PANEL_TOOLS || !s_reader_fullscreen)) ||
         s_clear_confirm || s_scan_pending || ctx->consumed || ev->type != UI_GESTURE_SWIPE_U ||
         ev->x0 >= UI_LOCK_WIDTH || ev->y0 < UI_LOCK_HEIGHT - 120 || ev->y0 >= UI_LOCK_HEIGHT) return APP_REDRAW_NONE;
     *handled = true;
@@ -8226,11 +8273,17 @@ static app_redraw_t reader_key_action(app_ctx_t *ctx, app_reader_key_action_t ac
         case APP_READER_KEY_HOME: return reader_return(ctx);
         case APP_READER_KEY_FULLSCREEN: return toggle_reader_fullscreen(ctx);
         case APP_READER_KEY_REFRESH: return reader_manual_refresh(ctx);
-        case APP_READER_KEY_TOOLS:
-            s_reader_slider = -1;
-            s_reader_panel = s_reader_panel == READER_PANEL_TOOLS ? READER_PANEL_NONE : READER_PANEL_TOOLS;
+        case APP_READER_KEY_TOOLS: {
+            app_redraw_t redraw=APP_REDRAW_PAGE;
+            if(s_reader_fullscreen){
+                redraw=toggle_reader_fullscreen(ctx);
+                if(s_reader_fullscreen||s_view!=READING||!s_text)return redraw;
+            }
+            s_reader_slider=-1;
+            s_reader_panel=s_reader_panel==READER_PANEL_TOOLS?READER_PANEL_NONE:READER_PANEL_TOOLS;
             pause_reader_prep();
-            return APP_REDRAW_PAGE;
+            return redraw;
+        }
         default: return APP_REDRAW_NONE;
     }
 }

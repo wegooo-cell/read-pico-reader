@@ -63,7 +63,7 @@ static bool tools_swipe(app_ctx_t *ctx,const ui_gesture_event_t *ev){
 '''
 
 unit+=function('book_reader_center',ROOT/'main/book/book_reader_input.h')+'\n'
-unit+='static EpdRect body_rect(void){return(EpdRect){0,80,684,968};}\n'
+unit+='static EpdRect body_rect(void){return(EpdRect){0,176,684,872};}\n'
 unit+='static int s_footnote_note=-1,footnote_candidate=-1;static EpdRect s_footnote_marker;\nstatic int reader_footnote_hit(int x,int y,EpdRect *r){(void)x;(void)y;(void)r;return footnote_candidate;}\n'
 center=function('action_at',book)
 a=center.index('        if (s_footnote_note >= 0)')
@@ -106,6 +106,8 @@ int main(void){
   assert(!s_reader_fullscreen&&s_reader_panel==READER_PANEL_TOOLS&&mode_changes==full);
   assert(last_tools_redraw==(full?APP_REDRAW_FULL:APP_REDRAW_PAGE));
  }
+ reset(&ctx);s_reader_fullscreen=true;s_reader_panel=READER_PANEL_TOOLS;
+ assert(tools_swipe(&ctx,&e)&&!s_reader_fullscreen&&s_reader_panel==READER_PANEL_TOOLS&&mode_changes==1);
  reset(&ctx);s_reader_fullscreen=fail_mode_change=true;
  assert(tools_swipe(&ctx,&e)&&last_tools_redraw==APP_REDRAW_NONE);
  assert(s_reader_fullscreen&&s_reader_panel==READER_PANEL_NONE&&s_reader_tap.pending&&!invalidations);

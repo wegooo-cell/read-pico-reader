@@ -583,7 +583,7 @@ int main(void) {
     for(int im=0;im<2;++im){
         test_reader_immersive=im;s_reader_fullscreen=false;
         EpdRect reading_body=reader_area(),text_body=body_rect(),footer=progress_rect();
-        assert(reading_body.y==80&&reading_body.height==968&&text_body.y==80&&text_body.height==968);
+        assert(reading_body.y==176&&reading_body.height==872&&text_body.y==176&&text_body.height==872);
         assert(footer.y==1048&&footer.height==48);
         s_reader_fullscreen=true;reading_body=reader_area();text_body=body_rect();footer=progress_rect();
         assert(reading_body.y==(im?0:80)&&reading_body.y+reading_body.height==(im?1204:1168));
@@ -892,7 +892,7 @@ int main(void) {
     assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE && s_reader_panel==READER_PANEL_NONE);
     test_keys[0]=APP_READER_KEY_HOME;test_keys[1]=APP_READER_KEY_FULLSCREEN;test_keys[2]=APP_READER_KEY_TOOLS;
     s_reader_fullscreen=false;assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE && s_reader_fullscreen);
-    assert(on_key(&ctx,UI_KEY_3)==APP_REDRAW_PAGE && s_reader_panel==READER_PANEL_TOOLS);
+    assert(on_key(&ctx,UI_KEY_3)==APP_REDRAW_PAGE && s_reader_panel==READER_PANEL_TOOLS && !s_reader_fullscreen);
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_FULL && s_reader_panel==READER_PANEL_NONE);
     test_nav_target=-1;assert(on_key(&ctx,UI_KEY_1)==APP_REDRAW_NONE && test_nav_target==0);
     s_view=READING;assert(reader_key_action(&ctx,APP_READER_KEY_NONE)==APP_REDRAW_NONE);

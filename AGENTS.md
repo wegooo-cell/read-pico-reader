@@ -10,6 +10,9 @@ Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Takin
 
 ## 当前工作：双板型本地整合 / Current work: local multi-board integration
 
+用户2026-11-01追加：底部上滑回到非全屏并显示底部工具栏；顶部先显示时间、签名、电量，下一行恢复返回键、书名及收藏操作。进入书籍的非全屏也使用此布局；上方返回/书名/收藏与底部工具栏共同出现，进入全屏共同收起，所有工具栏入口先退出全屏。全屏关闭沉浸时仍只有状态栏，不显示书名。
+User2026-11-01 follow-up: bottom swipes return to standard mode with bottom tools, a time/signature/battery row, then Back/book title/Favorite. Standard book entry shares this layout. Back/title/Favorite and bottom tools appear together and hide together on fullscreen entry; every tools entry first leaves fullscreen. Nonimmersive fullscreen retains its status-only header.
+
 用户2026-11-01追加：全屏且关闭“全屏沉浸”时，顶部恢复时间、状态栏签名与电量，不再显示书名；预留完整状态栏，分钟更新与缓存翻页沿用原状态栏路径。沉浸开启时继续保留原铺屏样式。
 User2026-11-01 follow-up: fullscreen with immersion off shows time, status signature and battery instead of the book title. Reserve the complete status row and retain its existing minute/cached-turn updates; immersion on retains the existing full-page style.
 

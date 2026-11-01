@@ -1,12 +1,12 @@
 /* SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
- * 中文：标准和非沉浸全屏共用完整状态栏及章节进度，标准底部保留工具栏；沉浸全屏保留铺屏细线。
- * English: Standard and nonimmersive fullscreen share the complete status row and chapter progress; standard retains tools and immersive fullscreen retains full-page text with a thin line.
+ * 中文：标准显示状态栏、返回/书名/收藏及底部工具栏；非沉浸全屏只保留状态及章节进度，沉浸全屏保留铺屏细线。
+ * English: Standard shows status, Back/title/Favorite and bottom tools; nonimmersive fullscreen retains status/chapter progress and immersive fullscreen retains a thin line.
  */
 #pragma once
 #include <stdbool.h>
 #include "epdiy.h"
-enum { UI_READER_STANDARD_TOP=80, UI_READER_STANDARD_BOTTOM=1048,
-       UI_READER_METADATA_TOP=UI_READER_STANDARD_TOP, UI_READER_METADATA_BOTTOM=1168,
+enum { UI_READER_STANDARD_TOP=176, UI_READER_STANDARD_BOTTOM=1048,
+       UI_READER_METADATA_TOP=80, UI_READER_METADATA_BOTTOM=1168,
        UI_READER_FULLSCREEN_TOP=0, UI_READER_FULLSCREEN_BOTTOM=1204,
        UI_READER_FOOTER_TEXT_Y=1180, UI_READER_FOOTER_TEXT_PX=21,
        UI_READER_HEADER_TEXT_PX=25, UI_READER_TOOLS_TOP=1096 };
@@ -24,6 +24,8 @@ static inline EpdRect ui_reader_body(bool fullscreen,bool immersive,int margin,b
     return (EpdRect){margin,r.y,684-2*margin,r.height};
 }
 static inline EpdRect ui_reader_header(void){return (EpdRect){0,0,684,UI_READER_METADATA_TOP};}
+static inline EpdRect ui_reader_back_control(void){return (EpdRect){32,80,64,64};}
+static inline EpdRect ui_reader_favorite_control(void){return (EpdRect){584,80,64,70};}
 static inline EpdRect ui_reader_footer(void){return (EpdRect){0,1168,684,48};}
 static inline EpdRect ui_reader_progress(void){return (EpdRect){18,1194,648,6};}
 static inline EpdRect ui_reader_fullscreen_footer(void){return (EpdRect){0,1204,684,12};}

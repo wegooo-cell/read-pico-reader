@@ -15,11 +15,13 @@ unit = r'''
 #include <stdio.h>
 #include <string.h>
 #include "ui_reader_layout.h"
-enum {READING,SHELF,READER_PANEL_NONE,READER_PANEL_OTHER,MODE_DU,EPD_DRAW_ALIGN_LEFT,EPD_DRAW_ALIGN_RIGHT};
+enum {READING,SHELF,READER_PANEL_NONE,READER_PANEL_OTHER,MODE_DU,EPD_DRAW_ALIGN_LEFT,EPD_DRAW_ALIGN_RIGHT,EPD_DRAW_ALIGN_CENTER,UI_ICON_ANIMATE_BOOKMARK_PLUS,UI_ICON_BOOKMARK};
 enum EpdDrawError {EPD_DRAW_SUCCESS,EPD_DRAW_OTHER_ERROR};
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_DONE} app_redraw_t;
 typedef struct {bool touched;} touch_t;
 typedef struct {void *hl;int64_t now_ms;bool consumed,request_app,request_return,request_menu;touch_t *touch;} app_ctx_t;
+#define UI_LOCK_WIDTH 684
+#define UI_GRAY_LIGHT 192
 #define UI_GRAY_WHITE 255
 #define UI_GRAY_BLACK 0
 static int s_view=READING,s_reader_panel=READER_PANEL_NONE,E0470_FOLLOW_WAVEFORM;
@@ -31,6 +33,16 @@ static size_t s_chapter=36,total_chapters=48;
 static int64_t s_reader_footer_due_ms;
 static int calls,guards,text_calls,bar_calls,fill_calls,status_calls;
 static void ui_nav_status(uint8_t *fb){(void)fb;++status_calls;}
+static char s_book_title[128]="Book title",s_title[128]="Fallback";
+static bool s_reader_favorite;
+static unsigned title_calls,back_calls,favorite_calls;
+static void copy_text(char *out,size_t cap,const char *text){snprintf(out,cap,"%s",text);}
+static void ui_nav_back(uint8_t *fb,int x,int y){(void)fb;assert(x==36&&y==79&&!s_reader_fullscreen);++back_calls;}
+static int ui_text_title_fit(char *s,int px,int width,const char *sample){assert(px==32&&width==450&&!strcmp(s,sample));return px;}
+static void ui_text_title_vc(uint8_t *fb,int x,int y,int px,const char *text,const char *sample,int align){(void)fb;assert(x==342&&y==114&&px==32&&align==EPD_DRAW_ALIGN_CENTER&&!strcmp(text,sample)&&!s_reader_fullscreen);++title_calls;}
+static void ui_draw_icon(uint8_t *fb,int x,int y,int px,int icon,int gray){(void)fb;assert(x==620&&y==114&&px==48&&gray==0x38&&icon==(s_reader_favorite?UI_ICON_ANIMATE_BOOKMARK_PLUS:UI_ICON_BOOKMARK)&&!s_reader_fullscreen);++favorite_calls;}
+static void ui_hairline(uint8_t *fb,int y,int x,int width,int gray){(void)fb;assert(y==151&&x==36&&width==612&&gray==UI_GRAY_LIGHT);}
+
 
 static enum EpdDrawError error;
 static const char *expected_chapter="Chapter name";
@@ -68,17 +80,18 @@ int main(void){
  s_chapter=99;reader_footer_progress(text,sizeof(text),100);assert(!strcmp(text,"48/48  100%"));s_chapter=36;
  s_reader_fullscreen=false;uint8_t none=0;
  for(int style=0;style<2;++style){
-  immersive=style;text_calls=bar_calls=fill_calls=status_calls=0;
+  immersive=style;s_reader_favorite=style;text_calls=bar_calls=fill_calls=status_calls=0;title_calls=back_calls=favorite_calls=0;
   draw_reader_header(&none);draw_reader_metadata(&none,74);
   assert(status_calls==1&&text_calls==2&&bar_calls==2&&fill_calls==1&&reader_status_visible());
+  assert(title_calls==1&&back_calls==1&&favorite_calls==1&&ui_reader_body(false,style,24,false).y==176);
   app_ctx_t ctx={.now_ms=1000};s_reader_footer_pending=true;s_reader_footer_due_ms=900;
   assert(reader_metadata_tick(&ctx)==APP_REDRAW_DONE&&!s_reader_footer_pending);
  }
  for(int full=0;full<2;++full){
  s_reader_fullscreen=true;immersive=full;s_reader_footer_pending=false;s_view=READING;calls=guards=text_calls=bar_calls=fill_calls=0;
- assert(reader_status_visible()==!full);status_calls=0;
+ assert(reader_status_visible()==!full);status_calls=0;title_calls=back_calls=favorite_calls=0;
  uint8_t fb=0;draw_reader_metadata(&fb,74);assert(text_calls==(full?0:2)&&bar_calls==2&&fill_calls==(full?1:2)&&status_calls==(full?0:1));
- assert(ui_reader_body(true,false,24,false).y==80&&ui_reader_header().height==80);
+ assert(ui_reader_body(true,false,24,false).y==80&&ui_reader_header().height==80&&!title_calls&&!back_calls&&!favorite_calls);
  touch_t touch={0};app_ctx_t ctx={.now_ms=100,.touch=&touch};
  assert(reader_metadata_tick(&ctx)==APP_REDRAW_NONE&&!calls);
  s_reader_footer_pending=true;s_reader_footer_due_ms=900;

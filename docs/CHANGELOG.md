@@ -2,6 +2,12 @@
 
 ## 未发布 / Unreleased — 阅读状态栏 / Reader status bar
 
+- 修复从目录或设置返回后，常驻阅读工具栏可见但点击无反应；工具栏绘制、命中与操作共用可见状态。
+  Fix inert persistent tools after returning from TOC or settings by sharing toolbar visibility across paint, hit testing and actions.
+
+- 底部上滑返回非全屏后，状态栏下恢复返回键、书名及收藏行，底部显示工具栏；新开书使用相同非全屏布局。返回保存阅读进度，收藏操作保留失败提示，切换保留阅读锚点。
+  Bottom swipes return to standard mode with Back/title/Favorite below status and tools at the bottom; book entry shares this layout. Back saves progress, failed favorite saves remain visible, and mode changes preserve the reading anchor.
+
 - 关闭“全屏沉浸”时，全屏顶部恢复时间、状态栏签名及电量，不再显示书名；顶部预留完整状态栏，支持原有分钟更新。底部章节与进度、全屏沉浸开启时的铺屏样式保持。
   With fullscreen immersion off, show time, status signature and battery instead of the book title, reserving the complete status row with existing minute updates. Retain bottom chapter/progress and the immersion-on full-page style.
 
