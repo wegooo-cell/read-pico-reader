@@ -104,7 +104,7 @@ Retain original Pico rc103/S31 rc108 web/TF entries, kiikoread.com as the sole w
 
 ## 未发布 / Unreleased
 
-- 阅读页脚右侧改为页码（本章第几页/本章共几页）加全书进度，翻页时数字会变化；纯插图 spine 文档接着前一章页码累加，不再显示 1/1；此前显示的是章节序号和百分比，容易被当成不更新的页码。
+- 阅读页脚右侧改为页码加全书进度：章节数较少的书打开时预计算每章页数，显示全书连续页码（跨章节与插图页连续，如“第 12 页/共 63 页”）；章节多或预计算失败时退回本章页码，并让纯插图 spine 文档承接前一章计数。此前显示的是章节序号和百分比，容易被当成不更新的页码。
   The reader footer now shows the page within the chapter plus whole-book progress, so the number changes on every turn; the old field showed chapter index and percentage, which read like a frozen page number.
 
 

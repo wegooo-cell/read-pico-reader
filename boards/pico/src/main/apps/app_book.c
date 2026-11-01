@@ -379,6 +379,20 @@ static int s_footnote_note = -1;
 // Illustration-only spine documents continue the previous chapter's page numbering instead of
 // restarting at 1/1.
 static size_t s_footer_page_base;
+// 小书（章节数少）预计算每章页数，页脚显示全书连续页码；大书退回章节页码。
+// Small books precompute per-chapter page counts so the footer can number pages book-wide;
+// larger books fall back to chapter pages.
+static uint16_t *s_global_pages;
+static size_t s_global_count;
+static size_t s_global_total;
+static bool s_global_computing;
+
+static void global_pages_reset(void) {
+    free(s_global_pages);
+    s_global_pages = NULL;
+    s_global_count = 0;
+    s_global_total = 0;
+}
 // 打开卡片时点中的注号位置：卡片靠近它弹出，而不是永远居中。
 // Marker rect of the opened note: the card pops near it instead of always centring.
 static EpdRect s_footnote_marker;
@@ -448,6 +462,16 @@ static size_t s_page_images_for = SIZE_MAX;
 static uint32_t s_page_images_generation;
 static size_t s_block_count;
 static size_t s_text_len, s_chapter, s_page;
+
+static bool page_counts_global(void) {
+    return s_global_pages != NULL && s_chapter < s_global_count;
+}
+
+static size_t global_page_before(size_t chapter) {
+    size_t before = 0;
+    for (size_t i = 0; i < chapter && i < s_global_count; ++i) before += s_global_pages[i];
+    return before;
+}
 // 整页插图的双指缩放：1000 为原始大小；缩放与位置只属于当时那一页，换页自动还原。
 // 图像中心用屏幕坐标保存，双指中点既是缩放锚点也是平移把手；单指拖动同样平移。
 // Two-finger zoom for a whole-page illustration: 1000 is original size, and the scale plus
@@ -3615,9 +3639,17 @@ static void draw_reader_images(uint8_t *fb, size_t page, EpdRect body) {
     }
 }
 static void reader_footer_progress(char *text,size_t cap,size_t page) {
-    // 页码 = 本章页数（纯插图文档累加前一章页数，不再从 1/1 开始）+ 全书进度百分比。
-    // Page number = pages in this chapter, with illustration-only documents continuing the
-    // previous chapter's count instead of restarting at 1/1; the percentage is whole-book progress.
+    // 小书用全书连续页码；大书退回本章页码（纯插图文档继续前一章页数，不显示 1/1）。
+    // Small books show book-wide page numbers; larger books keep chapter pages, with
+    // illustration-only documents continuing the previous chapter's count instead of 1/1.
+    if (page_counts_global()) {
+        size_t total = s_global_total;
+        size_t current = global_page_before(s_chapter) +
+                         (page < book_layout_page_count() ? page + 1 : book_layout_page_count());
+        if (current > total) current = total;
+        snprintf(text, cap, "%u/%u  %u%%", (unsigned)current, (unsigned)total, percent(page));
+        return;
+    }
     size_t pages=book_layout_page_count();
     size_t total=pages+s_footer_page_base;
     size_t current=total?(page<pages?page+1:pages):0;
@@ -4180,6 +4212,7 @@ static void free_book(void) {
     free(s_blocks);
     free(s_runs);
     book_layout_set_inline_images(NULL, 0);
+    global_pages_reset();
     free(s_notes); s_notes = NULL; s_note_count = 0; s_footnote_note = -1;
     for (size_t i = 0; i < s_image_count; ++i) free(s_images[i]);
     free(s_images);
@@ -4359,6 +4392,41 @@ static bool heading_text_matches(const char *text, const char *toc, const char *
     return false;
 }
 
+// 章节不多时预计算每章页数：逐章解析并按当前排版建页，得到全书连续页码；失败或章节过多退回本章页码。
+// Precompute page counts for every chapter when the book is small, laying each chapter out with
+// the current typography; failure or many chapters fall back to per-chapter page numbers.
+static void compute_global_pages(void) {
+    const size_t chapters = book_chapter_count();
+    if (s_global_pages || s_global_computing || chapters == 0 || chapters > 16) return;
+    uint16_t *pages = heap_caps_calloc(chapters, sizeof(*pages), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!pages) return;
+    s_global_computing = true;
+    size_t total = 0;
+    for (size_t ch = 0; ch < chapters; ++ch) {
+        html_text_t t = {0};
+        size_t anchor_offset = 0;
+        if (book_chapter_load_blocks_target(ch, NULL, SIZE_MAX, &anchor_offset, &t) != ESP_OK) {
+            s_global_computing = false;
+            free(pages);
+            return;
+        }
+        reader_dims_ctx_t dims = {ch, t.images, t.image_count, t.notes, t.note_count};
+        book_layout_set_image_dims(reader_image_dims, &dims);
+        book_layout_set_runs(t.runs, t.run_count);
+        book_layout_set_inline_images(t.notes, t.note_count);
+        size_t n = book_layout_build_blocks(t.utf8, t.len, t.blocks, t.count, body_rect(), s_px)
+                       ? book_layout_page_count() : 0;
+        if (n > UINT16_MAX) n = UINT16_MAX;
+        pages[ch] = (uint16_t)n;
+        total += n;
+        html_text_free(&t);
+    }
+    s_global_computing = false;
+    s_global_pages = pages;
+    s_global_count = chapters;
+    s_global_total = total;
+}
+
 static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
                             bool last_page, const char *anchor, size_t source_offset) {
     bool clear_toc = chapter != s_chapter || (!anchor && source_offset == SIZE_MAX);
@@ -4425,6 +4493,7 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     unsigned old_lead_height = s_chapter_lead_height;
     unsigned old_lead_width = s_chapter_lead_width;
     reader_dims_ctx_t old_dims_ctx = s_reader_dims_ctx;
+    compute_global_pages();
     const size_t old_footer_base = s_footer_page_base;
     const size_t old_chapter_pages = book_layout_page_count();
     const size_t old_chapter_index = s_chapter;
@@ -5351,6 +5420,7 @@ static app_redraw_t resize_text(app_ctx_t* ctx, int dir) {
         }
         return APP_REDRAW_NONE;
     }
+    global_pages_reset();
     s_px = next;
     s_page = book_layout_page_for_offset(off);
     unlock_draw();
@@ -5374,6 +5444,7 @@ static app_redraw_t apply_reader_layout(app_ctx_t* ctx, int next_px, int next_ma
     uint8_t old_para = app_settings_book_paragraph_spacing();
     lock_draw();
     invalidate_prep();
+    global_pages_reset();
     s_px = next_px;
     s_margin = next_margin;
     s_line_spacing = next_line;
