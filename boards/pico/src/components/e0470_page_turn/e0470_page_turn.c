@@ -28,7 +28,10 @@ static const char* TAG = "e0470_turn";
 
 #define TURN_DEFAULT_BANDS E0470_TURN_FAST_BANDS
 #define TURN_BANDS_MAX 32
-#define TURN_PHASE_CAP 45
+// 阅读翻页和水波纹波形最多 64 相（波形表上限）；水波纹增加擦白/重推黑后为 53 相。
+// Reader turns and ripple waveforms may reach 64 phases (waveform table ceiling); ripple is 53
+// after the erase/black-redrive insertion.
+#define TURN_PHASE_CAP 64
 #define TURN_LINE_MAX 2048
 
 static uint8_t (*s_lut)[1024];
