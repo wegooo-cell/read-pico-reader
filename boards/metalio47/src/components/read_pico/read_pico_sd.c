@@ -10,6 +10,8 @@
  */
 
 #include "read_pico_sd.h"
+#include "read_pico_sd_access.h"
+#include "read_pico_sd_msc.h"
 #include "metalio_hw.h"
 
 #include <errno.h>
@@ -43,6 +45,10 @@
 static const char* TAG = "sd_card";
 static sdmmc_card_t* card;
 static void* sd_dma_buffer;
+static sdmmc_card_t *usb_card;
+static sdmmc_host_t usb_host;
+static _Atomic bool usb_owned;
+static bool usb_host_ready;
 
 // Follow Metalio's S31 storage reference: keep SD DMA in internal RAM.
 // External application data is copied by the SDK through one bounded bounce buffer.
@@ -64,6 +70,12 @@ static esp_err_t prepare_sd_dma(sdmmc_host_t* host) {
     host->dma_aligned_buffer = sd_dma_buffer;
     host->unaligned_multi_block_rw_max_chunk_size = 8;
     return ESP_OK;
+}
+
+// SDK通过flag区分全局与按slot的清理回调；不能混用函数签名。
+// The SDK flag selects global versus per-slot teardown; preserve the callback ABI.
+static esp_err_t deinit_sd_host(const sdmmc_host_t *host) {
+    return host->flags&SDMMC_HOST_FLAG_DEINIT_ARG?host->deinit_p(host->slot):host->deinit();
 }
 
 static void release_sd_dma(void) {
@@ -150,6 +162,7 @@ static void publish_info(const read_pico_sd_info_t* info) {
         observe_media_locked(detect_err == ESP_OK ? present : cached_info.present);
     probe_state = 2;
     manual_busy = false;
+    read_pico_sd_access_set_mounted(cached_info.mounted && !media_invalidated && !suspended);
     portEXIT_CRITICAL(&state_lock);
 }
 
@@ -262,7 +275,7 @@ static bool probe_unsupported_filesystem(sdmmc_host_t host, const sdmmc_slot_con
         }
     }
 done:
-    if (owned) host.deinit();
+    if (owned) (void)deinit_sd_host(&host);
     free(probe); heap_caps_free(sector);
     return unsupported;
 }
@@ -286,7 +299,26 @@ static esp_err_t verify_mounted_card(void) {
     return read_error == FR_OK && close_error == FR_OK ? ESP_OK : ESP_FAIL;
 }
 
-static esp_err_t mount_card(bool format_if_failed) {
+// 普通挂载和MSC共用引脚、位宽、DMA与成功档；USB时钟上限仍20MHz。
+// VFS and MSC share pins, width, DMA and known-good profiles; USB retains a 20MHz ceiling.
+static void configure_sd_bus(sdmmc_host_t *host,sdmmc_slot_config_t *slot,sd_profile_t profile,bool usb) {
+    *slot=(sdmmc_slot_config_t)SDMMC_SLOT_CONFIG_DEFAULT();
+    host->slot=SDMMC_HOST_SLOT_0;
+    host->max_freq_khz=usb && profile.khz>20000?20000:profile.khz;
+    slot->width=profile.width;
+    slot->clk=SD_PIN_CLK;slot->cmd=SD_PIN_CMD;slot->d0=SD_PIN_D0;
+    slot->d1=profile.width==4?GPIO_NUM_21:GPIO_NUM_NC;
+    slot->d2=profile.width==4?GPIO_NUM_22:GPIO_NUM_NC;
+    slot->d3=profile.width==4?GPIO_NUM_23:GPIO_NUM_NC;
+    slot->cd=slot->wp=GPIO_NUM_NC;
+    slot->flags|=SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
+    if(profile.width==1) {
+        host->flags&=~(SDMMC_HOST_FLAG_4BIT|SDMMC_HOST_FLAG_8BIT);
+        host->flags|=SDMMC_HOST_FLAG_1BIT;
+    }
+}
+
+static esp_err_t mount_card_owned(bool format_if_failed) {
     filesystem_unreadable = false;
     if (card != NULL) return verify_mounted_card();
 
@@ -299,20 +331,8 @@ static esp_err_t mount_card(bool format_if_failed) {
     }
     // S31原四线高速优先；慢卡复用成功档，失败再降频/改单线。
     // Prefer native four-bit high speed, reusing good profiles before lower clocks/single-line fallback.
-    host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;
-
-    sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
-    host.slot = SDMMC_HOST_SLOT_0;
-    slot.width = 4;
-    slot.clk = SD_PIN_CLK;
-    slot.cmd = SD_PIN_CMD;
-    slot.d0 = SD_PIN_D0;
-    slot.d1 = GPIO_NUM_21;
-    slot.d2 = GPIO_NUM_22;
-    slot.d3 = GPIO_NUM_23;
-    slot.cd = GPIO_NUM_NC;
-    slot.wp = GPIO_NUM_NC;
-    slot.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
+    sdmmc_slot_config_t slot;
+    configure_sd_bus(&host,&slot,sd_profiles[0],false);
 
     const esp_vfs_fat_sdmmc_mount_config_t mount_config = {
         .format_if_mount_failed = format_if_failed,
@@ -338,15 +358,9 @@ static esp_err_t mount_card(bool format_if_failed) {
             break;
         }
         if (detect_err != ESP_OK) ESP_LOGW(TAG, "SD detect unavailable: %s; try card I/O", esp_err_to_name(detect_err));
-        host.max_freq_khz = profile.khz;
         host.flags=native_flags;
-        slot.width=profile.width;
-        slot.d1=profile.width==4?GPIO_NUM_21:GPIO_NUM_NC;
-        slot.d2=profile.width==4?GPIO_NUM_22:GPIO_NUM_NC;
-        slot.d3=profile.width==4?GPIO_NUM_23:GPIO_NUM_NC;
+        configure_sd_bus(&host,&slot,profile,false);
         if(profile.width==1) {
-            host.flags&=~(SDMMC_HOST_FLAG_4BIT|SDMMC_HOST_FLAG_8BIT);
-            host.flags|=SDMMC_HOST_FLAG_1BIT;
             err=metalio_sd_single_line_idle();
             if(err!=ESP_OK){profile_pin_error=true;break;}
         }
@@ -394,7 +408,15 @@ static esp_err_t mount_card(bool format_if_failed) {
     return err;
 }
 
-static esp_err_t close_card(void) {
+static esp_err_t mount_card(bool format_if_failed) {
+    if(usb_owned || !read_pico_sd_access_transition_begin(1000))return ESP_ERR_NOT_FINISHED;
+    esp_err_t err=mount_card_owned(format_if_failed);
+    if(err!=ESP_OK)read_pico_sd_access_set_mounted(false);
+    read_pico_sd_access_transition_end();
+    return err;
+}
+
+static esp_err_t close_card_owned(void) {
     if (card != NULL) {
         esp_err_t err = esp_vfs_fat_sdcard_unmount(SD_MOUNT_POINT, card);
         if (err != ESP_OK) {
@@ -405,6 +427,86 @@ static esp_err_t close_card(void) {
         release_sd_dma();
     }
     return ESP_OK;
+}
+
+// 暂时有访问未归还时恢复原快照，不能伪报卡已失效。/ Busy admission preserves the prior snapshot instead of inventing media loss.
+static void abort_operation(void) {
+    portENTER_CRITICAL(&state_lock);
+    probe_state=cached_info.mounted?2:0;manual_busy=false;
+    if(cached_info.error==ESP_ERR_NOT_FINISHED)cached_info.error=ESP_ERR_INVALID_STATE;
+    portEXIT_CRITICAL(&state_lock);
+}
+
+static esp_err_t close_card(void) {
+    if(usb_owned || !read_pico_sd_access_transition_begin(1000))return ESP_ERR_NOT_FINISHED;
+    esp_err_t err=close_card_owned();
+    if(err==ESP_OK)read_pico_sd_access_set_mounted(false);
+    read_pico_sd_access_transition_end();
+    return err;
+}
+
+// 原始卡资源始终归驱动；TinyUSB仅借用，销毁完成前不得归还DMA或host。
+// Driver owns raw resources; TinyUSB borrows them until teardown completes.
+static esp_err_t release_usb_host(void) {
+    if(usb_host_ready) {
+        esp_err_t err=deinit_sd_host(&usb_host);
+        if(err!=ESP_OK)return err;
+        usb_host_ready=false;
+    }
+    free(usb_card);usb_card=NULL;
+    return ESP_OK;
+}
+esp_err_t read_pico_sd_usb_release(void) {
+    if(!read_pico_sd_access_transition_begin(1000))return ESP_ERR_NOT_FINISHED;
+    esp_err_t err=release_usb_host();
+    if(err==ESP_OK && usb_owned){release_sd_dma();usb_owned=false;}
+    read_pico_sd_access_transition_end();
+    return err;
+}
+esp_err_t read_pico_sd_usb_acquire(sdmmc_card_t **out) {
+    if(!out)return ESP_ERR_INVALID_ARG;
+    *out=NULL;
+    if(usb_owned)return ESP_ERR_INVALID_STATE;
+    esp_err_t err=read_pico_sd_sync();
+    if(err!=ESP_OK)return err;
+    if(!read_pico_sd_access_transition_begin(1000))return ESP_ERR_NOT_FINISHED;
+    usb_owned=true;
+    usb_host=(sdmmc_host_t)SDMMC_HOST_DEFAULT();
+    err=prepare_sd_dma(&usb_host);
+    const size_t first=sd_preferred_profile();
+    const int native_flags=usb_host.flags;
+    for(size_t attempt=0;err==ESP_OK && attempt<SD_PROFILE_COUNT;attempt++) {
+        size_t index=(first+attempt)%SD_PROFILE_COUNT;
+        sdmmc_slot_config_t slot;
+        usb_host.flags=native_flags;
+        configure_sd_bus(&usb_host,&slot,sd_profiles[index],true);
+        metalio_sd_release_hold();
+        if(slot.width==1)err=metalio_sd_single_line_idle();
+        if(err==ESP_OK) {
+            err=usb_host.init();
+            if(err==ESP_OK)usb_host_ready=true;
+            else break; // 未取得host所有权，不能强制deinit。/ Never deinit a host we did not acquire.
+        }
+        if(err==ESP_OK)err=sdmmc_host_init_slot(usb_host.slot,&slot);
+        if(err==ESP_OK){usb_card=calloc(1,sizeof(*usb_card));if(!usb_card)err=ESP_ERR_NO_MEM;}
+        if(err==ESP_OK)err=sdmmc_card_init(&usb_host,usb_card);
+        if(err==ESP_OK)err=sdmmc_get_status(usb_card);
+        if(err==ESP_OK){*out=usb_card;break;}
+        ESP_LOGW(TAG,"USB SD probe %u at %d kHz/%d-bit failed: %s",
+            (unsigned)attempt+1,usb_host.max_freq_khz,slot.width,esp_err_to_name(err));
+        esp_err_t cleanup=release_usb_host();
+        if(cleanup!=ESP_OK){err=cleanup;break;}
+        if(err==ESP_ERR_NO_MEM || err==ESP_ERR_INVALID_ARG || attempt+1==SD_PROFILE_COUNT)break;
+        vTaskDelay(pdMS_TO_TICKS(250));
+        err=ESP_OK;
+    }
+    if(!*out) {
+        esp_err_t cleanup=release_usb_host();
+        if(cleanup==ESP_OK){release_sd_dma();usb_owned=false;}
+        else err=cleanup;
+    }
+    read_pico_sd_access_transition_end();
+    return err;
 }
 
 static void probe_task(void* arg) {
@@ -420,6 +522,7 @@ static void probe_task(void* arg) {
     }
 
     esp_err_t err = mount_card(false);
+    if(err==ESP_ERR_NOT_FINISHED){abort_operation();vTaskDelete(NULL);return;}
     fill_info(&info, err);
     if (err == ESP_OK) {
         ESP_LOGI(
@@ -476,6 +579,7 @@ esp_err_t read_pico_sd_get_info(read_pico_sd_info_t* info) {
     esp_err_t detect_err = read_pico_sd_detect(&present);
     portENTER_CRITICAL(&state_lock);
     if (detect_err == ESP_OK) observe_media_locked(present);
+    if(media_invalidated)read_pico_sd_access_set_mounted(false);
     *info = cached_info;
     esp_err_t err = manual_busy ? ESP_ERR_NOT_FINISHED :
         probe_state == 0 && detect_err != ESP_OK && !info->present ? detect_err :
@@ -489,7 +593,7 @@ esp_err_t read_pico_sd_get_info(read_pico_sd_info_t* info) {
 // 驱动操作期间占用忙状态，不在临界区执行 I/O。/ Reserve busy state across driver I/O outside the critical section.
 static bool begin_operation(void) {
     portENTER_CRITICAL(&state_lock);
-    bool ready = probe_state != 1 && !space_busy && !health_busy;
+    bool ready = !usb_owned && probe_state != 1 && !space_busy && !health_busy;
     if (ready) probe_state = 1;
     portEXIT_CRITICAL(&state_lock);
     return ready;
@@ -536,6 +640,7 @@ esp_err_t read_pico_sd_start_space_refresh(void) {
 esp_err_t read_pico_sd_remount(void) {
     if (!begin_operation()) return ESP_ERR_NOT_FINISHED;
     esp_err_t err = close_card();
+    if(err==ESP_ERR_NOT_FINISHED){abort_operation();return err;}
     if (err != ESP_OK) {
         read_pico_sd_info_t info = { .present = true, .error = err };
         (void)read_pico_sd_detect(&info.present);
@@ -572,8 +677,10 @@ static void health_task(void *arg) {
             }
         }
     }
+    bool invalidated=media_invalidated;
     health_busy = false;
     portEXIT_CRITICAL(&state_lock);
+    if(invalidated)read_pico_sd_access_set_mounted(false);
     vTaskDelete(NULL);
 }
 void read_pico_sd_poll_health(void) {
@@ -611,6 +718,7 @@ esp_err_t read_pico_sd_invalidate_io(void) {
     // 调用方已停消费者；仅失效快照，异步任务随后按既有所有权规则重挂。
     // Consumers are closed; invalidate only the snapshot, then remount through the owned async task.
     suspended=false;media_invalidated=true;probe_state=2;
+    read_pico_sd_access_set_mounted(false);
     memset(&cached_info,0,sizeof(cached_info));
     cached_info.present=true;cached_info.error=ESP_FAIL;
     portEXIT_CRITICAL(&state_lock);
@@ -619,6 +727,7 @@ esp_err_t read_pico_sd_invalidate_io(void) {
 static void recovery_task(void *arg) {
     const bool manual = arg != NULL;
     esp_err_t err = close_card();
+    if(err==ESP_ERR_NOT_FINISHED){abort_operation();vTaskDelete(NULL);return;}
     if (err == ESP_OK) {
         portENTER_CRITICAL(&state_lock);
         media_invalidated = false; health_failures = 0;
@@ -628,6 +737,7 @@ static void recovery_task(void *arg) {
         portEXIT_CRITICAL(&state_lock);
         err = mount_card(false);
     }
+    if(err==ESP_ERR_NOT_FINISHED){abort_operation();vTaskDelete(NULL);return;}
     read_pico_sd_info_t info;
     fill_info(&info,err);
     publish_info(&info);
@@ -662,6 +772,7 @@ esp_err_t read_pico_sd_sync(void) {
     (void)read_pico_sd_get_info(&previous);
     if (!begin_operation()) return ESP_ERR_NOT_FINISHED;
     esp_err_t err = close_card();
+    if(err==ESP_ERR_NOT_FINISHED){abort_operation();return err;}
     if (err != ESP_OK) {
         read_pico_sd_info_t info = { .present = true, .mounted = true, .error = err };
         (void)read_pico_sd_detect(&info.present);
@@ -684,7 +795,7 @@ esp_err_t read_pico_sd_format(void) {
     (void)read_pico_sd_get_info(&current);
     portENTER_CRITICAL(&state_lock);
     bool invalid = media_invalidated;
-    bool busy = probe_state == 1 || space_busy || health_busy || suspended;
+    bool busy = usb_owned || probe_state == 1 || space_busy || health_busy || suspended;
     if (!invalid && !busy) probe_state = 1;
     portEXIT_CRITICAL(&state_lock);
     if (invalid) return current.present ? ESP_ERR_INVALID_STATE : ESP_ERR_NOT_FOUND;
@@ -696,6 +807,10 @@ esp_err_t read_pico_sd_format(void) {
         return ESP_ERR_NOT_FOUND;
     }
 
+    if(!read_pico_sd_access_transition_begin(1000)) {
+        portENTER_CRITICAL(&state_lock);probe_state=2;portEXIT_CRITICAL(&state_lock);
+        return ESP_ERR_NOT_FINISHED;
+    }
     esp_err_t err = ESP_OK;
     if (card == NULL) {
         err = mount_card(true);
@@ -713,6 +828,8 @@ esp_err_t read_pico_sd_format(void) {
         fill_info(&info, ESP_OK);
         ESP_LOGI(TAG, "formatted %s", info.name);
     }
+    read_pico_sd_access_set_mounted(err==ESP_OK);
+    read_pico_sd_access_transition_end();
     publish_info(&info);
     return err;
 }

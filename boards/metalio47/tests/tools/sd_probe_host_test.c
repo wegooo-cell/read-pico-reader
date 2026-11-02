@@ -12,6 +12,12 @@
 #include "esp_vfs_fat.h"
 #include "freertos/task.h"
 
+static bool access_busy;
+bool read_pico_sd_access_transition_begin(uint32_t ms){(void)ms;return !access_busy;}
+void read_pico_sd_access_transition_end(void){}
+void read_pico_sd_access_set_mounted(bool mounted){(void)mounted;}
+static bool raw_mode,raw_need_single,raw_deinit_fail;
+static int raw_clock,raw_width,raw_limit=20000,raw_inits,raw_stops;
 static bool test_present, test_exfat, test_raw_error;
 static bool detect_failure, detect_unsupported;
 static int mount_calls, unmount_calls, test_fail_above_khz;
@@ -39,7 +45,7 @@ static sdmmc_card_t test_card = {
 #undef mkdir
 
 int64_t esp_timer_get_time(void){return 0;}
-esp_err_t sdmmc_get_status(sdmmc_card_t *c){assert(c==&test_card);return ESP_OK;}
+esp_err_t sdmmc_get_status(sdmmc_card_t *c){assert(c==&test_card || (raw_mode && c==usb_card));return ESP_OK;}
 static FATFS test_fat={.free_clst=1};
 BYTE ff_diskio_get_pdrv_card(const sdmmc_card_t *c){assert(c==&test_card);return 0;}
 int f_opendir(FF_DIR *root,const char *path){assert(!strcmp(path,"0:"));root->obj.fs=&test_fat;return FR_OK;}
@@ -47,10 +53,19 @@ int f_readdir(FF_DIR *root,FILINFO *entry){assert(root->obj.fs==&test_fat);entry
 int f_closedir(FF_DIR *root){assert(root->obj.fs==&test_fat);return FR_OK;}
 int ff_mutex_take(int drive){assert(drive==0&&!fat_locked);fat_locked=true;return 1;}
 void ff_mutex_give(int drive){assert(drive==0&&fat_locked&&test_fat.free_clst==UINT32_MAX);fat_locked=false;++invalidations;}
-esp_err_t test_host_init(void){return ESP_OK;}
-esp_err_t test_host_deinit(void){return ESP_OK;}
-esp_err_t sdmmc_host_init_slot(int slot,const sdmmc_slot_config_t *config){(void)slot;(void)config;return ESP_OK;}
-esp_err_t sdmmc_card_init(const sdmmc_host_t *host,sdmmc_card_t *out){(void)host;*out=test_card;return test_raw_error?ESP_ERR_TIMEOUT:ESP_OK;}
+esp_err_t test_host_init(void){if(raw_mode)++raw_inits;return ESP_OK;}
+esp_err_t test_host_deinit(void){if(raw_mode){++raw_stops;if(raw_deinit_fail)return ESP_FAIL;}return ESP_OK;}
+esp_err_t test_host_deinit_slot(int slot){assert(slot==0);return test_host_deinit();}
+esp_err_t sdmmc_host_init_slot(int slot,const sdmmc_slot_config_t *config){assert(slot==0);raw_width=config->width;return ESP_OK;}
+esp_err_t sdmmc_card_init(const sdmmc_host_t *host,sdmmc_card_t *out){
+ *out=test_card;
+ if(raw_mode){raw_clock=host->max_freq_khz;assert(raw_clock<=20000);
+  assert(host->dma_aligned_buffer==sd_dma_buffer && host->unaligned_multi_block_rw_max_chunk_size==8);
+  assert(host->check_buffer_alignment==sd_internal_dma_buffer);
+  if(raw_clock>raw_limit || (raw_need_single && raw_width!=1))return ESP_ERR_TIMEOUT;
+ }
+ return test_raw_error?ESP_ERR_TIMEOUT:ESP_OK;
+}
 esp_err_t sdmmc_read_sectors(sdmmc_card_t *c,void *buffer,size_t start,size_t count){(void)c;(void)start;assert(count==1);++verified_reads;if(verified_fail_above_khz&&active_khz>verified_fail_above_khz)return ESP_ERR_TIMEOUT;if(test_raw_error)return ESP_ERR_TIMEOUT;memset(buffer,0x5a,512);if(test_exfat)memcpy((char*)buffer+3,"EXFAT   ",8);return ESP_OK;}
 bool read_pico_sd_present(void) { return test_present; }
 esp_err_t read_pico_sd_detect(bool* present) {
@@ -305,6 +320,26 @@ int main(void) {
     assert(read_pico_sd_needs_recovery()&&read_pico_sd_start_recovery()==ESP_OK);
     assert(read_pico_sd_io_ready()&&unmount_calls==before+1&&format_calls==old_formats);
     assert(close_card()==ESP_OK&&!sd_dma_buffer&&test_dma_allocs==test_dma_frees);
+    // 真正调用共享驱动的MSC路径：降频/单线、内部DMA和失败所有权。
+    // Exercise the actual shared MSC driver: fallback, internal DMA and failed-cleanup ownership.
+    defer_manual=false;assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
+    raw_mode=true;raw_need_single=true;raw_limit=1000;
+    sdmmc_card_t *exported=NULL;before=mount_calls;
+    assert(read_pico_sd_usb_acquire(&exported)==ESP_OK && exported && usb_owned && !card);
+    assert(raw_width==1 && raw_clock==1000 && raw_inits==8 && raw_stops==7);
+    assert(sd_dma_buffer && !read_pico_sd_io_ready() && !read_pico_sd_needs_recovery());
+    assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED && mount_calls==before);
+    assert(read_pico_sd_start_manual_recovery()==ESP_ERR_NOT_FINISHED);
+    void *retained_dma=sd_dma_buffer;raw_deinit_fail=true;
+    assert(read_pico_sd_usb_release()==ESP_FAIL && usb_owned && usb_card==exported && sd_dma_buffer==retained_dma);
+    raw_deinit_fail=false;assert(read_pico_sd_usb_release()==ESP_OK && !usb_owned && !usb_card && !sd_dma_buffer);
+    assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
+    raw_limit=0;raw_inits=raw_stops=0;exported=NULL;
+    assert(read_pico_sd_usb_acquire(&exported)==ESP_ERR_TIMEOUT && !exported && !usb_owned && !sd_dma_buffer);
+    assert(raw_inits==8 && raw_stops==8 && !usb_card);
+    assert(read_pico_sd_usb_release()==ESP_OK);raw_mode=false;
+    assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
+    assert(close_card()==ESP_OK && test_dma_allocs==test_dma_frees);
     puts("PASS: SD profiles/RTC and DMA, asynchronous manual recovery from failed/paused/removal states, lifecycle owners/OOM/unmount failure/retry/no autoformat/256GiB");
     return 0;
 }

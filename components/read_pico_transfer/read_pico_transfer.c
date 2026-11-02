@@ -311,10 +311,17 @@ enum { TRANSFER_COMMITTED_BACKUP_RETAINED = 299 };
 #if KIIKO_BOARD_METALIO47
 #ifdef ESP_PLATFORM
 #include "transfer_stream_writer.h"
+#include "read_pico_sd_access.h"
 #endif
 #endif
 static int receive_file(const char *path, const char *part, size_t total, char *buf,
                         size_t cap, receive_cb_t recv, void *ctx, progress_cb_t progress) {
+#if KIIKO_BOARD_METALIO47
+#ifdef ESP_PLATFORM
+    read_pico_sd_access_scope_t access_scope __attribute__((cleanup(read_pico_sd_access_scope_end)))=read_pico_sd_access_scope(path);
+    if(!access_scope.allowed)return 507;
+#endif
+#endif
     FILE *f = fopen(part, "wb");
     if (!f) return 507;
 #if KIIKO_BOARD_METALIO47

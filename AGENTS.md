@@ -10,6 +10,9 @@ Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Takin
 
 ## 当前工作：双板型本地整合 / Current work: local multi-board integration
 
+用户2026-11-02授权先优化S31统一TF访问/卸载保护与普通挂载/USB共用初始化，保留现有降频、单线及自动恢复；只交付rc109本地刷机页，不发布官网。此指令仅放开对应SD驱动/CMake基线，原始波形、引脚及供电时序仍保留。
+User2026-11-02 authorizes S31 unified SD access/unmount protection and shared VFS/USB initialization, retaining fallback and automatic recovery. Deliver a local rc109 flasher only. This narrowly supersedes the affected SD/CMake baseline, preserving raw waveforms, pins and power sequencing.
+
 用户2026-11-01明确要求推送在线刷机：本轮正式发布Pico rc104与S31 rc109，包含此前已测试的合并、书架及阅读交互修复和Pico普通翻页信息栏分离；同步GitHub Release、kiikoread.com与既有Pages OTA，保留rc103/rc108原字节及上一版本刷机/TF入口。本次指令取代本轮此前仅本地、不发布的限制。
 User2026-11-01 explicitly authorizes online publication: release Pico rc104/S31 rc109 with the tested merges, shelf/reader fixes and Pico ordinary-turn metadata separation. Synchronize GitHub Releases, kiikoread.com and existing Pages OTA; retain original rc103/rc108 bytes and previous-version web/TF entries. This supersedes the earlier local-only restriction for this release.
 

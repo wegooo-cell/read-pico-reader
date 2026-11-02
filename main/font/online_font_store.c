@@ -15,6 +15,9 @@
 #include "zlib.h"
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
+#if KIIKO_BOARD_METALIO47
+#include "read_pico_sd_access.h"
+#endif
 #endif
 
 #define FONT_BLOCK 8192u
@@ -133,6 +136,12 @@ bool online_font_store_installed(const online_font_item_t *item,const char *dir)
 }
 esp_err_t online_font_store_commit(const online_font_item_t *item,const char *dir,const char *source,
                                   online_font_cancel_t cancel,void *ctx){
+#if KIIKO_BOARD_METALIO47
+#ifdef ESP_PLATFORM
+    read_pico_sd_access_scope_t access_scope __attribute__((cleanup(read_pico_sd_access_scope_end)))=read_pico_sd_access_scope(dir);
+    if(!access_scope.allowed)return ESP_ERR_INVALID_STATE;
+#endif
+#endif
     char target[256],notice[256],temp[256],license_temp[256];struct stat st;
     if(!paths(item,dir,target,notice)||!source||item->size>FONT_MAX||item->source_size>FONT_MAX)return ESP_ERR_INVALID_ARG;
     if(!stat(target,&st))return ESP_ERR_INVALID_STATE;

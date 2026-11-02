@@ -286,11 +286,11 @@ Child layouts use the1216px viewport: extend file lists, bottom-anchor directory
 
 ## S31传输与深睡恢复
 
-大于等于四个接收块的上传可使用两槽顺序写卡：HTTP只填空槽，单个后台任务按原顺序写入；每次最多增加一块接收块大小的PSRAM及4096字节内部任务栈，资源不足沿用单缓冲。任何接收/写入失败先等待已提交任务完成，再关闭、清理或替换文件。只在整个文件落盘关闭成功后确认提交。TCP接收窗口65535字节、接收邮箱64项，静态RX默认6/动态RX64/BA12；PSRAM传书独占会话按S31 SDK建议对照16槽静态RX/BA窗口（最大16槽），普通联网与临时对时保持原6槽。乱序队列最多12包并启用SACK，省电所有权保留；USB MSC块16KiB、TF四线20MHz，始终电脑/固件独占挂载。
+大于等于四个接收块的上传可使用两槽顺序写卡：HTTP只填空槽，单个后台任务按原顺序写入；每次最多增加一块接收块大小的PSRAM及4096字节内部任务栈，资源不足沿用单缓冲。任何接收/写入失败先等待已提交任务完成，再关闭、清理或替换文件。只在整个文件落盘关闭成功后确认提交。TCP接收窗口65535字节、接收邮箱64项，静态RX默认6/动态RX64/BA12；PSRAM传书独占会话按S31 SDK建议对照16槽静态RX/BA窗口（最大16槽），普通联网与临时对时保持原6槽。乱序队列最多12包并启用SACK，省电所有权保留；USB MSC块16KiB、TF最高20MHz并按兼容档回退，始终电脑/固件独占挂载。
 
 深睡保留屏幕物理锁图，TF挂载尚未完成时不清白换图；有效快照恢复前后参考不额外扫描，缺失/损坏时仅对可独立生成的真实锁屏作一次完整输出。未知透明底图保留物理画面，禁用差分提示；实际解锁取消所有延迟恢复。PIN继续验证，异常启动字体保护和S31外设休眠顺序保持。入书/目录返回正文使用一次原厂GC48，后续正文22相及图形GL48各走既有路径。
 
-English: Large S31 uploads use two bounded ordered slots,one optional PSRAM block and4096B internal worker stack; resource failure falls back synchronously. Join before close/cleanup/commit on every path. TCP receive65535/mailbox64,default staticRX6/dynamicRX64/BA12 and bounded12-packet SACK. PSRAM bulk sessions compare the SDK16-slot staticRX/BA minimum (capped at16),while ordinary connectivity/time sync retain6; MSC16KiB with unchanged four-bit20MHz card timing and exclusive ownership. Preserve physical deep-lock art while media is pending; trusted snapshots restore references without scanning,unknown transparent art never receives difference hints. Cancel deferred work before unlock,retain PIN/abnormal-font/board sleep guards,and clean reader entry once with vendorGC48 without changing subsequent body or graphical waveforms.
+English: Large S31 uploads use two bounded ordered slots,one optional PSRAM block and4096B internal worker stack; resource failure falls back synchronously. Join before close/cleanup/commit on every path. TCP receive65535/mailbox64,default staticRX6/dynamicRX64/BA12 and bounded12-packet SACK. PSRAM bulk sessions compare the SDK16-slot staticRX/BA minimum (capped at16),while ordinary connectivity/time sync retain6; MSC16KiB with a20MHz card-clock ceiling and compatibility fallback and exclusive ownership. Preserve physical deep-lock art while media is pending; trusted snapshots restore references without scanning,unknown transparent art never receives difference hints. Cancel deferred work before unlock,retain PIN/abnormal-font/board sleep guards,and clean reader entry once with vendorGC48 without changing subsequent body or graphical waveforms.
 
 文件传输服务持有BLE网络租约，停止扫描/连接并阻止主循环重启蓝牙；关闭服务后按原设置及最近设备恢复，不清配对/学习。仅连接WiFi的常驻会话不持有该租约，仍可使用蓝牙翻页器。临时扫描/联网的失败必须回滚租约；成功启动后的任何退出都释放一次。`/info`提供固件ELF身份、实际接收预算、BLE运行状态和内部RAM余量，便于核对实机；这些诊断不提供任意命令或存储访问。
 
@@ -307,6 +307,10 @@ CI 同时编译两块板并验证芯片、项目名、分区、启动地址和�
 English: Moku's board manifest/facade design centralizes capabilities and unchanged budgets while keeping native backends and strict target/config guards. `metalio_s31` aliases stable `metalio47`. The PowerShell wrapper shares the Python materializer/build driver. CI builds both chips and validates package identities/layouts; web regressions use self-contained fixtures without publishing a site.
 
 S31 SDMMC沿用Metalio官方内部DMA中转：固定4096字节内部对齐缓冲、最多8扇区，外部RAM不直接进入SD DMA；失败挂载与成功卸载回收，卸载失败保留缓冲和卡所有权。时钟降档、四线引脚、FAT锁及USB独占流程保持。传书每两秒只对文件名/字节/进度条做局部黑白差分，失败刷新重试，网页字节发送完成后继续计时并等待设备保存确认。
+
+S31的标准TF文件访问统一计数，包括打开的文件/目录、路径操作以及传书和在线字体提交事务；卸载先阻止新访问并等待句柄归还，暂忙时保留原挂载。内部`/flash`不参加TF访问计数。VFS关闭失败仍按SDK已回收句柄处理，保留错误返回，避免拔卡后永久阻塞恢复。普通挂载和USB原始卡共用四线/单线配置、内部4096字节DMA及成功档提示；USB最高20MHz，失败继续按原兼容档降频和单线回退。TinyUSB完全停止后才回收原始卡、host和DMA，收尾失败保留所有权供重试。现有健康检查、自动恢复、休眠引脚和阅读波形保持。
+English: S31 counts SD VFS files/directories, path operations and upload/font commit transactions. Unmount blocks new access and waits for admitted work; busy transitions retain the mount. Internal `/flash` is independent. Failed VFS closes release accounting because the SDK recycles handles, while errors remain visible. VFS/USB share bus configuration, internal4096B DMA and known-good profiles; USB caps at20MHz and retains lower-clock/single-bit fallback. Raw resources are released only after TinyUSB stops; failed cleanup retains ownership for retry. Health/recovery, sleep pins and reader waveforms retain their existing behavior.
+
 
 显式本地`--s31-transfer-startup-test`仅用于无人值守对照，启动仍保留PIN/恢复门禁，随后进入已保存网络的传书页。正常构建强制关闭并在manifest/verification记录该开关；此测试包不得交付。
 

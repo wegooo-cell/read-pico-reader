@@ -242,6 +242,14 @@
       "pull_request": 64,
       "source_commit": "b80785528c69a10004f4a6b02b4d6dd212ae3940",
       "reason": "User2026-11-01 explicitly approved PR64 as authored, superseding the previous derived-waveform pin for this file."
+    },
+    "boards/metalio47/src/components/read_pico/read_pico_sd.c": {
+      "sha256": "40e7d011fd029f69d3912b253a9d69b23c06f217febec2fdc8153e1251a61d93",
+      "reason": "User2026-11-02: S31 SD admission and shared VFS/USB initialization; retain native fallback, recovery and board isolation."
+    },
+    "components/read_pico/CMakeLists.txt": {
+      "sha256": "8aecef52d3c4b20cce992ba2672744d8c996b5f8699bf195b96b45a9437d6721",
+      "reason": "User2026-11-02: S31 SD admission and shared VFS/USB initialization; retain native fallback, recovery and board isolation."
     }
   }
 }

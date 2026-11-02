@@ -1,5 +1,10 @@
 # 版本变更 / Changelog
 
+## 本地测试 / Local test — 2026-11-02
+
+- S31统一TF文件访问与卸载保护，普通挂载及USB共用总线配置和内部DMA，保留降频/单线兼容及自动恢复；沿用rc109，仅本地测试。
+  S31 unifies SD admission/unmount protection and VFS/USB bus/internal-DMA setup, retaining fallback and automatic recovery. Local rc109 test only.
+
 ## Pico 0.3.3-rc104 / Metalio S31 0.3.3-rc109 — 2026-11-01
 
 保留上一正式版Pico rc103与S31 rc108的原版刷机和TF下载入口；网页刷机仍仅kiikoread.com，沿用兼容双槽布局及默认保留设置。

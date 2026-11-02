@@ -51,6 +51,7 @@ typedef int esp_err_t;
 #define ESP_RST_DEEPSLEEP 5
 static int esp_reset_reason(void){return 0;}
 static int metalio_sd_single_line_idle(void){return ESP_OK;}
+#define SDMMC_HOST_FLAG_DEINIT_ARG 8
 #define SDMMC_HOST_FLAG_1BIT 1
 #define SDMMC_HOST_FLAG_4BIT 2
 #define SDMMC_HOST_FLAG_8BIT 4
@@ -59,10 +60,14 @@ static int metalio_sd_single_line_idle(void){return ESP_OK;}
 #define SDMMC_SLOT_CONFIG_DEFAULT() ((sdmmc_slot_config_t){0})
 static esp_err_t mock_host_init(void){return ESP_OK;}
 static esp_err_t mock_host_deinit(void){return ESP_OK;}
-typedef struct { int max_freq_khz,slot,flags; esp_err_t (*init)(void),(*deinit)(void); bool (*check_buffer_alignment)(int,const void*,size_t); void* dma_aligned_buffer; size_t unaligned_multi_block_rw_max_chunk_size; } sdmmc_host_t;
+typedef struct { int max_freq_khz,slot,flags; esp_err_t (*init)(void),(*deinit)(void); esp_err_t (*deinit_p)(int); bool (*check_buffer_alignment)(int,const void*,size_t); void* dma_aligned_buffer; size_t unaligned_multi_block_rw_max_chunk_size; } sdmmc_host_t;
 typedef struct { int width,clk,cmd,d0,d1,d2,d3,cd,wp,flags; } sdmmc_slot_config_t;
 typedef struct { bool format_if_mount_failed; int max_files,allocation_unit_size; } esp_vfs_fat_sdmmc_mount_config_t;
 typedef struct { struct { char name[8]; } cid; struct { uint32_t capacity,sector_size; } csd; } sdmmc_card_t;
+static bool access_busy;
+bool read_pico_sd_access_transition_begin(uint32_t ms){(void)ms;return !access_busy;}
+void read_pico_sd_access_transition_end(void){}
+void read_pico_sd_access_set_mounted(bool mounted){(void)mounted;}
 #define SDMMC_HOST_FLAG_ALLOC_ALIGNED_BUF 64
 static bool sdmmc_host_check_buffer_alignment(int slot,const void* p,size_t n){(void)slot;return (uintptr_t)p%4==0&&n%4==0;}
 static bool esp_ptr_internal(const void* p){(void)p;return true;}
@@ -231,6 +236,10 @@ int main(void) {
     }
     assert(pthread_join(reader,NULL)==0);
     assert(formats==0);
+    access_busy=true;int before=unmounts;
+    assert(read_pico_sd_sync()==ESP_ERR_NOT_FINISHED && unmounts==before);
+    assert(read_pico_sd_get_info(&info)==ESP_OK && info.mounted);
+    access_busy=false;
     // S31无CD脚时靠三次CMD13错误确认；忙时不得卸载，USB主动卸载不自动恢复。
     // With no CD pin, confirm three CMD13 failures; never unmount a busy owner or auto-remount USB.
     status_error=ESP_ERR_TIMEOUT;
