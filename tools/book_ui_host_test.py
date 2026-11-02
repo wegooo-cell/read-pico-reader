@@ -474,8 +474,8 @@ int main(void) {
     assert(reader_swipe_direction(UI_GESTURE_SWIPE_R,false)==1);
     assert(reader_swipe_direction(UI_GESTURE_SWIPE_U,true)==1);
     test_book_vertical=false;
-    // 普通/沉浸正文采用半屏或1/3+2/3，中间双击独立处理。
-    // Normal/immersive tap regions use halves or 1/3+2/3 with independent center double taps.
+    // 全屏正文采用半屏或1/3+2/3，中间同样按分区翻页。
+    // Fullscreen taps, including the centre, use halves or1/3+2/3 turn regions.
     const EpdRect bodies[]={{36,180,612,900},{24,24,636,1182}};
     for (unsigned i=0;i<2;++i) {
         EpdRect body=bodies[i];
@@ -487,10 +487,10 @@ int main(void) {
         assert(book_reader_tap_direction(body,body.x,body.y,false,true)==1);
         assert(book_reader_tap_direction(body,body.x+body.width-1,body.y,false,true)==-1);
         book_reader_tap_t tap={0};
-        assert(book_reader_tap_feed(&tap,body,342,600,false,false,1000)==BOOK_READER_TAP_FULLSCREEN);
-        assert(book_reader_tap_feed(&tap,body,340,600,true,false,1250)==BOOK_READER_TAP_FULLSCREEN);
+        assert(book_reader_tap_feed(&tap,body,342,600,false,false,1000)==book_reader_tap_direction(body,342,600,false,false));
+        assert(book_reader_tap_feed(&tap,body,340,600,true,false,1250)==book_reader_tap_direction(body,340,600,true,false));
         assert(!book_reader_tap_tick(&tap,2000,false));
-        assert(book_reader_tap_feed(&tap,body,342,600,true,false,3000)==BOOK_READER_TAP_FULLSCREEN);
+        assert(book_reader_tap_feed(&tap,body,342,600,true,false,3000)==book_reader_tap_direction(body,342,600,true,false));
         assert(!book_reader_tap_tick(&tap,3341,false));
         assert(!book_reader_tap_tick(&tap,4000,false));
     }

@@ -389,3 +389,6 @@ Both boards share setup, system localization, recursive file search/grid/batch a
 
 阅读UI决定正文和信息栏范围；调用PR59已有差分/整块出口及原阅读波形，空闲后独立更新底部信息。不重新引入旧的d74b180驱动或本地缓存保护。`tools/pr59_driver_baseline_host_test.py`核验216个底层、配置及波形文件与用户指定PR提交一致。
 Reader UI owns body/metadata bounds and calls PR59's existing difference/full-area APIs and reader waveforms, updating footer metadata after idle. Do not reintroduce the d74b180 drivers or the superseded local cache guard. The driver-baseline host test verifies216 low-level/config/waveform files against the selected PR commit.
+
+阅读触屏规则（2026-11-02）：非全屏中间单击进入全屏；全屏后所有正文区域按所选左右/上下分区翻页。图片单击延后340ms以识别双击；非全屏中间图片的单击进入全屏，其他未放大图片单击按分区翻页。双击正文或整页图片放大/退出，已放大图片单击不翻页。底部上滑仍回到非全屏并共同显示标题操作行与工具栏；弹窗/工具栏优先于图片点按。
+Reader taps2026-11-02: standard centre taps enter fullscreen; fullscreen body taps follow the selected horizontal/vertical regions. Image singles wait340ms for double-tap zoom; standard centre image singles enter fullscreen and other unzoomed singles turn. Zoomed singles do not turn. Bottom swipes restore standard header/tools together; modal/tool controls take priority over image taps.

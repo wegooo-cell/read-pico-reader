@@ -17,6 +17,8 @@
  * User revision: restore rc90's original-table GC16 target-page output for manual and periodic refresh, without a white pre-clear and text pass.
  * 用户2026-10-21修订：Pico进入阅读页单次完整GC16清理；普通文字翻页保留校准GL16前导擦除及等灰保持，沿用预读；进度按最新要求在空闲时独立局刷。
  * User revision 2026-10-21: Pico reader entry uses one complete GC16; ordinary text retains calibrated GL16 erasure and equal-gray holds, prefetch and the newly requested idle metadata updates.
+ * 用户2026-11-02修订：合并PR68/69；非全屏中间单击进入全屏，全屏按所选分区翻页；插图双击缩放，单击保留延后动作，放大后单击不翻页。
+ * User2026-11-02: merge PR68/69; standard centre taps enter fullscreen, fullscreen taps follow turn regions; images retain double-tap zoom and deferred singles, with no turns from zoomed singles.
  * 用户2026-11-01修订：新开书默认非全屏并显示工具栏，顶部时间/签名/电量、底部章节/进度；中间单击仅进入全屏，底部上滑退出全屏并显示工具栏，全屏样式保留。
  * User2026-11-01: open standard with status/footer and tools visible; centre taps only enter fullscreen, bottom swipes exit fullscreen and show tools, retaining both fullscreen styles.
  * 用户2026-11-01追加：非沉浸全屏顶栏改为时间、签名及电量，不再显示书名；完整预留状态栏并保留分钟更新。
@@ -2549,7 +2551,7 @@ static void draw_turn_settings(uint8_t *fb) {
         epd_draw_circle(610, y + 61, 12, 0x38, fb);
         if (selected) epd_fill_circle(610, y + 61, 7, UI_GRAY_BLACK, fb);
     }
-    reader_panel_text_vc(fb, 342, 1051, 21, "中间单击进入全屏 · 上滑返回", EPD_DRAW_ALIGN_CENTER, false);
+    reader_panel_text_vc(fb, 342, 1051, 21, "中间单击全屏 · 全屏按区域翻页 · 上滑返回", EPD_DRAW_ALIGN_CENTER, false);
     ui_fill_round_rect(fb, (EpdRect){36, 1141, 612, 58}, 20, UI_GRAY_BLACK);
     reader_panel_text_vc(fb, 342, 1170, 26, "完成", EPD_DRAW_ALIGN_CENTER, true);
 }
@@ -2592,7 +2594,7 @@ static void draw_key_settings(uint8_t *fb) {
     ui_text_box(fb,(EpdRect){322,652,270,48},25,reader_key_label(app_settings_reader_hold_action()),EPD_DRAW_ALIGN_RIGHT,false);
     ui_draw_icon(fb, 625, 679, 20, UI_ICON_CHEVRON_DOWN, 0x38);
     reader_panel_text(fb, 58, 710, 19, "点击选择长按功能，例如返回主页", EPD_DRAW_ALIGN_LEFT, false);
-    reader_panel_text_vc(fb, 342, 775, 20, "中间单击进入全屏，底部上滑返回并显示工具栏", EPD_DRAW_ALIGN_CENTER, false);
+    reader_panel_text_vc(fb, 342, 775, 20, "中间单击全屏 · 全屏按区域翻页 · 上滑返回", EPD_DRAW_ALIGN_CENTER, false);
     for (unsigned preset = 1; preset <= 2; ++preset) {
         EpdRect card = reader_key_preset_card(preset);
         bool selected = reader_key_preset_selected(preset);
@@ -6684,99 +6686,52 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
             int note = reader_footnote_hit(x, y, &s_footnote_marker);
             if (note >= 0) { s_footnote_note = note; return APP_REDRAW_PAGE; }
         }
-        // 点在插图上时不切全屏：留给双击缩放的判定，否则中间单击会在双击前先把全屏切走。
-        // Never toggle fullscreen when the tap lands on an illustration; leave it to the
-        // double-tap zoom recognizer, or the first centre tap would consume the gesture.
-        // 已放大时双击退出：整页插图回 1:1，正文插图退出缩放模式；单击先记位置不动作。
-        // While zoomed, a double tap exits: whole-page images return to 1:1 and inline images
-        // leave zoom mode; a single tap only records the spot.
-        if (s_zoom_active || (s_image_zoom_page == s_page && s_image_zoom > READER_IMAGE_ZOOM_MIN)) {
-            static int64_t s_zoom_exit_ms;
-            static int s_zoom_exit_x, s_zoom_exit_y;
-            const int64_t now_exit = ctx->now_ms;
-            const int dx = (int)x - s_zoom_exit_x, dy = (int)y - s_zoom_exit_y;
-            if (s_zoom_exit_ms && now_exit >= s_zoom_exit_ms &&
-                now_exit - s_zoom_exit_ms <= BOOK_READER_DOUBLE_MS &&
-                dx * dx + dy * dy <= 120 * 120) {
-                s_zoom_exit_ms = 0;
-                if (s_zoom_active) return inline_zoom_toggle(ctx, x, y);
-                return zoom_jump(ctx, READER_IMAGE_ZOOM_MIN, x, y);
-            }
-            s_zoom_exit_ms = now_exit;
-            s_zoom_exit_x = (int)x;
-            s_zoom_exit_y = (int)y;
+        // 非全屏正文中间仍进入全屏；插图先等待双击窗口，避免抢走缩放。
+        // Standard centre taps enter fullscreen; images defer that action until the double-tap window closes.
+        const bool image_hit = reader_page_image_hit(x, y);
+        if (!s_clear_confirm && !s_reader_fullscreen && !image_hit &&
+            (s_reader_panel == READER_PANEL_NONE || s_reader_panel == READER_PANEL_TOOLS) &&
+            book_reader_center(body_rect(), x, y)) {
             s_reader_tap.pending = false;
-            return APP_REDRAW_NONE;
-        }
-        // 双击插图恢复缩放：第一击只记位置，第二击落在附近才放大；避免被中间单击全屏抢走。
-        // Restore double-tap illustration zoom: the first tap records the spot and the second one
-        // nearby zooms, so the centre single-tap fullscreen toggle cannot steal the gesture.
-        if (reader_page_image_hit(x, y) && !reader_zoom_mode()) {
-            static int64_t s_image_tap_ms;
-            static int s_image_tap_x, s_image_tap_y;
-            const int64_t now = ctx->now_ms;
-            const int dx = (int)x - s_image_tap_x, dy = (int)y - s_image_tap_y;
-            if (s_image_tap_ms && now >= s_image_tap_ms && now - s_image_tap_ms <= BOOK_READER_DOUBLE_MS &&
-                dx * dx + dy * dy <= 120 * 120) {
-                s_image_tap_ms = 0;
-                if (reader_single_image_page()) return zoom_jump(ctx, 2000, x, y);
-                return inline_zoom_toggle(ctx, x, y);
-            }
-            s_image_tap_ms = now;
-            s_image_tap_x = (int)x;
-            s_image_tap_y = (int)y;
-            s_reader_tap.pending = false;
-            return APP_REDRAW_NONE;
-        }
-        if ((s_reader_panel == READER_PANEL_NONE || s_reader_panel == READER_PANEL_TOOLS) &&
-            !reader_page_image_hit(x, y) && book_reader_center(body_rect(), x, y)) {
-            s_reader_tap.pending = false;
-            return s_reader_fullscreen ? APP_REDRAW_NONE : toggle_reader_fullscreen(ctx);
+            return toggle_reader_fullscreen(ctx);
         }
         if ((s_toolbar || (!s_reader_fullscreen && y >= UI_READER_TOOLS_TOP)) && !(s_reader_panel == READER_PANEL_TOOLS && y < UI_READER_TOOLS_TOP && ui_rect_hit(body_rect(), x, y)))
             return reader_panel_action(ctx, x, y);
-        // 通栏插图铺满整屏，点在图两侧的边条上同样要翻页；文字页仍按正文栏判定。
-        // A full-bleed illustration spans the panel, so taps on its side strips must turn pages
-        // too; text pages keep the body column.
+        // 翻页按用户选择的左右/上下分区；整页插图的边条也保持可点按。
+        // Use the chosen left/right or top/bottom turn regions, including full-page image side strips.
         EpdRect tap_area = body_rect();
         if (reader_image_slots(s_page)) tap_area = ui_rect_union(tap_area, book_layout_image_rect());
         if (!ui_rect_hit(tap_area, x, y)) return APP_REDRAW_NONE;
-        // 整页插图任意位置双击都算双击（用于定点缩放），单击延后到双击窗口后再翻页；
-        // 其它页面仍是原来的中间双击全屏、两侧单击翻页。
-        // On a whole-page illustration a double tap counts anywhere (point-anchored zoom) and a
-        // single tap is deferred; other pages keep centre double tap and side taps turning pages.
-        // 点在插图上时同样延后单击：只有这样才能把双击插图和单击翻页分开。
-        // A tap on an illustration defers the single tap too; that is the only way a double tap
-        // on the image can be told apart from a page turn.
-        int target = (reader_zoom_mode() || reader_page_image_hit(x, y))
+        const bool zoomed = s_zoom_active ||
+            (s_image_zoom_page == s_page && s_image_zoom > READER_IMAGE_ZOOM_MIN);
+        int target = (reader_zoom_mode() || image_hit)
             ? book_reader_tap_feed_any(&s_reader_tap, tap_area, x, y,
                                        app_settings_reader_vertical_turn(),
                                        app_settings_book_vertical(), ctx->now_ms)
             : book_reader_tap_feed(&s_reader_tap, tap_area, x, y,
                                    app_settings_reader_vertical_turn(),
                                    app_settings_book_vertical(), ctx->now_ms);
+        // 放大后的单击不翻页；普通图片保留延后的单击，非全屏中间单击进入全屏。
+        // Zoomed taps do not turn; unzoomed images retain deferred singles, with standard centre taps entering fullscreen.
+        if (s_reader_tap.pending) {
+            if (zoomed) s_reader_tap.direction = 0;
+            else if (!s_reader_fullscreen && book_reader_center(body_rect(), x, y))
+                s_reader_tap.direction = BOOK_READER_TAP_ENTER_FULLSCREEN;
+        }
         if (target == BOOK_READER_TAP_FULLSCREEN) {
-            if(book_reader_center(tap_area,x,y)) return s_reader_fullscreen ? APP_REDRAW_NONE : toggle_reader_fullscreen(ctx);
-            // 整页插图：双击以点到的那一点为中心放大到 2 倍，再双击回到原始大小；
-            // 正文插图：双击进入缩放模式（该图居中 2 倍），再双击退出回正文；
-            // 其它位置保持原来的全屏切换。
-            // A whole-page illustration zooms to 2x centred on the double-tapped point and a
-            // second double tap returns to 1:1. An inline illustration opens zoom mode on that
-            // image (2x, centred) and closes it again. Blank text keeps the full-screen toggle.
             if (s_zoom_active) return inline_zoom_toggle(ctx, x, y);
-            if (reader_single_image_page()) {
-                const bool zoomed = s_image_zoom_page == s_page && s_image_zoom > READER_IMAGE_ZOOM_MIN;
+            if (reader_single_image_page())
                 return zoom_jump(ctx, zoomed ? READER_IMAGE_ZOOM_MIN : 2000, x, y);
-            }
-            if (s_view == READING) {
-                app_redraw_t opened = inline_zoom_toggle(ctx, x, y);
-                if (opened != APP_REDRAW_NONE) return opened;
-            }
-            return toggle_reader_fullscreen(ctx);
+            return inline_zoom_toggle(ctx, x, y);
+        }
+        if (target == BOOK_READER_TAP_ENTER_FULLSCREEN) {
+            s_reader_tap.pending = false;
+            return s_reader_fullscreen ? APP_REDRAW_NONE : toggle_reader_fullscreen(ctx);
         }
         if (target) return turn_page(ctx, target);
         return APP_REDRAW_NONE;
     }
+
     if (s_view == SHELF) {
         if (s_view == SHELF) {
             int tab = ui_nav_hit(x, y);
@@ -7752,6 +7707,8 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
     if (s_view != READING || (s_toolbar && s_reader_panel != READER_PANEL_TOOLS) || s_clear_confirm || ctx->consumed) s_reader_tap.pending = false;
     else {
         int tap = book_reader_tap_tick(&s_reader_tap, ctx->now_ms, ctx->touch && ctx->touch->touched);
+        if (tap == BOOK_READER_TAP_ENTER_FULLSCREEN)
+            return s_reader_fullscreen ? APP_REDRAW_NONE : toggle_reader_fullscreen(ctx);
         if (tap) return turn_page(ctx, tap);
     }
     track_ticket_stats(ctx);

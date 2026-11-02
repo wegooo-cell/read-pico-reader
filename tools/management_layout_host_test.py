@@ -24,7 +24,7 @@ int main(void){
   assert(body.y>= (!full?UI_READER_STANDARD_TOP:immersive?UI_READER_FULLSCREEN_TOP:UI_READER_METADATA_TOP));assert(body.y+body.height<= (!full?UI_READER_STANDARD_BOTTOM:immersive?UI_READER_FULLSCREEN_BOTTOM:UI_READER_METADATA_BOTTOM));
   book_reader_tap_t tap={0};
   for(int y=body.y;y<body.y+body.height;++y){
-   assert(book_reader_tap_feed(&tap,body,342,y,vertical,vertical,10)==BOOK_READER_TAP_FULLSCREEN&&!tap.pending);
+   assert(book_reader_tap_feed(&tap,body,342,y,vertical,vertical,10)==book_reader_tap_direction(body,342,y,vertical,vertical)&&!tap.pending);
    assert(!book_reader_tap_tick(&tap,1000,false));
   }
   assert(!book_reader_tap_feed(&tap,body,342,1216,false,false,10));

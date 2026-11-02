@@ -10,6 +10,9 @@ Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Takin
 
 ## 当前工作：双板型本地整合 / Current work: local multi-board integration
 
+用户2026-11-02授权直接合并PR68/69并修复点按冲突：非全屏中间单击进入全屏；全屏后按已选左右/上下模式翻页；插图双击缩放，单击保持原翻页/全屏意图，底部上滑退出全屏并显示工具栏。对应Pico波形和引擎基线按PR68更新，S31波形保持；仅合并源码，不发布固件，既有S31 TF/字体/Wi-Fi/保持浅睡本地测试改动继续不上传。
+User2026-11-02 authorizes merging PR68/69 and fixing tap conflicts: standard centre taps enter fullscreen; fullscreen taps follow the selected turn regions. Retain image double-tap zoom and deferred singles, plus bottom-swipe tools. Update the affected Pico baseline to PR68, retain S31 waveforms. Merge source only; preserve the unpublished S31 SD/font/Wi-Fi/keep-light changes locally.
+
 用户2026-11-01明确要求推送在线刷机：本轮正式发布Pico rc104与S31 rc109，包含此前已测试的合并、书架及阅读交互修复和Pico普通翻页信息栏分离；同步GitHub Release、kiikoread.com与既有Pages OTA，保留rc103/rc108原字节及上一版本刷机/TF入口。本次指令取代本轮此前仅本地、不发布的限制。
 User2026-11-01 explicitly authorizes online publication: release Pico rc104/S31 rc109 with the tested merges, shelf/reader fixes and Pico ordinary-turn metadata separation. Synchronize GitHub Releases, kiikoread.com and existing Pages OTA; retain original rc103/rc108 bytes and previous-version web/TF entries. This supersedes the earlier local-only restriction for this release.
 

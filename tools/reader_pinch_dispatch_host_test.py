@@ -52,6 +52,9 @@ int main(void){
  puts("PASS: pinch start/end, release drain, I2C failure, media loss, overlays and navigation ownership; services are not skipped");
 }
 '''
+# AI键只属于S31，Pico视图不测试不存在的输入所有者。/ AI-key ownership is S31-only and absent from the selected Pico loop.
+if 'ai_owned' not in block:
+    unit=unit.replace('static bool ai_owned;\n','').replace(' ai_owned=true;pair();assert(!pinching);ai_owned=false;\n','')
 with tempfile.TemporaryDirectory() as tmp:
     p=Path(tmp);(p/'test.c').write_text(unit)
     subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',str(p/'test.c'),'-o',str(p/'test')],check=True)
