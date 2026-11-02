@@ -1,5 +1,10 @@
 # 版本变更 / Changelog
 
+## 本地测试 / Local test — Pico startup 2026-11-02
+
+- Pico首次书架扫描批量读取进度，复用已验证文件信息读取作者缓存，跳过已知非图书普通文件的多余查询；加入时间索引采用有界缓冲。保留现有顺序、进度、封面缓存格式与硬件参数，实际耗时待实机验证。
+  Batch Pico shelf progress, reuse validated file metadata for cached authors and avoid redundant stat calls on known non-book regular files. Buffer the first-added journal without changing order, progress, cache formats or hardware; device timing remains to be measured.
+
 ## 未发布 / Unreleased — 2026-11-02
 
 - 合并PR68的Pico水波纹擦白/补黑及53相支持，保留作者波形。修复全屏后中间点按不翻页；非全屏中间点按仍进入全屏，全屏按所选分区翻页。合并PR69插图双击缩放，并保留单击翻页、弹窗/工具栏优先权及取消边界。

@@ -51,6 +51,19 @@ typedef struct {
 /// 校验版本、完整路径与文件大小后恢复；失败不改 out。/ Restore after version, full-path and size validation; leave out unchanged on failure.
 bool book_progress_load(const char* path, uint32_t size, book_progress_t* out);
 
+enum { BOOK_PROGRESS_BATCH_MAX = 64 };
+typedef struct {
+    const char *path; ///< 已核验完整路径 / Validated full path
+    uint32_t file_size; ///< 目录扫描取得的字节数 / Size from directory scanning
+    book_progress_t progress; ///< 仅found时有效 / Valid only when found
+    bool found; ///< 完整路径、大小及记录校验均通过 / Path, size and record validation passed
+} book_progress_query_t;
+/// 最多64项共用一次只读NVS会话；打开失败返回false，旧进度与输出内容保持，found清零。
+/// Up to64 queries share one read-only NVS session; errors retain progress values and clear found.
+/// 命名空间不存在视为正常无进度，不重复逐本查询。/ A missing namespace is a successful empty result without repeated per-book queries.
+bool book_progress_load_batch(book_progress_query_t *queries, size_t count);
+
+
 /// 遍历回调：progress 只在回调期间有效，返回 false 提前结束。
 /// Visit callback: progress is valid only for the duration of the call; return false to stop early.
 typedef bool (*book_progress_visit_fn)(const char* path, const book_progress_t* progress, void* ctx);

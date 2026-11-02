@@ -67,6 +67,9 @@ static bool load_root(const char *root, book_added_item_t *items, size_t count, 
     if (status == 0 && (!S_ISREG(st.st_mode) || (st.st_size < 0 || st.st_size > ADDED_FILE_MAX))) return false;
     FILE *file = fopen(path, "rb");
     if (!file) { bool missing=errno==ENOENT; if(missing&&remaining)*remaining=ADDED_RECORD_MAX; return missing; }
+    // 顺序索引使用有界16KiB缓冲，减少TF的小块往返；分配失败沿用默认缓冲。
+    // Bound sequential journal buffering to16KiB; failed allocation retains stdio's default.
+    (void)setvbuf(file,NULL,_IOFBF,16384);
     bool valid = true;
     unsigned records = 0;
     for (;;) {
@@ -127,6 +130,7 @@ void book_added_load(book_added_item_t *items, size_t count) {
             if (!file) {
                 char path[ADDED_PATH_MAX];
                 if (!journal_path(roots[r], path) || !(file = fopen(path, "ab"))) break;
+                (void)setvbuf(file,NULL,_IOFBF,16384);
             }
             if (s_last_order == UINT64_MAX || !append(file, items[i].path, s_last_order + 1)) break;
             *items[i].order = ++s_last_order;--remaining[r];

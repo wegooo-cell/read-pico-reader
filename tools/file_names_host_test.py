@@ -70,8 +70,15 @@ static unsigned metadata_calls;static bool have_metadata;static const char *cach
 static int book_epub_metadata_cached(const char*p,char*t,size_t n,char*a,size_t z){(void)p;(void)n;++metadata_calls;t[0]=0;snprintf(a,z,"%s",have_metadata?cached_author:"");return have_metadata?0:-1;}
 typedef struct{int favorites,hidden;bool truncated;}shelf_backfill_t;
 '''+shelf_type+'\nstatic shelf_entry_t s_shelf[8];static int shelf_count,shelf_view;\n'
+if 'book_progress_load(' not in function('scan_shelf_dir',book):
+    unit=unit.replace('static bool book_progress_load(const char*p,uint32_t z,book_progress_t*out){(void)p;(void)z;(void)out;return false;}','')
+if 'book_epub_metadata_cached_for_file' in book.read_text():
+    unit+='static int book_epub_metadata_cached_for_file(const char*p,uint64_t size,int64_t modified,char*t,size_t n,char*a,size_t z){(void)size;(void)modified;return book_epub_metadata_cached(p,t,n,a,z); }\n'
+unit+='enum{EXPECTED_SCAN_STAT='+('4' if 'book_epub_metadata_cached_for_file' in function('scan_shelf_dir',book) else '7')+'};\n'
+unit+='static int shelf_stat_calls;static int shelf_stat(const char*p,struct stat*s){++shelf_stat_calls;return stat(p,s); }\n#define stat(p,s) shelf_stat(p,s)\n'
 for name in ['copy_text','clean_filename','scan_shelf_dir','shelf_backfill_visit']:
     unit+=function(name,book).replace('s_count','shelf_count').replace('s_view','shelf_view')+'\n'
+unit+='\n#undef stat\n'
 home=root/'main/apps/app_dashboard.c'
 unit+='typedef struct{char path[288],title[256],author[128];}home_book_t;\n'+function('copy_title',home)+'\n'+function('title_for',home)+'\n'
 unit+=r'''
@@ -87,9 +94,15 @@ int main(void){
  char longest[256];memset(longest,'x',250);strcpy(longest+250,".epub");
  char path[288];snprintf(path,sizeof(path),"%s/%s",folder,longest);FILE*f=fopen(path,"wb");assert(f);fclose(f);
  scan_folder(3);assert(s_count==4);
+ const char*ignored[]={"cover.png","notes.pdf","archive.zip"};
+ for(unsigned i=0;i<3;i++){snprintf(path,sizeof(path),"%s/%s",folder,ignored[i]);f=fopen(path,"wb");assert(f);fclose(f);}
  bool truncated=false,unreadable=false,skipped=false;app_ctx_t ctx={0};
  scan_shelf_dir(&ctx,folder,false,0,0,&truncated,&unreadable,&skipped);
  assert(shelf_count==4&&!truncated&&!unreadable&&!skipped&&metadata_calls==4);
+ assert(shelf_stat_calls==EXPECTED_SCAN_STAT);
+ for(unsigned i=0;i<3;i++){snprintf(path,sizeof(path),"%s/%s",folder,ignored[i]);assert(!unlink(path));}
+ printf("PASS:4 books plus3 non-books: %d directory stat calls (Pico fast path4, retained S31 path7)\n",shelf_stat_calls);
+
  for(int i=0;i<shelf_count;++i)if(strstr(s_shelf[i].path,"活山"))assert(!strcmp(s_shelf[i].name,"活山")&&!strcmp(s_shelf[i].author,"娜恩·谢泼德"));
  shelf_count=0;shelf_backfill_t backfill={0};book_progress_t progress={.file_size=7};
  snprintf(path,sizeof(path),"%s/%s",folder,names[0]);

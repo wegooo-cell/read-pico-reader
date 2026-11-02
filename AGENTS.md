@@ -10,6 +10,9 @@ Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Takin
 
 ## 当前工作：双板型本地整合 / Current work: local multi-board integration
 
+用户2026-11-02要求优化Pico开机首次书架加载：减少进度库会话、复用目录文件信息读取元数据缓存，并缓冲加入时间索引。保留递归目录、收藏/进度/排序/封面整组呈现和现有缓存格式；先本地验证，不更新官网或上传S31本地测试功能。
+User2026-11-02 requests faster Pico cold-start shelves: batch progress sessions, reuse directory metadata for cached EPUB metadata and buffer the first-added journal. Preserve recursion, favorites/progress/order, grouped covers and cache formats. Validate locally without publishing firmware or the S31 local features.
+
 用户2026-11-02授权直接合并PR68/69并修复点按冲突：非全屏中间单击进入全屏；全屏后按已选左右/上下模式翻页；插图双击缩放，单击保持原翻页/全屏意图，底部上滑退出全屏并显示工具栏。对应Pico波形和引擎基线按PR68更新，S31波形保持；仅合并源码，不发布固件，既有S31 TF/字体/Wi-Fi/保持浅睡本地测试改动继续不上传。
 User2026-11-02 authorizes merging PR68/69 and fixing tap conflicts: standard centre taps enter fullscreen; fullscreen taps follow the selected turn regions. Retain image double-tap zoom and deferred singles, plus bottom-swipe tools. Update the affected Pico baseline to PR68, retain S31 waveforms. Merge source only; preserve the unpublished S31 SD/font/Wi-Fi/keep-light changes locally.
 

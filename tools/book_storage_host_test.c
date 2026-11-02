@@ -14,16 +14,17 @@ static record_t records[8], *latest;
 static char last[BOOK_STORE_PATH_MAX];
 static bool has_last, has_sequence;
 static uint32_t sequence;
+static int read_open_failure,read_blob_failure,opens,closes;
 static int blob_failure, seq_failure, last_failure, erase_failure, commit_failure, commits;
 static record_t* record(const char* key, bool create) {
     for (int i=0;i<8;++i) if(records[i].len&&!strcmp(records[i].key,key))return &records[i];
     if(create)for(int i=0;i<8;++i)if(!records[i].len){strcpy(records[i].key,key);return &records[i];}
     return NULL;
 }
-esp_err_t nvs_open(const char* ns,int mode,nvs_handle_t* h){(void)mode;assert(!strcmp(ns,"rp_books"));*h=1;return ESP_OK;}
-void nvs_close(nvs_handle_t h){(void)h;}
+esp_err_t nvs_open(const char* ns,int mode,nvs_handle_t* h){(void)mode;assert(!strcmp(ns,"rp_books"));++opens;if(read_open_failure)return read_open_failure;*h=1;return ESP_OK;}
+void nvs_close(nvs_handle_t h){(void)h;++closes;}
 esp_err_t nvs_get_blob(nvs_handle_t h,const char* key,void* out,size_t* len){
-    (void)h;record_t*r=record(key,false);if(!r)return ESP_ERR_NVS_NOT_FOUND;
+    (void)h;if(read_blob_failure)return ESP_FAIL;record_t*r=record(key,false);if(!r)return ESP_ERR_NVS_NOT_FOUND;
     if(*len<r->len)return ESP_ERR_NVS_INVALID_LENGTH;
     memcpy(out,r->data,r->len);*len=r->len;return ESP_OK;
 }
@@ -94,6 +95,31 @@ int main(void){
     assert(!book_progress_load(sd,p.file_size,&q));
     assert(book_progress_save(sd,&p)==ESP_OK);
     assert(book_progress_load(sd,p.file_size,&q)&&q.last_open_s==1);
+    // 批量读取复用会话，保留大小/路径校验和失败输出。/ Batches reuse sessions while retaining path/size/failure behavior.
+    book_progress_query_t batch[BOOK_PROGRESS_BATCH_MAX];
+    memset(batch,0,sizeof(batch));
+    for(unsigned i=0;i<BOOK_PROGRESS_BATCH_MAX;i++){batch[i].path=sd;batch[i].file_size=p.file_size;}
+    int before_opens=opens,before_closes=closes;
+    assert(book_progress_load_batch(batch,BOOK_PROGRESS_BATCH_MAX));
+    assert(opens==before_opens+1&&closes==before_closes+1);
+    for(unsigned i=0;i<BOOK_PROGRESS_BATCH_MAX;i++)assert(batch[i].found&&batch[i].progress.last_open_s==1&&batch[i].progress.pct==p.pct);
+    before_opens=opens;
+    for(unsigned i=0;i<BOOK_PROGRESS_BATCH_MAX;i++)assert(book_progress_load(sd,p.file_size,&q));
+    assert(opens==before_opens+64);
+    batch[1].file_size++;batch[2].path=NULL;batch[3].path="/sdcard/missing.txt";
+    for(unsigned i=1;i<4;i++)batch[i].progress.file_size=99;
+    assert(book_progress_load_batch(batch,4)&&batch[0].found&&!batch[1].found&&!batch[2].found&&!batch[3].found);
+    for(unsigned i=1;i<4;i++)assert(batch[i].progress.file_size==99);
+    read_open_failure=ESP_FAIL;before_closes=closes;
+    assert(!book_progress_load_batch(batch,4)&&closes==before_closes&&!batch[0].found&&batch[1].progress.file_size==99);
+    read_open_failure=ESP_ERR_NVS_NOT_FOUND;
+    assert(book_progress_load_batch(batch,4)&&!batch[0].found&&closes==before_closes);
+    read_open_failure=0;read_blob_failure=1;
+    assert(book_progress_load_batch(batch,4)&&!batch[0].found&&batch[1].progress.file_size==99);
+    read_blob_failure=0;
+    assert(!book_progress_load_batch(NULL,1)&&!book_progress_load_batch(batch,0)&&!book_progress_load_batch(batch,BOOK_PROGRESS_BATCH_MAX+1));
+    puts("PASS:64 progress loads use1 NVS session instead of64; missing/stale/invalid queries and NVS open/read failures preserve outputs");
+
     assert(q.chapter==p.chapter&&q.byte_off==p.byte_off&&q.px==48&&q.pct==83);
     assert(!book_progress_load(sd,p.file_size+1,&q)&&q.file_size==p.file_size);
     p.last_open_s=0;assert(book_progress_save(sd,&p)==ESP_OK);

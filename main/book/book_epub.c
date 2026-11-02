@@ -2047,30 +2047,43 @@ esp_err_t book_epub_image(book_epub_t *book, size_t chapter, const char *src,
 uint32_t book_epub_total_bytes(const book_epub_t *book) { return book ? book->total : 0; }
 uint32_t book_epub_chapter_byte_offset(const book_epub_t *book, size_t i) { return book && i < book->count ? book->chapters[i].offset : 0; }
 
-esp_err_t book_epub_metadata_cached(const char *path, char *title, size_t title_cap,
-                                    char *author, size_t author_cap) {
-    if (!path || !title || !title_cap || !author || !author_cap) return ESP_ERR_INVALID_ARG;
-    title[0] = author[0] = 0;
-    char cache_path[112]; book_index_cache_header_t cache_key;
-    bool cacheable = book_index_cache_prepare(path, "epmeta", EPUB_META_CACHE_VERSION,
-                                              cache_path, sizeof(cache_path), &cache_key);
-    if (cacheable) {
-        FILE* cache = book_index_cache_open_read(cache_path, &cache_key);
-        if (cache) {
-            epub_meta_cache_payload_t payload;
-            bool ok = fread(&payload, 1, sizeof(payload), cache) == sizeof(payload) &&
-                fgetc(cache) == EOF && memchr(payload.title, 0, sizeof(payload.title)) &&
-                memchr(payload.author, 0, sizeof(payload.author));
-            fclose(cache);
-            if (ok) {
-                size_t tn = strlen(payload.title), an = strlen(payload.author);
-                if (tn >= title_cap || an >= author_cap) return ESP_ERR_INVALID_SIZE;
-                memcpy(title, payload.title, tn + 1); memcpy(author, payload.author, an + 1);
-                return ESP_OK;
-            }
+static esp_err_t metadata_cached_read(const char *cache_path, const book_index_cache_header_t *cache_key,
+                                       char *title, size_t title_cap, char *author, size_t author_cap) {
+    FILE* cache = book_index_cache_open_read(cache_path, cache_key);
+    if (cache) {
+        epub_meta_cache_payload_t payload;
+        bool ok = fread(&payload, 1, sizeof(payload), cache) == sizeof(payload) &&
+            fgetc(cache) == EOF && memchr(payload.title, 0, sizeof(payload.title)) &&
+            memchr(payload.author, 0, sizeof(payload.author));
+        fclose(cache);
+        if (ok) {
+            size_t tn = strlen(payload.title), an = strlen(payload.author);
+            if (tn >= title_cap || an >= author_cap) return ESP_ERR_INVALID_SIZE;
+            memcpy(title, payload.title, tn + 1); memcpy(author, payload.author, an + 1);
+            return ESP_OK;
         }
     }
     return ESP_ERR_NOT_FOUND;
+}
+
+esp_err_t book_epub_metadata_cached(const char *path, char *title, size_t title_cap,
+                                    char *author, size_t author_cap) {
+    if (!path || !title || !title_cap || !author || !author_cap) return ESP_ERR_INVALID_ARG;
+    title[0]=author[0]=0;
+    char cache_path[112]; book_index_cache_header_t key;
+    if (!book_index_cache_prepare(path,"epmeta",EPUB_META_CACHE_VERSION,cache_path,sizeof(cache_path),&key))
+        return ESP_ERR_NOT_FOUND;
+    return metadata_cached_read(cache_path,&key,title,title_cap,author,author_cap);
+}
+
+esp_err_t book_epub_metadata_cached_for_file(const char *path, uint64_t size, int64_t modified,
+                                             char *title, size_t title_cap, char *author, size_t author_cap) {
+    if (!path || !title || !title_cap || !author || !author_cap) return ESP_ERR_INVALID_ARG;
+    title[0]=author[0]=0;
+    char cache_path[112]; book_index_cache_header_t key;
+    if (!book_index_cache_prepare_file(path,"epmeta",EPUB_META_CACHE_VERSION,size,modified,cache_path,sizeof(cache_path),&key))
+        return ESP_ERR_NOT_FOUND;
+    return metadata_cached_read(cache_path,&key,title,title_cap,author,author_cap);
 }
 
 // 首页/书架封面入口使用受检 PSRAM 工作区，不能在嵌套 ZIP 调用上叠加大块栈数组。

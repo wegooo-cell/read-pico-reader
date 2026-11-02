@@ -21,21 +21,26 @@ static uint64_t cache_hash(const char* source, const char* tag) {
     return hash;
 }
 
-bool book_index_cache_prepare(const char* source, const char* tag, uint32_t version,
-                              char* path, size_t cap, book_index_cache_header_t* header) {
-    if (!source || strncmp(source, "/sdcard/", 8) || !tag || !*tag || !path || !cap || !header)
+bool book_index_cache_prepare_file(const char* source, const char* tag, uint32_t version,
+                                   uint64_t size, int64_t modified, char* path, size_t cap,
+                                   book_index_cache_header_t* header) {
+    if (!source || strncmp(source, "/sdcard/", 8) || !tag || !*tag || !path || !cap || !header || size>UINT32_MAX)
         return false;
-    struct stat st;
-    if (stat(source, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size < 0 ||
-        (uint64_t)st.st_size > UINT32_MAX) return false;
     uint64_t hash = cache_hash(source, tag);
     *header = (book_index_cache_header_t){
-        .magic = CACHE_MAGIC, .version = version, .source_size = (uint32_t)st.st_size,
-        .modified = (int64_t)st.st_mtime, .path_hash = hash,
+        .magic=CACHE_MAGIC, .version=version, .source_size=(uint32_t)size,
+        .modified=modified, .path_hash=hash,
     };
-    int n = snprintf(path, cap, "/sdcard/.readpico/index/%016llx-%s.bin",
-                     (unsigned long long)hash, tag);
-    return n > 0 && (size_t)n < cap;
+    int n=snprintf(path,cap,"/sdcard/.readpico/index/%016llx-%s.bin",(unsigned long long)hash,tag);
+    return n>0 && (size_t)n<cap;
+}
+
+bool book_index_cache_prepare(const char* source, const char* tag, uint32_t version,
+                              char* path, size_t cap, book_index_cache_header_t* header) {
+    if (!source || strncmp(source,"/sdcard/",8) || !tag || !*tag || !path || !cap || !header) return false;
+    struct stat st;
+    if (stat(source,&st) || !S_ISREG(st.st_mode) || st.st_size<0) return false;
+    return book_index_cache_prepare_file(source,tag,version,(uint64_t)st.st_size,(int64_t)st.st_mtime,path,cap,header);
 }
 
 FILE* book_index_cache_open_read(const char* path, const book_index_cache_header_t* expected) {

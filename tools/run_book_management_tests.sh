@@ -29,6 +29,7 @@ cc -std=gnu11 -Wall -Wextra -Werror -fsanitize=address,undefined tools/book_adde
 build/book-tests/added
 python3 tools/file_names_host_test.py
 python3 tools/book_ui_host_test.py
+python3 tools/epub_metadata_cache_host_test.py
 python3 tools/file_browser_names_host_test.py
 python3 tools/reader_fullscreen_host_test.py
 python3 tools/reader_controls_host_test.py

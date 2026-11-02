@@ -22,6 +22,11 @@ typedef struct {
 /// 仅为 /sdcard 下的普通文件生成缓存键。/ Build a cache key only for regular files under /sdcard.
 bool book_index_cache_prepare(const char* source, const char* tag, uint32_t version,
                               char* path, size_t cap, book_index_cache_header_t* header);
+/// 调用方已stat核验的普通文件可复用大小/修改时间，避免重复TF目录查询；缓存键与prepare一致。
+/// Reuse a caller-stat-validated regular file's size/mtime without another SD lookup; keys match prepare.
+bool book_index_cache_prepare_file(const char* source, const char* tag, uint32_t version,
+                                   uint64_t size, int64_t modified, char* path, size_t cap,
+                                   book_index_cache_header_t* header);
 /// 校验文件头并返回已定位到载荷的只读文件。/ Validate the header and return a stream positioned at the payload.
 FILE* book_index_cache_open_read(const char* path, const book_index_cache_header_t* expected);
 /// 创建临时文件并写入文件头。/ Create a temporary file and write its header.

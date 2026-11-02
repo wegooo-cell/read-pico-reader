@@ -60,6 +60,11 @@ esp_err_t book_epub_metadata(const char *path, char *title, size_t title_cap, ch
 /// Read an existing metadata cache only; the lock path must not open or parse an EPUB.
 esp_err_t book_epub_metadata_cached(const char *path, char *title, size_t title_cap,
                                     char *author, size_t author_cap);
+/// 目录已核验普通文件时复用大小/时间读取同一元数据缓存，不重新stat或解析EPUB。
+/// Reuse directory-validated size/mtime for the same metadata cache without another stat or EPUB parse.
+esp_err_t book_epub_metadata_cached_for_file(const char *path, uint64_t size, int64_t modified,
+                                             char *title, size_t title_cap, char *author, size_t author_cap);
+
 
 /// PNG先读32字节，JPEG按需扩头；SVG/晚帧头保留有界完整回退。
 /// Probe PNG with32 bytes and grow JPEG headers on demand; retain bounded full fallback for SVG/late frames.
