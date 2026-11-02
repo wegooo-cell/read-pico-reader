@@ -180,6 +180,7 @@ static const ui_locale_pair_t s_pairs[] = {
     {"中键长按：手动全刷","Hold middle: Full refresh"},
     {"中键长按：返回主页","Hold middle: Home"},
     {"中间区域双击切换全屏 · 始终可用","Tap centre to switch immersion · Always available"},
+    {"中间单击全屏 · 全屏按区域翻页 · 上滑返回","Tap centre for fullscreen · Tap regions to turn · Swipe up for tools"},
     {"中间单击切换沉浸 · 始终可用","Tap centre to switch immersion · Always available"},
     {"中间单击进入全屏 · 上滑返回","Tap centre for fullscreen; swipe up to return"},
     {"中间单击进入全屏，底部上滑返回并显示工具栏","Tap centre for fullscreen; swipe up for tools"},

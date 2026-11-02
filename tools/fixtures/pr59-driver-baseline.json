@@ -220,10 +220,10 @@
   },
   "approved_overrides": {
     "boards/pico/src/main/display_reader_waveform.c": {
-      "sha256": "e535449d9d50badfd32b2d0b2dfc5cfab46af45a333067a4df6f919188115895",
-      "pull_request": 62,
-      "source_commit": "02e0982c0442b5a8e208ef1c847fe5de051e4470",
-      "reason": "User2026-11-01 explicitly approved PR62 as authored, superseding the previous derived-waveform pin for this file."
+      "sha256": "231de8d85f6b6d9d7575ec37f18021c1b9d058ecd584ddbb18cdbf5fb2f10d19",
+      "pull_request": 68,
+      "source_commit": "cd9f1a598a97a985bcda57dc47d49e118c4b1083",
+      "reason": "User2026-11-02 explicitly approved merging PR68 as authored; retain its Pico ripple erase/redrive phases and64-phase engine capacity."
     },
     "boards/metalio47/src/main/display_reader_waveform.c": {
       "sha256": "72429e4b6a613243753a043379e2449e773999353fd780836035a6f7516f76ab",
@@ -258,6 +258,12 @@
     "components/read_pico/include/read_pico_sd.h": {
       "sha256": "08233e4107469c665c5f2feec22ce78c3fdb6f51bc33b62c56caed977d95dccb",
       "reason": "User2026-11-02: S31 wake/font and keep-light policy, bounded Wi-Fi reception and read-only SD profile diagnostics; preserve native pins, power sequence, waveforms and SD fallback."
+    },
+    "boards/pico/src/components/e0470_page_turn/e0470_page_turn.c": {
+      "sha256": "fcc91f574f59abcceab2f879f3d8992eb306c251a0933a974438e579ba39c114",
+      "pull_request": 68,
+      "source_commit": "cd9f1a598a97a985bcda57dc47d49e118c4b1083",
+      "reason": "User2026-11-02 explicitly approved merging PR68 as authored; retain its Pico ripple erase/redrive phases and64-phase engine capacity."
     }
   }
 }

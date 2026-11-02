@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0
- * 中文：正文两侧单击翻页、中间单击全屏；插图两侧保留双击缩放；页面负责取消离页/锁屏/滑动后的等待。
- * English: Side taps turn, centre taps enter fullscreen and image side double taps zoom; pages cancel pending taps on exit, lock or swipe.
+ * 中文：全屏正文按分区翻页，非全屏中间由页面进入全屏；插图任意位置保留双击，页面取消离页/锁屏/滑动后的等待。
+ * English: Fullscreen taps follow turn regions; the page owns standard centre fullscreen entry and image double taps, cancelling pending taps on exit, lock or swipe.
  */
 #pragma once
 #include <stdbool.h>
@@ -9,6 +9,7 @@
 
 #define BOOK_READER_DOUBLE_MS 340
 #define BOOK_READER_TAP_FULLSCREEN 2
+#define BOOK_READER_TAP_ENTER_FULLSCREEN 3
 
 typedef struct {
     bool pending;
@@ -33,7 +34,6 @@ static inline int book_reader_tap_feed(book_reader_tap_t *tap, EpdRect body,
                                       int x, int y, bool vertical, bool rtl, int64_t now_ms) {
     (void)now_ms;
     tap->pending=false;
-    if(book_reader_center(body,x,y))return BOOK_READER_TAP_FULLSCREEN;
     return book_reader_tap_direction(body,x,y,vertical,rtl);
 }
 static inline int book_reader_tap_tick(book_reader_tap_t *tap, int64_t now_ms, bool touching) {
@@ -48,7 +48,6 @@ static inline int book_reader_tap_tick(book_reader_tap_t *tap, int64_t now_ms, b
 /// the double-tap window expires before it turns the page.
 static inline int book_reader_tap_feed_any(book_reader_tap_t *tap, EpdRect body,
                                           int x, int y, bool vertical, bool rtl, int64_t now_ms) {
-    if(book_reader_center(body,x,y)){tap->pending=false;return BOOK_READER_TAP_FULLSCREEN;}
     const int direction = book_reader_tap_direction(body, x, y, vertical, rtl);
     if (!direction) { tap->pending = false; return 0; }
     const int dx = x - tap->x, dy = y - tap->y;

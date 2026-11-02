@@ -1,5 +1,10 @@
 # 版本变更 / Changelog
 
+## 未发布 / Unreleased — 2026-11-02
+
+- 合并PR68的Pico水波纹擦白/补黑及53相支持，保留作者波形。修复全屏后中间点按不翻页；非全屏中间点按仍进入全屏，全屏按所选分区翻页。合并PR69插图双击缩放，并保留单击翻页、弹窗/工具栏优先权及取消边界。
+  Merge PR68's authored Pico ripple erase/redrive and53-phase support. Standard centre taps still enter fullscreen; fullscreen centre taps follow the chosen turn regions. Integrate PR69 image double-tap zoom while retaining single turns, modal/tool priority and cancellation boundaries.
+
 ## 本地测试 / Local test — 2026-11-02
 
 - S31唤醒后保留待恢复字体，解析错误也可退避重试；新增“保持浅睡”，锁屏不自动关机，手动关机保持。传书采用有界四槽队列、64KiB接收块及接收窗口配套乱序预算，连接时恢复非省电策略；速度需实机对照。
@@ -47,6 +52,10 @@ Retain original Pico rc103/S31 rc108 web/TF entries, kiikoread.com as the sole w
 
 - EPUB 脚注改为弹窗：点正文注号在原处附近弹卡片显示注释，不再跳到章末；注号图标按书内 CSS 行内排进句子，卡片字号比正文小 5px 并跟随当前阅读字体。
   EPUB footnotes become a popup card anchored near the marker instead of jumping to the chapter end; inline 1em markers follow the book CSS, and the card uses the reading font at body size minus 5 px.
+
+
+- Pico 阅读水波纹翻页补上残影清理：在定稿保持前加入 12 相全屏擦白和 4 相重推黑，和普通翻页一致，减少翻页后的淡墨与残影。
+  Pico water-ripple page turns now run the same ghost cleanup as ordinary turns: twelve whole-panel erase phases plus four black re-drive phases before the settle holds.
 
 
 - 阅读默认非全屏，顶部恢复时间、签名和电量，章节与进度放在工具栏上方；进入即显示工具栏。中间单击只进入全屏，底部上滑退出全屏并显示工具栏，保留阅读锚点及原全屏样式。
@@ -111,6 +120,10 @@ Retain original Pico rc103/S31 rc108 web/TF entries, kiikoread.com as the sole w
 
 
 ## 未发布 / Unreleased
+
+- 恢复插图双击缩放：双击正文/整页插图放大，再双击退出；中间空白单击仍切换全屏，翻页判定不变。
+  Restore double-tap illustration zoom: double tap zooms and a second double tap exits; centre blank taps keep the fullscreen toggle and page-turn taps are unchanged.
+
 
 - S31本地残影优化：主页面切换涉及书架补八相变白，其余补六相，保留原灰阶、固定底栏和两相释放；设置/蓝牙列表使用黑白装饰、灰阶字缘/头像，列表滚动采用本机完整48相加八相擦白及两相释放，一次区域输出，不在松手后补刷。列表优先清残影、反馈会比原黑白快刷慢，光学效果待实屏确认；阅读模式保持独立。
   S31 local ghosting work: root changes add eight changed-white phases involving the shelf or six otherwise, retaining native grays, navigation and two release holds. Settings/BLE lists use BW decoration and gray glyphs/avatars; scrolling uses native48 plus eight whites/two releases in one regional pass without release-time output. Lists favor cleanup over prior BW latency; optical acceptance remains pending and reading modes stay independent.

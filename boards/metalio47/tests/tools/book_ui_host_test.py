@@ -492,10 +492,10 @@ int main(void) {
         assert(book_reader_tap_direction(body,body.x,body.y,false,true)==1);
         assert(book_reader_tap_direction(body,body.x+body.width-1,body.y,false,true)==-1);
         book_reader_tap_t tap={0};
-        assert(book_reader_tap_feed(&tap,body,342,600,false,false,1000)==BOOK_READER_TAP_FULLSCREEN);
-        assert(book_reader_tap_feed(&tap,body,340,600,true,false,1250)==BOOK_READER_TAP_FULLSCREEN);
+        assert(book_reader_tap_feed(&tap,body,342,600,false,false,1000)==book_reader_tap_direction(body,342,600,false,false));
+        assert(book_reader_tap_feed(&tap,body,340,600,true,false,1250)==book_reader_tap_direction(body,340,600,true,false));
         assert(!book_reader_tap_tick(&tap,2000,false));
-        assert(book_reader_tap_feed(&tap,body,342,600,true,false,3000)==BOOK_READER_TAP_FULLSCREEN);
+        assert(book_reader_tap_feed(&tap,body,342,600,true,false,3000)==book_reader_tap_direction(body,342,600,true,false));
         assert(!book_reader_tap_tick(&tap,3341,false));
         assert(!book_reader_tap_tick(&tap,4000,false));
     }

@@ -8,3 +8,5 @@ cc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined \
     tools/water_turn_host_test.c components/e0470_page_turn/e0470_page_turn.c \
     -o build/book-tests/water-turn
 build/book-tests/water-turn
+
+python3 tools/water_turn_capacity_host_test.py

@@ -10,6 +10,9 @@ Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Takin
 
 ## 当前工作：双板型本地整合 / Current work: local multi-board integration
 
+用户2026-11-02授权直接合并PR68/69并修复点按冲突：非全屏中间单击进入全屏；全屏后按已选左右/上下模式翻页；插图双击缩放，单击保持原翻页/全屏意图，底部上滑退出全屏并显示工具栏。对应Pico波形和引擎基线按PR68更新，S31波形保持；仅合并源码，不发布固件，既有S31 TF/字体/Wi-Fi/保持浅睡本地测试改动继续不上传。
+User2026-11-02 authorizes merging PR68/69 and fixing tap conflicts: standard centre taps enter fullscreen; fullscreen taps follow the selected turn regions. Retain image double-tap zoom and deferred singles, plus bottom-swipe tools. Update the affected Pico baseline to PR68, retain S31 waveforms. Merge source only; preserve the unpublished S31 SD/font/Wi-Fi/keep-light changes locally.
+
 用户2026-11-02追加授权：修复官网rc109的S31锁屏唤醒字库回退，优化路由器传书约50KB/s的反馈，并在关机睡眠增加“保持浅睡”，锁屏不自动断电；手动关机保留。继续只交付本地rc109，不推送官网；对应字体恢复、S31锁屏策略和网络缓冲基线按本轮明确指令更新，保留现有SD降频/自动恢复、原始波形及硬件供电顺序。
 User2026-11-02 additionally authorizes S31 wake-font recovery, router transfer optimization for reported50KB/s, and a keep-light lock policy without automatic power-off. Manual off remains available. Deliver local rc109 only; update the affected font, lock-policy and network-buffer baselines while preserving SD fallback/recovery, raw waveforms and hardware sequencing.
 

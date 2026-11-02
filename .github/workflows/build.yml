@@ -179,6 +179,7 @@ jobs:
           python3 tools/ui_locale_host_test.py
           python3 tools/reading_settings_host_test.py
           python3 tools/reader_controls_host_test.py
+          python3 tools/reader_tap_dispatch_host_test.py
           python3 tools/reader_ui_scale_host_test.py
           python3 tools/reader_refresh_release_host_test.py
           python3 tools/reader_fullscreen_host_test.py

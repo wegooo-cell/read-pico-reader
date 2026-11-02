@@ -62,6 +62,7 @@ static bool tools_swipe(app_ctx_t *ctx,const ui_gesture_event_t *ev){
 '''
 
 unit+=function('book_reader_center',ROOT/'main/book/book_reader_input.h')+'\n'
+unit+='static bool reader_page_image_hit(int x,int y){(void)x;(void)y;return false;}\n'
 unit+='static EpdRect body_rect(void){return(EpdRect){0,176,684,872};}\n'
 unit+='static int s_footnote_note=-1,footnote_candidate=-1;static EpdRect s_footnote_marker;\nstatic int reader_footnote_hit(int x,int y,EpdRect *r){(void)x;(void)y;(void)r;return footnote_candidate;}\n'
 center=function('action_at',book)
@@ -114,7 +115,7 @@ int main(void){
   reset(&ctx);s_reader_panel=panel;
   assert(center_action(&ctx,342,500)==APP_REDRAW_FULL&&s_reader_fullscreen&&mode_changes==1&&!s_reader_tap.pending);
   s_reader_tap.pending=true;
-  assert(center_action(&ctx,342,500)==APP_REDRAW_NONE&&s_reader_fullscreen&&mode_changes==1&&!s_reader_tap.pending);
+  assert(center_action(&ctx,342,500)==APP_REDRAW_NONE&&s_reader_fullscreen&&mode_changes==1&&s_reader_tap.pending);
  }
  // 工具栏正文注号可开关卡片，其他面板与确认框保有点击优先权。/ Body markers open/close cards while modal panels retain tap priority.
  for(int panel=READER_PANEL_NONE;panel<=READER_PANEL_BACKGROUND_PREVIEW;++panel){
