@@ -84,6 +84,8 @@ bash tools/run_water_turn_host_test.sh
 python3 tools/test_lcd_frame_lifecycle.py
 python3 tools/test_sd_media_guard.py
 python3 tools/metalio_sd_access_host_test.py
+python3 tools/metalio_font_recovery_host_test.py
+python3 tools/metalio_keep_light_host_test.py
 
 python3 tools/test_transfer_netif.py
 python3 tools/test_pmu_battery.py

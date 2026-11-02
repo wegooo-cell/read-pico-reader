@@ -117,7 +117,7 @@ CONFIG_LWIP_TCP_RECVMBOX_SIZE=64
 CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64
 
 # Bounded out-of-order reception and selective ACKs avoid whole-window retransmission.
-CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS=12
+CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS=48
 CONFIG_LWIP_TCP_SACK_OUT=y
 
 # 原厂S31固定聚合/报文预算。/ Vendor S31 aggregation and packet budgets.

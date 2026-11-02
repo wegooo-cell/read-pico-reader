@@ -10,6 +10,9 @@ Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Takin
 
 ## 当前工作：双板型本地整合 / Current work: local multi-board integration
 
+用户2026-11-02追加授权：修复官网rc109的S31锁屏唤醒字库回退，优化路由器传书约50KB/s的反馈，并在关机睡眠增加“保持浅睡”，锁屏不自动断电；手动关机保留。继续只交付本地rc109，不推送官网；对应字体恢复、S31锁屏策略和网络缓冲基线按本轮明确指令更新，保留现有SD降频/自动恢复、原始波形及硬件供电顺序。
+User2026-11-02 additionally authorizes S31 wake-font recovery, router transfer optimization for reported50KB/s, and a keep-light lock policy without automatic power-off. Manual off remains available. Deliver local rc109 only; update the affected font, lock-policy and network-buffer baselines while preserving SD fallback/recovery, raw waveforms and hardware sequencing.
+
 用户2026-11-02授权先优化S31统一TF访问/卸载保护与普通挂载/USB共用初始化，保留现有降频、单线及自动恢复；只交付rc109本地刷机页，不发布官网。此指令仅放开对应SD驱动/CMake基线，原始波形、引脚及供电时序仍保留。
 User2026-11-02 authorizes S31 unified SD access/unmount protection and shared VFS/USB initialization, retaining fallback and automatic recovery. Deliver a local rc109 flasher only. This narrowly supersedes the affected SD/CMake baseline, preserving raw waveforms, pins and power sequencing.
 

@@ -21,6 +21,6 @@ bool app_font_activate_system(void);
 bool app_font_activate_reading(void);
 bool app_font_retry_active(void);
 #if KIIKO_BOARD_METALIO47
-/// Clear transient file rejection after manual remount; abnormal-boot protection still applies.
+/// 挂卡或唤醒IO验证成功后清除旧字体拒绝；异常启动仍受保护。/ Clear old rejection after verified mount/wake IO; retain abnormal-boot protection.
 bool app_font_recover_media(void);
 #endif

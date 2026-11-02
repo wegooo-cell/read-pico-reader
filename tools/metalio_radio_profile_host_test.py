@@ -36,12 +36,18 @@ int main(void){
  }
  for(int n=1;n<=16;++n){wifi_init_config_t init={2,64,n,1,0};transfer_s31_bulk_receive_config(&init,true);
 #ifdef CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP
-  assert(init.static_rx_buf_num==(n<=2?2:16)&&init.rx_ba_win==(n<=2?n:16));
+  assert(init.static_rx_buf_num==16&&init.rx_ba_win==16);
 #else
   assert(init.static_rx_buf_num==(n<2?2:n));
 #endif
  }
- wifi_init_config_t variants[]={{16,64,12,1,0},{6,8,12,1,0},{6,64,32,1,0},{6,64,0,1,0}};
+ wifi_init_config_t already={16,64,12,1,0};transfer_s31_bulk_receive_config(&already,true);
+#ifdef CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP
+ assert(already.static_rx_buf_num==16&&already.rx_ba_win==16);
+#else
+ assert(already.static_rx_buf_num==16&&already.rx_ba_win==12);
+#endif
+ wifi_init_config_t variants[]={{6,8,12,1,0},{6,64,32,1,0},{6,64,0,1,0}};
  for(unsigned i=0;i<sizeof(variants)/sizeof(variants[0]);++i){wifi_init_config_t old=variants[i];transfer_s31_bulk_receive_config(&variants[i],true);assert(!memcmp(&old,&variants[i],sizeof(old)));}
  transfer_s31_bulk_receive_config(NULL,true);
  for(selected=0;selected<2;++selected)for(fail=0;fail<4;++fail){calls=0;int err=transfer_s31_radio_profile(selected);assert(err==(fail?-7:0));assert(calls==(fail?fail:3));}puts("PASS: bounded bulk RX/BA, PSRAM16 minimum, normal STA/disabled AMPDU/unsupported budgets unchanged; STA/AP PS_NONE, BGN and12dBm unchanged; failures propagate");}

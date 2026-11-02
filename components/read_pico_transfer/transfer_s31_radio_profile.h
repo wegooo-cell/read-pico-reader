@@ -19,13 +19,14 @@ static inline esp_err_t transfer_s31_radio_profile(wifi_interface_t interface) {
 // SDK: cover the BA window with static RX buffers; bulk-only, capped at16, retaining normal STA/BLE memory.
 static inline void transfer_s31_bulk_receive_config(wifi_init_config_t *init, bool bulk) {
     if (!init || !bulk || !init->ampdu_rx_enable || init->rx_ba_win <= 0 ||
-        init->rx_ba_win > 16 || init->static_rx_buf_num >= init->rx_ba_win ||
+        init->rx_ba_win > 16 ||
         (init->dynamic_rx_buf_num && init->dynamic_rx_buf_num < init->rx_ba_win)) return;
+    int window=init->rx_ba_win;
 #ifdef CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP
-    // The S31 SDK recommends at least16 BA slots when Wi-Fi uses PSRAM.
-    // Bound this experiment to bulk transfer and preserve smaller dynamic budgets.
-    if (!init->dynamic_rx_buf_num || init->dynamic_rx_buf_num >= 16)
-        init->rx_ba_win = 16;
+    // 独占传书统一到SDK建议的16槽；原静态池已经够大也不能跳过BA设置。
+    // Bulk PSRAM reception uses the SDK's16-slot recommendation even when the static pool was already large.
+    if (!init->dynamic_rx_buf_num || init->dynamic_rx_buf_num >= 16)window=16;
 #endif
-    init->static_rx_buf_num = init->rx_ba_win;
+    init->rx_ba_win=window;
+    if(init->static_rx_buf_num<window)init->static_rx_buf_num=window;
 }

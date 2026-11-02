@@ -102,6 +102,11 @@ static ui_online_fonts_t s_online_fonts;
 #include "soc/rtc_cntl_reg.h"
 #endif
 
+#if KIIKO_BOARD_METALIO47
+static EpdRect power_sleep_choice_rect(int index) {
+    return index>=0 && index<3?(EpdRect){36,300+index*154,612,132}:(EpdRect){0};
+}
+#endif
 static void fit_value(char *value, int width);
 static void settings_card(uint8_t *fb, EpdRect rect, int radius, uint8_t fill, uint8_t edge);
 static char s_notice[96];
@@ -1444,21 +1449,21 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
     if (s_page == SETTINGS_POWER_SLEEP) {
         back_header(fb, "关机睡眠");
         section(fb, 248, "选择短按与自动锁屏后的省电方式");
-        const char *labels[] = {"浅睡10分钟后关机", "彻底断电"};
+        const char *labels[] = {"浅睡10分钟后关机", "彻底断电", "保持浅睡"};
         const char *details[] = {"浅睡可唤醒；关机后重新开机",
-                                 "长按电源键开机"};
-        for (int i = 0; i < 2; ++i) {
-            EpdRect box = {36, 300 + i * 154, 612, 132};
-            bool active = app_settings_staged_shutdown() == (i == 0);
+                                 "长按电源键开机", "锁屏后保持浅睡，不自动关机"};
+        for (int i = 0; i < 3; ++i) {
+            EpdRect box = power_sleep_choice_rect(i);
+            bool active = app_settings_lock_sleep_mode() == (app_lock_sleep_mode_t)i;
             settings_card(fb, box, 22, active ? 0xd0 : UI_GRAY_WHITE, 0x70);
             ui_text(fb, 64, box.y + 23, 24, labels[i], EPD_DRAW_ALIGN_LEFT, false);
             ui_text(fb, 64, box.y + 79, 20, details[i], EPD_DRAW_ALIGN_LEFT, false);
             if (active) epd_fill_circle(609, box.y + 66, 8, UI_GRAY_BLACK, fb);
         }
-        ui_text(fb, 54, 664, 18, "关机前保存进度并同步 RTC", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 54, 708, 18, "USB 连接时暂缓休眠", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 54, 810, 18, "电源菜单滑动关机始终直接断电", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 54, 866, 20, "设置了锁屏密码时仍需验证", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(fb, 54, 788, 18, "关机前保存进度并同步 RTC", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(fb, 54, 830, 18, "USB 连接时暂缓休眠", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(fb, 54, 882, 18, "电源菜单滑动关机始终直接断电", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(fb, 54, 928, 20, "设置了锁屏密码时仍需验证", EPD_DRAW_ALIGN_LEFT, false);
         settings_navigation(fb);
         return;
     }
@@ -1728,7 +1733,7 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
     const char *display_values[]={font_name,contrast,
         app_settings_main_refresh_mode()==APP_MAIN_REFRESH_FAST?"快刷":app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER?"水波纹":"普通",
 #if KIIKO_BOARD_METALIO47
-        app_settings_home_full_refresh()?"开启":"关闭",idle,"",app_settings_staged_shutdown()?"浅睡后关机":"彻底断电","亮度与色温",app_setup_english()?"English":"简体中文"};
+        app_settings_home_full_refresh()?"开启":"关闭",idle,"",app_settings_keep_light_sleep()?"保持浅睡":app_settings_staged_shutdown()?"浅睡后关机":"彻底断电","亮度与色温",app_setup_english()?"English":"简体中文"};
     const int display_icons[]={2,7,15,11,14,SETTINGS_UNLOCK_ICON,9,7,2};
 #else
         app_settings_home_full_refresh()?"开启":"关闭",idle,"",app_settings_staged_shutdown()?"先浅后深":"彻底断电",app_setup_english()?"English":"简体中文"};
@@ -2605,9 +2610,9 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     }
 #if KIIKO_BOARD_METALIO47
     if (s_page == SETTINGS_POWER_SLEEP) {
-        for (int i = 0; i < 2; ++i) {
-            if (ui_rect_hit((EpdRect){36, 300 + i * 154, 612, 132}, ev->x0, ev->y0)) {
-                app_settings_set_staged_shutdown(i == 0);
+        for (int i = 0; i < 3; ++i) {
+            if (ui_rect_hit(power_sleep_choice_rect(i), ev->x0, ev->y0)) {
+                (void)app_settings_set_lock_sleep_mode((app_lock_sleep_mode_t)i);
                 return APP_REDRAW_PAGE;
             }
         }

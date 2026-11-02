@@ -34,6 +34,11 @@ esp_err_t app_settings_set_ai_short(app_ai_action_t action);
 void app_settings_set_sleep_mode(app_sleep_mode_t mode);
 const char* app_sleep_mode_name(app_sleep_mode_t mode);
 #if KIIKO_BOARD_METALIO47
+typedef enum {APP_LOCK_SLEEP_TIMED, APP_LOCK_SLEEP_OFF, APP_LOCK_SLEEP_KEEP_LIGHT} app_lock_sleep_mode_t;
+/// S31锁屏策略；保持浅睡不设置自动断电截止，手动关机独立。/ S31 lock policy; keep-light has no automatic power-off deadline, independent of manual off.
+app_lock_sleep_mode_t app_settings_lock_sleep_mode(void);
+esp_err_t app_settings_set_lock_sleep_mode(app_lock_sleep_mode_t mode);
+bool app_settings_keep_light_sleep(void);
 /// S31关机：默认浅睡十分钟后同步RTC并硬关机；false立即断电，保存后生效。/ S31 syncs RTC and powers off after ten minutes of light sleep; false powers off immediately, effective after saving.
 #else
 /// 电源菜单“关机”：false 为彻底断电，true 为先浅睡 10 分钟再由 PMU 软睡断电。

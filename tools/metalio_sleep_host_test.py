@@ -35,7 +35,7 @@ static int pico_boot_mark_frame_cached(void){++cached_marks;return cached_error;
 static unsigned light_calls,deep_calls;
 static int64_t clock_us,light_step;
 static bool deep_success;static jmp_buf deep_jump;
-static bool staged=true;
+static bool staged=true,keep_light;
 static bool light_key,light_fail;
 static int64_t recover_at;
 static int64_t esp_timer_get_time(void);
@@ -57,6 +57,7 @@ static int frontlight_calls,motion_reads,sensor_on,sensor_off,reconnects,schedul
 static unsigned last_wake;
 static bool pickup,usb,powered,stale_motion;
 static bool app_settings_staged_shutdown(void){return staged;}
+static bool app_settings_keep_light_sleep(void){return keep_light;}
 static int64_t esp_timer_get_time(void){return clock_us;}
 static bool app_settings_pickup_wake(void){return pickup;}
 static int sc7a20h_power_up(void *a){assert(a);sensor_on++;return ESP_OK;}
@@ -75,7 +76,7 @@ static void app_settings_set_last_wake(unsigned source){last_wake=source;}
 unit+='static void lock_resume_service(void){}\n'
 unit+=function('app_light_sleep_wait_timed',root/'main/sleep.c')
 unit+=r'''
-static void reset(void){staged=true;hint_window=false;s_lock_hint.pending_at=s_lock_hint.until=0;clock_us=0;recover_at=key_at=plug_at=unplug_at=-1;frontlight_calls=motion_reads=sensor_on=sensor_off=reconnects=scheduler_yields=0;pickup=usb=powered=stale_motion=false;light_calls=deep_calls=cached_marks=0;light_step=0;deep_success=false;cached_error=0;pin=s_lock_frame_cached=s_lock_io_pending=false;light_key=light_fail=s_lock_deep_ready=false;s_lock_sleep_touch=NULL;}
+static void reset(void){staged=true;keep_light=false;hint_window=false;s_lock_hint.pending_at=s_lock_hint.until=0;clock_us=0;recover_at=key_at=plug_at=unplug_at=-1;frontlight_calls=motion_reads=sensor_on=sensor_off=reconnects=scheduler_yields=0;pickup=usb=powered=stale_motion=false;light_calls=deep_calls=cached_marks=0;light_step=0;deep_success=false;cached_error=0;pin=s_lock_frame_cached=s_lock_io_pending=false;light_key=light_fail=s_lock_deep_ready=false;s_lock_sleep_touch=NULL;}
 static void settled(void){assert(frontlight_calls==(last_wake==APP_WAKE_NONE?1:2));}
 int main(void){
  reset();assert(app_light_sleep_wait_timed(NULL,1000)==APP_WAKE_TIMEOUT&&last_wake==APP_WAKE_NONE&&scheduler_yields==34);settled();
@@ -130,6 +131,14 @@ int main(void){
  reset();s_lock_sleep_touch=(void*)1;s_lock_deep_ready=true;staged=false;light_step=60000000;deep_success=true;
  if(!setjmp(deep_jump)){app_light_sleep_wait_timed(NULL,0);assert(0);}
  assert(deep_calls==1&&clock_us<100000&&frontlight_calls==1);
+ // Keep-light remains in real light-sleep slices beyond the former10min deadline.
+ reset();keep_light=true;s_lock_sleep_touch=(void*)1;s_lock_deep_ready=s_lock_frame_cached=true;
+ light_step=60000000;recover_at=INT64_C(10800000000);
+ assert(app_light_sleep_wait_timed(NULL,0)==APP_WAKE_KEY&&light_calls>=170&&clock_us>=recover_at&&!deep_calls&&!cached_marks);
+ // Charging/unplug cannot arm an off deadline in keep-light mode.
+ reset();keep_light=true;s_lock_sleep_touch=(void*)1;s_lock_deep_ready=true;usb=true;unplug_at=720000000;
+ light_step=60000000;recover_at=1800000000;
+ assert(app_light_sleep_wait_timed(NULL,0)==APP_WAKE_KEY&&!deep_calls&&light_calls>=18);
  puts("PASS: production S31 10min actual wait handoff model, no early power-off, PIN/art checkpoint boundaries, key priority, USB exclusion, power-off refusal then bounded retry, transient light recovery");
 }
 '''

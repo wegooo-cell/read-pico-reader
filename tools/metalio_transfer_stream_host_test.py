@@ -56,7 +56,7 @@ static int close_fault(FILE*f){int r=fclose(f);return close_error?EOF:r;}
 #define fclose close_fault
 #define fwrite write_fault
 #include "transfer_stream_writer.h"
-static struct{unsigned bytes,elapsed_ms,receive_ms,write_ms,writes,block;int error;}s_receive_metrics;
+static struct{unsigned bytes,elapsed_ms,receive_ms,write_ms,writes,block,queue_ms;int error;}s_receive_metrics;
 typedef int(*receive_cb_t)(void*,char*,size_t);typedef void(*progress_cb_t)(size_t);
 static unsigned access_depth;static bool deny_access;
 typedef struct{bool allowed,active;}read_pico_sd_access_scope_t;
@@ -75,7 +75,7 @@ static int receive_test(void*ctx,char*buf,size_t n){(void)ctx;if(++receive_calls
 static void progress_test(size_t n){assert(n>=progress_bytes);progress_bytes=n;}
 static void reset(void){allocations=fail_alloc=fail_task=threads=sem_live=0;atomic_store(&write_calls,0);atomic_store(&writing,false);short_write=overlaps=received=receive_calls=bad_receive=progress_bytes=0;packet=1371;oversize=false;}
 int main(void){char buf[32768];for(size_t i=0;i<sizeof(input);++i)input[i]=(unsigned char)(i*73+(i>>9));
- for(unsigned test=0;test<17;++test){reset();close_error=false;if(test>=1&&test<=7)fail_alloc=test;if(test==8)fail_task=1;if(test==9)bad_receive=10;if(test==10){bad_receive=10;oversize=true;}if(test>=11&&test<=13)short_write=test-10;if(test==14)packet=32768;if(test==15)packet=1;
+ for(unsigned test=0;test<25;++test){reset();close_error=false;if(test>=17)fail_alloc=test-9;if(test>=1&&test<=7)fail_alloc=test;if(test==8)fail_task=1;if(test==9)bad_receive=10;if(test==10){bad_receive=10;oversize=true;}if(test>=11&&test<=13)short_write=test-10;if(test==14)packet=32768;if(test==15)packet=1;
   FILE*f=fopen("target.epub","wb");assert(f);assert(fwrite("old",1,3,f)==3);assert(!fclose(f));
   close_error=test==16;size_t total=test==15?127:sizeof(input);int result=receive_file("target.epub","target.part",total,buf,sizeof(buf),receive_test,NULL,progress_test);
   if(threads)assert(!pthread_join(thread,NULL));assert(!sem_live && !access_depth);

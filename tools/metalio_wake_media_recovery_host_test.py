@@ -66,7 +66,6 @@ static int read_pico_sd_invalidate_io(void){assert(!font_live&&!book_live);++inv
 static int read_pico_sd_start_probe(void){assert(0);return ESP_FAIL;}
 static int read_pico_sd_start_recovery(void){assert(!font_live&&!book_live&&!mounted&&!usb&&!ota);mounting=true;++mounts;return ESP_OK;}
 static bool app_font_recover_media(void){assert(mounted&&verified&&!mounting);++recovered;if(!abnormal){font_live=true;builtin=false;font_generation=generation;}return !abnormal;}
-static bool app_font_retry_active(void){return false;}
 static void page_lost(app_ctx_t *c){(void)c;++lost;}
 static void page_ready(app_ctx_t *c){(void)c;assert(mounted&&verified&&!mounting);++ready;}
 '''

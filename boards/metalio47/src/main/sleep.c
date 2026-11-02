@@ -346,8 +346,8 @@ static void lock_hint_end(void) {
     s_lock_hint_hl=NULL;
 }
 
-// 锁屏先浅睡，十分钟后同步外挂RTC并硬关机；USB/输入和交接失败保持锁定。
-// Light-sleep locks, then sync the external RTC and power off after ten minutes; failed handoffs retain the gate.
+// 锁屏策略可保持浅睡或到时关机；USB/输入和交接失败保持锁定。
+// Lock policy may remain in light sleep or power off on deadline; failed handoffs retain the gate.
 app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc,uint32_t timeout_ms) {
     if (!(book_cover_jobs_quiesce(2000) && ui_avatar_quiesce(2000))) return APP_WAKE_TIMEOUT;
     const int64_t start=esp_timer_get_time();
@@ -360,8 +360,9 @@ app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc,uint32_t timeo
     metalio_frontlight(0,50);
     app_wake_source_t wake=APP_WAKE_NONE;
     bool usb_was_blocked=metalio_usb_blocks_sleep();
-    const int64_t off_delay=app_settings_staged_shutdown()?APP_LOCK_OFF_AFTER_US:1;
-    int64_t off_at=s_lock_sleep_touch&&!timeout_ms ? start+off_delay : 0;
+    const int64_t off_delay=app_settings_keep_light_sleep()?0:
+        app_settings_staged_shutdown()?APP_LOCK_OFF_AFTER_US:1;
+    int64_t off_at=s_lock_sleep_touch&&!timeout_ms&&off_delay ? start+off_delay : 0;
     int64_t off_retry_at=off_at;
     bool frame_marked=false,frame_mark_attempted=false;
     unsigned light_failures=0;

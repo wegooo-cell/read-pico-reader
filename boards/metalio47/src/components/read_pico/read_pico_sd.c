@@ -703,6 +703,14 @@ bool read_pico_sd_needs_recovery(void) {
     portEXIT_CRITICAL(&state_lock);
     return needed;
 }
+void read_pico_sd_profile(int *khz,int *width) {
+    portENTER_CRITICAL(&state_lock);
+    bool ready=cached_info.mounted && !media_invalidated && !usb_owned && s_sd_last_profile>=0;
+    sd_profile_t profile=ready?sd_profiles[s_sd_last_profile]:(sd_profile_t){0};
+    if(khz)*khz=profile.khz;
+    if(width)*width=profile.width;
+    portEXIT_CRITICAL(&state_lock);
+}
 bool read_pico_sd_io_ready(void) {
     portENTER_CRITICAL(&state_lock);
     bool ready = !suspended && probe_state != 1 && cached_info.mounted && !media_invalidated;

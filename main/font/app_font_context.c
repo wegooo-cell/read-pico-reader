@@ -19,12 +19,13 @@
 #include "ui_nav.h"
 #if KIIKO_BOARD_METALIO47
 #include "esp_timer.h"
+#include "esp_log.h"
 #include "read_pico_sd.h"
 #include "sleep.h"
 #endif
 
 static bool s_reading;
-// Failed unchanged files are not repeatedly opened (opening unloads the active slot).
+// 失败字体按退避间隔重试；保持用户选择，避免反复卸载当前槽。/ Back off failed faces without changing the saved choice or repeatedly unloading the active slot.
 static char s_rejected[TTF_FONT_PATH_MAX];
 static time_t s_rejected_mtime;
 static off_t s_rejected_size;
@@ -65,8 +66,8 @@ static bool activate(const char* path) {
     bool rejected = !builtin && !strcmp(s_rejected, path) &&
         s_rejected_mtime == st.st_mtime && s_rejected_size == st.st_size;
 #if KIIKO_BOARD_METALIO47
-    // 手动加载成功即可解除旧拒绝；临时I/O或内存失败有界退避，不永久封锁同一文件。
-    // A successful manual load clears old rejection; transient I/O/OOM failures back off without permanently blocking the file.
+    // 唤醒时的解析错误也可能是短暂状态；所有失败都有限速的下一次机会。
+    // Wake-time parse failures may be transient too; every failure gets a rate-limited retry.
     if (valid && ttf_font_ready() && !strcmp(ttf_font_path(), path)) {
         if (!builtin) { s_rejected[0]=0; s_rejected_attempts=0; }
         return false;
@@ -92,11 +93,11 @@ static bool activate(const char* path) {
 #if KIIKO_BOARD_METALIO47
         if (strcmp(s_rejected,path) || s_rejected_mtime!=st.st_mtime || s_rejected_size!=st.st_size)
             s_rejected_attempts=0;
-        static const unsigned retry_ms[]={1000,3000,10000,30000};
-        unsigned index=s_rejected_attempts<3?s_rejected_attempts:3;
-        if(s_rejected_attempts<4)++s_rejected_attempts;
-        s_rejected_retry_us=err==ESP_ERR_INVALID_RESPONSE?0:
-            esp_timer_get_time()+(int64_t)retry_ms[index]*1000;
+        static const unsigned retry_ms[]={1000,3000,10000,30000,300000};
+        unsigned index=s_rejected_attempts<4?s_rejected_attempts:4;
+        if(s_rejected_attempts<5)++s_rejected_attempts;
+        s_rejected_retry_us=esp_timer_get_time()+(int64_t)retry_ms[index]*1000;
+        ESP_LOGW("font_context","font load failed: %s err=%s retry_ms=%u",path,esp_err_to_name(err),retry_ms[index]);
 #endif
         snprintf(s_rejected, sizeof(s_rejected), "%s", path);
         s_rejected_mtime = st.st_mtime;
@@ -172,9 +173,10 @@ void app_font_end_lock(const app_lock_font_t *saved) {
     if (pico_boot_recovery()) restore=TTF_FONT_BUILTIN;
     else if(s_reading && ttf_font_path_is_builtin(restore)) restore=app_settings_font_path();
     if(ttf_font_path_is_builtin(restore)) restore=TTF_FONT_BUILTIN;
-    if ((ttf_font_path_is_builtin(restore)||read_pico_sd_io_ready()) &&
-        (!ttf_font_ready() || strcmp(restore, ttf_font_path())) && !activate(restore) && !ttf_font_is_builtin())
-        (void)ttf_font_open_builtin();
+    // activate的false也表示“暂缓/未改变”，不能据此卸载仍待恢复的字体。
+    // False also means deferred/unchanged; it must not discard a face still awaiting IO restoration.
+    if (!app_sleep_media_pending() &&
+        (ttf_font_path_is_builtin(restore)||read_pico_sd_io_ready())) (void)activate(restore);
 #else
 #endif
     ttf_set_stroke_adjust_fine(s_reading ? app_settings_book_weight_fine() : 0);

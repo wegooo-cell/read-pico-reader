@@ -2,6 +2,9 @@
 
 ## 本地测试 / Local test — 2026-11-02
 
+- S31唤醒后保留待恢复字体，解析错误也可退避重试；新增“保持浅睡”，锁屏不自动关机，手动关机保持。传书采用有界四槽队列、64KiB接收块及接收窗口配套乱序预算，连接时恢复非省电策略；速度需实机对照。
+  S31 retains pending wake fonts and retries parse failures with backoff. Keep-light locks do not auto-power-off; manual off remains available. Transfers use bounded four-slot queues,64KiB blocks, a window-sized reorder budget and no-power-save connections; hardware throughput remains to be measured.
+
 - S31统一TF文件访问与卸载保护，普通挂载及USB共用总线配置和内部DMA，保留降频/单线兼容及自动恢复；沿用rc109，仅本地测试。
   S31 unifies SD admission/unmount protection and VFS/USB bus/internal-DMA setup, retaining fallback and automatic recovery. Local rc109 test only.
 

@@ -244,12 +244,20 @@
       "reason": "User2026-11-01 explicitly approved PR64 as authored, superseding the previous derived-waveform pin for this file."
     },
     "boards/metalio47/src/components/read_pico/read_pico_sd.c": {
-      "sha256": "40e7d011fd029f69d3912b253a9d69b23c06f217febec2fdc8153e1251a61d93",
-      "reason": "User2026-11-02: S31 SD admission and shared VFS/USB initialization; retain native fallback, recovery and board isolation."
+      "sha256": "6447cc070ff5cceefc7f4e8fb1ccaa006c2be5d019aadc5babf8b59ef3ecc7fd",
+      "reason": "User2026-11-02: S31 wake/font and keep-light policy, bounded Wi-Fi reception and read-only SD profile diagnostics; preserve native pins, power sequence, waveforms and SD fallback."
     },
     "components/read_pico/CMakeLists.txt": {
       "sha256": "8aecef52d3c4b20cce992ba2672744d8c996b5f8699bf195b96b45a9437d6721",
       "reason": "User2026-11-02: S31 SD admission and shared VFS/USB initialization; retain native fallback, recovery and board isolation."
+    },
+    "boards/metalio47/src/main/sleep.c": {
+      "sha256": "2d733d3c3c45ede311cde5ced9e857b26874325d8613c05336ddfa6227f64271",
+      "reason": "User2026-11-02: S31 wake/font and keep-light policy, bounded Wi-Fi reception and read-only SD profile diagnostics; preserve native pins, power sequence, waveforms and SD fallback."
+    },
+    "components/read_pico/include/read_pico_sd.h": {
+      "sha256": "08233e4107469c665c5f2feec22ce78c3fdb6f51bc33b62c56caed977d95dccb",
+      "reason": "User2026-11-02: S31 wake/font and keep-light policy, bounded Wi-Fi reception and read-only SD profile diagnostics; preserve native pins, power sequence, waveforms and SD fallback."
     }
   }
 }

@@ -923,7 +923,9 @@ static bool poll_media(app_ctx_t* ctx, const app_desc_t* current,
         if (!ready) recover_media(ctx,&info);
 #if KIIKO_BOARD_METALIO47
         if(wake_restored && ready) {
-            (void)app_font_retry_active();
+            // 新的唤醒IO会话已验证，清除上一会话的字体拒绝再恢复选择。
+            // Verified wake IO starts a new session; clear old font rejection before restoring intent.
+            if(!gained)(void)app_font_recover_media();
             if(!gained && current->on_media_ready)current->on_media_ready(ctx);
             return true;
         }

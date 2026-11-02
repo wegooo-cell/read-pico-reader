@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
- * 中文：S31大文件双缓冲顺序写入；接收方只填空槽，收齐工作线程后才能关闭或提交文件。
- * English: S31 bounded two-slot sequential writes; receive into free slots and join before closing or committing.
+ * 中文：S31大文件最多四槽顺序写入；接收方只填空槽，收齐工作线程后才能关闭或提交文件。
+ * English: S31 bounded four-slot sequential writes; receive into free slots and join before closing or committing.
  */
 #pragma once
 #include <stdatomic.h>
@@ -8,11 +8,13 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 
+enum {TRANSFER_WRITE_SLOTS=4};
 typedef struct {
     FILE *file;
-    char *buffer[2];
-    size_t bytes[2];
-    SemaphoreHandle_t ready[2], free[2], joined;
+    unsigned slots;
+    char *buffer[TRANSFER_WRITE_SLOTS];
+    size_t bytes[TRANSFER_WRITE_SLOTS];
+    SemaphoreHandle_t ready[TRANSFER_WRITE_SLOTS], free[TRANSFER_WRITE_SLOTS], joined;
     atomic_int error;
     int64_t write_us;
     unsigned writes;
@@ -20,7 +22,7 @@ typedef struct {
 
 static void transfer_writer_task(void *opaque) {
     transfer_writer_t *w=opaque;
-    for(unsigned slot=0;;slot^=1) {
+    for(unsigned slot=0;;slot=(slot+1)%w->slots) {
         xSemaphoreTake(w->ready[slot],portMAX_DELAY);
         size_t bytes=w->bytes[slot];
         if(!bytes)break;
@@ -40,26 +42,32 @@ static void transfer_writer_task(void *opaque) {
 
 static void transfer_writer_destroy(transfer_writer_t *w) {
     if(!w)return;
-    for(unsigned i=0;i<2;++i) {
+    for(unsigned i=0;i<TRANSFER_WRITE_SLOTS;++i) {
         if(w->ready[i])vSemaphoreDelete(w->ready[i]);
         if(w->free[i])vSemaphoreDelete(w->free[i]);
     }
     if(w->joined)vSemaphoreDelete(w->joined);
-    heap_caps_free(w->buffer[1]);
+    for(unsigned i=1;i<TRANSFER_WRITE_SLOTS;i++)heap_caps_free(w->buffer[i]);
     heap_caps_free(w);
 }
 
 static transfer_writer_t *transfer_writer_start(FILE *file,char *first,size_t cap,size_t total) {
-    // 小文件直接沿用单缓冲；每次上传最多增加一块PSRAM和一个内部栈。
-    // Small files retain single-buffer I/O; each upload adds at most one PSRAM block and one internal stack.
+    // 最多四槽吸收短暂写卡停顿；PSRAM不足回到双槽，再不足沿用同步写入。
+    // Up to four slots absorb card stalls; PSRAM pressure falls back to two slots, then synchronous writes.
     if(!cap || total/cap<4)return NULL;
     transfer_writer_t *w=heap_caps_calloc(1,sizeof(*w),MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
     if(!w)return NULL;
     atomic_init(&w->error,0);
-    w->file=file;w->buffer[0]=first;
-    w->buffer[1]=heap_caps_malloc(cap,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-    if(!w->buffer[1])goto fail;
-    for(unsigned i=0;i<2;++i) {
+    w->file=file;w->buffer[0]=first;w->slots=TRANSFER_WRITE_SLOTS;
+    for(unsigned i=1;i<TRANSFER_WRITE_SLOTS;i++) {
+        w->buffer[i]=heap_caps_malloc(cap,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+        if(!w->buffer[i]) {
+            if(i==1)goto fail;
+            for(unsigned j=2;j<TRANSFER_WRITE_SLOTS;j++){heap_caps_free(w->buffer[j]);w->buffer[j]=NULL;}
+            w->slots=2;break;
+        }
+    }
+    for(unsigned i=0;i<w->slots;++i) {
         w->ready[i]=xSemaphoreCreateBinary();w->free[i]=xSemaphoreCreateBinary();
         if(!w->ready[i] || !w->free[i])goto fail;
         xSemaphoreGive(w->free[i]);

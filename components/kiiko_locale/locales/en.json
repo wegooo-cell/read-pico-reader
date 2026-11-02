@@ -1185,5 +1185,7 @@
   "删除书籍": "Delete books",
   "搜索书籍": "Search books",
   "清理进度": "Clear progress",
-  "脚注": "Footnote"
+  "脚注": "Footnote",
+  "保持浅睡": "Keep light sleep",
+  "锁屏后保持浅睡，不自动关机": "Stay in light sleep when locked"
 }

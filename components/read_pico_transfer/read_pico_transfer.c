@@ -59,10 +59,11 @@ static bool decode_font_name(const char *encoded,char *out,size_t cap) {
 #include "transfer_http_time.h"
 #include "transfer_ntp_time.h"
 #include "esp_app_desc.h"
+#include "read_pico_sd.h"
 // HTTP 服务独占写入，供 /info 诊断真实接收与写卡瓶颈，不含文件名。
 // Owned by the HTTP task; report measured receive/storage costs without file names.
 static struct {
-    unsigned bytes, elapsed_ms, receive_ms, write_ms, writes, block;
+    unsigned bytes, elapsed_ms, receive_ms, write_ms, writes, block, queue_ms;
     int error;
 } s_receive_metrics;
 #endif
@@ -332,7 +333,7 @@ static int receive_file(const char *path, const char *part, size_t total, char *
     size_t done = 0, pending = 0;
 #ifdef ESP_PLATFORM
     const int64_t started_us = esp_timer_get_time();
-    int64_t receive_us = 0, write_us = 0;
+    int64_t receive_us = 0, write_us = 0, queue_us = 0;
     unsigned writes = 0;
     unsigned write_slot=0;
     transfer_writer_t *writer=transfer_writer_start(f,buf,cap,total);
@@ -387,8 +388,10 @@ static int receive_file(const char *path, const char *part, size_t total, char *
 #ifdef ESP_PLATFORM
             if(writer) {
                 transfer_writer_submit(writer,write_slot,pending);
-                write_slot^=1;
+                write_slot=(write_slot+1)%writer->slots;
+                int64_t waiting_us=esp_timer_get_time();
                 buf=transfer_writer_acquire(writer,write_slot);
+                queue_us+=esp_timer_get_time()-waiting_us;
             } else
 #endif
             {
@@ -424,6 +427,7 @@ static int receive_file(const char *path, const char *part, size_t total, char *
     s_receive_metrics.write_ms = (unsigned)(write_us/1000);
     s_receive_metrics.writes = writes;
     s_receive_metrics.block = (unsigned)cap;
+    s_receive_metrics.queue_ms = (unsigned)(queue_us/1000);
     s_receive_metrics.error = error;
     ESP_LOGI("transfer", "receive bytes=%u time_ms=%u net_ms=%u write_ms=%u writes=%u block=%u error=%d",
              (unsigned)done, (unsigned)((esp_timer_get_time()-started_us)/1000),
@@ -607,6 +611,8 @@ static int s_active_rx_ba = CONFIG_ESP_WIFI_RX_BA_WIN;
 // Match vendor AP: send small replies promptly; bounded TCP/card queues still provide upload backpressure.
 static esp_err_t transfer_socket_open(httpd_handle_t server, int socket) {
     (void)server;
+    esp_err_t radio=esp_wifi_set_ps(WIFI_PS_NONE);
+    if(radio!=ESP_OK)ESP_LOGW("transfer","restore transfer PS_NONE: %s",esp_err_to_name(radio));
     int enable=1;
     if (setsockopt(socket,IPPROTO_TCP,TCP_NODELAY,&enable,sizeof(enable)) != 0)
         ESP_LOGW("transfer","TCP_NODELAY unavailable: %d",errno);
@@ -1291,6 +1297,9 @@ static esp_err_t info_handler(httpd_req_t *req) {
     cJSON_AddNumberToObject(json,"heap_internal_free",heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
     cJSON_AddNumberToObject(json,"heap_internal_min",heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
     cJSON_AddNumberToObject(json,"heap_internal_largest",heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+    int sd_khz=0,sd_width=0;read_pico_sd_profile(&sd_khz,&sd_width);
+    cJSON_AddNumberToObject(json,"sd_profile_khz",sd_khz);
+    cJSON_AddNumberToObject(json,"sd_profile_width",sd_width);
     cJSON_AddNumberToObject(json,"tcp_window",CONFIG_LWIP_TCP_WND_DEFAULT);
     cJSON_AddNumberToObject(json,"wifi_dynamic_rx",CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM);
     cJSON_AddNumberToObject(json,"wifi_static_rx",s_active_static_rx);
@@ -1336,6 +1345,7 @@ static esp_err_t info_handler(httpd_req_t *req) {
         cJSON_AddNumberToObject(metrics, "write_ms", s_receive_metrics.write_ms);
         cJSON_AddNumberToObject(metrics, "writes", s_receive_metrics.writes);
         cJSON_AddNumberToObject(metrics, "block", s_receive_metrics.block);
+        cJSON_AddNumberToObject(metrics, "queue_ms", s_receive_metrics.queue_ms);
         cJSON_AddNumberToObject(metrics, "error", s_receive_metrics.error);
     }
     char *body = cJSON_PrintUnformatted(json);
@@ -2275,7 +2285,7 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
     clear_secret(&wifi, sizeof(wifi)); clear_secret(&saved, sizeof(saved));
     if (!cfg->network_only) {
         // 单个传输独占缓冲，低内存时逐级降档。/ One transfer-owned block with bounded OOM fallback.
-        for (size_t cap = 32768; cap >= 4096 && !s_buffer; cap /= 2) {
+        for (size_t cap = 65536; cap >= 4096 && !s_buffer; cap /= 2) {
             s_buffer = heap_caps_malloc(cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             if (s_buffer) s_buffer_capacity = cap;
         }

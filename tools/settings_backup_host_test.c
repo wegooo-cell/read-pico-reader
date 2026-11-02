@@ -112,7 +112,13 @@ esp_err_t nvs_set_u32(nvs_handle_t h, const char *key, uint32_t value) {
     return ESP_OK;
 }
 static int loaded_shelf_order=-1;
+#if KIIKO_BOARD_METALIO47
+static bool test_shutdown_storage;static int loaded_shutdown;
+#endif
 esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
+#if KIIKO_BOARD_METALIO47
+    if(test_shutdown_storage&&!strcmp(key,NVS_KEY_SHUTDOWN_MODE)){*value=loaded_shutdown;return ESP_OK;}
+#endif
     if(!strcmp(key,NVS_KEY_SHELF_RECENT)&&loaded_shelf_order>=0){*value=(uint8_t)loaded_shelf_order;return ESP_OK;}
     if(!strcmp(key,NVS_KEY_HOME_FULL)&&loaded_home_full>=0){*value=(uint8_t)loaded_home_full;return ESP_OK;}
 #ifdef NVS_KEY_PIN_GRACE
@@ -120,6 +126,9 @@ esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
 #endif
  (void)h; if(test_full_storage&&!strcmp(key,NVS_KEY_READER_FULL)){*value=loaded_full_pages;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_TURN)&&loaded_turn>=0){*value=(uint8_t)loaded_turn;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_PARA)&&has_para){*value=loaded_para;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)&&has_tracking){*value=loaded_tracking;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)&&has_fine){*value=loaded_fine;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOME_COMPONENT)&&loaded_home>=0){*value=(uint8_t)loaded_home;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_AA)&&has_aa){*value=loaded_aa;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2)&&keys_v2){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)&&has_weight){*value=loaded_weight;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)&&has_adjust){*value=loaded_adjust;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_STYLE)&&loaded_shelf>=0){*value=(uint8_t)loaded_shelf;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_V22)&&loaded_shelf_v22){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_LOCK_STYLE)&&loaded_lock>=0){*value=(uint8_t)loaded_lock;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOLD_ACTION)&&has_hold){*value=loaded_hold;return ESP_OK;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])&&has_keys[i]){*value=loaded_keys[i];return ESP_OK;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH) && has_main_mode) { *value=loaded_main_mode;return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } return ESP_FAIL; }
 esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) {
+#if KIIKO_BOARD_METALIO47
+    if(test_shutdown_storage&&!strcmp(key,NVS_KEY_SHUTDOWN_MODE))loaded_shutdown=value;
+#endif
     if(!strcmp(key,NVS_KEY_SHELF_RECENT))loaded_shelf_order=value;
     if(!strcmp(key,NVS_KEY_HOME_FULL))loaded_home_full=value;
 #ifdef NVS_KEY_PIN_GRACE
@@ -830,6 +839,20 @@ int main(void) {
     uint8_t prior=s_reader_full_pages;app_settings_set_reader_full_pages(25);assert(s_reader_full_pages==prior);
 #if !KIIKO_BOARD_METALIO47
     app_settings_set_reader_full_pages(20);assert(s_reader_full_pages==prior);
+#endif
+#if KIIKO_BOARD_METALIO47
+    // 三态策略在现有便携格式中往返，并重新读取真实设置键。
+    // Round-trip all three policies through the unchanged portable format and persisted key.
+    test_shutdown_storage=true;loaded_shutdown=1;s_sleep=APP_SLEEP_DEEP;s_staged_shutdown=true;
+    for(int policy=0;policy<3;policy++){
+        assert(app_settings_set_lock_sleep_mode((app_lock_sleep_mode_t)policy)==ESP_OK);
+        assert(app_settings_backup_save()==ESP_OK);
+        assert(app_settings_set_lock_sleep_mode((app_lock_sleep_mode_t)((policy+1)%3))==ESP_OK);
+        assert(app_settings_backup_restore()==ESP_OK&&app_settings_lock_sleep_mode()==(app_lock_sleep_mode_t)policy);
+        s_sleep=APP_SLEEP_DEEP;s_staged_shutdown=false;app_settings_init();
+        assert(app_settings_lock_sleep_mode()==(app_lock_sleep_mode_t)policy);
+    }
+    assert(loaded_shutdown==2&&app_settings_keep_light_sleep());
 #endif
     puts("settings backup host test passed (200% sizes, retired shelf migration, collage persistence/restore without wallpaper)");
     return 0;

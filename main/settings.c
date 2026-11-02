@@ -212,6 +212,15 @@ static uint8_t valid_book_px(uint8_t px) {
     return px >= BOOK_READER_PX_MIN && px <= BOOK_READER_PX_MAX ? px : 48;
 }
 
+#if KIIKO_BOARD_METALIO47
+static void load_lock_sleep_policy(nvs_handle_t h) {
+    uint8_t raw=1;
+    if(nvs_get_u8(h,NVS_KEY_SHUTDOWN_MODE,&raw)==ESP_OK && raw<=2) {
+        s_staged_shutdown=raw!=0;
+        s_sleep=raw==2?APP_SLEEP_LIGHT:APP_SLEEP_DEEP;
+    }
+}
+#endif
 void app_settings_init(void) {
     // 缺省与读取失败采用新默认，随后仅由有效的已保存选择覆盖。
     // Use current defaults on missing/failed reads, then apply valid saved preferences.
@@ -235,11 +244,11 @@ void app_settings_init(void) {
     }
     raw = 0;
 #if KIIKO_BOARD_METALIO47
-    if (nvs_get_u8(h, NVS_KEY_SHUTDOWN_MODE, &raw) == ESP_OK && raw <= 1)
+    load_lock_sleep_policy(h);
 #else
     if (nvs_get_u8(h, NVS_KEY_SHUTDOWN_MODE, &raw) == ESP_OK)
-#endif
         s_staged_shutdown = raw == 1;
+#endif
     raw = 1;
     if (nvs_get_u8(h, NVS_KEY_WAKE_PRESSES, &raw) != ESP_OK || (raw != 1 && raw != 2)) raw = 1;
     s_wake_presses = raw;
@@ -452,17 +461,33 @@ void app_settings_set_sleep_mode(app_sleep_mode_t mode) {
     nvs_close(h);
 }
 
+#if KIIKO_BOARD_METALIO47
+app_lock_sleep_mode_t app_settings_lock_sleep_mode(void) {
+    return s_sleep==APP_SLEEP_LIGHT?APP_LOCK_SLEEP_KEEP_LIGHT:
+        s_staged_shutdown?APP_LOCK_SLEEP_TIMED:APP_LOCK_SLEEP_OFF;
+}
+bool app_settings_keep_light_sleep(void) { return app_settings_lock_sleep_mode()==APP_LOCK_SLEEP_KEEP_LIGHT; }
+esp_err_t app_settings_set_lock_sleep_mode(app_lock_sleep_mode_t mode) {
+    if(mode<APP_LOCK_SLEEP_TIMED || mode>APP_LOCK_SLEEP_KEEP_LIGHT)return ESP_ERR_INVALID_ARG;
+    if(mode==app_settings_lock_sleep_mode())return ESP_OK;
+    nvs_handle_t h;esp_err_t err=nvs_open(NVS_NS,NVS_READWRITE,&h);
+    if(err!=ESP_OK)return err;
+    // 一个已存在的键保存三态；旧的0/1值保持含义，提交成功才更新当前策略。
+    // One existing key stores all three states; retain old0/1 values and update live policy only after commit.
+    uint8_t raw=mode==APP_LOCK_SLEEP_KEEP_LIGHT?2:mode==APP_LOCK_SLEEP_TIMED?1:0;
+    err=nvs_set_u8(h,NVS_KEY_SHUTDOWN_MODE,raw);
+    if(err==ESP_OK)err=nvs_commit(h);
+    nvs_close(h);
+    if(err==ESP_OK){s_sleep=mode==APP_LOCK_SLEEP_KEEP_LIGHT?APP_SLEEP_LIGHT:APP_SLEEP_DEEP;s_staged_shutdown=raw!=0;}
+    return err;
+}
+#endif
 bool app_settings_staged_shutdown(void) { return s_staged_shutdown; }
 void app_settings_set_staged_shutdown(bool staged) {
-    if (staged == s_staged_shutdown) return;
 #if KIIKO_BOARD_METALIO47
-    nvs_handle_t h;
-    if(nvs_open(NVS_NS,NVS_READWRITE,&h)!=ESP_OK) return;
-    esp_err_t err=nvs_set_u8(h,NVS_KEY_SHUTDOWN_MODE,staged?1:0);
-    if(err==ESP_OK) err=nvs_commit(h);
-    nvs_close(h);
-    if(err==ESP_OK) s_staged_shutdown=staged;
+    (void)app_settings_set_lock_sleep_mode(staged?APP_LOCK_SLEEP_TIMED:APP_LOCK_SLEEP_OFF);
 #else
+    if (staged == s_staged_shutdown) return;
     s_staged_shutdown = staged;
     nvs_put_u8(NVS_KEY_SHUTDOWN_MODE, staged ? 1 : 0);
 #endif
@@ -1419,7 +1444,14 @@ esp_err_t app_settings_backup_restore(void) {
     for (unsigned i = 0; i < 3 && err == ESP_OK; ++i) err = nvs_set_u8(h, s_reader_key_names[i], keys.actions[i]);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOLD_ACTION, hold.action);
     BACKUP_SET_U8(NVS_KEY_SLEEP, BK_SLEEP);
+#if KIIKO_BOARD_METALIO47
+    // 便携备份沿用已有sleep字段表示保持浅睡，不修改文件格式。
+    // Reuse the backup's existing sleep field for keep-light without changing its format.
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_SHUTDOWN_MODE,
+        backup.flags[BK_SLEEP]==APP_SLEEP_LIGHT?2:staged_shutdown&1);
+#else
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_SHUTDOWN_MODE, staged_shutdown & 1);
+#endif
     uint8_t idle_values[] = {0, 1, 5, 10};
     uint8_t idle_minutes = idle_values[(staged_shutdown >> 1) & 3];
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_AUTO_LOCK, idle_minutes);
