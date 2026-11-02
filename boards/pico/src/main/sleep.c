@@ -264,10 +264,22 @@ static void lock_hint_service(void) {
     }
 }
 
+// 深睡唤醒后的第一次等待只认一次按键：开机那次短按已经在电源交接时消耗掉了，
+// 不能再要求双击，否则用户会感觉“多按一遍”。
+// The first wait after a deep-sleep wake accepts a single press: the power-on press was already
+// consumed by the power handoff, so requiring a double click would ask for one extra press.
+static bool s_lock_wake_single_once;
+void app_lock_wake_single_once(void) { s_lock_wake_single_once = true; }
+
 static bool lock_wait_key(void) {
-    bool wake = app_settings_wake_presses() == 1
-        ? read_pico_pmu_take_key_wakeup_single() : read_pico_pmu_take_key_wakeup();
-    if(wake)return true;
+    const bool single = app_settings_wake_presses() == 1 || s_lock_wake_single_once;
+    bool wake = single ? read_pico_pmu_take_key_wakeup_single()
+                       : read_pico_pmu_take_key_wakeup();
+    if(wake) {
+        if(s_lock_wake_single_once && app_settings_wake_presses() != 1)
+            s_lock_wake_single_once = false;
+        return true;
+    }
     lock_resume_service();lock_hint_service();return false;
 }
 
@@ -688,6 +700,10 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
     if (!lock_pin_enabled()) {
         if(pico_boot_has_resume()) {
             pico_boot_ready();pico_boot_hold_resume();
+            // 深睡唤醒的开机短按已经算一次，这里再等一次即可，不再要求双击。
+            // The power-on short press already counts as one; this wait accepts a single press
+            // instead of demanding a double click.
+            app_lock_wake_single_once();
             (void)app_light_sleep_wait_timed(NULL,0);
         }
         s_boot_lock_hl=NULL;s_boot_lock_active=false;s_lock_hint_hl=NULL;return;

@@ -113,6 +113,10 @@ Retain original Pico rc103/S31 rc108 web/TF entries, kiikoread.com as the sole w
 
 ## 未发布 / Unreleased
 
+- Pico 深睡唤醒后不再多按一遍：锁屏 10 分钟转深睡后，上电短按已经算一次唤醒，恢复阅读只需再按一次；设置双击唤醒时由 3 下减为 2 下，普通浅睡锁屏仍遵循双击/单次设置。
+  After Pico deep sleep, one press powers the host and one more resumes reading (two presses total with the double-click wake setting instead of three); ordinary light-sleep locks still follow the configured single/double press.
+
+
 - 恢复插图双击缩放：双击正文/整页插图放大，再双击退出；中间空白单击仍切换全屏，翻页判定不变。
   Restore double-tap illustration zoom: double tap zooms and a second double tap exits; centre blank taps keep the fullscreen toggle and page-turn taps are unchanged.
 
