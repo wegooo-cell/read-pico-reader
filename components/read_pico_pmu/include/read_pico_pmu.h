@@ -229,6 +229,12 @@ void read_pico_pmu_latch_power_wakeup(void);
 #else
 /// 开机证据只能消费一次。/ Boot evidence is consumed once.
 bool read_pico_pmu_take_boot_short_press(void);
+/// 握手前确认的按键上电证据，仅消费一次；调用方仍须检查主控上电复位、恢复记录和解锁策略。
+/// Consume verified pre-handshake key power-on evidence once; caller must still check power-on reset, resume and unlock policy.
+bool read_pico_pmu_take_boot_power_key(void);
+/// 单击启动门禁放行后调用；普通动作消费器非阻塞清理残留，确认释放且队列为空后才恢复按键。
+/// After a one-press boot is accepted, discard its tail without blocking; normal actions resume after validated release and an empty queue.
+void read_pico_pmu_rearm_after_boot_key(void);
 #endif
 /// 保证 RUNNING 后发 HOST_SOFT_SLEEP，等到 STATUS 为 SOFT_SLEEP（随后 EN=0）。
 /// / After RUNNING, send HOST_SOFT_SLEEP and wait for STATUS SOFT_SLEEP (then EN=0).

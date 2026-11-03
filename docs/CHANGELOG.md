@@ -2,6 +2,9 @@
 
 ## 未发布 / Unreleased — 2026-11-03
 
+- Pico锁屏十分钟后深睡，单击且未设密码时承接本次按键上电，PMU未附带短按事件也无需再按一次。握手前校验启动状态与来源，握手后核对PMU会话；软件/异常复位、旧运行状态及非按键来源不采用这份证据，保留密码和双击策略，版本号不变。开机按键的延后释放由独立交接保护清理，避免慢首帧后再次锁屏。
+  Resume Pico after deep sleep with the same power-on press in single-press mode without a PIN, even without a separate SHORT event. Validate pre-handshake state/source and the completed PMU session; reject stale running state, non-key sources and software/fault resets, preserving PIN/double-click policy and firmware versions. Discard the boot gesture tail until released and drained, preventing a slow first frame from turning it into another lock action.
+
 - 阅读题头、工具栏与设置面板改为悬浮覆盖，显隐保持正文区域、分页和当前阅读位置，不再因呼出工具栏重排。同步处理插图缩放裁剪与遮挡区触摸；脚注卡片限制在可见区，打开时点击题头/工具栏先关闭脚注。保留原沉浸样式，版本号不变。
   Overlay reader headers, tools and settings without changing body geometry, pagination or the current position. Clip image zoom and input around chrome; keep note cards within the visible viewport and dismiss an open note before handling chrome taps. Retain immersive styles and existing firmware versions.
 
