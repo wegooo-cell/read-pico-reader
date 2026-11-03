@@ -51,7 +51,7 @@ static size_t book_chapter_count(void){return total_chapters;}
 static void fit_fixed_text(char *text,int px,int width){assert(px>0&&width>0);(void)text;}
 static int ui_text_fixed_width_px(int px,const char *text){return (int)strlen(text)*px/2;}
 static void reader_footer_chapter_name(char *text,size_t cap){snprintf(text,cap,"%s",expected_chapter);}
-static void ui_fill_rect_fast(EpdRect r,int color,uint8_t *fb){(void)fb;assert(color==255);if(s_reader_fullscreen&&immersive)assert(r.y==1204&&r.height==12);else if(r.y==0)assert(r.height==80);else assert(r.y==(s_reader_fullscreen?1168:1048));++fill_calls;}
+static void ui_fill_rect_fast(EpdRect r,int color,uint8_t *fb){(void)fb;assert(color==255);if(s_reader_fullscreen&&immersive)assert(r.y==1204&&r.height==12);else if(r.y==0)assert(r.height==(s_reader_fullscreen?80:176));else assert(r.y==(s_reader_fullscreen?1168:1048));++fill_calls;}
 static void ui_reader_background_paint(uint8_t *fb,EpdRect r,bool overlay){(void)fb;(void)r;assert(overlay);}
 static void ui_text_fixed_vc(uint8_t *fb,int x,int y,int px,const char *text,int align,bool inverted){
  (void)fb;assert(y==(s_reader_fullscreen?1180:1060)&&px==21&&!inverted);
@@ -82,8 +82,8 @@ int main(void){
  for(int style=0;style<2;++style){
   immersive=style;s_reader_favorite=style;text_calls=bar_calls=fill_calls=status_calls=0;title_calls=back_calls=favorite_calls=0;
   draw_reader_header(&none);draw_reader_metadata(&none,74);
-  assert(status_calls==1&&text_calls==2&&bar_calls==2&&fill_calls==1&&reader_status_visible());
-  assert(title_calls==1&&back_calls==1&&favorite_calls==1&&ui_reader_body(false,style,24,false).y==176);
+  assert(status_calls==1&&text_calls==2&&bar_calls==2&&fill_calls==2&&reader_status_visible());
+  assert(title_calls==1&&back_calls==1&&favorite_calls==1&&ui_reader_body(false,style,24,false).y==(style?24:80));
   app_ctx_t ctx={.now_ms=1000};s_reader_footer_pending=true;s_reader_footer_due_ms=900;
   assert(reader_metadata_tick(&ctx)==APP_REDRAW_DONE&&!s_reader_footer_pending);
  }

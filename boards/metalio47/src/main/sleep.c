@@ -16,6 +16,7 @@
 #include "ui_avatar.h"
 #include "book_cover_jobs.h"
 #include "metalio_hw.h"
+#include "metalio_charger.h"
 #include "metalio_sleep.h"
 #include "ble_page_turner.h"
 #include "driver/usb_serial_jtag.h"
@@ -512,6 +513,10 @@ static esp_err_t lock_light_sleep_once(sc7a20h_handle_t acc,cst836u_handle_t tou
     // Defer active mount/write transactions; absent or failed media is not active IO.
     esp_err_t media_state=read_pico_sd_get_info(&info);
     if(media_state==ESP_ERR_NOT_FINISHED || (media_state!=ESP_OK && info.mounted)) return media_state;
+    // 浅睡准备与恢复全程会使用 I2C/电源轨；先挂起充电监控，避免其插入这些事务。
+    // Light-sleep preparation and restoration use I2C and rails; suspend the charger monitor first
+    // so it cannot interleave with those transactions.
+    metalio_charger_suspend();
     bool touch_asleep=false,sd_closed=false,lcd_stopped=false,keys_ready=false,rails_cut=false,pins_prepared=false;
     uint16_t saved_rails=0;
     bool key_irq=false,power_confirmed=false;
@@ -619,6 +624,9 @@ static esp_err_t lock_light_sleep_once(sc7a20h_handle_t acc,cst836u_handle_t tou
         if(lock_take_key_wakeup())*key_wake=true;
         else if(err==ESP_OK)err=ESP_ERR_INVALID_STATE;
     }
+    // 外设与按键恢复完成后再恢复充电监控，避免其插入恢复期的 I2C 事务。
+    // Resume the charger monitor only after peripheral/key restoration so it cannot interleave.
+    metalio_charger_resume();
     // 恢复失败仍保持锁屏；仅真正的电源键可交给PIN/解锁逻辑。
     // Restore failure retains the lock; only a real power wake reaches PIN/unlock handling.
     ESP_LOGI(TAG,"S31 light restore: result=%s power_wake=%u",esp_err_to_name(err),*key_wake);
@@ -642,6 +650,10 @@ static esp_err_t lock_power_off(void) {
     if(err==ESP_OK)err=ttf_font_suspend_io();
     bool sd_closed=false;
     if(err==ESP_OK) { err=read_pico_sd_sync();sd_closed=err==ESP_OK; }
+    // 关机事务（按键暂停、EPD 掉电、扩展口断电）前挂起充电监控；失败回滚后恢复。
+    // Suspend the charger monitor before the key pause/EPD rail/expander power-off transaction;
+    // resume it on failure rollback.
+    metalio_charger_suspend();
     bool keys_paused=false;
     if(err==ESP_OK) {
         err=read_pico_pmu_keys_pause();
@@ -658,6 +670,7 @@ static esp_err_t lock_power_off(void) {
     if(sd_closed)(void)read_pico_sd_remount();
     (void)lock_resume_media_io(500);
     metalio_haptic_resume();
+    metalio_charger_resume();
     return err;
 }
 
@@ -680,6 +693,11 @@ esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {
         if(restore_radios) { ble_pt_resume_after_sleep(); read_pico_transfer_resume_after_sleep(); }
         return ESP_ERR_INVALID_STATE;
     }
+    // 深睡准入完成、电源/总线事务开始前挂起充电监控；成功入睡由下次启动重新初始化，
+    // 失败回滚必须在本函数返回前恢复，避免监控永久停摆。
+    // Suspend the charger monitor once deep-sleep admission passed and the power/bus transaction
+    // starts; a real sleep re-initializes on next boot, while a failed rollback must resume it here.
+    if (mode == APP_SLEEP_DEEP) metalio_charger_suspend();
     (void)app_sync_time_to_pmu();
     app_lock_font_t saved_font = {0};
     app_font_begin_lock(&saved_font);
@@ -693,6 +711,7 @@ esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {
         if (mode == APP_SLEEP_DEEP) {
             lock_restore_key_wake();
             (void)lock_resume_media_io(15000);
+            metalio_charger_resume();
         }
         app_font_end_lock(&saved_font);
         if(restore_radios) { ble_pt_resume_after_sleep(); read_pico_transfer_resume_after_sleep(); }
@@ -726,6 +745,7 @@ esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {
         if(touch_asleep) (void)cst836u_wake(s_lock_sleep_touch);
         app_font_end_lock(&saved_font);
         metalio_haptic_resume();
+        metalio_charger_resume();
         if(restore_radios) { ble_pt_resume_after_sleep(); read_pico_transfer_resume_after_sleep(); }
         return err;
     }

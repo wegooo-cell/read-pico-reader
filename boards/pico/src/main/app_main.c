@@ -4,6 +4,8 @@
  *
  * 用户修订：硬件前建立持久化启动保护；深睡恢复入口先消费再开书，中断图书进入可操作恢复页。
  * User revision: persist startup protection before hardware; consume deep-sleep checkpoints before opening books, and show an operable recovery page after interrupted opening.
+ * 用户2026-11-03修订：无密码的单击深睡恢复承接本次 PMU 按键上电证据，不再要求额外短按；非上电复位、双击及密码门禁保留。
+ * User2026-11-03: single-press deep resume without PIN accepts fresh PMU key power-on evidence; retain non-power-on, double-click and PIN gates.
  * 只做开机装配：拉起板级硬件、读设置、定 VCOM、放开机图、开字体；
  * 未标定则先拦住进设定页。然后把控制权交给 app_loop。
  *
@@ -193,6 +195,10 @@ void app_main(void) {
     const bool one_press_boot = resuming && !lock_pin_enabled() && hw.pmu_ready &&
         app_settings_wake_presses() == 1;
     bool boot_press = read_pico_pmu_take_boot_short_press();
+    // PMU 软睡后的第一按可能只上电，不产生 SHORT；软件/USB/异常复位不能复用该证据。
+    // The first press after PMU soft sleep may only power on, without SHORT; software/USB/fault resets cannot reuse it.
+    const bool boot_power_key = read_pico_pmu_take_boot_power_key();
+    if (reset == ESP_RST_POWERON && boot_power_key) boot_press = true;
     // 按住稍久会被 PMU 记成长按，释放也可能晚于握手；有界补等一次按键事件，避免已经按过还要再按。
     // A slightly long hold is logged as a long press and its release can land after the handshake,
     // so wait a bounded window for that event instead of asking for a second press.
@@ -202,6 +208,9 @@ void app_main(void) {
     }
     const bool boot_with_one_press = one_press_boot && boot_press;
     if (boot_with_one_press) {
+        // 开机那次已完成解锁，其延后释放不得在慢首帧之后再次触发锁屏。
+        // This press already unlocked; its delayed tail must not relock after a slow first frame.
+        read_pico_pmu_rearm_after_boot_key();
         ESP_LOGI(TAG, "resume lock cache=%d; one-press boot", restored_lock);
         pico_boot_ready();
         pico_boot_hold_resume();

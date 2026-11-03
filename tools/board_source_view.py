@@ -87,6 +87,11 @@ def materialize(root, destination, board, tests=False):
             relative = path.relative_to(root)
             if not path.is_file() or any(part in ignored for part in relative.parts):
                 continue
+            # 本机计划/调试资料不入设备视图：既不是源码，也会与并行写入产生竞争。
+            # Keep local plans/debug material out of generated views: not source, and parallel
+            # writers would race the copy.
+            if relative.parts[:2] == ('docs', 'local'):
+                continue
             # 生产构建由C编译器选择板型分支；旧主机测试的函数提取器需要预选后的视图。
             # Production uses compiler board guards; legacy host extractors need preselected sources.
             if tests and path.suffix in ('.c', '.h', '.cpp') and 'boards' not in relative.parts and path.name != 'stb_truetype.h':

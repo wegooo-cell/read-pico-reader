@@ -57,9 +57,15 @@ jobs:
           python3 tools/metalio_lock_key_host_test.py
           python3 tools/metalio_lock_resume_host_test.py
           python3 tools/metalio_mount_resume_host_test.py
+          python3 tools/metalio_sd_access_host_test.py
+          python3 tools/metalio_font_recovery_host_test.py
+          python3 tools/metalio_transfer_stream_host_test.py
+          python3 tools/metalio_keep_light_host_test.py
           python3 tools/txt_utf16_host_test.py
           python3 tools/metalio_wake_media_recovery_host_test.py
           python3 tools/metalio_power_choice_host_test.py
+          python3 tools/metalio_charger_host_test.py
+          python3 tools/metalio_power_host_test.py
           python3 tools/settings_layout_font_host_test.py
           mkdir -p build/book-tests
           cc -std=c11 -D_DEFAULT_SOURCE -DKIIKO_BOARD_METALIO47=1 -Wall -Wextra -Werror -fsanitize=address,undefined -Itools/settings_backup_stubs -Imain tools/boot_state_host_test.c -o build/book-tests/boot-state
@@ -79,6 +85,7 @@ jobs:
           python3 tools/font_catalog_host_test.py
           python3 tools/power_double_click_host_test.py
           python3 tools/pico_wake_option_host_test.py
+          python3 tools/pico_boot_power_key_host_test.py
           python3 tools/pico_lock_hint_host_test.py
           python3 tools/pico_lock_wait_host_test.py
           python3 tools/factory_reset_host_test.py
@@ -172,6 +179,8 @@ jobs:
           python3 tools/shelf_guard_cache_host_test.py
           python3 tools/management_layout_host_test.py
           python3 tools/epub_metadata_cache_host_test.py
+          python3 tools/book_ui_host_test.py
+          python3 tools/shelf_pager_host_test.py
           python3 tools/webp_host_test.py
           python3 tools/gif_host_test.py
           python3 tools/reader_metadata_host_test.py
@@ -185,6 +194,8 @@ jobs:
           python3 tools/reader_ui_scale_host_test.py
           python3 tools/reader_refresh_release_host_test.py
           python3 tools/reader_fullscreen_host_test.py
+          python3 tools/reader_overlay_host_test.py
+          python3 tools/reader_immersive_space_host_test.py
           python3 tools/lock_screen_host_test.py
           python3 tools/power_double_click_host_test.py
           cc -std=gnu11 -Wall -Wextra -Werror -Itools/settings_backup_stubs \

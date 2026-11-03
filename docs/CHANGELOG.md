@@ -15,6 +15,20 @@
 
 ## 未发布 / Unreleased — 2026-11-02
 
+## 未发布 / Unreleased — 2026-11-03
+
+- S31整页刷新恢复厂家完整48相GC16/GL16（官方v2.0.66起默认），完整DU表末四相补黑（对齐官方v2.0.69）；普通翻页对齐Pico：十二相整屏擦白后补四相重推黑，并改用单带1K相位表引擎（约12ms/相）。残影与翻页速度改善，灰度仍由原厂序列产生；可用构建开关 `--s31-trimmed-waveform` 回退到裁剪37相档做A/B。
+  S31 page refreshes use the vendor full 48-phase GC16/GL16 (official default since v2.0.66) with the official four-phase DU black re-drive (v2.0.69); ordinary reader turns match Pico's twelve whole-panel erase phases plus four black re-drive phases on the single-band 1K phase-LUT engine (~12 ms/phase). Ghosting and turn speed improve while gray levels keep the vendor sequence; `--s31-trimmed-waveform` restores the trimmed 37-phase profile for A/B.
+
+- S31与Pico的配置备份统一写到 TF 卡根目录 `Kiikoread-settings.backup`；两板都能恢复旧的 `Pico-settings.backup` 与 `Metalio-S31-settings.backup`（含各自 `.previous`），同一张卡可直接换板恢复，旧卡备份无需改名。
+  Both boards now save backups as `Kiikoread-settings.backup` in the TF card root; either board also restores the legacy `Pico-settings.backup` and `Metalio-S31-settings.backup` files (including `.previous`), so one card works across devices without renaming old backups.
+
+- Pico锁屏十分钟后深睡，单击且未设密码时承接本次按键上电，PMU未附带短按事件也无需再按一次。握手前校验启动状态与来源，握手后核对PMU会话；软件/异常复位、旧运行状态及非按键来源不采用这份证据，保留密码和双击策略，版本号不变。开机按键的延后释放由独立交接保护清理，避免慢首帧后再次锁屏。
+  Resume Pico after deep sleep with the same power-on press in single-press mode without a PIN, even without a separate SHORT event. Validate pre-handshake state/source and the completed PMU session; reject stale running state, non-key sources and software/fault resets, preserving PIN/double-click policy and firmware versions. Discard the boot gesture tail until released and drained, preventing a slow first frame from turning it into another lock action.
+
+- 阅读题头、工具栏与设置面板改为悬浮覆盖，显隐保持正文区域、分页和当前阅读位置，不再因呼出工具栏重排。同步处理插图缩放裁剪与遮挡区触摸；脚注卡片限制在可见区，打开时点击题头/工具栏先关闭脚注。保留原沉浸样式，版本号不变。
+  Overlay reader headers, tools and settings without changing body geometry, pagination or the current position. Clip image zoom and input around chrome; keep note cards within the visible viewport and dismiss an open note before handling chrome taps. Retain immersive styles and existing firmware versions.
+
 - 合并PR68的Pico水波纹擦白/补黑及53相支持，保留作者波形。修复全屏后中间点按不翻页；非全屏中间点按仍进入全屏，全屏按所选分区翻页。合并PR69插图双击缩放，并保留单击翻页、弹窗/工具栏优先权及取消边界。
   Merge PR68's authored Pico ripple erase/redrive and53-phase support. Standard centre taps still enter fullscreen; fullscreen centre taps follow the chosen turn regions. Integrate PR69 image double-tap zoom while retaining single turns, modal/tool priority and cancellation boundaries.
 
@@ -25,6 +39,9 @@
 
 - S31统一TF文件访问与卸载保护，普通挂载及USB共用总线配置和内部DMA，保留降频/单线兼容及自动恢复；沿用rc109，仅本地测试。
   S31 unifies SD admission/unmount protection and VFS/USB bus/internal-DMA setup, retaining fallback and automatic recovery. Local rc109 test only.
+
+- S31新增「快充」设置，默认开启（1.5A），关闭后回到标准1A充电；切换立即生效并保存，重启后保持。该项位于设置「个性化功能」分组，独立一行并带充电闪电图标。
+  S31 gains a Fast charge setting, on by default (1.5 A); turning it off returns to standard 1 A charging. The change applies and is saved immediately and persists across restarts. It is its own row in Settings > Personalization with a charging bolt icon.
 
 ## Pico 0.3.3-rc104 / Metalio S31 0.3.3-rc109 — 2026-11-01
 
@@ -133,6 +150,10 @@ Retain original Pico rc103/S31 rc108 web/TF entries, kiikoread.com as the sole w
 
 
 ## 未发布 / Unreleased
+
+- Pico 深睡唤醒后不再多按一遍：锁屏 10 分钟转深睡后，上电短按已经算一次唤醒，恢复阅读只需再按一次；设置双击唤醒时由 3 下减为 2 下，普通浅睡锁屏仍遵循双击/单次设置。
+  After Pico deep sleep, one press powers the host and one more resumes reading (two presses total with the double-click wake setting instead of three); ordinary light-sleep locks still follow the configured single/double press.
+
 
 - 恢复插图双击缩放：双击正文/整页插图放大，再双击退出；中间空白单击仍切换全屏，翻页判定不变。
   Restore double-tap illustration zoom: double tap zooms and a second double tap exits; centre blank taps keep the fullscreen toggle and page-turn taps are unchanged.

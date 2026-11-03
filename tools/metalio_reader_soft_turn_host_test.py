@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
-"""核对Moku普通原字节、八相擦白、活动灰阶/OOM回退及独立DU加四白；不连接设备。
-Check Moku ordinary bytes, eight white phases, active-gray/OOM fallback and separate DU plus four whites; no device access.
+"""核对最新普通翻页十二相白/四相黑、原厂灰阶/OOM回退及独立DU加四白；不连接设备。
+Check twelve white/four black phases, vendor gray/OOM fallback and independent DU plus four whites; no device access.
 """
 from pathlib import Path
 import hashlib
@@ -51,14 +51,15 @@ int main(int argc,char **argv){
  if(hold<1){
   assert(normal==&E0470_WAVEFORM&&n==e0470_waveform_phases(&E0470_WAVEFORM,MODE_GL16));
  }else{
-  assert(normal!=&E0470_WAVEFORM&&n&&n->phases==base->phases+8);
+  assert(normal!=&E0470_WAVEFORM&&n&&n->phases==base->phases+16);
   for(int to=0;to<16;++to)for(int from=0;from<16;++from){
    for(int f=0;f<drive;++f){int expected=e0470_phase_action(base,f,to,from);
     if(to==0&&from==0&&expected==2)expected=0;
     assert(e0470_phase_action(n,f,to,from)==expected);
    }
-   for(int f=drive;f<drive+8;++f)assert(e0470_phase_action(n,f,to,from)==(to==15?2:0));
-   for(int f=0;f<hold;++f)assert(e0470_phase_action(n,drive+8+f,to,from)==e0470_phase_action(base,drive+f,to,from));
+   for(int f=drive;f<drive+12;++f)assert(e0470_phase_action(n,f,to,from)==(to==15?2:0));
+   for(int f=drive+12;f<drive+16;++f)assert(e0470_phase_action(n,f,to,from)==(to==0?1:0));
+   for(int f=0;f<hold;++f)assert(e0470_phase_action(n,drive+16+f,to,from)==e0470_phase_action(base,drive+f,to,from));
   }
  }
  assert(display_reader_soft_turn_waveform()==normal);
@@ -82,7 +83,7 @@ int main(int argc,char **argv){
   for(int f=0;f<hold;++f)assert(e0470_phase_action(b,drive+4+f,to,from)==e0470_phase_action(du,drive+f,to,from));
  }
  assert(!memcmp(old_du,du->luts,(size_t)du->phases*64)&&!memcmp(saved,raw->luts,sizeof(saved)));
- printf("PASS: panel37=%d OOM=%d normal=%d fast=%d; all256 pairs, vendor bytes, white-only extras, original DU settling and bounded caches\n",KIIKO_S31_READER_PANEL37,oom,n->phases,b->phases);
+ printf("PASS: panel37=%d OOM=%d normal=%d fast=%d; all256 pairs, vendor bytes, 12 white/4 black extras, original DU settling and bounded caches\n",KIIKO_S31_READER_PANEL37,oom,n->phases,b->phases);
 }
 '''
 
@@ -102,12 +103,15 @@ with tempfile.TemporaryDirectory(prefix='s31-reader-profiles-') as temporary:
     sources = [str(test), 'main/display_reader_waveform.c', 'main/display_main_waveform.c',
                'components/e0470_epaper_waveform/e0470_epaper_waveform.c',
                'components/e0470_epaper_waveform/e0470_waveform_trim.c']
-    for du14 in variants:
-        for panel37 in (0, 1):
-            exe = folder / f'profile-{du14}-{panel37}'
-            subprocess.run(flags + [f'-DKIIKO_S31_DU14={du14}',
-                           f'-DKIIKO_S31_READER_PANEL37={panel37}', *sources, '-o', str(exe)], cwd=view, check=True)
-            for oom in (0, 1):
-                dump = folder / 'normal.lut'
-                subprocess.run([str(exe), str(oom), str(dump)], check=True)
-                assert len(dump.read_bytes()) in (37*64,45*64)
+    for trimmed in (0, 1):
+        for du14 in variants:
+            for panel37 in (0, 1):
+                exe = folder / f'profile-{trimmed}-{du14}-{panel37}'
+                subprocess.run(flags + [f'-DE0470_WAVEFORM_TRIM={trimmed}',
+                               f'-DKIIKO_S31_DU14={du14}',
+                               f'-DKIIKO_S31_READER_PANEL37={panel37}', *sources, '-o', str(exe)], cwd=view, check=True)
+                for oom in (0, 1):
+                    dump = folder / 'normal.lut'
+                    subprocess.run([str(exe), str(oom), str(dump)], check=True)
+                    expected = 53 if panel37 and not oom else 37 if trimmed else 48
+                    assert len(dump.read_bytes()) == expected * 64

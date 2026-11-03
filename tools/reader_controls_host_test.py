@@ -28,7 +28,7 @@ static struct {bool pending;} s_reader_tap;
 static int64_t s_stats_activity_ms,s_reader_notice_until;
 static unsigned invalidations;
 static void invalidate_prep(void){++invalidations;}
-static void pause_reader_prep(void){++invalidations;}
+void pause_reader_prep(void){++invalidations;}
 static bool locked,aa=true,raster_aa=true,save_fail;
 static void lock_draw(void){assert(!locked);locked=true;}
 static void unlock_draw(void){assert(locked);locked=false;}
@@ -65,6 +65,7 @@ static bool tools_swipe(app_ctx_t *ctx,const ui_gesture_event_t *ev){
 unit+=function('book_reader_center',ROOT/'main/book/book_reader_input.h')+'\n'
 unit+='static bool reader_page_image_hit(int x,int y){(void)x;(void)y;return false;}\n'
 unit+='static EpdRect body_rect(void){return(EpdRect){0,176,684,872};}\n'
+unit+='#define UI_READER_TOOLS_TOP 1096\nstatic EpdRect reader_area(void){return(EpdRect){0,176,684,872};}\nstatic app_redraw_t reader_panel_action(app_ctx_t *ctx,int x,int y){(void)ctx;(void)x;(void)y;return APP_REDRAW_NONE;}\n'
 unit+='static int s_footnote_note=-1,footnote_candidate=-1;static EpdRect s_footnote_marker;\nstatic int reader_footnote_hit(int x,int y,EpdRect *r){(void)x;(void)y;(void)r;return footnote_candidate;}\n'
 center=function('action_at',book)
 a=center.index('        if (s_footnote_note >= 0)')

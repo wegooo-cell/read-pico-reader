@@ -30,6 +30,18 @@ int main(void){
  assert(captured_count>before+1);
  assert(ui_reader_fullscreen_progress().y==1207&&ui_reader_fullscreen_progress().height==3);
  puts("PASS: full immersion recovers release body24..1202 and thin1207/3px progress, adding more real text lines");
+ // Both chrome states feed identical geometry to the real paginator, including vertical text.
+ for(int style=0;style<2;++style)for(int vertical=0;vertical<2;++vertical){
+  book_layout_set_vertical(vertical);
+  EpdRect a=ui_reader_body(true,style,24,vertical),b=ui_reader_body(false,style,24,vertical);
+  assert(a.x==b.x&&a.y==b.y&&a.width==b.width&&a.height==b.height);
+  assert(book_layout_build(text,11999,a,48));
+  size_t pages=book_layout_page_count(),offsets[1024];assert(pages<1024);
+  for(size_t page=0;page<pages;++page)offsets[page]=book_layout_page_start_offset(page);
+  assert(book_layout_build(text,11999,b,48)&&book_layout_page_count()==pages);
+  for(size_t page=0;page<pages;++page)assert(book_layout_page_start_offset(page)==offsets[page]);
+ }
+ puts("PASS: real horizontal/vertical pagination and every page offset are identical with chrome shown/hidden in both immersive styles");
  book_layout_free();}
 '''
 u=(R/'tools/book_layout_host_test.c').read_text().replace('int main(void) {','static void original_layout_test(void) {')+'\n'+u.split('#undef main\n',1)[1]

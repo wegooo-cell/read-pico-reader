@@ -41,6 +41,10 @@ static void metalio_poweroff(void){assert(closed&&paused&&rtc&&font);++pulses;if
 static int read_pico_sd_remount(void){assert(closed);++remounts;closed=false;return ESP_OK;}
 static int lock_resume_media_io(unsigned wait){assert(wait==500&&!closed);++resumes;s_lock_io_pending=false;return ESP_OK;}
 static void metalio_haptic_resume(void){++haptics;}
+// 充电监控的挂起/恢复由充电驱动自己验证；这里只要求关机事务前后成对调用。
+// The charge driver owns suspend/resume; this test only requires the paired call around power-off.
+static void metalio_charger_suspend(void){}
+static void metalio_charger_resume(void){}
 '''
 source=root/'main/sleep.c'
 unit+=function('lock_power_off',source)+'\n'+function('lock_power_off_parked',source)+'\n'

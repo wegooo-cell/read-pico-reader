@@ -201,6 +201,9 @@ void app_settings_set_shelf_recent_sort(bool on);
 /// by default. Turning it off tears the whole stack down and returns NimBLE's memory.
 bool app_settings_ble_turner(void);
 void app_settings_set_ble_turner(bool on);
+/// S31快充：默认开启；关闭回到标准充电电流，切换立即生效并掉电保存。/ S31 fast charge: on by default; off returns to the standard current, and the choice persists.
+bool app_settings_fast_charge(void);
+void app_settings_set_fast_charge(bool on);
 /// 字间距默认0px，31档以0居中。/ Default 0px, centered among 31 tracking stops.
 #define APP_BOOK_TRACK_MIN (-15)
 #define APP_BOOK_TRACK_MAX 15

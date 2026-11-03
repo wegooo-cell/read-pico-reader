@@ -64,11 +64,16 @@ const EpdWaveform* e0470_du14_waveform(void);
 extern const EpdWaveform E0470_GRAY8_WAVEFORM;
 
 #if KIIKO_BOARD_METALIO47
-/// 用户2026-11-01实验：S31本地套用Pico的裁剪参数（GC36/GL37），原始48相表仍完整保留。
-/// User2026-11-01 experiment: S31 locally adopts Pico's trimmed profile (GC36/GL37); the original 48-phase tables stay intact.
-/// 置0即回到厂家2.0.76完整48相；本次只改裁剪开关，不改表数据。
-/// Set 0 to return to vendor 2.0.76 full 48 phases; this switch changes only the trim, not the table data.
-#define E0470_WAVEFORM_TRIM 1
+/// 用户2026-11-03：S31残影对齐官方v2.0.66+与Pico默认——主表用完整48相，裁剪版降为可选快速档。
+/// 2026-11-01的裁剪参数实验（GC36/GL37）保留为可回退档；原始48相表始终完整保留。
+/// User2026-11-03: align S31 ghosting with official v2.0.66+ and Pico's default -- the main table
+/// is the complete 48 phases, with the trimmed profile demoted to an optional fast profile. The
+/// 2026-11-01 trimmed experiment (GC36/GL37) remains available for rollback; raw 48-phase data intact.
+/// 置1即回到裁剪档；本开关只改裁剪，不改表数据。
+/// Set 1 to return to the trimmed profile; this switch only changes the trim, not the table data.
+#ifndef E0470_WAVEFORM_TRIM
+#define E0470_WAVEFORM_TRIM 0
+#endif
 #else
 /// 裁剪版保留新屏所需的 3 个尾部保持相。完整48相实测未明显改善边缘残影，因此恢复
 /// 已验证的主动段裁剪，避免无收益地增加约150ms；无损前导保持跳过仍由渲染器执行。

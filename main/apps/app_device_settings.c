@@ -98,6 +98,7 @@ static ui_online_fonts_t s_online_fonts;
 #include "pmu_selftest.h"
 #if KIIKO_BOARD_METALIO47
 #include "metalio_hw.h"
+#include "metalio_charger.h"
 #else
 #include "soc/rtc_cntl_reg.h"
 #endif
@@ -412,7 +413,13 @@ static int settings_main_row_height(void) {
 #else
 #define SETTINGS_DISPLAY_ROWS 8
 #endif
+#if KIIKO_BOARD_METALIO47
+// S31 个性化功能多一行「快充」，其余板型保持四项。
+// S31 keeps one extra Fast charge row in Personalization; other boards keep four.
+#define SETTINGS_PERSONAL_ROWS 5
+#else
 #define SETTINGS_PERSONAL_ROWS 4
+#endif
 #if KIIKO_BOARD_METALIO47
 #define SETTINGS_MAINTENANCE_ROWS 6
 #else
@@ -889,6 +896,7 @@ static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
         UI_ICON_LOCK,              // 16 锁屏密码 / lock screen password
         UI_ICON_ROTATE_CW,         // 17 屏幕修复 / panel repair
         UI_ICON_LOCK,              // 18 双击解锁 / double-press unlock
+        UI_ICON_ZAP,               // 19 快充 / fast charge
     };
     if (index < 0 || index >= (int)(sizeof(icons) / sizeof(icons[0]))) return;
     ui_draw_icon(fb, cx, cy, SETTINGS_ICON_PX, icons[index], SETTINGS_ICON_INK);
@@ -1742,11 +1750,22 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
     setting_group(fb,SETTINGS_DISPLAY_Y-49,"显示",SETTINGS_DISPLAY_Y,
                   display_icons,display_labels,display_values,SETTINGS_DISPLAY_ROWS);
     snprintf(signature,sizeof(signature),"%s",app_settings_status_signature()[0]?app_settings_status_signature():"未设置");
+#if KIIKO_BOARD_METALIO47
+    // 快充是独立一行：点按即切换，值显示实际生效档位。
+    // Fast charge is its own row: a tap toggles it and the value shows the effective current.
+    const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名","快充"};
+    const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==6?"液态玻璃书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架",
+        app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
+        lock_pin_enabled()?"已开启":"已关闭",signature,
+        app_settings_fast_charge()?"开启":"关闭"};
+    const int personal_icons[]={4,5,16,10,19};
+#else
     const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名"};
     const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==6?"液态玻璃书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架",
         app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
         lock_pin_enabled()?"已开启":"已关闭",signature};
     const int personal_icons[]={4,5,16,10};
+#endif
     setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
                   personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
 #if KIIKO_BOARD_METALIO47
@@ -2823,6 +2842,15 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         if(row==0) {s_page=SETTINGS_SHELF_STYLE;s_style_scroll=0;}
         else if(row==1)s_page=SETTINGS_LOCK_STYLE;
         else if(row==2){s_page=SETTINGS_LOCK_PIN;s_notice[0]=0;}
+#if KIIKO_BOARD_METALIO47
+        // 先保存设置再改充电电流；写 NVS 失败时按实际生效的旧值应用并重绘，避免行与硬件不一致。
+        // Persist before reprogramming; on a failed save apply the value that actually took effect.
+        else if(row==4) {
+            bool next=!app_settings_fast_charge();
+            app_settings_set_fast_charge(next);
+            (void)metalio_charger_set_fast_charge(app_settings_fast_charge());
+        }
+#endif
         else profile_editor_open(true);
         return APP_REDRAW_PAGE;
     }

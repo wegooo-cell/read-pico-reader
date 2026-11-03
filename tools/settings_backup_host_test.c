@@ -23,6 +23,38 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
 #define APP_SETTINGS_BACKUP_ROOT "build/book-tests/settings-card"
 #include "../main/settings.c"
 
+// 两板旧备份名仍须能恢复；固件查找表是私有的，这里按公开约定复述。
+// Both boards' legacy backup names must stay restorable; repeat the documented names here.
+#define LEGACY_PICO_FILE APP_SETTINGS_BACKUP_ROOT "/Pico-settings.backup"
+#define LEGACY_PICO_PREVIOUS APP_SETTINGS_BACKUP_ROOT "/Pico-settings.backup.previous"
+#define LEGACY_S31_FILE APP_SETTINGS_BACKUP_ROOT "/Metalio-S31-settings.backup"
+#define LEGACY_S31_PREVIOUS APP_SETTINGS_BACKUP_ROOT "/Metalio-S31-settings.backup.previous"
+
+static void remove_backup_files(void) {
+    (void)remove(BACKUP_FILE);
+    (void)remove(BACKUP_PREVIOUS);
+    (void)remove(BACKUP_TEMP);
+    (void)remove(LEGACY_PICO_FILE);
+    (void)remove(LEGACY_PICO_PREVIOUS);
+    (void)remove(LEGACY_S31_FILE);
+    (void)remove(LEGACY_S31_PREVIOUS);
+}
+
+static bool copy_backup_file(const char *from, const char *to) {
+    FILE *input = fopen(from, "rb");
+    if (!input) return false;
+    FILE *output = fopen(to, "wb");
+    if (!output) { fclose(input); return false; }
+    bool ok = true;
+    char buffer[256];
+    size_t read;
+    while ((read = fread(buffer, 1, sizeof(buffer), input)) > 0)
+        if (fwrite(buffer, 1, read, output) != read) { ok = false; break; }
+    fclose(input);
+    if (fclose(output) != 0) ok = false;
+    return ok;
+}
+
 static read_pico_transfer_wifi_backup_t saved_wifi = {
     .configured = 1, .ssid = "Home_2.4G", .password = "password123"
 };
@@ -282,9 +314,7 @@ int main(void) {
     s_main_refresh=APP_MAIN_REFRESH_NORMAL;app_settings_init();assert(app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER);
     assert(!app_settings_main_fast_refresh());
     (void)mkdir(APP_SETTINGS_BACKUP_ROOT, 0700);
-    (void)remove(BACKUP_FILE);
-    (void)remove(BACKUP_PREVIOUS);
-    (void)remove(BACKUP_TEMP);
+    remove_backup_files();
     card_mounted = false;
     assert(app_settings_backup_save() == ESP_ERR_INVALID_STATE);
     card_mounted = true;
@@ -899,6 +929,30 @@ int main(void) {
         if (valid) assert(app_settings_book_reading_line() == code % 3 && app_settings_book_reading_line_full() == (v == 21 && code >= 3));
         else assert(commit_count == before && app_settings_book_reading_line_full());
     }
-    puts("settings backup host test passed (200% sizes, retired shelf migration, collage persistence/restore without wallpaper)");
+
+    // 新版本统一写 Kiikoread-settings.backup；两板旧名及各自 .previous 仍可恢复。
+    // New builds write the shared Kiikoread name; both legacy names and their .previous copies restore.
+    remove_backup_files();
+    app_settings_set_book_px(42);assert(app_settings_book_px()==42);
+    assert(app_settings_backup_save()==ESP_OK);
+    FILE *unified=fopen(BACKUP_FILE,"rb");assert(unified);fclose(unified);
+    const char *legacy_names[]={LEGACY_PICO_FILE,LEGACY_S31_FILE};
+    const char *legacy_previous[]={LEGACY_PICO_PREVIOUS,LEGACY_S31_PREVIOUS};
+    for(unsigned i=0;i<2;++i){
+        remove_backup_files();
+        app_settings_set_book_px(42);assert(app_settings_backup_save()==ESP_OK);
+        assert(copy_backup_file(BACKUP_FILE,legacy_names[i]));
+        assert(remove(BACKUP_FILE)==0);
+        app_settings_set_book_px(30);assert(app_settings_book_px()==30);
+        assert(app_settings_backup_restore()==ESP_OK&&app_settings_book_px()==42);
+        remove_backup_files();
+        app_settings_set_book_px(55);assert(app_settings_backup_save()==ESP_OK);
+        assert(copy_backup_file(BACKUP_FILE,legacy_previous[i]));
+        assert(remove(BACKUP_FILE)==0);
+        app_settings_set_book_px(30);assert(app_settings_book_px()==30);
+        assert(app_settings_backup_restore()==ESP_OK&&app_settings_book_px()==55);
+    }
+    remove_backup_files();
+    puts("settings backup host test passed (200% sizes, retired shelf migration, collage persistence/restore without wallpaper, unified backup name with both boards' legacy names)");
     return 0;
 }

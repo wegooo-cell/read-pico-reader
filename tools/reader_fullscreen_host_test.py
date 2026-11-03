@@ -56,7 +56,6 @@ static void copy_text(char *to,size_t cap,const char *from){snprintf(to,cap,"%s"
 static void lock_draw(void){assert(!draw_locked);draw_locked=true;}
 static void unlock_draw(void){assert(draw_locked);draw_locked=false;}
 static void invalidate_prep(void){}
-static void refresh_chapter_lead(void){}
 static bool immersive,persisted_immersive,hide_images,vertical,power_turn;
 static unsigned style_saves;
 static bool app_settings_reader_immersive(void){return immersive;}
@@ -69,7 +68,7 @@ static void app_settings_set_book_vertical(bool v){vertical=v;}
 static void book_layout_set_vertical(bool v){(void)v;}
 static bool app_settings_reader_power_turn(void){return power_turn;}
 static void app_settings_set_reader_power_turn(bool v){power_turn=v;}
-static EpdRect body_rect(void){return(EpdRect){0,0,684,s_reader_fullscreen?(app_settings_reader_immersive()?180:150):100};}
+static EpdRect body_rect(void){return(EpdRect){0,0,684,app_settings_reader_immersive()?180:100};}
 static char s_chapter_heading_title[8],s_chapter_heading_label[8],s_reader_notice[128];
 static size_t s_chapter_lead_skip,s_image_count;static unsigned s_chapter_lead_row_height;
 static bool s_reader_footer_pending,s_reader_image_refresh_pending;
@@ -129,7 +128,7 @@ static int s_pressed_control;
 unit += function('reader_tools_swipe', BOOK) + '\n'
 unit += r'''
 static void reset(bool full,bool tools,size_t page,size_t chapter){
- immersive=persisted_immersive=false;style_saves=0;s_text="text";s_view=READING;s_reader_fullscreen=full;layout_span=full?150:100;s_page=page;s_chapter=chapter;
+ immersive=persisted_immersive=false;style_saves=0;s_text="text";s_view=READING;s_reader_fullscreen=full;layout_span=100;s_page=page;s_chapter=chapter;
  s_reader_panel=tools?READER_PANEL_TOOLS:READER_PANEL_NONE;s_reader_slider=2;
  reflows=paints=saves=s_stats_pending_turns=s_session_turns=s_turns=s_unsaved=0;
  failed_reflows=0;load_failed=false;full_pages=0;s_reader_text_frame=true;
@@ -183,40 +182,40 @@ int main(void){
  assert(!s_reader_fullscreen&&!s_toolbar&&s_page==0&&!paints&&!s_stats_pending_turns);
  reset(false,true,8,1);assert(turn_page(&ctx,1)==APP_REDRAW_PAGE);
  assert(!s_reader_fullscreen&&!s_toolbar&&s_page==8&&!s_stats_pending_turns);
- reset(true,true,5,1);assert(turn_page(&ctx,1)==APP_REDRAW_PAGE&&!s_toolbar&&!reflows);
+ reset(true,true,8,1);assert(turn_page(&ctx,1)==APP_REDRAW_PAGE&&!s_toolbar&&!reflows);
  reset(false,true,8,0);assert(turn_page(&ctx,1)==APP_REDRAW_PAGE&&s_chapter==1&&s_page==0&&!s_reader_fullscreen);
  reset(false,true,0,1);assert(turn_page(&ctx,-1)==APP_REDRAW_PAGE&&s_chapter==0&&s_page==8&&!s_reader_fullscreen);
  reset(false,true,8,0);load_failed=true;assert(turn_page(&ctx,1)==APP_REDRAW_PAGE&&s_view==TOC&&!paints&&!s_stats_pending_turns);
- // Explicit mode changes retain the anchor and roll back failed pagination; turns never reflow.
- reset(false,true,2,0);assert(toggle_reader_fullscreen(&ctx)==APP_REDRAW_FULL);
- assert(s_reader_fullscreen&&s_page==1&&layout_span==150&&reflows==1&&saves==1);
- assert(toggle_reader_fullscreen(&ctx)==APP_REDRAW_FULL&&!s_reader_fullscreen&&s_page==1&&layout_span==100);
- reset(false,true,2,0);failed_reflows=1;assert(toggle_reader_fullscreen(&ctx)==APP_REDRAW_NONE);
- assert(s_text&&!s_reader_fullscreen&&layout_span==100&&s_page==2&&reflows==2&&!saves);
- reset(false,true,2,0);failed_reflows=2;assert(toggle_reader_fullscreen(&ctx)==APP_REDRAW_PAGE);
- assert(!s_text&&s_view==SHELF&&!paints&&!s_stats_pending_turns&&s_message[0]);
- // Real fullscreen exit/reflow plus tools must preserve the source anchor in one gesture.
+ // Chrome toggles preserve the exact page/offset and never rebuild or save progress.
  for(int style=0;style<2;++style){
-  reset(true,false,3,0);immersive=style;layout_span=style?180:150;
+  reset(false,true,2,0);immersive=style;layout_span=style?180:100;
+  size_t off=book_layout_page_start_offset(s_page);s_jump_offset=73;failed_reflows=2;
+  for(int n=0;n<4;++n){
+   assert(toggle_reader_fullscreen(&ctx)==APP_REDRAW_FULL);
+   assert(s_reader_fullscreen==!(n&1)&&s_reader_panel==READER_PANEL_NONE);
+   assert(s_page==2&&book_layout_page_start_offset(s_page)==off&&s_jump_offset==73);
+   assert(!reflows&&!saves&&failed_reflows==2);
+  }
+  reset(true,false,3,0);immersive=style;layout_span=style?180:100;
   size_t before=book_layout_page_start_offset(s_page);bool handled=false;
   ui_gesture_event_t swipe={UI_GESTURE_SWIPE_U,342,1180,342,980};
   assert(reader_tools_swipe(&ctx,&swipe,&handled)==APP_REDRAW_FULL&&handled);
-  assert(!s_reader_fullscreen&&s_reader_panel==READER_PANEL_TOOLS&&reflows==1&&saves==1);
-  assert(book_layout_page_start_offset(s_page)<=before&&before<book_layout_page_start_offset(s_page+1));
-  reset(true,false,3,0);failed_reflows=1;
-  assert(reader_tools_swipe(&ctx,&swipe,&handled)==APP_REDRAW_NONE&&handled);
-  assert(s_reader_fullscreen&&s_reader_panel==READER_PANEL_NONE&&s_page==3&&reflows==2&&!saves);
+  assert(!s_reader_fullscreen&&s_reader_panel==READER_PANEL_TOOLS&&!reflows&&!saves);
+  assert(s_page==3&&book_layout_page_start_offset(s_page)==before);
  }
- // 沉浸偏好独立保存：非全屏不重排，全屏改样式保留字节锚点。/ Persist style independently: no nonfullscreen reflow; preserve fullscreen byte anchors.
- reset(false,true,2,0);assert(apply_reader_option(&ctx,1)==APP_REDRAW_PAGE);
- assert(!s_reader_fullscreen&&immersive&&persisted_immersive&&style_saves==1&&!reflows&&s_page==2);
- assert(toggle_reader_fullscreen(&ctx)==APP_REDRAW_FULL&&s_reader_fullscreen&&immersive&&layout_span==180&&s_page==1&&style_saves==1);
- assert(toggle_reader_fullscreen(&ctx)==APP_REDRAW_FULL&&!s_reader_fullscreen&&immersive&&style_saves==1);
+ // Changing the actual immersive style still reflows, even while tools cover the body.
+ reset(false,true,2,0);size_t standard_anchor=book_layout_page_start_offset(s_page);
+ assert(apply_reader_option(&ctx,1)==APP_REDRAW_FULL);
+ assert(!s_reader_fullscreen&&immersive&&persisted_immersive&&style_saves==1&&reflows==1&&saves==1);
+ assert(book_layout_page_start_offset(s_page)<=standard_anchor&&standard_anchor<book_layout_page_start_offset(s_page)+layout_span);
+ size_t style_page=s_page;
+ assert(toggle_reader_fullscreen(&ctx)==APP_REDRAW_FULL&&s_reader_fullscreen&&immersive&&layout_span==180&&s_page==style_page&&reflows==1&&saves==1);
+ assert(toggle_reader_fullscreen(&ctx)==APP_REDRAW_FULL&&!s_reader_fullscreen&&immersive&&s_page==style_page);
  reset(true,true,2,0);size_t style_anchor=book_layout_page_start_offset(s_page);
  assert(apply_reader_option(&ctx,1)==APP_REDRAW_FULL&&s_reader_fullscreen&&immersive&&persisted_immersive);
  assert(book_layout_page_start_offset(s_page)<=style_anchor&&style_anchor<book_layout_page_start_offset(s_page)+layout_span&&layout_span==180&&s_reader_panel==READER_PANEL_TOOLS);
  reset(true,true,2,0);failed_reflows=1;
- assert(apply_reader_option(&ctx,1)==APP_REDRAW_PAGE&&s_reader_fullscreen&&!immersive&&!persisted_immersive&&s_page==2&&layout_span==150&&reflows==2&&!saves);
+ assert(apply_reader_option(&ctx,1)==APP_REDRAW_PAGE&&s_reader_fullscreen&&!immersive&&!persisted_immersive&&s_page==2&&layout_span==100&&reflows==2&&!saves);
  reset(true,true,2,0);failed_reflows=2;
  assert(apply_reader_option(&ctx,1)==APP_REDRAW_PAGE&&!s_text&&s_view==SHELF&&!immersive&&!persisted_immersive);
  // 速读黑白严格使用Pico既有0/5/10/15/30间隔，没有隐藏十页清理上限。

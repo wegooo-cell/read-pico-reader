@@ -43,6 +43,10 @@ static int cst836u_set_mode(void *t,int m){assert(t&&m==1);if(fail())return -2;t
 static int read_pico_sd_sync(void){if(fail())return -2;media=false;++closes;return ESP_OK;}
 static void metalio_haptic_stop(void){}
 static void metalio_haptic_resume(void){}
+// 充电监控的睡眠挂起/恢复由充电驱动自己验证；本测试只要求事务期间不被插入。
+// The charge driver owns suspend/resume; this test only needs the transaction to stay isolated.
+static void metalio_charger_suspend(void){}
+static void metalio_charger_resume(void){}
 static void metalio_frontlight(unsigned b,unsigned w){assert(!b&&w==50);}
 static void epd_poweroff(void){}
 static void epd_lcd_deinit(void){lcd=true;}

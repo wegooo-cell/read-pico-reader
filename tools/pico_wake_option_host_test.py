@@ -19,7 +19,7 @@ unit=r'''
 #define NVS_KEY_WAKE_PRESSES "wake_press"
 #define ESP_OK 0
 #define ESP_LOGI(...) ((void)0)
-static uint8_t stored;static unsigned writes,gate,ready,held;
+static uint8_t stored;static unsigned writes,gate,ready,held,rearms;
 static bool pin,boot_press;
 static void nvs_put_u8(const char *key,uint8_t value){assert(!strcmp(key,NVS_KEY_WAKE_PRESSES));stored=value;++writes;}
 '''
@@ -61,11 +61,17 @@ b=settings.read_text().index('    s_wake_presses = raw;',a)+len('    s_wake_pres
 unit+=settings.read_text()[a:b]+'}\n'
 unit+=r'''
 static bool read_pico_pmu_take_boot_short_press(void){bool value=boot_press;boot_press=false;return value;}
+#define ESP_RST_POWERON 1
+#define ESP_RST_SW 3
+static int reset=ESP_RST_POWERON;
+static bool power_key;
+static bool read_pico_pmu_take_boot_power_key(void){bool value=power_key;power_key=false;return value;}
 static bool late_press;
 static bool read_pico_pmu_take_key_wakeup_single(void){bool value=late_press;late_press=false;return value;}
 static void vTaskDelay(unsigned ticks){(void)ticks;}
 #define pdMS_TO_TICKS(ms) (ms)
 static bool lock_pin_enabled(void){return pin;}
+static void read_pico_pmu_rearm_after_boot_key(void){++rearms;}
 static void pico_boot_ready(void){++ready;}
 static void pico_boot_hold_resume(void){++held;}
 static bool app_lock_resume_frame(void *hl){(void)hl;return false;}
@@ -97,14 +103,22 @@ int main(void){
  assert(setting_tap(300,UI_NAV_TOP,0)==APP_REDRAW_NONE);
  for(unsigned resume=0;resume<2;++resume)for(unsigned password=0;password<2;++password)
  for(unsigned key=0;key<2;++key)for(unsigned count=1;count<=2;++count){
-  s_wake_presses=count;pin=password;boot_press=key;late_press=false;gate=ready=held=0;
+  s_wake_presses=count;pin=password;boot_press=key;late_press=false;gate=ready=held=rearms=0;
   boot_gate(resume);bool direct=resume&&!password&&key&&count==1;
-  assert(gate==!direct&&ready==direct&&held==direct&&!boot_press);
+  assert(gate==!direct&&ready==direct&&held==direct&&rearms==direct&&!boot_press);
  }
- s_wake_presses=1;pin=false;boot_press=false;late_press=true;gate=ready=held=0;
+ s_wake_presses=1;pin=false;boot_press=false;late_press=true;gate=ready=held=rearms=0;
  boot_gate(true);assert(!gate&&ready==1&&held==1&&!late_press);
- s_wake_presses=2;pin=false;boot_press=false;late_press=true;gate=ready=held=0;
+ s_wake_presses=2;pin=false;boot_press=false;late_press=true;gate=ready=held=rearms=0;
  boot_gate(true);assert(gate&&!ready&&!held&&late_press);
+ // Fresh PMU power-on evidence still obeys the real reset/resume/PIN/preference gate.
+ for(int power_reset=0;power_reset<2;++power_reset)for(int resume=0;resume<2;++resume)
+ for(int password=0;password<2;++password)for(int count=1;count<=2;++count){
+  reset=power_reset?ESP_RST_POWERON:ESP_RST_SW;pin=password;s_wake_presses=count;
+  power_key=true;boot_press=late_press=false;gate=ready=held=rearms=0;
+  boot_gate(resume);bool direct=power_reset&&resume&&!password&&count==1;
+  assert(gate==!direct&&ready==direct&&held==direct&&rearms==direct&&!power_key);
+ }
  puts("PASS: single-press default/missing/invalid NVS, explicit double choice retained, root switch below auto sleep, scrolled row/nav boundaries, wake/PIN/late press guards");
 }
 '''

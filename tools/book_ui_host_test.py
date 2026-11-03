@@ -582,7 +582,8 @@ int main(void) {
     for(int im=0;im<2;++im){
         test_reader_immersive=im;s_reader_fullscreen=false;
         EpdRect reading_body=reader_area(),text_body=body_rect(),footer=progress_rect();
-        assert(reading_body.y==176&&reading_body.height==872&&text_body.y==176&&text_body.height==872);
+        assert(reading_body.y==176&&reading_body.height==872);
+        assert(text_body.y==(im?24:80)&&text_body.y+text_body.height==(im?1202:1168));
         assert(footer.y==1048&&footer.height==48);
         s_reader_fullscreen=true;reading_body=reader_area();text_body=body_rect();footer=progress_rect();
         assert(reading_body.y==(im?0:80)&&reading_body.y+reading_body.height==(im?1204:1168));
@@ -865,12 +866,12 @@ int main(void) {
     assert(apply_reader_option(&ctx,0)==APP_REDRAW_PAGE&&test_power_turn);
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_FULL);
     s_reader_fullscreen=false;
-    assert(apply_reader_option(&ctx,1)==APP_REDRAW_PAGE&&!s_reader_fullscreen&&test_reader_immersive&&s_page==1);
+    assert(apply_reader_option(&ctx,1)==APP_REDRAW_FULL&&!s_reader_fullscreen&&test_reader_immersive&&s_page==1);
     assert(apply_reader_option(&ctx,2)==APP_REDRAW_PAGE&&test_hide_images&&!test_images_visible&&s_page==1);
-    assert(test_image_preparations==1&&test_reflows==1);
+    assert(test_image_preparations==2&&test_reflows==2);
     test_reflow_failures=1;
     assert(apply_reader_option(&ctx,2)==APP_REDRAW_PAGE&&test_hide_images&&!test_images_visible&&s_page==1);
-    assert(test_reflows==3&&test_image_preparations==1);
+    assert(test_reflows==4&&test_image_preparations==2);
     assert(apply_reader_option(&ctx,2)==APP_REDRAW_PAGE&&!test_hide_images&&test_images_visible&&s_page==1);
     test_hold_action=APP_READER_KEY_HOME;test_nav_target=-1;
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_PAGE && test_nav_target==-1 && s_view==SHELF);

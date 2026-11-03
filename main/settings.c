@@ -86,6 +86,7 @@ static bool reader_full_pages_valid(uint8_t pages) {
 #define NVS_KEY_READER_KEYS_V2 "rd_keys_v2"
 #define NVS_KEY_VERTICAL_TURN "rd_vertical"
 #define NVS_KEY_BLE_TURNER "ble_turn"
+#define NVS_KEY_FAST_CHARGE "fast_chg"
 #define NVS_KEY_SHELF_RECENT "shelf_recent"
 #define NVS_KEY_BOOK_LINE "bk_line"
 #define NVS_KEY_BOOK_PARA "bk_para"
@@ -154,6 +155,9 @@ static uint8_t s_reader_hold_action = APP_READER_KEY_HOME;
 static uint8_t s_reader_keys[3] = {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT};
 static bool s_reader_vertical_turn;
 static bool s_ble_turner;
+// 快充默认开启：首次上电即 1.5A，用户关闭后才回到标准 1A。
+// Fast charge is on by default: 1.5 A from first boot, standard 1 A only after the user turns it off.
+static bool s_fast_charge = true;
 #if KIIKO_BOARD_METALIO47
 static app_ai_action_t s_ai_short=APP_AI_REFRESH;
 #endif
@@ -229,6 +233,7 @@ void app_settings_init(void) {
     s_home_full_refresh = true;
     s_home_component = APP_HOME_MOON;
     s_shelf_style = 6;
+    s_fast_charge = true;
     esp_err_t err = nvs_flash_init();
     // 设置分区异常时保留原数据供恢复，绝不因空间不足自动擦除用户资料。
     // Preserve settings on NVS errors; a full partition must never silently erase profile data.
@@ -372,6 +377,8 @@ void app_settings_init(void) {
     uint8_t hide_images = 0, recent_sort = 0, ble_turner = 0, book_fonts = 1, book_vertical = 0;
     if (nvs_get_u8(h, NVS_KEY_HIDE_IMAGES, &hide_images) == ESP_OK) s_reader_hide_images = hide_images == 1;
     if (nvs_get_u8(h, NVS_KEY_BLE_TURNER, &ble_turner) == ESP_OK) s_ble_turner = ble_turner == 1;
+    uint8_t fast_charge = 1;
+    if (nvs_get_u8(h, NVS_KEY_FAST_CHARGE, &fast_charge) == ESP_OK) s_fast_charge = fast_charge != 0;
 #if KIIKO_BOARD_METALIO47
     uint8_t ai_short=APP_AI_REFRESH;
     s_ai_short=nvs_get_u8(h,"ai_short",&ai_short)==ESP_OK&&ai_short<APP_AI_ACTION_COUNT?(app_ai_action_t)ai_short:APP_AI_REFRESH;
@@ -884,6 +891,17 @@ void app_settings_set_ble_turner(bool on) {
     s_ble_turner = on;
     nvs_put_u8(NVS_KEY_BLE_TURNER, on ? 1 : 0);
 }
+bool app_settings_fast_charge(void) { return s_fast_charge; }
+void app_settings_set_fast_charge(bool on) {
+    if (on == s_fast_charge) return;
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    esp_err_t err = nvs_set_u8(h, NVS_KEY_FAST_CHARGE, on ? 1 : 0);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    // 写失败保留原值，UI 重绘仍显示实际生效的档位。/ Keep the old value on write failure so repaints show the active current.
+    if (err == ESP_OK) s_fast_charge = on;
+}
 bool app_settings_shelf_recent_sort(void) { return s_shelf_recent_sort; }
 uint8_t app_settings_shelf_order(void) { return s_shelf_order; }
 void app_settings_set_shelf_order(uint8_t order) {
@@ -991,15 +1009,29 @@ bool app_settings_set_fonts_dir(const char* path) { return set_media_dir(s_fonts
 #ifndef APP_SETTINGS_BACKUP_ROOT
 #define APP_SETTINGS_BACKUP_ROOT "/sdcard"
 #endif
+// 新版本统一写同一个备份名；两板旧名仍可恢复，同一张卡可直接换板。
+// New builds share one backup name; both boards' legacy names stay restorable so one card can move.
+#define BACKUP_FILE APP_SETTINGS_BACKUP_ROOT "/Kiikoread-settings.backup"
+#define BACKUP_TEMP APP_SETTINGS_BACKUP_ROOT "/Kiikoread-settings.backup.tmp"
+#define BACKUP_PREVIOUS APP_SETTINGS_BACKUP_ROOT "/Kiikoread-settings.backup.previous"
+// 恢复顺序：统一名 → 本板旧名 → 另一板旧名；每个名字先主文件再 .previous。
+// Restore order: unified, this board's legacy, the other board's legacy; primary before .previous.
 #if KIIKO_BOARD_METALIO47
-#define BACKUP_FILE APP_SETTINGS_BACKUP_ROOT "/Metalio-S31-settings.backup"
-#define BACKUP_TEMP APP_SETTINGS_BACKUP_ROOT "/Metalio-S31-settings.backup.tmp"
-#define BACKUP_PREVIOUS APP_SETTINGS_BACKUP_ROOT "/Metalio-S31-settings.backup.previous"
+#define BACKUP_LEGACY_OWN APP_SETTINGS_BACKUP_ROOT "/Metalio-S31-settings.backup"
+#define BACKUP_LEGACY_OWN_PREVIOUS APP_SETTINGS_BACKUP_ROOT "/Metalio-S31-settings.backup.previous"
+#define BACKUP_LEGACY_OTHER APP_SETTINGS_BACKUP_ROOT "/Pico-settings.backup"
+#define BACKUP_LEGACY_OTHER_PREVIOUS APP_SETTINGS_BACKUP_ROOT "/Pico-settings.backup.previous"
 #else
-#define BACKUP_FILE APP_SETTINGS_BACKUP_ROOT "/Pico-settings.backup"
-#define BACKUP_TEMP APP_SETTINGS_BACKUP_ROOT "/Pico-settings.backup.tmp"
-#define BACKUP_PREVIOUS APP_SETTINGS_BACKUP_ROOT "/Pico-settings.backup.previous"
+#define BACKUP_LEGACY_OWN APP_SETTINGS_BACKUP_ROOT "/Pico-settings.backup"
+#define BACKUP_LEGACY_OWN_PREVIOUS APP_SETTINGS_BACKUP_ROOT "/Pico-settings.backup.previous"
+#define BACKUP_LEGACY_OTHER APP_SETTINGS_BACKUP_ROOT "/Metalio-S31-settings.backup"
+#define BACKUP_LEGACY_OTHER_PREVIOUS APP_SETTINGS_BACKUP_ROOT "/Metalio-S31-settings.backup.previous"
 #endif
+static const char *const BACKUP_RESTORE_FILES[] = {
+    BACKUP_FILE, BACKUP_PREVIOUS,
+    BACKUP_LEGACY_OWN, BACKUP_LEGACY_OWN_PREVIOUS,
+    BACKUP_LEGACY_OTHER, BACKUP_LEGACY_OTHER_PREVIOUS,
+};
 
 // All fields are bytes, so the v1 disk layout is independent of structure padding.
 // 所有字段均为字节，v1 磁盘格式不依赖编译器的结构体填充。
@@ -1334,9 +1366,14 @@ static bool backup_file_exists(const char *path, bool directory) {
 
 esp_err_t app_settings_backup_restore(void) {
     if (!backup_card_ready()) return ESP_ERR_INVALID_STATE;
-    const char *source = BACKUP_FILE;
-    FILE *file = fopen(source, "rb");
-    if (!file) { source = BACKUP_PREVIOUS; file = fopen(source, "rb"); }
+    // 依次识别统一名与两板旧名，旧卡或换板后的备份可直接恢复。
+    // Accept the unified name and both legacy names so old cards and moved backups still restore.
+    const char *source = NULL;
+    FILE *file = NULL;
+    for (unsigned i = 0; i < sizeof(BACKUP_RESTORE_FILES) / sizeof(BACKUP_RESTORE_FILES[0]) && !file; ++i) {
+        source = BACKUP_RESTORE_FILES[i];
+        file = fopen(source, "rb");
+    }
     if (!file) return ESP_ERR_NOT_FOUND;
     settings_backup_v1_t backup;
     bool ok = fread(&backup, 1, sizeof(backup), file) == sizeof(backup);

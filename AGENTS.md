@@ -10,8 +10,20 @@ Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Takin
 
 ## 当前工作：双板型本地整合 / Current work: local multi-board integration
 
+用户2026-11-03要求整合GitHub最新修改与本地未上传功能、修好CI并提供Pico/S31本地刷机页。采用PR71–74的唤醒、固定阅读正文、快充、统一备份及S31波形，保留本地TF保护、唤醒字体、传书队列、保持浅睡、书架提速、阅读线范围及分页箭头。仅交付本地测试，官网不发布；本轮明确整合要求取代旧文档中的对应功能冻结。
+User2026-11-03 requests integrating latest GitHub changes with all local work, repairing CI and delivering Pico/S31 local flashers. Adopt PR71–74 wake/overlay/charger/backup/waveforms while retaining local media/font/transfer/keep-light/shelf/guide/pager changes. Local delivery only, no website publication; this supersedes the affected older behavioral pins.
+
 用户2026-11-02要求优化Pico开机首次书架加载：减少进度库会话、复用目录文件信息读取元数据缓存，并缓冲加入时间索引。保留递归目录、收藏/进度/排序/封面整组呈现和现有缓存格式；先本地验证，不更新官网或上传S31本地测试功能。
 User2026-11-02 requests faster Pico cold-start shelves: batch progress sessions, reuse directory metadata for cached EPUB metadata and buffer the first-added journal. Preserve recursion, favorites/progress/order, grouped covers and cache formats. Validate locally without publishing firmware or the S31 local features.
+
+用户2026-11-03：S31残影/翻页优化定稿——整页刷新恢复厂家完整48相GC16/GL16（官方v2.0.66起默认）并补官方DU末四相黑，普通翻页对齐Pico（十二相整屏擦白+四相重推黑），翻页改单带1K相位表引擎提速；灰度继续由原厂序列产生，“白→灰直接推”实验因灰阶无法标定已放弃。回退开关 `--s31-trimmed-waveform`。
+User2026-11-03: finalize S31 ghosting/turn work -- page refreshes use the vendor full 48-phase GC16/GL16 (official default since v2.0.66) plus the official DU four-phase black re-drive; ordinary turns match Pico (twelve whole-panel erase phases + four black re-drive) on the faster single-band 1K phase-LUT engine. Gray levels still come from the vendor sequence; the direct white-to-gray rewrite was abandoned because it cannot be calibrated. `--s31-trimmed-waveform` restores the trimmed profile.
+
+用户2026-11-03：配置备份统一为 TF 卡根目录 `Kiikoread-settings.backup`；两板新版本都写这一个名字，并且都能恢复两板旧名 `Pico-settings.backup`、`Metalio-S31-settings.backup`（含各自 `.previous`），同一张卡可直接换板使用。
+User2026-11-03: unify configuration backups on `Kiikoread-settings.backup` in the TF card root; both boards' new builds write that name and both restore the legacy `Pico-settings.backup` and `Metalio-S31-settings.backup` files (with `.previous`), so one card works across devices.
+
+用户2026-11-03修订：阅读题头、工具栏与设置面板悬浮于固定正文区域，打开/关闭不重新分页、不改变当前页或阅读进度。保留两种沉浸样式与现有入口；仅实际排版/沉浸设置变化才重排。此要求取代此前非全屏为工具栏缩小正文的实现；本轮在功能分支修复，版本号不变。
+User2026-11-03: reader header, tools and settings overlay a stable body. Opening/closing preserves pagination, page and progress; retain both immersive styles and existing entry gestures. Only layout/immersive setting edits reflow. This supersedes the reduced standard-mode body; fix on a feature branch without changing versions.
 
 用户2026-11-02授权直接合并PR68/69并修复点按冲突：非全屏中间单击进入全屏；全屏后按已选左右/上下模式翻页；插图双击缩放，单击保持原翻页/全屏意图，底部上滑退出全屏并显示工具栏。对应Pico波形和引擎基线按PR68更新，S31波形保持；仅合并源码，不发布固件，既有S31 TF/字体/Wi-Fi/保持浅睡本地测试改动继续不上传。
 User2026-11-02 authorizes merging PR68/69 and fixing tap conflicts: standard centre taps enter fullscreen; fullscreen taps follow the selected turn regions. Retain image double-tap zoom and deferred singles, plus bottom-swipe tools. Update the affected Pico baseline to PR68, retain S31 waveforms. Merge source only; preserve the unpublished S31 SD/font/Wi-Fi/keep-light changes locally.
