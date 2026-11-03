@@ -586,6 +586,7 @@ static const ui_locale_pair_t s_pairs[] = {
     {"彻底关机","Complete power-off"},
     {"彻底断电","Power off"},
     {"待准备","Pending"},
+    {"快充","Fast charge"},
     {"快刷","Fast"},
     {"思源黑体","思源黑体"},
     {"思源黑体（TF 卡）","思源黑体（TF 卡）"},

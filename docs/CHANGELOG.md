@@ -5,6 +5,9 @@
 - 合并PR68的Pico水波纹擦白/补黑及53相支持，保留作者波形。修复全屏后中间点按不翻页；非全屏中间点按仍进入全屏，全屏按所选分区翻页。合并PR69插图双击缩放，并保留单击翻页、弹窗/工具栏优先权及取消边界。
   Merge PR68's authored Pico ripple erase/redrive and53-phase support. Standard centre taps still enter fullscreen; fullscreen centre taps follow the chosen turn regions. Integrate PR69 image double-tap zoom while retaining single turns, modal/tool priority and cancellation boundaries.
 
+- S31新增「快充」设置，默认开启（1.5A），关闭后回到标准1A充电；切换立即生效并保存，重启后保持。该项位于设置「个性化功能」分组，独立一行并带充电闪电图标。
+  S31 gains a Fast charge setting, on by default (1.5 A); turning it off returns to standard 1 A charging. The change applies and is saved immediately and persists across restarts. It is its own row in Settings > Personalization with a charging bolt icon.
+
 ## Pico 0.3.3-rc104 / Metalio S31 0.3.3-rc109 — 2026-11-01
 
 保留上一正式版Pico rc103与S31 rc108的原版刷机和TF下载入口；网页刷机仍仅kiikoread.com，沿用兼容双槽布局及默认保留设置。
