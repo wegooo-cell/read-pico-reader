@@ -31,6 +31,7 @@ static int reader_image_slots(size_t page){(void)page;return slots;}
 static int epd_width(void){return 24;}static int epd_height(void){return 16;}
 static int epd_get_rotation(void){return rotation;}
 static EpdRect book_layout_image_rect(void){return(EpdRect){0,0,24,16};}
+static int reader_image_top(void){return 0;}
 static EpdRect reader_area(void){return book_layout_image_rect();}
 static bool reader_image_slot(size_t p,int s,int*i,int*y,int*w,int*h){
  (void)p;(void)i;if(s>=slots)return false;*y=0;*w=24;*h=16;return true;}
@@ -59,6 +60,10 @@ int main(void){
   case 5:s_page_image_count=0;break;case 6:image.gray=NULL;break;case 7:image.width=0;break;}
   assert(!reader_inline_image_at(11,1,&slot));assert(!reader_zoom_mode());
  }
+ // A panel blocks input, but keeps the decoded zoom target available for unchanged underlay painting.
+ image.width=image.height=4;image.gray=gray;s_toolbar=true;s_reader_panel=1;
+ assert(reader_image_cache_ready()&&reader_zoom_image()==&image&&!reader_zoom_mode());
+ s_reader_panel=0;
  image=(reader_image_t){gray,4,4};s_page_images_for=2;s_page_images_generation=3;
  s_view=READING;s_toolbar=hidden=false;s_page_image_count=1;
  slots=20;assert(!reader_inline_image_at(0,15,&slot)); // 布局槽多于实际缓存。/ Layout outnumbers decoded slots.

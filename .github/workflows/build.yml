@@ -183,6 +183,8 @@ jobs:
           python3 tools/reader_ui_scale_host_test.py
           python3 tools/reader_refresh_release_host_test.py
           python3 tools/reader_fullscreen_host_test.py
+          python3 tools/reader_overlay_host_test.py
+          python3 tools/reader_immersive_space_host_test.py
           python3 tools/lock_screen_host_test.py
           python3 tools/power_double_click_host_test.py
           cc -std=gnu11 -Wall -Wextra -Werror -Itools/settings_backup_stubs \

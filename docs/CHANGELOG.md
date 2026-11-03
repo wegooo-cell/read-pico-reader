@@ -1,6 +1,9 @@
 # 版本变更 / Changelog
 
-## 未发布 / Unreleased — 2026-11-02
+## 未发布 / Unreleased — 2026-11-03
+
+- 阅读题头、工具栏与设置面板改为悬浮覆盖，显隐保持正文区域、分页和当前阅读位置，不再因呼出工具栏重排。同步处理插图缩放裁剪与遮挡区触摸；脚注卡片限制在可见区，打开时点击题头/工具栏先关闭脚注。保留原沉浸样式，版本号不变。
+  Overlay reader headers, tools and settings without changing body geometry, pagination or the current position. Clip image zoom and input around chrome; keep note cards within the visible viewport and dismiss an open note before handling chrome taps. Retain immersive styles and existing firmware versions.
 
 - 合并PR68的Pico水波纹擦白/补黑及53相支持，保留作者波形。修复全屏后中间点按不翻页；非全屏中间点按仍进入全屏，全屏按所选分区翻页。合并PR69插图双击缩放，并保留单击翻页、弹窗/工具栏优先权及取消边界。
   Merge PR68's authored Pico ripple erase/redrive and53-phase support. Standard centre taps still enter fullscreen; fullscreen centre taps follow the chosen turn regions. Integrate PR69 image double-tap zoom while retaining single turns, modal/tool priority and cancellation boundaries.

@@ -9,7 +9,7 @@ from home_cover_cache_host_test import function
 R=Path(__file__).resolve().parents[1]
 book=R/'main/apps/app_book.c'
 s=book.read_text()
-a=s.index('        if (s_footnote_note >= 0)',s.index('static app_redraw_t action_at'))
+a=s.index('\n',s.index('if(header_handled)return header_redraw;'))+1
 b=s.index('\n    if (s_view == SHELF) {',a)
 block=s[a:b]
 a=s.index('        int tap = book_reader_tap_tick(')
@@ -38,7 +38,8 @@ static int fullscreen_calls,zoom_calls,inline_calls,panel_calls,turn_calls,last_
 static book_reader_tap_t s_reader_tap;
 static int s_footnote_note=-1,note_candidate=-1;static EpdRect s_footnote_marker;
 static int reader_footnote_hit(int x,int y,EpdRect*r){(void)x;(void)y;(void)r;return note_candidate;}
-static EpdRect body_rect(void){return(EpdRect){0,200,684,896};}
+static EpdRect body_rect(void){return(EpdRect){0,24,684,1178};}
+static EpdRect reader_area(void){return s_reader_fullscreen?(EpdRect){0,0,684,1204}:(EpdRect){0,176,684,872};}
 static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}
 static EpdRect ui_rect_union(EpdRect a,EpdRect b){(void)b;return a;}
 static EpdRect book_layout_image_rect(void){return body_rect();}
@@ -108,7 +109,30 @@ int main(void){
  dispatch(&c,342,500);assert(panel_calls==1&&!s_reader_tap.pending&&!zoom_calls);
  reset(false,1,false,false);s_zoom_active=true;s_image_zoom=2000;s_image_zoom_page=s_page;
  dispatch(&c,100,1150);assert(panel_calls==1&&!s_reader_tap.pending&&!inline_calls);
- reset(true,0,false,false);dispatch(&c,342,150);assert(!turn_calls&&!fullscreen_calls);
+ reset(true,0,false,false);dispatch(&c,342,1215);assert(!turn_calls&&!fullscreen_calls);
+ // Opaque chrome must win even when an image or footnote lies underneath.
+ for(int panel=READER_PANEL_NONE;panel<=READER_PANEL_TOOLS;++panel){
+  const int covered[]={40,114,175,1048,1075,1096,1150};
+  for(unsigned i=0;i<sizeof(covered)/sizeof(covered[0]);++i){
+   reset(false,1,false,false);s_reader_panel=panel;s_toolbar=panel!=READER_PANEL_NONE;
+   note_candidate=0;dispatch(&c,342,covered[i]);
+   assert(s_footnote_note==-1&&!turn_calls&&!fullscreen_calls&&!inline_calls&&!zoom_calls&&!s_reader_tap.pending);
+   assert(panel_calls==(covered[i]>=UI_READER_TOOLS_TOP));
+  }
+ }
+ // An existing note owns the first tap, even on chrome; the next setting tap must work.
+ const int note_tap_y[]={40,114,175,500,1048,1075,1150};
+ for(int panel=READER_PANEL_NONE;panel<=READER_PANEL_TOOLS;++panel)
+ for(unsigned i=0;i<sizeof(note_tap_y)/sizeof(note_tap_y[0]);++i){
+  reset(false,0,false,false);s_reader_panel=panel;s_toolbar=panel!=READER_PANEL_NONE;
+  s_footnote_note=0;s_reader_tap.pending=true;
+  assert(dispatch(&c,470,note_tap_y[i])==APP_REDRAW_PAGE);
+  assert(s_footnote_note==-1&&!panel_calls&&!turn_calls&&!fullscreen_calls&&!s_reader_tap.pending);
+  assert(s_reader_panel==panel);
+  assert(dispatch(&c,470,1150)==APP_REDRAW_PAGE&&panel_calls==1);
+  s_reader_panel=READER_PANEL_MODAL;s_toolbar=true;
+  assert(dispatch(&c,340,700)==APP_REDRAW_PAGE&&panel_calls==2&&s_footnote_note==-1);
+ }
  puts("PASS: actual reader action/tick/reset; standard centre entry, fullscreen horizontal/vertical/RTL turns, inline/whole-page singles and doubles, zoom exit, delayed fullscreen intent, modal/tools/notes, held touch, rollback and cancellation");
 }
 '''
