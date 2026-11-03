@@ -1,5 +1,10 @@
 # 版本变更 / Changelog
 
+## 本地测试 / Local test — 2026-11-03
+
+- 阅读线新增“跟随文字 / 整行”范围切换，默认跟随文字；竖排对应整列。保留虚线/点线和位置微调，选择支持重启与设置备份恢复。
+  Reading guides can follow text or span the full body row (column for vertical text), defaulting to follow text. Retain styles/offset and persist the choice across restarts and settings backups.
+
 ## 本地测试 / Local test — Pico startup 2026-11-02
 
 - Pico首次书架扫描批量读取进度，复用已验证文件信息读取作者缓存，跳过已知非图书普通文件的多余查询；加入时间索引采用有界缓冲。保留现有顺序、进度、封面缓存格式与硬件参数，实际耗时待实机验证。

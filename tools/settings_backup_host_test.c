@@ -62,6 +62,7 @@ esp_err_t book_history_backup_restore(FILE *file) {
 static bool card_mounted = true;
 static char loaded_dirs[2][96];
 static bool commit_fails;
+static int loaded_rule_full = -1;
 static int commit_count;
 static bool test_full_storage;static uint8_t loaded_full_pages;
 static uint8_t test_loaded_system_size;
@@ -116,6 +117,7 @@ static int loaded_shelf_order=-1;
 static bool test_shutdown_storage;static int loaded_shutdown;
 #endif
 esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
+    if (!strcmp(key, NVS_KEY_BOOK_RULE_FULL) && loaded_rule_full >= 0) { *value = (uint8_t)loaded_rule_full; return ESP_OK; }
 #if KIIKO_BOARD_METALIO47
     if(test_shutdown_storage&&!strcmp(key,NVS_KEY_SHUTDOWN_MODE)){*value=loaded_shutdown;return ESP_OK;}
 #endif
@@ -126,6 +128,7 @@ esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
 #endif
  (void)h; if(test_full_storage&&!strcmp(key,NVS_KEY_READER_FULL)){*value=loaded_full_pages;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_TURN)&&loaded_turn>=0){*value=(uint8_t)loaded_turn;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_PARA)&&has_para){*value=loaded_para;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)&&has_tracking){*value=loaded_tracking;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)&&has_fine){*value=loaded_fine;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOME_COMPONENT)&&loaded_home>=0){*value=(uint8_t)loaded_home;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_AA)&&has_aa){*value=loaded_aa;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2)&&keys_v2){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)&&has_weight){*value=loaded_weight;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)&&has_adjust){*value=loaded_adjust;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_STYLE)&&loaded_shelf>=0){*value=(uint8_t)loaded_shelf;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_V22)&&loaded_shelf_v22){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_LOCK_STYLE)&&loaded_lock>=0){*value=(uint8_t)loaded_lock;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOLD_ACTION)&&has_hold){*value=loaded_hold;return ESP_OK;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])&&has_keys[i]){*value=loaded_keys[i];return ESP_OK;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH) && has_main_mode) { *value=loaded_main_mode;return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } return ESP_FAIL; }
 esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) {
+    if (!strcmp(key, NVS_KEY_BOOK_RULE_FULL) && !commit_fails) loaded_rule_full = value;
 #if KIIKO_BOARD_METALIO47
     if(test_shutdown_storage&&!strcmp(key,NVS_KEY_SHUTDOWN_MODE))loaded_shutdown=value;
 #endif
@@ -854,6 +857,48 @@ int main(void) {
     }
     assert(loaded_shutdown==2&&app_settings_keep_light_sleep());
 #endif
+    // 新范围持久化、错误提交不生效、旧备份默认跟随且非法编码先拒绝。
+    // Persist span, reject failed commits and malformed codes, and default legacy backups to follow text.
+    loaded_rule_full = -1; s_book_rule_full = true; app_settings_init();
+    assert(!app_settings_book_reading_line_full());
+    loaded_rule_full = 255; app_settings_init(); assert(!app_settings_book_reading_line_full());
+    commit_fails = true;
+    assert(!app_settings_set_book_reading_line_full(true) && !app_settings_book_reading_line_full());
+    commit_fails = false;
+    for (unsigned style = 0; style <= 2; ++style) for (int full = 0; full <= 1; ++full) {
+        app_settings_set_book_reading_line(style);
+        assert(app_settings_set_book_reading_line_full(full != 0));
+        s_book_rule_full = !full; app_settings_init();
+        assert(app_settings_book_reading_line_full() == (full != 0));
+        assert(app_settings_backup_save() == ESP_OK);
+        s_book_reading_line = 99; s_book_rule_full = !full;
+        assert(app_settings_backup_restore() == ESP_OK);
+        assert(app_settings_book_reading_line() == style && app_settings_book_reading_line_full() == (full != 0));
+    }
+    for (unsigned v = 20; v <= 21; ++v) for (uint8_t code = 0; code <= 6; ++code) {
+        assert(app_settings_set_book_reading_line_full(false));
+        app_settings_set_book_reading_line(0);
+        assert(app_settings_backup_save() == ESP_OK);
+        FILE *f = fopen(BACKUP_FILE, "r+b"); assert(f);
+        settings_backup_v1_t h; uint8_t ext[7]; settings_backup_profile_t profile;
+        assert(fread(&h, 1, sizeof(h), f) == sizeof(h));
+        assert(fread(ext, 1, sizeof(ext), f) == sizeof(ext));
+        assert(fread(&profile, 1, sizeof(profile), f) == sizeof(profile));
+        h.magic[7] = v == 20 ? 'K' : 'L'; h.flags[BK_READING_LINE] = code; backup_seal(&h);
+        uint32_t eh = backup_shutdown_checksum(&h, ext[0], ext[1], ext[2]);
+        for (unsigned i = 0; i < 4; ++i) ext[i+3] = (uint8_t)(eh >> (8*i));
+        uint32_t ph = backup_profile_checksum(&h, ext[0], ext[1], ext[2], &profile);
+        for (unsigned i = 0; i < 4; ++i) profile.checksum[i] = (uint8_t)(ph >> (8*i));
+        rewind(f); assert(fwrite(&h, 1, sizeof(h), f) == sizeof(h));
+        assert(fwrite(ext, 1, sizeof(ext), f) == sizeof(ext));
+        assert(fwrite(&profile, 1, sizeof(profile), f) == sizeof(profile) && fclose(f) == 0);
+        assert(app_settings_set_book_reading_line_full(true));
+        int before = commit_count;
+        bool valid = code <= (v == 20 ? 2 : 5);
+        assert(app_settings_backup_restore() == (valid ? ESP_OK : ESP_ERR_INVALID_RESPONSE));
+        if (valid) assert(app_settings_book_reading_line() == code % 3 && app_settings_book_reading_line_full() == (v == 21 && code >= 3));
+        else assert(commit_count == before && app_settings_book_reading_line_full());
+    }
     puts("settings backup host test passed (200% sizes, retired shelf migration, collage persistence/restore without wallpaper)");
     return 0;
 }

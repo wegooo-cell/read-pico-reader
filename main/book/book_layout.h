@@ -39,6 +39,8 @@ void book_layout_set_first_line_indent_adjust(int px);
 EpdRect book_layout_balanced_rect(EpdRect outer, int px, int tracking_px);
 /// 正文阅读线：0 无，1 虚线，2 点线。/ Reading guides: none, dashed or dotted.
 void book_layout_set_reading_line(unsigned style);
+/// 阅读线覆盖整行/整列；默认跟随文字。/ Full row/column guides; default follows text.
+void book_layout_set_reading_line_full(bool full);
 /// 阅读线相对默认位置上下移动 -8..+8 像素；负值上移。/ Move guide -8..+8 px; negative is up.
 void book_layout_set_reading_line_offset(int offset_px);
 /// 关闭插图时，排版跳过图片块，不为其保留页或正文空位。/ When false, omit image blocks without reserving pages or body space.

@@ -716,6 +716,25 @@ int main(void) {
     int dashed_segments = test_guide_segments;
     assert(dashed_segments > 0);
     assert(test_guide_first_y == 70 && test_guide_height == 2 && test_guide_gray == 0x50);
+    // 同一页切换范围不改变文字位置、分页或虚实节奏。/ Switching span preserves text positions, pagination and dash rhythm.
+    assert(test_guide_first_x >= r.x + 80);
+    size_t guide_pages = book_layout_page_count();
+    int guide_text_x = last_draw_x;
+    book_layout_set_reading_line_full(true);
+    test_guide_segments = 0;
+    book_layout_draw_page(&fb, 0, r, 40);
+    assert(test_guide_segments == (r.width + 30) / 31 && test_guide_first_x == r.x);
+    assert(last_draw_x == guide_text_x && book_layout_page_count() == guide_pages);
+    book_layout_set_reading_line(2);
+    test_guide_segments = 0;
+    book_layout_draw_page(&fb, 0, r, 40);
+    assert(test_guide_segments == (r.width + 12) / 13 && test_guide_first_x == r.x);
+    book_layout_set_reading_line(0);
+    test_guide_segments = 0;
+    book_layout_draw_page(&fb, 0, r, 40);
+    assert(!test_guide_segments);
+    book_layout_set_reading_line_full(false);
+    book_layout_set_reading_line(1);
     book_layout_set_reading_line_offset(-8);
     test_guide_segments = 0;
     book_layout_draw_page(&fb, 0, r, 40);
@@ -763,6 +782,18 @@ int main(void) {
     // starts at the first glyph instead of the page top.
     assert(test_guide_first_y > r.y);
     assert(test_guide_last_y < r.y + r.height);
+    int guide_column_x = test_guide_first_x, guide_glyph_y = first_vertical_y;
+    size_t guide_vertical_pages = book_layout_page_count();
+    for (unsigned style = 1; style <= 2; ++style) {
+        book_layout_set_reading_line(style);
+        book_layout_set_reading_line_full(true);
+        test_guide_segments = 0; vertical_draws = 0;
+        book_layout_draw_page(&fb, 0, r, 40);
+        assert(test_guide_first_x == guide_column_x && test_guide_first_y == r.y);
+        assert(first_vertical_y == guide_glyph_y && book_layout_page_count() == guide_vertical_pages);
+    }
+    book_layout_set_reading_line_full(false);
+    book_layout_set_reading_line(1);
     // 缩进归零后字首就落在页顶；虚实节奏仍从页上边起算，所以第一段在页顶、段距正好一个周期。
     // Without the indent the first glyph sits on the page top; the rhythm still counts from the page
     // edge, so the first segment lands there and the next is exactly one period later.

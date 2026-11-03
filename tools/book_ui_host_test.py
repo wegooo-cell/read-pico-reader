@@ -366,6 +366,8 @@ static void book_layout_set_typography(int tracking){(void)tracking;}
 static void book_layout_set_first_line_indent(unsigned em){(void)em;}
 static void book_layout_set_first_line_indent_adjust(int px){(void)px;}
 static void book_layout_set_reading_line(int style){(void)style;}
+static bool app_settings_book_reading_line_full(void){return false;}
+static void book_layout_set_reading_line_full(bool full){(void)full;}
 static void book_layout_set_reading_line_offset(int offset){(void)offset;}
 static void book_layout_set_images_visible(bool visible){test_images_visible=visible;}
 static bool test_book_vertical;

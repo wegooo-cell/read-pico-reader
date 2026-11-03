@@ -217,6 +217,9 @@ void app_settings_set_book_indent_adjust(int8_t px);
 /// 正文阅读线：0 无，1 虚线，2 点线。/ Body reading guides: none, dashed or dotted.
 uint8_t app_settings_book_reading_line(void);
 void app_settings_set_book_reading_line(uint8_t style);
+/// 阅读线范围，false 跟随文字，true 整行/整列；提交成功才生效。/ Guide span, applied after commit.
+bool app_settings_book_reading_line_full(void);
+bool app_settings_set_book_reading_line_full(bool full);
 /// 阅读线相对默认位置 -8..+8 像素，2 像素一步，默认 0。/ Guide offset in 2 px steps.
 int8_t app_settings_book_reading_line_offset(void);
 void app_settings_set_book_reading_line_offset(int8_t offset_px);

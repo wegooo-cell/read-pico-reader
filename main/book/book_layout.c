@@ -35,6 +35,7 @@ static int s_tracking_px;
 static unsigned s_first_line_indent_em = 2;
 static int s_first_line_indent_adjust_px;
 static unsigned s_reading_line;
+static bool s_reading_line_full;
 static int s_reading_line_offset;
 static bool s_images_visible = true;
 // 竖排：同一套折行与禁则逻辑，只是推进方向朝下、堆叠方向朝左。
@@ -322,6 +323,9 @@ EpdRect book_layout_balanced_rect(EpdRect outer, int px, int tracking_px) {
 }
 void book_layout_set_reading_line(unsigned style) {
     s_reading_line = style <= 2 ? style : 0;
+}
+void book_layout_set_reading_line_full(bool full) {
+    s_reading_line_full = full;
 }
 void book_layout_set_reading_line_offset(int offset_px) {
     s_reading_line_offset = offset_px < -8 ? -8 : offset_px > 8 ? 8 : offset_px;
@@ -1096,8 +1100,8 @@ size_t book_layout_page_for_offset(size_t off) {
     return lo;
 }
 
-// 阅读线只铺在有字的地方：整行只有空白字符时不画。
-// Guides cover inked spans only; whitespace-only lines get none.
+// 两种范围都跳过空白行，不在没有文字的行上画阅读线。
+// Whitespace-only lines get no guides in either span mode.
 static bool line_has_ink(const char* line) {
     for (const char* at = line; at && *at; ++at)
         if (*at != ' ' && *at != '\t' && *at != '\r' && *at != '\n') return true;
@@ -1146,13 +1150,12 @@ static void draw_vertical_column(uint8_t* fb, EpdRect rect, int left, int pitch,
         if (guide_x < cell_left + px + 1) guide_x = cell_left + px + 1;
         const int dash = s_reading_line == 1 ? 19 : 2;
         const int period = s_reading_line == 1 ? 31 : 13;
-        // 与横排对称：竖排走整页高度、从页上边起算，每列的虚实节奏完全一样，不会因为列首缩进、
-        // 居中或列长短而各画各的。只在有字的纵向范围内落墨：列首缩进与列尾留白保持白底。
-        // Symmetric with the horizontal rule: the rhythm counts from the page's top edge so every
-        // column shares it regardless of indent, centring or column length. The dashes ink only the
-        // column's glyph span; the leading indent and the trailing blank stay white.
-        const int ink_top = y;
-        int ink_bottom = y + ttf_vertical_text_height_px(px, s_line, s_tracking_px + extra);
+        // 虚实节奏从页上边起算，每列一致；整列铺满正文高度，跟随文字保留列首/列尾留白。
+        // Count dashes from the page top for a shared rhythm; full columns span the body height,
+        // while following text preserves leading/trailing blanks.
+        const int ink_top = s_reading_line_full ? rect.y : y;
+        int ink_bottom = s_reading_line_full ? rect.y + rect.height :
+            y + ttf_vertical_text_height_px(px, s_line, s_tracking_px + extra);
         if (ink_bottom > rect.y + rect.height) ink_bottom = rect.y + rect.height;
         for (int pos = rect.y; pos < rect.y + rect.height; pos += period) {
             int top = pos, bottom = pos + dash;
@@ -1343,17 +1346,17 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
                 if (hang > s_rect.x - 4) hang = s_rect.x - 4;
                 line_extent = line_width > available ? available + hang : available;
             }
-            // 阅读线只铺在有字的横向范围：首行缩进、行尾空白和对齐留白保持白底。
-            // 虚实仍从页左边缘起算，各行的点划节奏保持一致。
-            // The guide inks only the line's glyph span: the first-line indent, trailing blanks and
-            // alignment slack stay white. Dashes still count from the page's left edge so every line
-            // keeps the same rhythm.
+            // 跟随文字保留缩进、行尾和对齐留白；整行模式铺满正文宽度。
+            // 两种范围均从页左边起算虚实节奏，不改变文字布局。
+            // Follow text preserves indent, trailing and alignment blanks; full-row spans the body.
+            // Both count dashes from the page's left edge without changing text layout.
             if (s_reading_line && line_has_ink(s_line)) {
                 int guide_y = rect.y + (int)used + line_px + (line_height - line_px) / 2 +
                               s_reading_line_offset;
                 int dash = s_reading_line == 1 ? 19 : 2;
                 int period = s_reading_line == 1 ? 31 : 13;
-                const int ink_left = x, ink_right = x + line_extent;
+                const int ink_left = s_reading_line_full ? rect.x : x;
+                const int ink_right = s_reading_line_full ? rect.x + rect.width : x + line_extent;
                 for (int dx = 0; dx < rect.width; dx += period) {
                     int left = rect.x + dx, right = rect.x + dx + dash;
                     if (right > rect.x + rect.width) right = rect.x + rect.width;

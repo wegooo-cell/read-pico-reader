@@ -46,6 +46,7 @@ static int ttf_text_width_px(int px,const char *text);
 static bool scaling=true,s_system_ttf;
 static unsigned glyphs;
 static EpdRect last_box, image_text_boxes[2];
+static bool rule_probe;static int rule_style_label_bottom,rule_offset_label_bottom,rule_hint_bottom;
 static bool image_probe;static unsigned image_text_count,image_switches;
 static int s_reader_slider=-1,s_reader_preview_px=32,s_px=32;
 static unsigned app_settings_system_font_size(void){return scale;}
@@ -86,7 +87,12 @@ static int app_settings_book_weight_fine(void){return 2;}
 static bool app_settings_book_vertical(void){return true;}
 static bool app_settings_book_fonts(void){return true;}
 static bool app_settings_book_antialias(void){return true;}
-static unsigned app_settings_book_reading_line(void){return 2;}
+static unsigned rule_style=2;
+static unsigned app_settings_book_reading_line(void){return rule_style;}
+static bool rule_full;
+static bool app_settings_book_reading_line_full(void){return rule_full;}
+static int app_settings_book_reading_line_offset(void){return 0;}
+static void draw_sheet_back(uint8_t *fb,int top){(void)fb;(void)top;}
 static const char *ttf_font_display_name(void){return "测试字体的名称";}
 static unsigned app_settings_reader_full_pages(void){return 15;}
 static unsigned app_settings_reader_turn_effect(void){return 1;}
@@ -100,6 +106,11 @@ unit+=r'''
 static void ui_text_box(uint8_t *fb,EpdRect box,int px,const char *text,enum EpdFontFlags align,bool inv){
  assert(box.x>=0&&box.y>=0&&box.x+box.width<=684&&box.y+box.height<=1216);
  if(image_probe){assert(image_text_count<2);image_text_boxes[image_text_count++]=box;}
+ if(rule_probe){
+  if(!strcmp(text,"选择样式"))rule_style_label_bottom=box.y+box.height;
+  if(!strncmp(text,"上下位置",strlen("上下位置")))rule_offset_label_bottom=box.y+box.height;
+  if(!strcmp(text,"选择虚线或点线后可调整位置"))rule_hint_bottom=box.y+box.height;
+ }
  assert(box.width>0&&box.height>0);last_box=box;actual_text_box(fb,box,px,text,align,inv);
 }
 '''
@@ -117,7 +128,11 @@ for name in ('reader_ui_extra','reader_font_top','reader_font_card','reader_slid
     unit+=function(name,book)+'\n'
 for name in ['s_font_card','s_weight_card','s_bookfont_card','s_layout_card','s_rule_card','s_antialias_card']:
     unit+=re.search(r'^#define '+name+r' .*',s,re.M)[0]+'\n'
-unit+=function('reader_panel_text_vc',book)+'\n'
+unit+=function('reader_panel_text_vc',book)+'\n'+function('reader_panel_text',book)+'\n'
+for name in ['s_rule_offset_up','s_rule_offset_reset','s_rule_offset_down']:
+    unit+=re.search(r'^static const EpdRect '+name+r' = .*',s,re.M)[0]+'\n'
+for name in ['rule_style_rect','rule_span_rect','draw_rule_settings']:
+    unit+=function(name,book)+'\n'
 unit+=function('reader_weight_value',book)+'\n'
 unit+=function('draw_font_settings',book)+'\n'+function('draw_reading_settings',book)+'\n'
 unit+=function('reader_font_picker_top',book)+'\n'+function('reader_font_pick_rect',book)+'\n'
@@ -128,6 +143,14 @@ int main(void){uint8_t fb[1]={0};
  for(face=0;face<3;++face)for(scale=100;scale<=200;scale+=10){
    image_probe=KIIKO_BOARD_METALIO47;image_text_count=0;draw_reading_toggle(fb,2,"关闭书内图片","跳过正文插图，保留原书文件",true);image_probe=false;
    draw_font_settings(fb);assert(!antialias&&selected_slot==2);draw_reading_settings(fb);
+   for(int style=0;style<3;++style)for(int full=0;full<2;++full){
+    rule_style=style;rule_full=full;rule_probe=true;draw_rule_settings(fb);rule_probe=false;
+    assert(rule_style_label_bottom<=rule_style_rect(0).y);
+    assert(rule_offset_label_bottom<=s_rule_offset_up.y);
+    if(!style)assert(rule_hint_bottom<1113);
+   }
+   EpdRect rule_controls[]={rule_style_rect(0),rule_style_rect(1),rule_style_rect(2),rule_span_rect(0),rule_span_rect(1),s_rule_offset_up,s_rule_offset_reset,s_rule_offset_down,{36,1113,612,72}};
+   for(unsigned i=0;i<sizeof(rule_controls)/sizeof(rule_controls[0]);++i)for(unsigned j=0;j<i;++j)assert(!overlap(rule_controls[i],rule_controls[j]));
    for(int i=0;i<6;++i){EpdRect a=reader_font_card(i);assert(a.y>=reader_font_top()+100&&a.y+a.height<1141);for(int j=0;j<i;++j)assert(!overlap(a,reader_font_card(j)));}
    EpdRect slider=reader_slider_rect(0);assert(slider.y>reader_font_top()+100&&slider.y+slider.height<reader_font_card(0).y);
    for(int i=0;i<8;++i){EpdRect a=reading_setting_rect(i);assert(a.y>=reading_settings_top()+100&&a.y+a.height<1141);for(int j=0;j<i;++j)assert(!overlap(a,reading_setting_rect(j)));}

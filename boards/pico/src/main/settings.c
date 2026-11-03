@@ -87,6 +87,7 @@
 #define NVS_KEY_BOOK_INDENT_ADJUST "bk_indent_adj"
 #define NVS_KEY_BOOK_RULE "bk_rule"
 #define NVS_KEY_BOOK_RULE_OFFSET "bk_rule_y"
+#define NVS_KEY_BOOK_RULE_FULL "bk_rule_full"
 #define NVS_KEY_SHELF_STYLE "shelf_ui"
 #define NVS_KEY_SHELF_V22 "shelf_v22"
 #define NVS_KEY_BOOKS_DIR "books_dir"
@@ -146,6 +147,7 @@ static bool s_book_fonts = true;
 // untouched.
 static bool s_book_vertical;
 static uint8_t s_book_tracking = -APP_BOOK_TRACK_MIN, s_book_reading_line, s_book_rule_offset = 4;
+static bool s_book_rule_full;
 static uint8_t s_book_indent = 2;
 static uint8_t s_book_indent_adjust = 20;
 static uint8_t s_auto_lock_minutes;
@@ -346,6 +348,8 @@ void app_settings_init(void) {
     }
     if (nvs_get_u8(h, NVS_KEY_BOOK_RULE, &reading_line) == ESP_OK && reading_line <= 2)
         s_book_reading_line = reading_line;
+    uint8_t rule_full = 0;
+    s_book_rule_full = nvs_get_u8(h, NVS_KEY_BOOK_RULE_FULL, &rule_full) == ESP_OK && rule_full == 1;
     if (nvs_get_u8(h, NVS_KEY_BOOK_RULE_OFFSET, &rule_offset) == ESP_OK && rule_offset <= 8)
         s_book_rule_offset = rule_offset;
     if (nvs_get_u8(h, NVS_KEY_BOOK_INDENT, &indent) == ESP_OK && indent <= 3)
@@ -835,6 +839,18 @@ void app_settings_set_book_reading_line(uint8_t style) {
     s_book_reading_line = style;
     nvs_put_u8(NVS_KEY_BOOK_RULE, style);
 }
+bool app_settings_book_reading_line_full(void) { return s_book_rule_full; }
+bool app_settings_set_book_reading_line_full(bool full) {
+    if (full == s_book_rule_full) return true;
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
+    esp_err_t err = nvs_set_u8(h, NVS_KEY_BOOK_RULE_FULL, full ? 1 : 0);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    if (err != ESP_OK) return false;
+    s_book_rule_full = full;
+    return true;
+}
 int8_t app_settings_book_reading_line_offset(void) { return (int8_t)((int)s_book_rule_offset - 4) * 2; }
 void app_settings_set_book_reading_line_offset(int8_t offset_px) {
     if (offset_px < -8 || offset_px > 8 || offset_px % 2) return;
@@ -993,7 +1009,7 @@ static bool backup_home_valid(const settings_backup_home_t *v) {
 static unsigned backup_version(const settings_backup_v1_t *backup) {
     if (memcmp(backup->magic, "PICOSET", 7)) return 0;
     unsigned char c = backup->magic[7];
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : 0;
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1073,7 +1089,7 @@ static bool backup_card_ready(void) {
 esp_err_t app_settings_backup_save(void) {
     if (!backup_card_ready()) return ESP_ERR_INVALID_STATE;
     settings_backup_v1_t backup = {0};
-    memcpy(backup.magic, "PICOSETK", sizeof(backup.magic));
+    memcpy(backup.magic, "PICOSETL", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -1089,7 +1105,9 @@ esp_err_t app_settings_backup_save(void) {
     f[BK_POWER_TURN] = s_reader_power_turn;
     f[BK_IMMERSIVE] = s_reader_immersive;
     f[BK_TRACKING] = s_book_tracking;
-    f[BK_READING_LINE] = s_book_reading_line;
+    // v21把范围与样式封在同一校验字段，旧版本0..2始终跟随文字。
+    // V21 seals span and style together; legacy0..2 always follow text.
+    f[BK_READING_LINE] = s_book_reading_line + (s_book_rule_full ? 3 : 0);
     f[BK_LINE_SPACING] = s_book_line;
     f[BK_MARGIN] = s_book_margin;
     f[BK_PARAGRAPH] = s_book_para;
@@ -1209,7 +1227,7 @@ static bool backup_valid(const settings_backup_v1_t *backup) {
                             f[BK_FULL_PAGES] != 10 && f[BK_FULL_PAGES] != 15 &&
                             f[BK_FULL_PAGES] != 30) ||
         f[BK_TURN] > READER_TURN_EFFECT_MAX || f[BK_POWER_TURN] > 1 || f[BK_IMMERSIVE] > 1 ||
-        f[BK_TRACKING] > (backup_version(backup)>=20 ? APP_BOOK_TRACK_COUNT-1 : backup_version(backup)==19 ? 20 : 4) || f[BK_READING_LINE] > 2 ||
+        f[BK_TRACKING] > (backup_version(backup)>=20 ? APP_BOOK_TRACK_COUNT-1 : backup_version(backup)==19 ? 20 : 4) || f[BK_READING_LINE] > (backup_version(backup) >= 21 ? 5 : 2) ||
         f[BK_LINE_SPACING] < 110 || f[BK_LINE_SPACING] > 150 ||
         f[BK_MARGIN] > 60 ||
         (backup_version(backup)>=20 ?
@@ -1390,7 +1408,8 @@ esp_err_t app_settings_backup_restore(void) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_WEIGHT_FINE, fine_weight+APP_BOOK_WEIGHT_FINE_MAX);
     const bool antialias = version < 15 || backup.flags[BK_SHAKE] == 0;
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_AA, antialias ? 1 : 0);
-    BACKUP_SET_U8(NVS_KEY_BOOK_RULE, BK_READING_LINE);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_RULE, backup.flags[BK_READING_LINE] % 3);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_RULE_FULL, version >= 21 && backup.flags[BK_READING_LINE] >= 3);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_RULE_OFFSET, rule_offset);
     BACKUP_SET_U8(NVS_KEY_BOOK_LINE, BK_LINE_SPACING);
     BACKUP_SET_U8(NVS_KEY_BOOK_MARGIN, BK_MARGIN);
@@ -1447,7 +1466,8 @@ esp_err_t app_settings_backup_restore(void) {
     s_book_tracking = f[BK_TRACKING];
     s_book_indent = indent;
     s_book_indent_adjust = adjust.encoded;
-    s_book_reading_line = f[BK_READING_LINE];
+    s_book_reading_line = f[BK_READING_LINE] % 3;
+    s_book_rule_full = version >= 21 && f[BK_READING_LINE] >= 3;
     s_book_rule_offset = rule_offset;
     s_book_line = f[BK_LINE_SPACING];
     s_book_margin = f[BK_MARGIN];

@@ -4,6 +4,8 @@
  *
  * 图书书架、阅读、目录与页内进度；文件解析和排版由book模块负责。
  * Book shelf, reader, TOC and progress; book modules own parsing and pagination.
+ * 用户2026-11-03：阅读线支持跟随文字或整行，默认跟随文字；竖排对应整列。
+ * User2026-11-03: reading guides follow text by default with an optional full-row/column span.
  *
  * 用户修订：阅读设置采用已确认的半屏双列排版；自动全刷与翻页效果点按轮换，保留按键控制二级页。
  * User revision: use the approved compact two-column reading sheet; tap cycles refresh/effect and key controls retain their secondary page.
@@ -2062,9 +2064,9 @@ static EpdRect reader_font_card(int index) {
 #define s_rule_card reader_font_card(4)
 #define s_antialias_card reader_font_card(5)
 static void draw_reading_switch(uint8_t *fb, EpdRect track, bool on);
-static const EpdRect s_rule_offset_up = {36, 980, 190, 88};
-static const EpdRect s_rule_offset_reset = {246, 980, 192, 88};
-static const EpdRect s_rule_offset_down = {458, 980, 190, 88};
+static const EpdRect s_rule_offset_up = {36, 1006, 190, 68};
+static const EpdRect s_rule_offset_reset = {246, 1006, 192, 68};
+static const EpdRect s_rule_offset_down = {458, 1006, 190, 68};
 
 static int background_compare(const void *a, const void *b) {
     return strcasecmp(((const reader_background_item_t *)a)->path, ((const reader_background_item_t *)b)->path);
@@ -2332,31 +2334,46 @@ static void draw_weight_settings(uint8_t *fb) {
 }
 
 static EpdRect rule_style_rect(int index) {
-    return (EpdRect){36 + index * 208, 788, 196, 120};
+    return (EpdRect){36 + index * 208, 766, 196, 104};
+}
+
+static EpdRect rule_span_rect(int index) {
+    return (EpdRect){214 + index * 222, 890, 212, 64};
 }
 
 static void draw_rule_settings(uint8_t *fb) {
     const int top = 580;
     draw_sheet(fb, top, "阅读线");
     draw_sheet_back(fb, top);
-    reader_panel_text(fb, 42, 741, 21, "选择样式", EPD_DRAW_ALIGN_LEFT, false);
+    reader_panel_text(fb, 42, 710, 21, "选择样式", EPD_DRAW_ALIGN_LEFT, false);
     static const char *const names[] = {"无", "虚线", "点线"};
     int selected = app_settings_book_reading_line();
     for (int i = 0; i < 3; ++i) {
         EpdRect card = rule_style_rect(i);
         ui_fill_round_rect(fb, card, 20, selected == i ? 0xc8 : 0xe8);
         ui_draw_control_frame(fb, card, 20, selected == i ? 0x40 : 0x78);
-        reader_panel_text_vc(fb, card.x + card.width / 2, card.y + 37, 24, names[i], EPD_DRAW_ALIGN_CENTER, false);
+        reader_panel_text_vc(fb, card.x + card.width / 2, card.y + 29, 24, names[i], EPD_DRAW_ALIGN_CENTER, false);
         if (i) {
             int span = i == 1 ? 14 : 3, step = i == 1 ? 24 : 13;
             int start = card.x + 25, end = card.x + card.width - 25;
             for (int x = start; x < end; x += step)
-                ui_fill_rect_fast((EpdRect){x, card.y + 83, x + span <= end ? span : end - x, 2}, 0x48, fb);
-        } else reader_panel_text_vc(fb, card.x + card.width / 2, card.y + 83, 17, "不显示", EPD_DRAW_ALIGN_CENTER, false);
+                ui_fill_rect_fast((EpdRect){x, card.y + 73, x + span <= end ? span : end - x, 2}, 0x48, fb);
+        } else reader_panel_text_vc(fb, card.x + card.width / 2, card.y + 73, 17, "不显示", EPD_DRAW_ALIGN_CENTER, false);
+    }
+    reader_panel_text_vc(fb, 42, 922, 21, "范围", EPD_DRAW_ALIGN_LEFT, false);
+    static const char *const spans[] = {"跟随文字", "整行"};
+    bool full = app_settings_book_reading_line_full();
+    for (int i = 0; i < 2; ++i) {
+        EpdRect choice = rule_span_rect(i);
+        bool active = full == (i != 0);
+        ui_fill_round_rect(fb, choice, 20, active ? UI_GRAY_BLACK : 0xe8);
+        ui_draw_control_frame(fb, choice, 20, active ? UI_GRAY_BLACK : 0x78);
+        ui_text_box(fb, (EpdRect){choice.x+8, choice.y+6, choice.width-16, choice.height-12},
+                    23, spans[i], EPD_DRAW_ALIGN_CENTER, active);
     }
     char offset[36];
     snprintf(offset, sizeof(offset), "上下位置  %+d", app_settings_book_reading_line_offset());
-    reader_panel_text(fb, 42, 936, 21, offset, EPD_DRAW_ALIGN_LEFT, false);
+    reader_panel_text(fb, 42, 962, 21, offset, EPD_DRAW_ALIGN_LEFT, false);
     const EpdRect controls[] = {s_rule_offset_up, s_rule_offset_reset, s_rule_offset_down};
     const char *const labels[] = {"上移 2px", "恢复居中", "下移 2px"};
     for (int i = 0; i < 3; ++i) {
@@ -2365,7 +2382,7 @@ static void draw_rule_settings(uint8_t *fb) {
         reader_panel_text_vc(fb, controls[i].x + controls[i].width / 2,
                    controls[i].y + controls[i].height / 2, 22, labels[i], EPD_DRAW_ALIGN_CENTER, false);
     }
-    if (!selected) reader_panel_text(fb, 42, 1080, 18, "选择虚线或点线后可调整位置", EPD_DRAW_ALIGN_LEFT, false);
+    if (!selected) ui_text_box(fb, (EpdRect){42, 1080, 600, 28}, 18, "选择虚线或点线后可调整位置", EPD_DRAW_ALIGN_LEFT, false);
     EpdRect done = {36, 1113, 612, 72};
     ui_fill_round_rect(fb, done, 20, UI_GRAY_BLACK);
     reader_panel_text_vc(fb, 342, 1149, 23, "返回字体设置", EPD_DRAW_ALIGN_CENTER, true);
@@ -6215,6 +6232,13 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
             invalidate_prep();
             return APP_REDRAW_PAGE;
         }
+        for (int i = 0; i < 2; ++i) {
+            if (!ui_rect_hit(rule_span_rect(i), x, y)) continue;
+            if (!app_settings_set_book_reading_line_full(i != 0)) return APP_REDRAW_NONE;
+            book_layout_set_reading_line_full(app_settings_book_reading_line_full());
+            invalidate_prep();
+            return APP_REDRAW_PAGE;
+        }
         if (app_settings_book_reading_line()) {
             int offset = app_settings_book_reading_line_offset();
             if (ui_rect_hit(s_rule_offset_up, x, y)) offset -= 2;
@@ -6836,6 +6860,7 @@ static void on_enter(app_ctx_t* ctx) {
     book_layout_set_first_line_indent(app_settings_book_indent());
     book_layout_set_first_line_indent_adjust(app_settings_book_indent_adjust());
     book_layout_set_reading_line(app_settings_book_reading_line());
+    book_layout_set_reading_line_full(app_settings_book_reading_line_full());
     book_layout_set_reading_line_offset(app_settings_book_reading_line_offset());
     // 字体页可能刚改过书内字体开关；回正文时重排当前章，别让用户对着旧排版猜。
     // The font page may have just changed the embedded-face switch; re-typeset this chapter
