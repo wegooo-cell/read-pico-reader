@@ -968,15 +968,29 @@ bool app_settings_set_fonts_dir(const char* path) { return set_media_dir(s_fonts
 #ifndef APP_SETTINGS_BACKUP_ROOT
 #define APP_SETTINGS_BACKUP_ROOT "/sdcard"
 #endif
+// 新版本统一写同一个备份名；两板旧名仍可恢复，同一张卡可直接换板。
+// New builds share one backup name; both boards' legacy names stay restorable so one card can move.
+#define BACKUP_FILE APP_SETTINGS_BACKUP_ROOT "/Kiikoread-settings.backup"
+#define BACKUP_TEMP APP_SETTINGS_BACKUP_ROOT "/Kiikoread-settings.backup.tmp"
+#define BACKUP_PREVIOUS APP_SETTINGS_BACKUP_ROOT "/Kiikoread-settings.backup.previous"
+// 恢复顺序：统一名 → 本板旧名 → 另一板旧名；每个名字先主文件再 .previous。
+// Restore order: unified, this board's legacy, the other board's legacy; primary before .previous.
 #if KIIKO_BOARD_METALIO47
-#define BACKUP_FILE APP_SETTINGS_BACKUP_ROOT "/Metalio-S31-settings.backup"
-#define BACKUP_TEMP APP_SETTINGS_BACKUP_ROOT "/Metalio-S31-settings.backup.tmp"
-#define BACKUP_PREVIOUS APP_SETTINGS_BACKUP_ROOT "/Metalio-S31-settings.backup.previous"
+#define BACKUP_LEGACY_OWN APP_SETTINGS_BACKUP_ROOT "/Metalio-S31-settings.backup"
+#define BACKUP_LEGACY_OWN_PREVIOUS APP_SETTINGS_BACKUP_ROOT "/Metalio-S31-settings.backup.previous"
+#define BACKUP_LEGACY_OTHER APP_SETTINGS_BACKUP_ROOT "/Pico-settings.backup"
+#define BACKUP_LEGACY_OTHER_PREVIOUS APP_SETTINGS_BACKUP_ROOT "/Pico-settings.backup.previous"
 #else
-#define BACKUP_FILE APP_SETTINGS_BACKUP_ROOT "/Pico-settings.backup"
-#define BACKUP_TEMP APP_SETTINGS_BACKUP_ROOT "/Pico-settings.backup.tmp"
-#define BACKUP_PREVIOUS APP_SETTINGS_BACKUP_ROOT "/Pico-settings.backup.previous"
+#define BACKUP_LEGACY_OWN APP_SETTINGS_BACKUP_ROOT "/Pico-settings.backup"
+#define BACKUP_LEGACY_OWN_PREVIOUS APP_SETTINGS_BACKUP_ROOT "/Pico-settings.backup.previous"
+#define BACKUP_LEGACY_OTHER APP_SETTINGS_BACKUP_ROOT "/Metalio-S31-settings.backup"
+#define BACKUP_LEGACY_OTHER_PREVIOUS APP_SETTINGS_BACKUP_ROOT "/Metalio-S31-settings.backup.previous"
 #endif
+static const char *const BACKUP_RESTORE_FILES[] = {
+    BACKUP_FILE, BACKUP_PREVIOUS,
+    BACKUP_LEGACY_OWN, BACKUP_LEGACY_OWN_PREVIOUS,
+    BACKUP_LEGACY_OTHER, BACKUP_LEGACY_OTHER_PREVIOUS,
+};
 
 // All fields are bytes, so the v1 disk layout is independent of structure padding.
 // 所有字段均为字节，v1 磁盘格式不依赖编译器的结构体填充。
@@ -1309,9 +1323,14 @@ static bool backup_file_exists(const char *path, bool directory) {
 
 esp_err_t app_settings_backup_restore(void) {
     if (!backup_card_ready()) return ESP_ERR_INVALID_STATE;
-    const char *source = BACKUP_FILE;
-    FILE *file = fopen(source, "rb");
-    if (!file) { source = BACKUP_PREVIOUS; file = fopen(source, "rb"); }
+    // 依次识别统一名与两板旧名，旧卡或换板后的备份可直接恢复。
+    // Accept the unified name and both legacy names so old cards and moved backups still restore.
+    const char *source = NULL;
+    FILE *file = NULL;
+    for (unsigned i = 0; i < sizeof(BACKUP_RESTORE_FILES) / sizeof(BACKUP_RESTORE_FILES[0]) && !file; ++i) {
+        source = BACKUP_RESTORE_FILES[i];
+        file = fopen(source, "rb");
+    }
     if (!file) return ESP_ERR_NOT_FOUND;
     settings_backup_v1_t backup;
     bool ok = fread(&backup, 1, sizeof(backup), file) == sizeof(backup);

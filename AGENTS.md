@@ -10,6 +10,12 @@ Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Takin
 
 ## 当前工作：双板型本地整合 / Current work: local multi-board integration
 
+用户2026-11-03：S31残影/翻页优化定稿——整页刷新恢复厂家完整48相GC16/GL16（官方v2.0.66起默认）并补官方DU末四相黑，普通翻页对齐Pico（十二相整屏擦白+四相重推黑），翻页改单带1K相位表引擎提速；灰度继续由原厂序列产生，“白→灰直接推”实验因灰阶无法标定已放弃。回退开关 `--s31-trimmed-waveform`。
+User2026-11-03: finalize S31 ghosting/turn work -- page refreshes use the vendor full 48-phase GC16/GL16 (official default since v2.0.66) plus the official DU four-phase black re-drive; ordinary turns match Pico (twelve whole-panel erase phases + four black re-drive) on the faster single-band 1K phase-LUT engine. Gray levels still come from the vendor sequence; the direct white-to-gray rewrite was abandoned because it cannot be calibrated. `--s31-trimmed-waveform` restores the trimmed profile.
+
+用户2026-11-03：配置备份统一为 TF 卡根目录 `Kiikoread-settings.backup`；两板新版本都写这一个名字，并且都能恢复两板旧名 `Pico-settings.backup`、`Metalio-S31-settings.backup`（含各自 `.previous`），同一张卡可直接换板使用。
+User2026-11-03: unify configuration backups on `Kiikoread-settings.backup` in the TF card root; both boards' new builds write that name and both restore the legacy `Pico-settings.backup` and `Metalio-S31-settings.backup` files (with `.previous`), so one card works across devices.
+
 用户2026-11-03修订：阅读题头、工具栏与设置面板悬浮于固定正文区域，打开/关闭不重新分页、不改变当前页或阅读进度。保留两种沉浸样式与现有入口；仅实际排版/沉浸设置变化才重排。此要求取代此前非全屏为工具栏缩小正文的实现；本轮在功能分支修复，版本号不变。
 User2026-11-03: reader header, tools and settings overlay a stable body. Opening/closing preserves pagination, page and progress; retain both immersive styles and existing entry gestures. Only layout/immersive setting edits reflow. This supersedes the reduced standard-mode body; fix on a feature branch without changing versions.
 

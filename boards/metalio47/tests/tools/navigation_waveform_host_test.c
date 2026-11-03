@@ -82,7 +82,10 @@ int main(void) {
     assert(bands && bands->phases == gray_table->phases && bands->phase_times == gray_table->phase_times);
     assert(bw && bw->phases == 20);
     for (int f = 0; f < bw->phases; ++f) {
-        assert(e0470_phase_action(bw, f, 0, 0) == 0);
+        // 官方v2.0.69：完整DU表末四相给黑→黑补黑；其余相保持不驱动。
+        // Vendor v2.0.69 re-drives black in the last four complete-DU phases; other phases hold.
+        const int black_redrive = f >= bw->phases - 4;
+        assert(e0470_phase_action(bw, f, 0, 0) == (black_redrive ? 1 : 0));
         assert(e0470_phase_action(bw, f, 15, 15) == 0 || e0470_phase_action(bw,f,15,15)==2);
     }
     int original_diagonal = 0;
