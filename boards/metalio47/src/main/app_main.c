@@ -37,6 +37,7 @@ extern const app_desc_t app_onboarding;
 #include "esp_log.h"
 #include "ota_update.h"
 #include "pmu_selftest.h"
+#include "metalio_charger.h"
 #include "metalio_hw.h"
 #include "output_lcd/lcd_driver.h"
 #include "read_pico_board.h"
@@ -176,7 +177,12 @@ void app_main(void) {
     read_pico_handle_t hw;
     if (read_pico_init(&hw) != ESP_OK) return;
     rp_boot_mark("hw");
-    if (hw.pmu_ready) restore_time_from_pmu();
+    if (hw.pmu_ready) {
+        restore_time_from_pmu();
+        // 快充开关按保存的偏好立即生效；驱动未就绪时保持初始化时的标准电流。
+        // Apply the saved fast-charge preference immediately; a missing driver keeps the standard current.
+        (void)metalio_charger_set_fast_charge(app_settings_fast_charge());
+    }
     const bool vcom_ok = resolve_vcom_at_boot();
     rp_boot_mark("vcom");
     ESP_LOGI(TAG,"TPS65185 last VCOM register readback=%dmV",metalio_tps_vcom_mv());

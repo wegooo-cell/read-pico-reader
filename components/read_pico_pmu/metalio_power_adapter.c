@@ -4,6 +4,7 @@
  */
 #include "read_pico_pmu.h"
 #include "power_double_click.h"
+#include "metalio_charger.h"
 #include "metalio_hw.h"
 #include "esp_system.h"
 #include "esp_mac.h"
@@ -138,28 +139,12 @@ void read_pico_pmu_latch_power_wakeup(void) {
     }
     portEXIT_CRITICAL(&key_lock);
 }
-static esp_err_t charger_update(uint8_t reg,uint8_t mask,uint8_t value) {
-    uint8_t previous;
-    esp_err_t err=metalio_read(0x6b,reg,&previous,1);
-    if (err!=ESP_OK) return err;
-    const uint8_t next=(previous&~mask)|(value&mask);
-    if (next!=previous) err=metalio_write8(0x6b,reg,next);
-    uint8_t verified;
-    if (err==ESP_OK) err=metalio_read(0x6b,reg,&verified,1);
-    if (err==ESP_OK && (verified&mask)!=(next&mask)) err=ESP_ERR_INVALID_RESPONSE;
-    return err;
-}
 static esp_err_t charger_init(void) {
-    uint8_t part;
-    esp_err_t err=metalio_read(0x6b,0x38,&part,1);
-    // 原厂cx25601n hw_init_defaults/enable_charge/enable_otg的公开控制位。
-    // Public control bits from reference cx25601n hw_init_defaults/enable_charge/enable_otg.
-    // 保留既有电压、电流、终止阈值与私有寄存器，只解除OTG/HIZ并开启无看门狗充电。
-    // Preserve voltage/current/termination/private registers; exit OTG/HIZ and enable charging without its watchdog.
-    if (err==ESP_OK) err=charger_update(0x18,0x40,0);
-    if (err==ESP_OK) err=charger_update(0x16,0x33,0x20);
-    charger_initialized=err==ESP_OK;
-    ESP_LOGI("metalio_power","CX25601N init=%s part=%02x",esp_err_to_name(err),err==ESP_OK?part:0);
+    // 初始化与寄存器策略在 metalio_charger 内；适配器只保留失败重试与日志。
+    // Initialization and register policy live in metalio_charger; this adapter only retries and logs.
+    esp_err_t err=metalio_charger_init();
+    charger_initialized=metalio_charger_ready();
+    ESP_LOGI("metalio_power","CX25601N init=%s ready=%u",esp_err_to_name(err),(unsigned)charger_initialized);
     return err;
 }
 static void battery(void) {

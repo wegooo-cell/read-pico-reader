@@ -60,6 +60,8 @@ jobs:
           python3 tools/txt_utf16_host_test.py
           python3 tools/metalio_wake_media_recovery_host_test.py
           python3 tools/metalio_power_choice_host_test.py
+          python3 tools/metalio_charger_host_test.py
+          python3 tools/metalio_power_host_test.py
           python3 tools/settings_layout_font_host_test.py
           mkdir -p build/book-tests
           cc -std=c11 -D_DEFAULT_SOURCE -DKIIKO_BOARD_METALIO47=1 -Wall -Wextra -Werror -fsanitize=address,undefined -Itools/settings_backup_stubs -Imain tools/boot_state_host_test.c -o build/book-tests/boot-state

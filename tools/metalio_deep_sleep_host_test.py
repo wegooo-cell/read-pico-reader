@@ -84,6 +84,10 @@ static void metalio_haptic_resume(void){++resumes;}
 static void metalio_poweroff(void){++off_calls;}
 static void epd_lcd_deinit(void){++lcd_deinit;}
 static void metalio_hold_for_deep_sleep(void){++hold_calls;}
+// 充电监控的挂起/恢复由充电驱动自己验证；这里只要求回滚路径成对调用。
+// The charge driver owns suspend/resume; the rollback paths only require a paired call.
+static void metalio_charger_suspend(void){}
+static void metalio_charger_resume(void){}
 static void esp_deep_sleep_start(void){++sleep_calls;assert(wake_source&&paused&&font_closed&&sd_closed&&hold_calls&&lcd_deinit&&deep_pins&&deep_rails);deep_success=true;longjmp(deep,1);}
 static int app_light_sleep_wait_timed(void *acc,unsigned ms){assert(!acc&&ms==0);return ++waits<=wait_timeouts?APP_WAKE_TIMEOUT:APP_WAKE_KEY;}
 '''
