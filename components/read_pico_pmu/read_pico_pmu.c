@@ -21,6 +21,9 @@
 #include "freertos/task.h"
 
 #define TAG "pmu"
+// PMU STATUS 的按键上电来源；不等同于 FIFO 中的短按事件。
+// Key-caused power-on in PMU STATUS, distinct from a FIFO short-press event.
+#define PMU_WAKE_POWER_KEY 2u
 
 static i2c_master_bus_handle_t s_bus;
 static i2c_master_dev_handle_t s_dev;
@@ -395,6 +398,8 @@ static power_double_click_t s_wake_click;
 // 记录握手扫描中真正收到的短按，避免充电或定时唤醒跳过锁屏。/ Record real handshake short presses so charging/timers cannot skip the lock.
 static bool s_scan_short;
 static bool s_boot_short;
+static bool s_boot_power_key;
+static bool s_boot_key_release_pending;
 void read_pico_pmu_drain_events(void) {
     s_wake_click=(power_double_click_t){0};
     for (int i = 0; i < PMU_EVENT_FIFO_DEPTH; i++) {
@@ -412,6 +417,18 @@ read_pico_pmu_key_action_t read_pico_pmu_take_key_action(void) {
     read_pico_pmu_key_action_t action = READ_PICO_PMU_KEY_NONE;
     for (int i = 0; i < PMU_EVENT_FIFO_DEPTH; i++) {
         if (read_pico_pmu_poll() != ESP_OK) break;
+        // 已用于开机的按键仍归启动门禁；首帧再慢也不能把其释放当成新锁屏动作。
+        // The boot gate owns its key through release, regardless of first-frame latency.
+        if (s_boot_key_release_pending) {
+            if (!s_snap.identity_ok || !s_snap.status_ok) break;
+            if (s_snap.pending_events == 0) {
+                if (!(s_snap.key_state & 0x01)) s_boot_key_release_pending = false;
+                break;
+            }
+            if (!s_snap.event_ok || !s_snap.event.event_id ||
+                read_pico_pmu_event_ack(s_snap.event.event_id) != ESP_OK) break;
+            continue;
+        }
         if (!s_snap.event_ok || s_snap.pending_events == 0) break;
         uint8_t type = s_snap.event.type;
         uint16_t id = s_snap.event.event_id;
@@ -481,6 +498,16 @@ bool read_pico_pmu_take_boot_short_press(void) {
     bool seen = s_boot_short;
     s_boot_short = false;
     return seen;
+}
+
+bool read_pico_pmu_take_boot_power_key(void) {
+    bool seen = s_boot_power_key;
+    s_boot_power_key = false;
+    return seen;
+}
+
+void read_pico_pmu_rearm_after_boot_key(void) {
+    s_boot_key_release_pending = true;
 }
 
 // 命令 OK/ACCEPTED 只表示受理，以 STATUS power_state 为准。
@@ -720,6 +747,10 @@ esp_err_t read_pico_pmu_poll(void) {
 esp_err_t read_pico_pmu_init(i2c_master_bus_handle_t bus_handle, const read_pico_pmu_config_t* config) {
     memset(&s_snap, 0, sizeof(s_snap));
     memset(&s_soc_filter,0,sizeof(s_soc_filter));
+    s_ready = false;
+    s_scan_short = s_boot_short = s_boot_power_key = false;
+    s_boot_key_release_pending = false;
+    s_wake_click = (power_double_click_t){0};
     if (config == NULL || bus_handle == NULL) return ESP_ERR_INVALID_ARG;
 
     uint16_t addr = config->i2c_addr ? config->i2c_addr : PMU_I2C_ADDR;
@@ -757,6 +788,14 @@ esp_err_t read_pico_pmu_init(i2c_master_bus_handle_t bus_handle, const read_pico
 
     recover_seq();
 
+    // HOST_READY 会把 BOOT_WAIT 改成 RUNNING；先锁存本次有效状态，不能用运行中的旧原因。
+    // HOST_READY changes BOOT_WAIT to RUNNING; latch a fresh validated state before it, not a stale running reason.
+    const bool boot_power_key_pending = read_pico_pmu_poll() == ESP_OK &&
+        s_snap.identity_ok && s_snap.status_ok && s_snap.boot_id != 0 &&
+        s_snap.wake_reason == PMU_WAKE_POWER_KEY &&
+        (s_snap.power_state == PMU_PWR_BOOT_WAIT || s_snap.power_state == PMU_PWR_POWERING_ON);
+    const uint32_t boot_power_key_session = s_snap.boot_id;
+
     uint8_t reason = 0;
     err = read_pico_pmu_cmd(PMU_CMD_HOST_READY, &reason, 1);
     if (err != ESP_OK) {
@@ -793,6 +832,11 @@ esp_err_t read_pico_pmu_init(i2c_master_bus_handle_t bus_handle, const read_pico
         bool boot_double=read_pico_pmu_take_key_wakeup();
         s_wake_click.ready=boot_double;
         s_boot_short = s_scan_short;
+        // FIFO 可以没有 SHORT；只在同一 PMU 会话成功完成握手后交给启动门禁消费一次。
+        // SHORT may be absent; expose power-on evidence once only after a successful same-session handshake.
+        s_boot_power_key = boot_power_key_pending && err == ESP_OK &&
+            s_snap.identity_ok && s_snap.status_ok && s_snap.boot_id == boot_power_key_session &&
+            s_snap.power_state == PMU_PWR_RUNNING && s_snap.wake_reason == PMU_WAKE_POWER_KEY;
         return ESP_OK;
     }
     (void)read_pico_pmu_deinit();
@@ -807,7 +851,8 @@ esp_err_t read_pico_pmu_deinit(void) {
     s_bus = NULL;
     s_dev = NULL;
     s_ready = false;
-    s_scan_short = s_boot_short = false;
+    s_scan_short = s_boot_short = s_boot_power_key = false;
+    s_boot_key_release_pending = false;
     memset(&s_snap, 0, sizeof(s_snap));
     memset(&s_soc_filter,0,sizeof(s_soc_filter));
     return ESP_OK;

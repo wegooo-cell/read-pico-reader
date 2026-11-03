@@ -16,10 +16,13 @@ static inline EpdRect ui_reader_area(bool fullscreen,bool immersive) {
     return (EpdRect){0,top,684,bottom-top};
 }
 static inline EpdRect ui_reader_body(bool fullscreen,bool immersive,int margin,bool vertical) {
-    EpdRect r=ui_reader_area(fullscreen,immersive);
+    // 工具栏及题头悬浮在正文上；显隐只改变可见/刷新范围，不改变排版。
+    // Header/tools overlay the body; visibility changes the paint crop, never pagination.
+    (void)fullscreen;
+    EpdRect r=ui_reader_area(true,immersive);
     // 正式版正文上留24像素、下留2像素；横竖排继续使用用户边距。
     // Retain the release's24px top and2px bottom text inset, with configured horizontal/vertical margins.
-    if(fullscreen&&immersive){r.y+=24;r.height-=26;}
+    if(immersive){r.y+=24;r.height-=26;}
     if(vertical)return (EpdRect){24,r.y+margin,636,r.height-2*margin};
     return (EpdRect){margin,r.y,684-2*margin,r.height};
 }

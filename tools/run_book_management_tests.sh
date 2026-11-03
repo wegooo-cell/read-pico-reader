@@ -31,6 +31,8 @@ python3 tools/file_names_host_test.py
 python3 tools/book_ui_host_test.py
 python3 tools/file_browser_names_host_test.py
 python3 tools/reader_fullscreen_host_test.py
+python3 tools/reader_overlay_host_test.py
+python3 tools/reader_immersive_space_host_test.py
 python3 tools/reader_controls_host_test.py
 python3 tools/reader_tap_dispatch_host_test.py
 python3 tools/reader_chapter_jump_host_test.py

@@ -79,6 +79,7 @@ static size_t measured_chapter;
 static uint32_t generation=1;
 static bool app_settings_reader_hide_images(void){return hidden;}
 static EpdRect body_rect(void){return body;}
+static int reader_image_top(void){return reader_area_rect.y;}
 static EpdRect reader_area(void){return reader_area_rect;}
 static EpdRect book_layout_image_rect(void){return image_band;}
 static size_t free_block=4u*1024u*1024u;

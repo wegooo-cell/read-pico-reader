@@ -27,7 +27,6 @@ static bool pin,cached,valid,mounted,draw_ok,scan_ok;
 static unsigned remaining,probes,reads,draws,scans,saves,marks,fonts,clears,power,censuses,white_push,fallback;
 static EpdiyHighlevelState *s_lock_hint_hl,*s_boot_lock_hl;
 static bool s_boot_lock_active,s_boot_lock_known,s_boot_lock_draw;
-static const uint8_t loading_4bpp_bin_start[1]={0x56};
 static int epd_width(void){return 684;}static int epd_height(void){return 1216;}
 static uint8_t *epd_hl_get_framebuffer(EpdiyHighlevelState *hl){assert(hl->back_fb==back);return front;}
 static int read_pico_sd_get_info(read_pico_sd_info_t *i){++probes;if(remaining){--remaining;i->mounted=false;return ESP_ERR_NOT_FINISHED;}i->mounted=mounted;return 0;}
@@ -48,7 +47,7 @@ static bool lock_screen_save(const uint8_t *fb){assert(fb==front&&scan_ok&&(!dra
 static int pico_boot_mark_frame_cached(void){++marks;return 0;}
 static void epd_poweron(void){++power;}static void epd_clear(void){++clears;memset(panel,255,BYTES);}
 static void read_pico_i2c_census_take(void){++censuses;}
-static void ui_draw_full_image(uint8_t *fb,const uint8_t *im){memset(fb,im[0],BYTES);}
+static void draw_startup_frame(uint8_t *fb){memset(fb,0x56,BYTES);}
 static void ui_lock_fallback_draw(uint8_t *fb){++fallback;memset(fb,255,BYTES);}
 static void update_display_from_white(EpdiyHighlevelState *h){(void)h;++white_push;memcpy(panel,front,BYTES);}
 '''

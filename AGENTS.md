@@ -10,6 +10,9 @@ Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Takin
 
 ## 当前工作：双板型本地整合 / Current work: local multi-board integration
 
+用户2026-11-03修订：阅读题头、工具栏与设置面板悬浮于固定正文区域，打开/关闭不重新分页、不改变当前页或阅读进度。保留两种沉浸样式与现有入口；仅实际排版/沉浸设置变化才重排。此要求取代此前非全屏为工具栏缩小正文的实现；本轮在功能分支修复，版本号不变。
+User2026-11-03: reader header, tools and settings overlay a stable body. Opening/closing preserves pagination, page and progress; retain both immersive styles and existing entry gestures. Only layout/immersive setting edits reflow. This supersedes the reduced standard-mode body; fix on a feature branch without changing versions.
+
 用户2026-11-02授权直接合并PR68/69并修复点按冲突：非全屏中间单击进入全屏；全屏后按已选左右/上下模式翻页；插图双击缩放，单击保持原翻页/全屏意图，底部上滑退出全屏并显示工具栏。对应Pico波形和引擎基线按PR68更新，S31波形保持；仅合并源码，不发布固件，既有S31 TF/字体/Wi-Fi/保持浅睡本地测试改动继续不上传。
 User2026-11-02 authorizes merging PR68/69 and fixing tap conflicts: standard centre taps enter fullscreen; fullscreen taps follow the selected turn regions. Retain image double-tap zoom and deferred singles, plus bottom-swipe tools. Update the affected Pico baseline to PR68, retain S31 waveforms. Merge source only; preserve the unpublished S31 SD/font/Wi-Fi/keep-light changes locally.
 

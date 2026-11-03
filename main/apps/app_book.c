@@ -20,6 +20,8 @@
  * User revision 2026-10-24: S31 image turns/exits hold equal pixels and drive BW endpoints directionally; real gray changes retain complete GL48 while BW-only changes use DU20, with fused progress and manual/periodic GC48.
  * 用户2026-10-29：S31普通/图文原样采用Moku GL37加六相白；速读独立DU加四相，水波纹/GC48独立。
  * User2026-10-29: S31 ordinary/image turns retain Moku GL37 plus six whites; separate FastBW DU adds four, with independent ripple/GC48.
+ * 用户2026-11-03修订：题头、工具栏与设置悬浮于固定正文；显隐不重排、不改变当前页或阅读进度，沉浸/排版设置变化才重新分页。
+ * User2026-11-03: header/tools/settings overlay a fixed body; visibility preserves pagination, page and progress. Only immersive/typographic changes reflow.
  * 用户2026-11-02修订：合并PR68/69；非全屏中间单击进入全屏，全屏按所选分区翻页；插图双击缩放，单击保留延后动作，放大后单击不翻页。
  * User2026-11-02: merge PR68/69; standard centre taps enter fullscreen, fullscreen taps follow turn regions; images retain double-tap zoom and deferred singles, with no turns from zoomed singles.
  * 用户2026-11-01修订：新开书默认非全屏并显示工具栏，顶部时间/签名/电量、底部章节/进度；中间单击仅进入全屏，底部上滑退出全屏并显示工具栏，全屏样式保留。
@@ -654,6 +656,9 @@ static bool reader_tools_visible(void) {
     return !s_reader_fullscreen&&(s_reader_panel==READER_PANEL_TOOLS||s_reader_panel==READER_PANEL_NONE);
 }
 static EpdRect reader_area(void) { return ui_reader_area(s_reader_fullscreen,app_settings_reader_immersive()); }
+// 页首插图与脚注固定在内容顶部，不随可见刷新裁剪下移。
+// Page-start images and notes stay at the layout top, independently of the visible refresh crop.
+static int reader_image_top(void) { return ui_reader_area(true,app_settings_reader_immersive()).y; }
 static EpdRect reader_fullscreen_progress_area(void) { return ui_reader_fullscreen_footer(); }
 static EpdRect body_rect_for_tracking(int tracking_index) {
     (void)tracking_index;
@@ -3204,6 +3209,8 @@ static uint8_t inline_ink_gray(uint8_t gray) {
 }
 
 static void draw_reader_header(uint8_t *fb) {
+    if (!s_reader_fullscreen)
+        ui_fill_rect_fast((EpdRect){0,0,UI_LOCK_WIDTH,UI_READER_STANDARD_TOP},UI_GRAY_WHITE,fb);
     ui_nav_status(fb);
     if (s_reader_fullscreen) return;
     ui_nav_back(fb,36,79);
@@ -3366,7 +3373,6 @@ static uint32_t reader_sqrt(uint32_t v) {
 // Require the active page and layout: failed decoding or chapter changes cannot borrow stale slots.
 static bool reader_image_cache_ready(void) {
     return s_view == READING && s_text && !app_settings_reader_hide_images() &&
-        s_reader_panel == READER_PANEL_NONE && !s_toolbar &&
         s_page_images && s_page_image_count > 0 && s_page_images_for == s_page &&
         s_page_images_generation == book_layout_generation();
 }
@@ -3394,7 +3400,9 @@ static const reader_image_t *reader_zoom_image(void) {
 // 有可缩放目标（整页插图，或已进入正文插图缩放模式）。
 // Whether a zoom surface is available: a whole-page illustration, or an inline image already
 // opened in zoom mode.
-static bool reader_zoom_mode(void) { return reader_zoom_image() != NULL; }
+static bool reader_zoom_mode(void) {
+    return s_reader_panel == READER_PANEL_NONE && !s_toolbar && reader_zoom_image() != NULL;
+}
 
 // 1:1 时缩放目标在插图区域里的显示尺寸：等比缩小到能放下，不放大。
 // The display size of the zoom target at 1:1: aspect-fit into the illustration region, never
@@ -3414,7 +3422,7 @@ static void reader_image_base_size(int *out_w, int *out_h) {
 // 正文里按点选中的插图槽；不在任何插图矩形里返回 false。
 // The inline illustration slot under a tap, or false when the tap misses every image rectangle.
 static bool reader_inline_image_at(uint16_t x, uint16_t y, int *slot) {
-    if (!slot || !reader_image_cache_ready()) return false;
+    if (!slot || s_reader_panel != READER_PANEL_NONE || s_toolbar || !reader_image_cache_ready()) return false;
     EpdRect band = book_layout_image_rect();
     for (int i = 0; i < reader_image_slots(s_page) && i < s_page_image_count; ++i) {
         int iy = 0, width = 0, height = 0;
@@ -3423,7 +3431,7 @@ static bool reader_inline_image_at(uint16_t x, uint16_t y, int *slot) {
         if (!image->gray || image->width <= 0 || image->height <= 0) continue;
         int left = band.x + (band.width - image->width) / 2;
         int top = band.y + iy + (height - image->height) / 2;
-        if (iy == 0) top = reader_area().y;
+        if (iy == 0) top = reader_image_top();
         if (x >= left && x < left + image->width && y >= top && y < top + image->height) {
             *slot = i;
             return true;
@@ -3665,7 +3673,7 @@ static int reader_footnote_hit(uint16_t x, uint16_t y, EpdRect *marker) {
         if (!book_layout_page_image_rect(s_page, i, &index, &raw_x, &slot_y, &width, &height)) continue;
         int left = raw_x >= 0 ? raw_x : band.x + (band.width - width) / 2;
         int top = band.y + slot_y;
-        if (slot_y == 0) top = reader_area().y;
+        if (slot_y == 0) top = reader_image_top();
         EpdRect rect = {left, top, width, height};
         EpdRect hot = {left - pad_x, top - pad_y, width + pad_x * 2, height + pad_y * 2};
         if (!ui_rect_hit(hot, x, y)) continue;
@@ -3684,6 +3692,13 @@ static void draw_reader_footnote_card(uint8_t *fb, size_t page, EpdRect body) {
     (void)page;
     if (s_footnote_note < 0 || !s_text) return;
     if ((size_t)s_footnote_note >= s_note_count) { s_footnote_note = -1; return; }
+    // 卡片使用当前可见区，正文仍按固定区域分页；工具栏显隐不重排。
+    // Bound the card to the visible viewport without changing the stable body pagination.
+    EpdRect visible = reader_area();
+    int bottom = body.y + body.height;
+    if (body.y < visible.y) body.y = visible.y;
+    if (bottom > visible.y + visible.height) bottom = visible.y + visible.height;
+    body.height = bottom - body.y;
     const html_note_t *note = &s_notes[s_footnote_note];
     if (!note->text_len || note->text_start + note->text_len > s_text_len) return;
     static char text[1024];
@@ -3784,11 +3799,13 @@ static void draw_reader_footnote_card(uint8_t *fb, size_t page, EpdRect body) {
     const int left_limit = body.x + 12, right_limit = body.x + body.width - card_w - 12;
     if (card_x < left_limit) card_x = left_limit;
     if (card_x > right_limit) card_x = right_limit;
+    const int top_limit = body.y + 12, bottom_limit = body.y + body.height - height - 12;
     int card_y = marker.y + marker.height + 14;
-    if (card_y + height > body.y + body.height - 12) {
-        card_y = marker.y - height - 14;
-        if (card_y < body.y + 12) card_y = body.y + 12;
-    }
+    if (card_y > bottom_limit) card_y = marker.y - height - 14;
+    // 注号可能因刚打开工具栏而被遮住，短卡片也须同时夹住上下界。
+    // Newly shown chrome may cover the marker; clamp both edges even for a short card.
+    if (card_y < top_limit) card_y = top_limit;
+    if (card_y > bottom_limit) card_y = bottom_limit;
     EpdRect card = {card_x, card_y, card_w, height};
     ui_fill_round_rect(fb, card, 16, UI_GRAY_WHITE);
     ui_draw_control_frame(fb, card, 16, 0x60);
@@ -3851,7 +3868,7 @@ static void draw_reader_images(uint8_t *fb, size_t page, EpdRect body) {
                 // 页首插图贴到阅读区顶端：正文上方那点呼吸空间只属于正文，不该把插图压下来。
                 // A page-start illustration sits at the top of the reading area: the inset above
                 // body text belongs to text and must not push the illustration down.
-                if (y == 0) top = reader_area().y;
+                if (y == 0) top = reader_image_top();
 
                 for (int iy = 0; iy < image->height; ++iy)
                     for (int ix = 0; ix < image->width; ++ix)
@@ -3901,7 +3918,6 @@ static void draw_reader_metadata(uint8_t *fb,size_t page) {
 }
 static void draw_reader_outer(uint8_t *fb,size_t page) {
     ui_text_set_system_scale(false);
-    if (!s_reader_fullscreen) draw_reader_header(fb);
     EpdRect body=body_rect();
     if (page == 0 && s_chapter_heading_title[0] &&
         (s_chapter_lead_height || s_chapter_lead_width)) {
@@ -3926,6 +3942,12 @@ static void draw_reader_outer(uint8_t *fb,size_t page) {
         ui_reader_background_paint(fb, (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT}, true);
     draw_reader_images(fb, page, body);
     draw_reader_footnote_card(fb, page, body);
+    // 覆盖层最后绘制，遮住下方的正文、章节题头与插图。
+    // Paint chrome last, covering underlying text, chapter headings and illustrations.
+    if (!s_reader_fullscreen) {
+        draw_reader_header(fb);
+        ui_reader_background_paint(fb,(EpdRect){0,0,UI_LOCK_WIDTH,UI_READER_STANDARD_TOP},true);
+    }
     draw_reader_metadata(fb,page);
     if (s_reader_notice[0]) {
         EpdRect notice = {218, 160, 248, 48};
@@ -3944,7 +3966,7 @@ static void draw_reader_outer(uint8_t *fb,size_t page) {
 }
 static void draw_reader(uint8_t *fb,size_t page) {
     ui_text_set_system_scale(false);ui_clear_page(fb);
-    if (!(s_zoom_active && page == s_page && reader_zoom_mode()))
+    if (!(s_zoom_active && page == s_page && reader_zoom_image()))
         book_layout_draw_page(fb,page,body_rect(),s_px);
     draw_reader_outer(fb,page);
 }
@@ -6130,11 +6152,8 @@ static app_redraw_t apply_reader_option(app_ctx_t* ctx, int kind) {
     if (!s_text || kind < 1 || kind > 3) return APP_REDRAW_NONE;
     bool previous = kind == 1 ? app_settings_reader_immersive() :
         kind == 2 ? app_settings_reader_hide_images() : app_settings_book_vertical();
-    // 非全屏只保存偏好，当前正文和工具栏不切换。/ Outside fullscreen, save the style without changing body or tools.
-    if (kind == 1 && !s_reader_fullscreen) {
-        app_settings_set_reader_immersive(!previous);
-        return APP_REDRAW_PAGE;
-    }
+    // 沉浸样式决定固定正文区域，工具栏显示期间修改也须重排并保留锚点。
+    // Immersion defines the stable body, so changing it with tools visible also reflows at the anchor.
     // 重新开启插图时，先补齐尺寸；文件读取必须在绘制锁外。
     // Probe missing dimensions before re-enabling images, outside the drawing lock.
     if (kind == 2 && previous) for (size_t i = 0; i < s_block_count; ++i) {
@@ -6220,37 +6239,14 @@ static app_redraw_t reader_return(app_ctx_t *ctx) {
 static app_redraw_t toggle_reader_fullscreen(app_ctx_t* ctx) {
     (void)ctx;
     if (!s_text) return APP_REDRAW_NONE;
-    size_t off = book_layout_page_start_offset(s_page);
     lock_draw();
+    // 预绘帧可能带有旧题头/工具栏；仅失效绘图缓存，不触碰正文排版与阅读锚点。
+    // Cached frames may contain old chrome; invalidate rasters without changing layout or anchors.
     invalidate_prep();
-    s_reader_tap.pending=false;
+    s_reader_tap.pending = false;
     s_reader_fullscreen = !s_reader_fullscreen;
-    // 全屏切换会换掉整个正文带，题头的预留必须跟着换。
-    // Toggling full screen swaps the whole body band, so the heading's reservation must follow.
-    refresh_chapter_lead();
-    bool ok = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
-    bool restored = true;
-    if (ok) s_page = book_layout_page_for_offset(off);
-    else {
-        s_reader_fullscreen = !s_reader_fullscreen;
-        refresh_chapter_lead();
-        restored = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
-    }
-    unlock_draw();
-    if (!ok) {
-        if (!restored) {
-            free_book();
-            s_view = SHELF;
-            copy_text(s_message, sizeof(s_message), "排版失败，请重新扫描并打开图书");
-            return APP_REDRAW_PAGE;
-        }
-        return APP_REDRAW_NONE;
-    }
-    release_page_images();
-    prepare_inline_image();
-    s_jump_offset = SIZE_MAX;
     s_reader_panel = READER_PANEL_NONE;
-    save_progress();
+    unlock_draw();
     return APP_REDRAW_FULL;
 }
 
@@ -7383,10 +7379,21 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         bool header_handled;
         app_redraw_t header_redraw=reader_header_action(ctx,x,y,&header_handled);
         if(header_handled)return header_redraw;
-        // 脚注卡片打开时，点任意处先关闭；否则点中注号图标直接弹卡片，不跳转。
-        // With the card open any tap closes it; otherwise a tap on a note marker opens the card
-        // without jumping anywhere.
-        if (s_footnote_note >= 0) { s_footnote_note = -1; return APP_REDRAW_PAGE; }
+        // 已有脚注先消费任意点击，包括题头/工具栏；下次点击才执行对应操作。
+        // An open note consumes any tap, including chrome; the next tap performs its action.
+        if (s_footnote_note >= 0) {
+            s_footnote_note = -1;
+            s_reader_tap.pending = false;
+            return APP_REDRAW_PAGE;
+        }
+        // 遮挡区由工具栏处理，禁止点到下面的脚注或插图。
+        // Chrome owns covered coordinates; hidden notes/images must not receive taps.
+        if (!s_reader_fullscreen &&
+            (s_reader_panel == READER_PANEL_NONE || s_reader_panel == READER_PANEL_TOOLS) &&
+            !ui_rect_hit(reader_area(), x, y)) {
+            s_reader_tap.pending = false;
+            return y >= UI_READER_TOOLS_TOP ? reader_panel_action(ctx,x,y) : APP_REDRAW_NONE;
+        }
         if (!s_clear_confirm && (s_reader_panel == READER_PANEL_NONE || s_reader_panel == READER_PANEL_TOOLS)) {
             int note = reader_footnote_hit(x, y, &s_footnote_marker);
             if (note >= 0) { s_footnote_note = note; return APP_REDRAW_PAGE; }
@@ -7846,6 +7853,14 @@ static app_redraw_t zoom_frame(app_ctx_t* ctx) {
     s_image_zoom_bw = true;
     s_image_zoom_draw_ms = ctx->now_ms;
     EpdRect band = book_layout_image_rect();
+    // 插图仍按固定正文缩放，只输出未被题头/工具栏覆盖的部分。
+    // Keep stable image geometry, but paint/present only the portion outside chrome.
+    EpdRect visible = reader_area();
+    int bottom = band.y + band.height;
+    if (band.y < visible.y) band.y = visible.y;
+    if (bottom > visible.y + visible.height) bottom = visible.y + visible.height;
+    band.height = bottom - band.y;
+    if (band.height <= 0) return APP_REDRAW_NONE;
     int x0, y0, x1, y1;
     reader_logical_to_phys(band.x, band.y, &x0, &y0);
     reader_logical_to_phys(band.x + band.width - 1, band.y + band.height - 1, &x1, &y1);
@@ -7921,6 +7936,9 @@ static app_redraw_t on_pinch(app_ctx_t* ctx, const app_pinch_t* pinch) {
     if (!pinch || !reader_zoom_mode()) return APP_REDRAW_NONE;
     EpdRect band = book_layout_image_rect();
     if (!pinch->active) return zoom_settle(ctx);
+    if (!s_image_zoom_start_distance &&
+        (!ui_rect_hit(reader_area(),pinch->ax,pinch->ay) ||
+         !ui_rect_hit(reader_area(),pinch->bx,pinch->by))) return APP_REDRAW_NONE;
     int dx = (int)pinch->bx - (int)pinch->ax, dy = (int)pinch->by - (int)pinch->ay;
     uint32_t distance = reader_sqrt((uint32_t)(dx * dx + dy * dy));
     int mx = ((int)pinch->ax + (int)pinch->bx) / 2;
@@ -7986,7 +8004,8 @@ static app_redraw_t on_pinch(app_ctx_t* ctx, const app_pinch_t* pinch) {
 // toggles the toolbar.
 static app_redraw_t image_zoom_gesture(app_ctx_t* ctx, const ui_gesture_event_t* ev, bool* handled) {
     *handled = false;
-    if (!reader_zoom_mode() || s_image_zoom_page != s_page ||
+    if (!ui_rect_hit(reader_area(), ev->x0, ev->y0) ||
+        !reader_zoom_mode() || s_image_zoom_page != s_page ||
         s_image_zoom <= READER_IMAGE_ZOOM_MIN) {
         s_image_pan_active = false;
         return APP_REDRAW_NONE;
@@ -8226,7 +8245,8 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
             copy_text(s_manage_message, sizeof(s_manage_message), s_file_removed ? "文件已删除，进度清理失败，请重试" : "");
             return APP_REDRAW_PAGE;
         }
-        if (s_view == READING && !s_toolbar && !s_clear_confirm && ui_rect_hit(body_rect(), ev->x0, ev->y0)) {
+        if (s_view == READING && !s_toolbar && !s_clear_confirm &&
+            ui_rect_hit(reader_area(), ev->x0, ev->y0) && ui_rect_hit(body_rect(), ev->x0, ev->y0)) {
             save_progress();
             set_reader_view(TOC);
             s_message[0] = 0;
@@ -8250,7 +8270,7 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
     }
     if (!s_clear_confirm && !s_scan_pending) {
         if (s_view == READING && (!s_toolbar || (s_reader_panel == READER_PANEL_TOOLS && ev->y0 < 1096)) &&
-            ui_rect_hit(body_rect(), ev->x0, ev->y0)) {
+            ui_rect_hit(reader_area(), ev->x0, ev->y0) && ui_rect_hit(body_rect(), ev->x0, ev->y0)) {
             int direction = reader_swipe_direction(ev->type, app_settings_reader_vertical_turn());
             if (direction) { ctx->user_activity = true; return turn_page(ctx, direction); }
         } else if (s_view == SHELF && (ev->type == UI_GESTURE_SWIPE_L || ev->type == UI_GESTURE_SWIPE_R)) {

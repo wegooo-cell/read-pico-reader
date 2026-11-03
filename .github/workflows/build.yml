@@ -81,6 +81,7 @@ jobs:
           python3 tools/font_catalog_host_test.py
           python3 tools/power_double_click_host_test.py
           python3 tools/pico_wake_option_host_test.py
+          python3 tools/pico_boot_power_key_host_test.py
           python3 tools/pico_lock_hint_host_test.py
           python3 tools/pico_lock_wait_host_test.py
           python3 tools/factory_reset_host_test.py
@@ -185,6 +186,8 @@ jobs:
           python3 tools/reader_ui_scale_host_test.py
           python3 tools/reader_refresh_release_host_test.py
           python3 tools/reader_fullscreen_host_test.py
+          python3 tools/reader_overlay_host_test.py
+          python3 tools/reader_immersive_space_host_test.py
           python3 tools/lock_screen_host_test.py
           python3 tools/power_double_click_host_test.py
           cc -std=gnu11 -Wall -Wextra -Werror -Itools/settings_backup_stubs \

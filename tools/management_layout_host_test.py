@@ -19,9 +19,13 @@ static void bounds(EpdRect a){assert(a.x>=0&&a.y>=0&&a.width>0&&a.height>0&&a.x+
 int main(void){
  for(int full=0;full<2;++full)for(int immersive=0;immersive<2;++immersive)for(int vertical=0;vertical<2;++vertical)for(int margin=0;margin<=48;++margin){
   EpdRect body=ui_reader_body(full,immersive,margin,vertical);bounds(body);
-  EpdRect controls=full?ui_reader_footer_for(full,immersive):(EpdRect){0,1096,684,120};bounds(controls);assert(!overlaps(body,controls));
-  if(!full) { EpdRect footer=ui_reader_footer_for(false,immersive);bounds(footer);assert(!overlaps(body,footer)&&!overlaps(footer,controls));assert(controls.y==UI_READER_TOOLS_TOP); }
-  assert(body.y>= (!full?UI_READER_STANDARD_TOP:immersive?UI_READER_FULLSCREEN_TOP:UI_READER_METADATA_TOP));assert(body.y+body.height<= (!full?UI_READER_STANDARD_BOTTOM:immersive?UI_READER_FULLSCREEN_BOTTOM:UI_READER_METADATA_BOTTOM));
+  EpdRect hidden=ui_reader_body(!full,immersive,margin,vertical);
+  assert(body.x==hidden.x&&body.y==hidden.y&&body.width==hidden.width&&body.height==hidden.height);
+  EpdRect controls=full?ui_reader_footer_for(full,immersive):(EpdRect){0,1096,684,120};bounds(controls);
+  EpdRect visible=ui_reader_area(full,immersive);bounds(visible);assert(!overlaps(visible,controls));
+  if(full)assert(!overlaps(body,controls));
+  else { EpdRect footer=ui_reader_footer_for(false,immersive);bounds(footer);assert(!overlaps(visible,footer)&&!overlaps(footer,controls));assert(controls.y==UI_READER_TOOLS_TOP); }
+  assert(body.y>= (immersive?UI_READER_FULLSCREEN_TOP:UI_READER_METADATA_TOP));assert(body.y+body.height<= (immersive?UI_READER_FULLSCREEN_BOTTOM:UI_READER_METADATA_BOTTOM));
   book_reader_tap_t tap={0};
   for(int y=body.y;y<body.y+body.height;++y){
    assert(book_reader_tap_feed(&tap,body,342,y,vertical,vertical,10)==book_reader_tap_direction(body,342,y,vertical,vertical)&&!tap.pending);
@@ -49,7 +53,7 @@ int main(void){
  EpdRect controls[]={ui_book_manage_search(),ui_book_manage_layout(),ui_book_manage_sort(),ui_book_manage_select()};
  for(int i=0;i<4;++i){bounds(controls[i]);for(int j=0;j<i;++j)assert(!overlaps(controls[i],controls[j]));}
  for(int i=3;i<7;++i){EpdRect action=ui_book_manage_action(i);bounds(action);assert(action.y==1096&&action.height==120);assert(!overlaps(action,(EpdRect){36,1006,612,50}));for(int j=3;j<i;++j)assert(!overlaps(action,ui_book_manage_action(j)));}
- puts("PASS: no reader/header/footer intersection, immediate centre mode tap, retained image side zoom, 7 file rows/4 actions, 5 shelf rows and separated pager/actions");
+ puts("PASS: stable body with disjoint visible crop/header/footer, immediate centre mode tap, retained image side zoom, 7 file rows/4 actions, 5 shelf rows and separated pager/actions");
 }
 ''')
  exe=p/'test';subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(p),'-I'+str(root/'main'),str(p/'test.c'),'-o',str(exe)],check=True);subprocess.run([str(exe)],check=True)
