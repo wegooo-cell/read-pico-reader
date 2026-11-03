@@ -219,6 +219,21 @@
     "main/sleep.h": "9e2322807c1f0984247d0b4d4f68637ca8f8a1ce93f2a4b5a810164a2269aa9a"
   },
   "approved_overrides": {
+    "boards/metalio47/src/main/sleep.c": {
+      "sha256": "193fbcb97bf01256dc116293211995ec1fdd1c8eca625be50c444957ef1ebeca",
+      "user_decision": "2026-11-03",
+      "reason": "User2026-11-03 authorized porting the vendor CX25601N charger optimization and fast-charge setting; this file only gains charger-monitor suspend/resume around light-sleep, power-off and deep-sleep transactions."
+    },
+    "components/metalio_hw/CMakeLists.txt": {
+      "sha256": "75f3504a8850c7275cbdd986d08947fe182661b1f308b3cf6480afb4f86ff36f",
+      "user_decision": "2026-11-03",
+      "reason": "User2026-11-03 authorized the CX25601N charger driver; this CMakeLists only adds metalio_charger.c to the S31-only source list."
+    },
+    "components/read_pico_pmu/metalio_power_adapter.c": {
+      "sha256": "a3ee90b75cd911422c9af4c8c600f09bfa7acbfa7e481251acce186d5936a2e7",
+      "user_decision": "2026-11-03",
+      "reason": "User2026-11-03 authorized the CX25601N charger optimization; charger_init now delegates to metalio_charger while battery status decoding stays unchanged."
+    },
     "boards/pico/src/main/display_reader_waveform.c": {
       "sha256": "231de8d85f6b6d9d7575ec37f18021c1b9d058ecd584ddbb18cdbf5fb2f10d19",
       "pull_request": 68,
