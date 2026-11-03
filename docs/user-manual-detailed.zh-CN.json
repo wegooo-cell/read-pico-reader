@@ -269,7 +269,7 @@
               "设置 → 系统升级 → TF 卡升级"
             ],
             [
-              "/Pico-settings.backup",
+              "/Kiikoread-settings.backup",
               "设备保存的配置备份",
               "设置 → 保存与恢复"
             ]
@@ -1870,7 +1870,7 @@
           "steps": [
             "确认卡已挂载可写，退出 USB 或传输任务。",
             "点「保存当前配置到 TF 卡」，等待成功提示。",
-            "在根目录找到 Pico-settings.backup。",
+            "在根目录找到 Kiikoread-settings.backup（旧版可能是 Pico-settings.backup 或 Metalio-S31-settings.backup）。",
             "复制一份到电脑，按日期或版本另外保存，避免后续保存覆盖唯一备份。"
           ],
           "result": "备份设置、设备资料、阅读记录、书签与已存 WiFi 等。",
@@ -1882,7 +1882,7 @@
           "title": "刷机后恢复设置与阅读进度",
           "path": "TF 根目录放备份 → 保存与恢复 → 从 TF 卡恢复配置",
           "steps": [
-            "把需要恢复的备份准确放在根目录，文件名为 Pico-settings.backup。",
+            "把需要恢复的备份准确放在根目录，文件名统一为 Kiikoread-settings.backup；旧版 Pico-settings.backup 与 Metalio-S31-settings.backup 也能直接识别。",
             "把原书籍、字体和图片也放回原目录，尤其保留书籍路径。",
             "点「从 TF 卡恢复配置」，按提示再次点按确认恢复。",
             "等成功后检查个人姓名、签名、WiFi、字体选择和书架。",

@@ -141,6 +141,10 @@ static void e0470_complete_du_build(void) {
             }
         }
     }
+    // 官方 v2.0.72：末 4 相给黑目标再推黑（含等黑），抵消全像素推白后的回弹。
+    // Vendor v2.0.72 re-drives black in the final four phases, including black-on-black.
+    for (int f = E0470_FULL_DU_FRAMES - 4; f < E0470_FULL_DU_FRAMES; ++f)
+        lut_or(e0470_complete_du_data, f, 0, 0, 1);
 }
 
 // 白底 15→15 源表全保持。挂在已经「往白推」的那一相上再推 1 帧，不增加相数。
@@ -349,6 +353,9 @@ void e0470_waveform_init(void) {
     // One erase pulse on unchanged white leaks grey in seconds under strong light
     // (measured: immune after the 3-pass boot clear, grey after a page refresh). A
     // few more tail erase pulses charge white deeper without adding phases.
+    // 完整48相与裁剪档都保留本地白底补帧（整页白维护合同依赖至少3相擦白）。
+    // Both the full-48 and trimmed profiles keep the local white maintenance pulses here:
+    // page-white-maintenance contracts require at least three erase pulses.
     e0470_waveform_white_boost(e0470_gl16_data, E0470_GL16_FRAMES, 3);
     e0470_waveform_white_boost(e0470_full_gl16_live, E0470_FULL_GL16_FRAMES, 3);
     // 完整 DU 表同样补白：全像素二进制推屏时白底要重新擦一次，否则只靠电荷保持。

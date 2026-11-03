@@ -22,6 +22,16 @@ if(METALIO_DU14_EXPERIMENT AND NOT KIIKO_BOARD_METALIO47)
     message(FATAL_ERROR "DU14 experiment requires Metalio S31")
 endif()
 add_compile_definitions(KIIKO_BOARD_METALIO47=${KIIKO_BOARD_METALIO47})
+# S31 波形回退开关：默认用官方完整48相；置ON可回退到2026-11-01的裁剪37相档做A/B。
+# / S31 waveform rollback switch: vendor full 48 phases by default; ON restores the 2026-11-01
+#   trimmed 37-phase profile for A/B.
+option(METALIO_TRIMMED_WAVEFORM "Local S31 rollback to the trimmed 36/37-phase waveform" OFF)
+if(METALIO_TRIMMED_WAVEFORM AND NOT KIIKO_BOARD_METALIO47)
+    message(FATAL_ERROR "Trimmed waveform rollback requires Metalio S31")
+endif()
+if(METALIO_TRIMMED_WAVEFORM)
+    add_compile_definitions(E0470_WAVEFORM_TRIM=1)
+endif()
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # "Trim" the build. Include the minimal set of components, main, and anything it depends on.
 idf_build_set_property(MINIMAL_BUILD ON)

@@ -2,6 +2,12 @@
 
 ## 未发布 / Unreleased — 2026-11-03
 
+- S31整页刷新恢复厂家完整48相GC16/GL16（官方v2.0.66起默认），完整DU表末四相补黑（对齐官方v2.0.69）；普通翻页对齐Pico：十二相整屏擦白后补四相重推黑，并改用单带1K相位表引擎（约12ms/相）。残影与翻页速度改善，灰度仍由原厂序列产生；可用构建开关 `--s31-trimmed-waveform` 回退到裁剪37相档做A/B。
+  S31 page refreshes use the vendor full 48-phase GC16/GL16 (official default since v2.0.66) with the official four-phase DU black re-drive (v2.0.69); ordinary reader turns match Pico's twelve whole-panel erase phases plus four black re-drive phases on the single-band 1K phase-LUT engine (~12 ms/phase). Ghosting and turn speed improve while gray levels keep the vendor sequence; `--s31-trimmed-waveform` restores the trimmed 37-phase profile for A/B.
+
+- S31与Pico的配置备份统一写到 TF 卡根目录 `Kiikoread-settings.backup`；两板都能恢复旧的 `Pico-settings.backup` 与 `Metalio-S31-settings.backup`（含各自 `.previous`），同一张卡可直接换板恢复，旧卡备份无需改名。
+  Both boards now save backups as `Kiikoread-settings.backup` in the TF card root; either board also restores the legacy `Pico-settings.backup` and `Metalio-S31-settings.backup` files (including `.previous`), so one card works across devices without renaming old backups.
+
 - Pico锁屏十分钟后深睡，单击且未设密码时承接本次按键上电，PMU未附带短按事件也无需再按一次。握手前校验启动状态与来源，握手后核对PMU会话；软件/异常复位、旧运行状态及非按键来源不采用这份证据，保留密码和双击策略，版本号不变。开机按键的延后释放由独立交接保护清理，避免慢首帧后再次锁屏。
   Resume Pico after deep sleep with the same power-on press in single-press mode without a PIN, even without a separate SHORT event. Validate pre-handshake state/source and the completed PMU session; reject stale running state, non-key sources and software/fault resets, preserving PIN/double-click policy and firmware versions. Discard the boot gesture tail until released and drained, preventing a slow first frame from turning it into another lock action.
 

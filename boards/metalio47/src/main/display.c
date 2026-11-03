@@ -879,7 +879,7 @@ static enum EpdDrawError update_display_reader_turn_unlocked(EpdiyHighlevelState
     if(s_system_binary&&!main_gray)system_normalize(hl);
     const EpdWaveform* turn_waveform = main_gray?display_main_water_waveform():s_system_binary
         ? (system_navigation_gray_changed(hl)?display_main_navigation_waveform():display_main_bw_turn_waveform())
-        : display_reader_text_waveform();
+        : (bands==1?display_reader_soft_turn_waveform():display_reader_text_waveform());
     // 普通文字整轮在差分生成前预唤醒TPS，实际驱动仍由引擎按原顺序上电。
     // Pre-wake TPS before ordinary text differences; the engine still enables drive in the established sequence.
     const bool prepared=bands==1&&!s_system_binary&&!main_gray&&epd_pipeline_enabled();

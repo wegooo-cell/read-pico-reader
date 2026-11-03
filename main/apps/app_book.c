@@ -4375,17 +4375,12 @@ static bool reader_slider_feedback_present(app_ctx_t *ctx,app_redraw_t redraw) {
 #endif
 #if KIIKO_BOARD_METALIO47
 static enum EpdDrawError reader_soft_present(app_ctx_t* ctx,EpdRect area) {
-    const EpdWaveform* wave=display_reader_soft_turn_waveform();
-    // 阅读补白覆盖本轮完整正文留白，信息栏保持在裁剪范围外。
-    // White maintenance covers this body crop, keeping metadata outside the driven bounds.
-    // 保留Moku原相序和等黑/等灰保持；仅扩大本轮掩码，不添加GC、额外相位或第二次输出。
-    // Retain Moku's phases and equal black/gray holds; widen only this scan's mask without GC, extra phases or a second output.
-    const EpdRect body=reader_area();
-    const bool whole=area.x==0&&area.y==0&&area.width==UI_LOCK_WIDTH&&area.height==UI_LOCK_HEIGHT;
-    const bool body_only=area.x==body.x&&area.y==body.y&&area.width==body.width&&area.height==body.height;
-    return body_only?reader_present_crop(ctx->hl,wave,MODE_GL16,area,true):whole
-        ? update_display_area_full_with(ctx->hl,wave,MODE_GL16,area)
-        : update_display_area_diff_with(ctx->hl,wave,MODE_GL16,area);
+    // 用户2026-11-03：普通翻页不再走整页hl_update（约15ms/相），改用与水波纹/速读相同的
+    // 单带1K相位表引擎（约12ms/相），接近Pico翻页速度；波形仍是柔和翻页表。
+    // User2026-11-03: ordinary turns leave the whole-page hl_update (~15 ms/phase) for the same
+    // single-band 1K phase-LUT engine as ripple/FastBW (~12 ms/phase), approaching Pico turn
+    // speed while keeping the soft-turn waveform.
+    return update_display_text_turn(ctx->hl, area, E0470_TURN_RTL);
 }
 #endif
 
