@@ -86,6 +86,7 @@ jobs:
           python3 tools/book_excerpt_host_test.py
           python3 tools/custom_media_dirs_host_test.py
           python3 tools/pager_host_test.py
+          python3 tools/shelf_pager_host_test.py
           python3 tools/quick_layer_raster_host_test.py
           python3 tools/test_epd_difference_bounds.py --check-regression
           python3 tools/test_s31_pie_dispatch.py

@@ -1337,6 +1337,45 @@ static bool shelf_main_key(app_ctx_t *ctx,int key,app_redraw_t *redraw) {
     *redraw=shelf_key_paint(ctx);return true;
 }
 static app_redraw_t shelf_turn_page(app_ctx_t *ctx, int direction);
+// 分页独立接管完整触摸，按下只反馈，抬手才翻页；容许轻点在边缘小幅漂移。
+// Own pager contacts independently: press feedback only, turn on release, tolerating small edge drift.
+static bool shelf_pager_release_hit(int action, int x, int y) {
+    int end = ui_pager_hit(x, y);
+    if (end >= 0) return end == action;
+    EpdRect hit = ui_pager_rect(action);
+    hit.x -= 8; hit.y -= 8; hit.width += 16; hit.height += 16;
+    return ui_rect_hit(hit, x, y);
+}
+static bool shelf_pager_event(app_ctx_t *ctx, const ui_gesture_event_t *ev, app_redraw_t *redraw) {
+    if (s_view != SHELF || s_category_menu || s_clear_confirm || s_batch_confirm) return false;
+    int start = ui_pager_hit(ev->x0, ev->y0);
+    bool decorated = s_pressed_control >= 116 && s_pressed_control <= 119;
+    if (start < 0 && !decorated) return false;
+    *redraw = APP_REDRAW_NONE;
+    if (s_scan_pending) { s_pressed_control = -1; return true; }
+    if (ev->type == UI_GESTURE_PRESS) {
+        s_pressed_control = start < 0 ? -1 : 116 + start;
+        if (start >= 0) {
+#if KIIKO_BOARD_METALIO47
+            (void)metalio_haptic_click();
+#endif
+            *redraw = shelf_key_paint(ctx);
+        }
+        return true;
+    }
+    if (ev->type == UI_GESTURE_MOVE && decorated &&
+        shelf_pager_release_hit(s_pressed_control - 116, ev->x, ev->y)) return true;
+    int pressed = decorated ? s_pressed_control - 116 : UI_PAGER_NONE;
+    s_pressed_control = -1;
+    if (ev->type == UI_GESTURE_TAP && start >= 0 &&
+        (pressed == UI_PAGER_NONE || pressed == start) && shelf_pager_release_hit(start, ev->x, ev->y)) {
+        int target = ui_pager_target(start, ctx->leaf, leaves());
+        *redraw = shelf_turn_page(ctx, target - ctx->leaf);
+        if (*redraw != APP_REDRAW_NONE) return true;
+    }
+    if (decorated) *redraw = shelf_key_paint(ctx);
+    return true;
+}
 static EpdRect import_rect(int index) { return (EpdRect){36, 230 + index * 164, 612, 136}; }
 static void clean_filename(char *dst, size_t cap, const char *filename) {
     copy_text(dst, cap, filename);
@@ -8066,6 +8105,8 @@ static app_redraw_t reader_font_recovery_gesture(app_ctx_t *ctx, const ui_gestur
     return APP_REDRAW_NONE;
 }
 static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) {
+    app_redraw_t pager_redraw;
+    if (shelf_pager_event(ctx, ev, &pager_redraw)) return pager_redraw;
     if (s_view == READING && s_reader_panel == READER_PANEL_FONT_RECOVERY)
         return reader_font_recovery_gesture(ctx, ev);
     bool tools_handled = false;
@@ -8230,7 +8271,6 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
 #if KIIKO_BOARD_METALIO47
         // 两个设置入口松手后一次推最终面板，不先为按下态阻塞一整轮DU20。
         // Primary setting entries present their final sheet on release without a blocking DU20 press pass.
-        if(s_view==SHELF&&start>=116&&start<=119)(void)metalio_haptic_click();
         bool panel_entry=s_view==READING&&(s_reader_panel==READER_PANEL_TOOLS||(!s_reader_fullscreen&&s_reader_panel==READER_PANEL_NONE))&&(start==203||start==204);
         s_pressed_control=panel_entry?-1:start;
         if(panel_entry)return APP_REDRAW_NONE;
@@ -8441,6 +8481,7 @@ static app_redraw_t shelf_turn_page(app_ctx_t *ctx, int direction) {
     shelf_category_remember(ctx);
     s_category_menu=false;
     s_shelf_page_pending = true;
+    s_shelf_key_paint_pending = false;
     s_pressed_control = -1;
     prepare_covers(ctx);
     render(ctx, ctx->fb);

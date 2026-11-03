@@ -2,6 +2,9 @@
 
 ## 本地测试 / Local test — 2026-11-03
 
+- 书架四个分页箭头独立处理按下/抬手，容许边缘轻微漂移；实际翻页清除旧按压刷新标记，保留取消、扫描门禁和首末页边界。
+  Shelf pager contacts own press/release with slight edge-drift tolerance; real turns clear stale press refresh state while retaining cancellation, scan guards and page bounds.
+
 - 阅读线新增“跟随文字 / 整行”范围切换，默认跟随文字；竖排对应整列。保留虚线/点线和位置微调，选择支持重启与设置备份恢复。
   Reading guides can follow text or span the full body row (column for vertical text), defaulting to follow text. Retain styles/offset and persist the choice across restarts and settings backups.
 

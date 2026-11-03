@@ -46,7 +46,9 @@ unit = r'''
 #define MALLOC_CAP_8BIT 2
 typedef struct {int x,y,width,height;} EpdRect;
 typedef struct {unsigned x,y,width,height;} book_crop_t;
-enum {SHELF,MANAGE};
+enum {SHELF,MANAGE,BULK};
+static bool s_bulk_grid;
+static EpdRect ui_book_manage_cover(bool grid,int row){(void)grid;(void)row;assert(false);return (EpdRect){0};}
 static int s_view=SHELF,rows=9,contrast=100,phase_shift,style=2;
 static unsigned s_cover_generation;
 static void book_cover_jobs_cancel(unsigned g){(void)g;}
@@ -96,6 +98,7 @@ static bool book_progress_last_path(char* out,size_t cap){assert(cap>=10);strcpy
 static bool book_progress_load(const char* path,uint32_t size,book_progress_t* p){assert(!strcmp(path,"/test.epub") && size==100);*p=test_progress;return progress_valid;}
 static void copy_text(char* dst,size_t cap,const char* src){assert(strlen(src)<cap);strcpy(dst,src);}
 static void sort_shelf(app_ctx_t* ctx){(void)ctx;++sorts;}
+static void shelf_added_load(void){}
 '''
 unit += function('refresh_cached_progress', book) + '\n'
 unit += r'''
