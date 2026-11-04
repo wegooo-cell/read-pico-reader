@@ -7,6 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 import subprocess
 import tempfile
 from pathlib import Path
+from font_hanzi_host_support import font_hanzi_host_sources
 
 ROOT = Path(__file__).resolve().parents[1]
 FONT = (ROOT / 'main/assets/builtin.ttf').read_bytes()
@@ -116,7 +117,7 @@ with tempfile.TemporaryDirectory(prefix='pico-vertical-number-') as directory:
              '-Wno-error=format-truncation',
              '-I' + str(work), '-I' + str(ROOT / 'main/font'), '-I' + str(ROOT / 'main/ui'),
              '-I' + str(ROOT / 'main/book'), '-I' + str(ROOT / 'main'), '-I' + str(ROOT / 'tools/ui_gesture_stubs')]
-    subprocess.run(flags + [str(work / 'test.c'), str(work / 'assets.c'),
+    subprocess.run(flags +font_hanzi_host_sources(ROOT,work)+ [str(work / 'test.c'), str(work / 'assets.c'),
                             str(ROOT / 'main/font/ttf_font.c'), '-lm',
                             '-o', str(work / 'test')], check=True)
     subprocess.run([str(work / 'test')], check=True)

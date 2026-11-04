@@ -26,8 +26,8 @@
  * User2026-11-03: header/tools/settings overlay a fixed body; visibility preserves pagination, page and progress. Only immersive/typographic changes reflow.
  * 用户2026-11-02修订：合并PR68/69；非全屏中间单击进入全屏，全屏按所选分区翻页；插图双击缩放，单击保留延后动作，放大后单击不翻页。
  * User2026-11-02: merge PR68/69; standard centre taps enter fullscreen, fullscreen taps follow turn regions; images retain double-tap zoom and deferred singles, with no turns from zoomed singles.
- * 用户2026-11-01修订：新开书默认非全屏并显示工具栏，顶部时间/签名/电量、底部章节/进度；中间单击仅进入全屏，底部上滑退出全屏并显示工具栏，全屏样式保留。
- * User2026-11-01: open standard with status/footer and tools visible; centre taps only enter fullscreen, bottom swipes exit fullscreen and show tools, retaining both fullscreen styles.
+ * 用户2026-11-01修订：新开书默认非全屏并显示工具栏，可用“默认全屏”改变新开书入口，顶部时间/签名/电量、底部章节/进度；中间单击仅进入全屏，底部上滑退出全屏并显示工具栏，全屏样式保留。
+ * User2026-11-01: open standard unless Default fullscreen is enabled; status/footer and tools follow the mode. Centre taps enter fullscreen and bottom swipes exit it, retaining both styles.
  * 用户2026-11-01追加：非沉浸全屏顶栏改为时间、签名及电量，不再显示书名；完整预留状态栏并保留分钟更新。
  * User2026-11-01 follow-up: nonimmersive fullscreen restores time/signature/battery instead of the book title, with full status-row space and minute updates.
  * 用户2026-11-01追加：非全屏在状态栏下恢复返回/书名/收藏行，底部上滑退出全屏并显示此布局和工具栏。
@@ -273,6 +273,7 @@ static bool s_reader_text_frame;
 static char s_requested_open[BOOK_STORE_PATH_MAX];
 static bool s_requested_open_home;
 static bool s_requested_fullscreen = false;
+static bool s_requested_resume_mode;
 static bool s_reader_return_home;
 static bool s_requested_manage;
 static shelf_entry_t* s_shelf;
@@ -555,7 +556,8 @@ bool app_book_request_open(const char* path) {
     if (!book_file_path_supported(path)) return false;
     copy_text(s_requested_open, sizeof(s_requested_open), path);
     s_requested_open_home = false;
-    s_requested_fullscreen = false;
+    s_requested_fullscreen = app_settings_reader_default_fullscreen();
+    s_requested_resume_mode = false;
     return true;
 }
 bool app_book_request_open_from_home(const char* path) {
@@ -566,6 +568,7 @@ bool app_book_request_open_from_home(const char* path) {
 bool app_book_request_resume(const char *path, bool fullscreen) {
     if (!app_book_request_open_from_home(path)) return false;
     s_requested_fullscreen = fullscreen;
+    s_requested_resume_mode = true;
     return true;
 }
 bool app_book_resume_context(char *path, size_t capacity, bool *fullscreen) {
@@ -2383,7 +2386,7 @@ static EpdRect rule_style_rect(int index) {
 }
 
 static EpdRect rule_span_rect(int index) {
-    return (EpdRect){214 + index * 222, 890, 212, 64};
+    return (EpdRect){244 + index * 208, 894, 196, 56};
 }
 
 static void draw_rule_settings(uint8_t *fb) {
@@ -2411,8 +2414,8 @@ static void draw_rule_settings(uint8_t *fb) {
     for (int i = 0; i < 2; ++i) {
         EpdRect choice = rule_span_rect(i);
         bool active = full == (i != 0);
-        ui_fill_round_rect(fb, choice, 20, active ? UI_GRAY_BLACK : 0xe8);
-        ui_draw_control_frame(fb, choice, 20, active ? UI_GRAY_BLACK : 0x78);
+        ui_fill_round_rect(fb, choice, 16, active ? UI_GRAY_BLACK : 0xe8);
+        ui_draw_control_frame(fb, choice, 16, active ? UI_GRAY_BLACK : 0x78);
         ui_text_box(fb, (EpdRect){choice.x+8, choice.y+6, choice.width-16, choice.height-12},
                     23, spans[i], EPD_DRAW_ALIGN_CENTER, active);
     }
@@ -2515,20 +2518,18 @@ static void draw_layout_settings(uint8_t* fb) {
     reader_panel_text_vc(fb, 342, 1168, 24, "返回字体设置", EPD_DRAW_ALIGN_CENTER, true);
 }
 
-// 用户确认半屏双列布局；绘制与点击共用同一矩形，间隙不穿透。/ Approved two-column half sheet; paint and hit testing share rectangles with inert gaps.
+// 用户确认双列阅读设置：默认全屏与沉浸并排，按键控制独占末行；绘制与点击共用矩形。
+// Approved paired settings: fullscreen entry beside immersion, keys on the final wide row; shared paint/hit geometry.
 static EpdRect reading_setting_rect(int index) {
     int extra=reader_ui_extra(56), footer=reader_ui_extra(36);
-    if (index < 0 || index >= 8) return (EpdRect){0, 0, 0, 0};
+    if (index < 0 || index >= 9) return (EpdRect){0,0,0,0};
     int row=index/2;
-    // 四行双列：竖排占第四行右格，与「关闭书内图片」并排；行距收到 104，
-    // 四行底部才仍然留在「完成」之上。
-    // Four two-column rows: the vertical switch takes the fourth row's right cell beside "hide
-    // in-book images", and a 104 pitch keeps every row clear of Done.
-    return (EpdRect){36+(index%2)*314,702+row*104-(3-row)*extra-footer,298,98+extra};
+    return (EpdRect){index==8?36:36+(index%2)*314,
+        590+row*104-(4-row)*extra-footer,index==8?612:298,98+extra};
 }
-static int reading_settings_top(void) { return 580-reader_ui_extra(204); }
+static int reading_settings_top(void) { return 480-reader_ui_extra(260); }
 static EpdRect reading_toggle_rect(int index) {
-    return reading_setting_rect(index == 0 ? 3 : index == 1 ? 5 : index == 2 ? 6 : 7);
+    return reading_setting_rect(index == 0 ? 3 : index == 1 ? 5 : index == 2 ? 6 : index == 3 ? 7 : 4);
 }
 static void draw_reading_switch(uint8_t *fb, EpdRect track, bool on) {
     ui_fill_round_rect(fb, track, 19, on ? 0x38 : 0xc4);
@@ -2543,26 +2544,19 @@ static void draw_reading_card(uint8_t *fb, int index, const char *title,
     ui_draw_control_frame(fb, card, 20, 0x68);
     ui_text_box(fb,(EpdRect){card.x+21,card.y+6,card.width-42,card.height/2-12},23,title,EPD_DRAW_ALIGN_LEFT,false);
     char shown[48]; copy_text(shown,sizeof(shown),value);
-    ui_text_box(fb,(EpdRect){card.x+21,card.y+card.height/2,222,card.height/2-8},26,shown,EPD_DRAW_ALIGN_LEFT,false);
-    ui_draw_icon(fb,card.x+272,card.y+3*card.height/4,26,
+    ui_text_box(fb,(EpdRect){card.x+21,card.y+card.height/2,card.width-76,card.height/2-8},26,shown,EPD_DRAW_ALIGN_LEFT,false);
+    ui_draw_icon(fb,card.x+card.width-26,card.y+3*card.height/4,26,
                  cycle ? UI_ICON_ROTATE_CW : UI_ICON_CHEVRON_RIGHT, 0x38);
 }
 static void draw_reading_toggle(uint8_t *fb, int index, const char *title,
                                 const char *detail, bool on) {
+    (void)detail;
     EpdRect row = reading_toggle_rect(index);
-    ui_fill_round_rect(fb, row, 20, UI_GRAY_WHITE);
-    ui_draw_control_frame(fb, row, 20, 0x68);
-    if (index == 2) {
-        // 半宽格放两行：标题与说明各降一号字，开关仍留在右端。
-        // A half-width cell carries two lines: title and detail step down a size, the switch stays right.
-        ui_text_box(fb,(EpdRect){row.x+20,row.y+10,row.width-40,row.height/2-16},21,title,EPD_DRAW_ALIGN_LEFT,false);
-        ui_text_box(fb,(EpdRect){row.x+20,row.y+row.height/2,row.width-40,row.height/2-10},17,detail,EPD_DRAW_ALIGN_LEFT,false);
-        draw_reading_switch(fb,(EpdRect){row.x+row.width-90,row.y+3*row.height/4-19,69,39},on);
-    } else {
-        ui_text_box(fb,(EpdRect){row.x+21,row.y+6,row.width-42,row.height/2-12},23,title,EPD_DRAW_ALIGN_LEFT,false);
-        ui_text_box(fb,(EpdRect){row.x+21,row.y+row.height/2,166,row.height/2-8},26,on?"开启":"关闭",EPD_DRAW_ALIGN_LEFT,false);
-        draw_reading_switch(fb,(EpdRect){row.x+209,row.y+3*row.height/4-19,69,39},on);
-    }
+    ui_fill_round_rect(fb,row,20,UI_GRAY_WHITE);
+    ui_draw_control_frame(fb,row,20,0x68);
+    ui_text_box(fb,(EpdRect){row.x+21,row.y+6,row.width-42,row.height/2-12},23,title,EPD_DRAW_ALIGN_LEFT,false);
+    ui_text_box(fb,(EpdRect){row.x+21,row.y+row.height/2,166,row.height/2-8},26,on?"开启":"关闭",EPD_DRAW_ALIGN_LEFT,false);
+    draw_reading_switch(fb,(EpdRect){row.x+209,row.y+3*row.height/4-19,69,39},on);
 }
 static void draw_reading_settings(uint8_t* fb) {
     draw_sheet(fb, reading_settings_top(), "阅读设置");
@@ -2575,7 +2569,8 @@ static void draw_reading_settings(uint8_t* fb) {
         app_settings_reader_turn_effect()?"水波纹":"普通",true);
     draw_reading_card(fb, 2, "翻页模式", app_settings_reader_vertical_turn() ? "上下翻页" : "左右翻页", false);
     draw_reading_toggle(fb, 0, "电源键翻页", NULL, app_settings_reader_power_turn());
-    draw_reading_card(fb, 4, "按键控制", "自定义三键", false);
+    draw_reading_card(fb, 8, "按键控制", "自定义三键", false);
+    draw_reading_toggle(fb, 4, "默认全屏", NULL, app_settings_reader_default_fullscreen());
     draw_reading_toggle(fb, 1, "全屏沉浸", NULL, app_settings_reader_immersive());
     draw_reading_toggle(fb, 2, "关闭书内图片", "跳过正文插图，保留原书文件", app_settings_reader_hide_images());
     draw_reading_toggle(fb, 3, "竖排（从右到左）", NULL, app_settings_book_vertical());
@@ -4659,7 +4654,8 @@ static bool open_book_impl(app_ctx_t* ctx, const char* path) {
     }
     save_progress();
     free_book();
-    s_reader_fullscreen = s_requested_fullscreen;
+    s_reader_fullscreen = s_requested_resume_mode ? s_requested_fullscreen : app_settings_reader_default_fullscreen();
+    s_requested_resume_mode = false;
     app_font_activate_reading();
     if (!pending_reserve(path)) {
         copy_text(s_message, sizeof(s_message), "内存不足，无法打开图书");
@@ -4751,6 +4747,7 @@ static bool open_requested_book(app_ctx_t* ctx) {
     s_requested_open_home = false;
     bool opened = open_book(ctx, path);
     s_requested_fullscreen = false;
+    s_requested_resume_mode = false;
     if (!opened) return false;
     s_reader_return_home = from_home;
     return true;
@@ -5870,8 +5867,10 @@ static app_redraw_t reading_settings_action(app_ctx_t *ctx, uint16_t x, uint16_t
         s_turns=0;
     } else if (ui_rect_hit(reading_setting_rect(2), x, y)) {
         s_reader_panel = READER_PANEL_TURN_SETTINGS;
-    } else if (ui_rect_hit(reading_setting_rect(4), x, y)) {
+    } else if (ui_rect_hit(reading_setting_rect(8), x, y)) {
         s_reader_panel = READER_PANEL_KEY_SETTINGS;
+    } else if (ui_rect_hit(reading_toggle_rect(4),x,y)) {
+        if (!app_settings_set_reader_default_fullscreen(!app_settings_reader_default_fullscreen())) return APP_REDRAW_NONE;
     } else {
         for (int i = 0; i < 4; ++i)
             if (ui_rect_hit(reading_toggle_rect(i), x, y)) return apply_reader_option(ctx, i);

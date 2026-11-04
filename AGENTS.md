@@ -8,6 +8,34 @@ Agent entry for this tree. Humans can read it too. Product overview, hardware, p
 
 Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Taking over an in-flight task: read [docs/HANDOFF.md](docs/HANDOFF.md) first.
 
+## 双板源码整合 / Dual-board source integration
+
+用户2026-11-04要求合并PR75，并将本地保留改动对齐Pico/S31后提交上传源码。保留PR76的Moku波形；两板同步默认全屏、阅读线按钮、缺字回退及7668字符覆盖。Pico保留16级补字与墨量校正；S31保留PIF1省空间补字及板级缓存/恢复路径。原1263轮廓与5637界面补字像素不变。32px黑白试验仅本地归档，不纳入本次上传；不发布官网、不刷设备。此授权取代以上功能此前仅本地、不上传及S31字库冻结的范围。
+User2026-11-04 requests PR75 plus local retained changes aligned across Pico/S31 and uploaded as source. Preserve Moku PR76 waveforms; share default fullscreen,guide controls,fallback and7668-character coverage. Pico keeps16-level supplements/ink calibration; S31 keeps compactPIF1 and board cache/recovery. Preserve1263 original outlines and5637 UI supplements. Mono32 is locally archived and excluded from this upload; no website publication or device flash. This supersedes earlier local-only and S31 asset pins within this scope.
+
+## Pico普通简体书籍覆盖 / Pico ordinary simplified-book coverage
+
+用户2026-11-04确认8840扩字版仍有个别正文补字偏粗，要求继续优化显示。Pico放大补字改用保墨量的灰边校正与四点插值；保持原生轮廓、16级资源、字集、排版度量、UI、外置字体和S31。软件墨量测试不能代替实屏验收；仍仅本地验证。
+User confirms uneven reader weight in local8840 and requests further display refinement. Pico enlarged supplements use ink-calibrated edges and four-tap interpolation. Retain native outlines,16-level assets,coverage,layout metrics,UI,imported faces and S31. Software ink measurements do not replace optical acceptance; local validation only.
+
+用户2026-11-04要求增加普通简体小说常用字。保留GB2312全覆盖与16级灰阶，补通用规范前6500缺字、精选姓名/常见繁体和书籍符号；Pico轮廓子集追加标点/拼音/Latin-1及3个规范表非BMP字，剔除渲染器未使用的OpenType布局表和替代字形。所有原1263字符的字宽、字框与像素必须不变，旧5637补字单色记录也逐字不变；S31字库/波形/引擎保持。继续仅本地rc104和刷机页，不发布官网。
+User2026-11-04 requests ordinary simplified-fiction coverage. Retain GB2312 and16-level AA; add common6500 gaps, selected names/traditional forms and book symbols. Expand Pico outlines with punctuation/pinyin/Latin-1 and3 non-BMP standardized Han; drop unused shaping tables/alternates. Preserve every original1263 outline's pixels/metrics and all5637 legacy bitmap records. Retain S31 assets and Moku engines/waveforms; local rc104/flasher only, no publication.
+
+## Pico正文灰阶补字 / Pico body Han coverage
+
+用户反馈8838本地版内建正文深浅不一、抗锯齿不明显，要求优化。Pico保留现有原生轮廓，仅缺字改用同源Medium的16级灰阶补字，统一字框坐标、精确源字宽与边缘处理。Pico覆盖资源改为PIF4，界面接口重建原先的单色记录，像素/度量须与PIF1逐字一致；S31继续PIF1和已有正文路径。此明确反馈放开上条“字库资产不扩大”在Pico正文的限制；保留外置字体与两板Moku波形，只本地测试和刷机页，不发布官网。
+User reports uneven embedded body weight and ineffective AA in Pico local8838. Preserve native outlines; only missing glyphs use16-level source-Medium coverage, exact source advances and consistent edges. Pico overrides its resource withPIF4; UI APIs reconstruct byte-identical legacy monochrome records/metrics. S31 keepsPIF1 and its existing reader route. This supersedes the no-new-asset limit for Pico body text; retain imported faces and both boards' Moku waveforms. Local tests/flasher only, no publication.
+
+## 正文缺字回退 / Missing reader glyphs
+
+用户2026-11-03要求优先复用已有补字库补正文缺字。当前字体原生字形优先，缺字按内建轮廓、现有GB2312位图补字回退；不替换字体选择或扩大字库资产。排版和绘制共用前进宽度，界面与正文使用独立解压工作区，正文缓存可释放，临时失败不缓存缺字方块。两板保持各自现有缓存预算与Moku波形/引擎，先本地验证。
+User2026-11-03 prioritizes reusing the existing supplement for missing reader glyphs. Native glyphs take priority, then built-in outlines and the shipped GB2312 bitmap supplement; preserve font selection/assets. Layout and drawing share advances; UI/reader decode workspaces are independent and reclaimable, and transient failures do not cache .notdef. Preserve board-specific cache budgets and Moku display/reader engines; validate locally first.
+
+## 当前工作：阅读入口与设置 / Current work: reader entry/settings
+
+用户2026-11-03在edb9caf实机反馈图片页书架残影，要求入阅读彻底清屏；批准阅读线紧凑等宽按钮及“默认全屏”预览。S31入书复用既有物理清白/原厂灰阶出口，后续波形保持；两板新增默认全屏（初始关闭），正常新开书采用偏好，睡眠恢复遵从记录，保留独立沉浸样式。设置持久化与备份兼容旧版本，暂不刷设备或发布。
+User2026-11-03 requests thorough S31 reader-entry cleanup after shelf ghosts on images and approves compact guide controls plus Default fullscreen. Reuse the existing physical-white/vendor-gray outlet only on S31 entry; retain turn waveforms. Both boards default to standard entry unless enabled; explicit sleep resumes keep recorded state and immersive styling remains independent. Persist and restore settings compatibly; no device update or publication yet.
+
 ## 当前工作：双板型本地整合 / Current work: local multi-board integration
 
 用户2026-11-04：S31阅读波形定稿并经真机确认——整页刷新完整48相、普通翻页12擦白+4推黑、单带快速引擎；48相模式关闭本地额外白/黑补帧。纯文字“白→中灰”改为白侧直接压黑（标定0.40，1~6相），灰边与黑白同段；图文页整页全像素走原厂柔和翻页表（对齐Pico），避免压坏插图灰阶。相关宿主测试与PR59基线按实际代码更新。

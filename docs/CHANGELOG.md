@@ -8,7 +8,25 @@
 - Pico局部刷新精确屏蔽裁剪范围外的像素，避免沉浸阅读普通翻页把底部未读进度线带入灰阶重驱而闪黑；后缓冲只提交实际刷新范围，保留原波形与页脚延迟更新，版本号不变。
   Mask Pico partial updates to exact pixel bounds so immersive body turns do not re-drive the unread gray progress track. Commit only the scanned bounds, retaining waveforms, deferred footer updates and existing versions.
 
+- Pico正文放大的内建补字按每字原始墨量校正灰边，改善密集笔画粘连和个别字符偏粗；保留字库覆盖、原生字形、字宽、抗锯齿及字重微调。大字号细节仍受24px补字素材限制。
+  Calibrate enlarged Pico reader supplements to each glyph's source ink, improving dense-stroke merging and uneven weight. Preserve coverage,native glyphs,advances,AA and stroke controls. Fine detail at large sizes remains limited by24px source bitmaps.
+
+- Pico与S31新增771个字符：396个汉字（包括通用规范前6500字中的缺口、姓名字与部分常见繁体）及375个标点/符号/常用字母，涵盖书名号、单双引号、圈号数字、罗马数字、拼音和Latin-1。保留原有GB2312与16级灰阶，原有轮廓和界面像素不变；精简未使用的字体布局数据以适应现有分区，S31沿用紧凑单色补字以适应现有分区；极生僻字仍需TF字体。
+  Pico and S31 add771 characters:396 Han covering common6500 gaps, selected names/traditional forms, and375 book punctuation/symbols/letters including quotes, circled/Roman numbers, pinyin andLatin-1. Preserve GB2312,16-level AA and original pixels/metrics; remove unused font layout data to fit existing partitions. S31 retains compact monochrome supplements within its existing partition; rarer glyphs still need a card font.
+
 ## 本地测试 / Local test — 2026-11-03
+
+- Pico保留内建原生轮廓，缺字改用16级灰阶补字，改善混排黑度不一；开关抗锯齿分别输出灰阶与黑白，放大收窄灰边。补字使用源字体精确字宽，保留字号、笔画微调、横竖排及外置字体选择；UI字库与S31保持。
+  Pico keeps native outlines and uses16-level missing-glyph coverage to improve mixed text weight. AA switches between gray and binary ink; enlarged edges stay narrow. Use exact source advances with existing size, stroke, vertical/horizontal and face controls, preserving UI fonts and S31 behavior.
+
+- 正文缺字复用已有内建轮廓与压缩补字库，合计覆盖6763个GB2312汉字；当前字体已有字形优先，不改字体选择。补字按字号缩放并参与字重微调、横竖排和预读，字宽测量与实际绘制一致；大字形的清晰度受现有24px位图素材限制，超出已有字库的字符仍需外置字体。
+  Missing body glyphs reuse built-in outlines and the shipped compressed supplement, covering6763 GB2312 Han characters while preserving native-glyph priority and selected faces. Fallback scales with size, follows stroke adjustment, horizontal/vertical layout and prefetch, with matching measured/raster advances. Large glyph sharpness is limited by the existing24px bitmap source; characters outside the embedded coverage still require an external face.
+
+- 阅读线范围按钮缩小并与样式卡片对齐；阅读设置新增“默认全屏”，仅影响新开书，睡眠恢复保留锁屏前状态。默认关闭，与“全屏沉浸”独立，支持重启及设置备份恢复。
+  Align compact guide-range buttons with style cards. Default fullscreen changes fresh book entry only, while sleep resumes keep their recorded mode. Default off, independent of immersion, persistent across restarts and configuration restore.
+
+- S31进入阅读时先物理清白，再从白底完整绘制阅读页，增强封面和图片页对书架残影的清理；沿用现有图片清屏接口与原厂波形，后续翻页路径保持。
+  Clear the S31 panel before rendering the reader entry frame from white, improving shelf ghost cleanup on cover/image pages. Reuse the existing image-clean path and vendor waveforms; retain subsequent turn routing.
 
 - 书架四个分页箭头独立处理按下/抬手，容许边缘轻微漂移；实际翻页清除旧按压刷新标记，保留取消、扫描门禁和首末页边界。
   Shelf pager contacts own press/release with slight edge-drift tolerance; real turns clear stale press refresh state while retaining cancellation, scan guards and page bounds.

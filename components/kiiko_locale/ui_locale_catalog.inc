@@ -1191,6 +1191,7 @@ static const ui_locale_pair_t s_pairs[] = {
     {"鲜明","Vivid"},
     {"黑体","黑体"},
     {"黑白快刷，亚克力用细棋盘格","Fast B&W, with fine checkerboard acrylic"},
+    {"默认全屏","Default full screen"},
     {"默认图标  ›","Default icon  ›"},
     {"默认系统字体","Default system font"},
     {"；所选可重试","; retry selected items"},

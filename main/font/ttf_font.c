@@ -12,12 +12,15 @@
  * preserving advances and proportions; normal is unchanged, with one bounded glyph scratch buffer.
  * 用户修订：标题复用当前字体的轮廓与缓存；覆盖检查只读现有 cmap，不切字体或另加载字库。
  * User revision: titles reuse the active outlines/cache; coverage checks read the existing cmap without switching or loading another face.
+ * 用户修订：正文缺字按需复用内建轮廓与现有补字，原字体优先；字宽和绘制采用相同回退度量。
+ * User revision: missing body glyphs reuse embedded outlines/supplements on demand; native glyphs take priority and layout shares raster advances.
  */
 
 #include "ttf_font.h"
 #include "text_glue.h"
 #include "../kiiko_board_config.h"
 #include "ttf_stroke_filter.h"
+#include "ui_hanzi_scale.h"
 
 #include <dirent.h>
 #if KIIKO_BOARD_METALIO47
@@ -119,6 +122,8 @@ static void ttf_free(void* ptr, void* userdata) {
 #define TTF_MAP_MAX (5u * 1024u * 1024u)
 
 static const char* TAG = "ttf_font";
+// 界面与正文预读各用独立、有界的解压工作区。/ UI and reader prefetch use independent bounded decode workspaces.
+static ui_hanzi_cache_t s_reader_hanzi;
 
 static const char* const k_font_dirs[] = {
     "/sdcard/assets/fonts",
@@ -1989,13 +1994,52 @@ static glyph_entry_t* cache_lookup(uint32_t codepoint, int size) {
     return NULL;
 }
 
+// 原生覆盖查询不变，标题保留既有回退；正文仅在缺字时借用内建轮廓或补字。
+// Preserve native coverage queries/title policy; only missing body glyphs borrow embedded outlines/supplements.
+static const stbtt_fontinfo *reader_builtin_fallback(void) {
+    static stbtt_fontinfo info;
+    static bool attempted,ready;
+    if (!attempted) {
+        attempted=true;
+        int offset=stbtt_GetFontOffsetForIndex(builtin_ttf_start,0);
+        ready=offset>=0 && stbtt_InitFont(&info,builtin_ttf_start,offset);
+    }
+    return ready?&info:NULL;
+}
+static int reader_missing_advance(uint32_t cp,int px) {
+    const stbtt_fontinfo *builtin=reader_builtin_fallback();
+    int gid=builtin?stbtt_FindGlyphIndex(builtin,(int)cp):0;
+    if (gid) {
+        int advance,lsb;stbtt_GetGlyphHMetrics(builtin,gid,&advance,&lsb);
+        return (int)lroundf(advance*stbtt_ScaleForPixelHeight(builtin,(float)px));
+    }
+    return ui_hanzi_has(cp)?(UI_HANZI_ADVANCE*px+UI_HANZI_BASE_PX/2)/UI_HANZI_BASE_PX:-1;
+}
 static glyph_entry_t* rasterize_glyph(uint32_t codepoint, int pixel_height) {
     int gid = stbtt_FindGlyphIndex(&font_info, (int)codepoint);
-    if (!pack_glyph_tree(gid)) return NULL;
+    const stbtt_fontinfo *raster_font=&font_info;
+    bool borrowed=false,supplemental=false;
+    uint8_t extra[UI_HANZI_RECORD];
+    if (!gid) {
+        const stbtt_fontinfo *builtin=reader_builtin_fallback();
+        int fallback=builtin?stbtt_FindGlyphIndex(builtin,(int)codepoint):0;
+        if (fallback) { raster_font=builtin;gid=fallback;borrowed=true; }
+        else if (ui_hanzi_has(codepoint)) {
+            // 内存不足时下次重试，不把方块缓存成该字。/ Retry after memory pressure; never cache .notdef for this character.
+            if (!ui_hanzi_get_cached(&s_reader_hanzi,codepoint,extra)) return NULL;
+            supplemental=true;
+        }
+    }
+    if (!borrowed && !supplemental && !pack_glyph_tree(gid)) return NULL;
 
-    float scale = stbtt_ScaleForPixelHeight(&font_info, (float)pixel_height);
+    float scale = stbtt_ScaleForPixelHeight(raster_font, (float)pixel_height);
     int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-    stbtt_GetGlyphBitmapBox(&font_info, gid, scale, scale, &x0, &y0, &x1, &y1);
+    if (supplemental) {
+        x0=(int)floorf((int8_t)extra[0]*(float)pixel_height/UI_HANZI_BASE_PX);
+        y0=(int)floorf((int8_t)extra[1]*(float)pixel_height/UI_HANZI_BASE_PX);
+        x1=x0+(extra[2]*pixel_height+UI_HANZI_BASE_PX-1)/UI_HANZI_BASE_PX;
+        y1=y0+(extra[3]*pixel_height+UI_HANZI_BASE_PX-1)/UI_HANZI_BASE_PX;
+    } else stbtt_GetGlyphBitmapBox(raster_font, gid, scale, scale, &x0, &y0, &x1, &y1);
 
     int width = x1 - x0;
     int height = y1 - y0;
@@ -2023,8 +2067,11 @@ static glyph_entry_t* rasterize_glyph(uint32_t codepoint, int pixel_height) {
             heap_caps_free(entry);
             return NULL;
         }
-        stbtt_MakeGlyphBitmap(
-            &font_info, entry->bitmap, width, height, width, scale, scale, gid
+        if (supplemental) {
+            for (int y=0;y<height;++y)for(int x=0;x<width;++x)
+                entry->bitmap[y*width+x]=ui_hanzi_coverage(extra,width,height,x,y);
+        } else stbtt_MakeGlyphBitmap(
+            raster_font, entry->bitmap, width, height, width, scale, scale, gid
         );
     }
 
@@ -2052,7 +2099,7 @@ static glyph_entry_t* rasterize_glyph(uint32_t codepoint, int pixel_height) {
     }
     int advance = 0;
     int lsb = 0;
-    stbtt_GetGlyphHMetrics(&font_info, gid, &advance, &lsb);
+    if (!supplemental) stbtt_GetGlyphHMetrics(raster_font, gid, &advance, &lsb);
 
     entry->codepoint = codepoint;
     entry->size = (uint8_t)pixel_height;
@@ -2062,7 +2109,7 @@ static glyph_entry_t* rasterize_glyph(uint32_t codepoint, int pixel_height) {
     entry->height = (int16_t)height;
     entry->left = (int16_t)x0;
     entry->top = (int16_t)(-y0);
-    entry->advance_x = (int16_t)lroundf(advance * scale);
+    entry->advance_x = supplemental ? (int16_t)reader_missing_advance(codepoint,pixel_height) : (int16_t)lroundf(advance * scale);
     entry->bitmap_bytes = bitmap_bytes;
 
     unsigned bucket = cache_bucket(codepoint, pixel_height);
@@ -2181,6 +2228,7 @@ static void warm_text_io(int pixel_height, const char* text, const char* end) {
         cps[seen++] = cp;
         if (cache_lookup(cp, pixel_height) != NULL) continue;
         int gid = stbtt_FindGlyphIndex(&font_info, (int)cp);
+        if (!gid && reader_missing_advance(cp,pixel_height)>=0) continue;
         if (gid < 0 || gid >= num_glyphs) continue;
         io_touch(file_glyf_off + file_glyph_off(gid), file_glyph_len(gid));
         if (gvar_ready && current_weight != wght_def && gvar_glyph_off != NULL) {
@@ -2208,8 +2256,10 @@ static int measure_width(int pixel_height, const char* text) {
             // 排版只需字宽；实际绘制时才读取轮廓并生成位图。/ Layout needs advances only; drawing loads outlines and rasterizes.
             int advance = 0, lsb = 0;
             int gid = stbtt_FindGlyphIndex(&font_info, (int)cp);
-            stbtt_GetGlyphHMetrics(&font_info, gid, &advance, &lsb);
-            width += (int)lroundf(advance * scale);
+            int missing=gid?-1:reader_missing_advance(cp,pixel_height);
+            if (missing>=0) width+=missing;
+            else { stbtt_GetGlyphHMetrics(&font_info, gid, &advance, &lsb);
+                   width += (int)lroundf(advance * scale); }
         }
     }
     return width;
@@ -2285,6 +2335,7 @@ int ttf_em_height_px(int em_size) {
 }
 
 void ttf_font_cache_clear(void) {
+    (void)ui_hanzi_cache_release(&s_reader_hanzi);
     cache_reset();
     packed_root = -1;
     packed_weight = -1;
@@ -2510,6 +2561,7 @@ bool ttf_font_slot_has_text(int slot, const char* text) {
 // The public entry always drops the system face: the loop and the card page mean the
 // active face, and must not hit a book face just because the cursor sits there.
 void ttf_font_unload(void) {
+    (void)ui_hanzi_cache_release(&s_reader_hanzi);
     ttf_font_slots_init();
     int keep = slot_lend(TTF_FONT_SLOT_SYSTEM);
     unload_here();
@@ -2527,7 +2579,7 @@ void ttf_font_unload(void) {
 size_t ttf_font_cache_clear_all(void) {
     ttf_font_slots_init();
     int keep = s_cur_index;
-    size_t freed = 0;
+    size_t freed = ui_hanzi_cache_release(&s_reader_hanzi);
     for (int i = 0; i < TTF_FONT_SLOTS; i++) {
         if (!s_slots[i].f_ready) continue;
         s_cur_index = i;
@@ -2802,6 +2854,21 @@ int ttf_text_left_bearing_px(int pixel_height, const char* text) {
     if (glyph) return glyph->left;
     int advance, lsb;
     int gid = stbtt_FindGlyphIndex(&font_info, (int)cp);
+    if (!gid && reader_missing_advance(cp,pixel_height)>=0) {
+        const stbtt_fontinfo *builtin=reader_builtin_fallback();
+        int fallback=builtin?stbtt_FindGlyphIndex(builtin,(int)cp):0;
+        int x0=0;
+        if (fallback) {
+            int y0,x1,y1;float scale=stbtt_ScaleForPixelHeight(builtin,(float)pixel_height);
+            stbtt_GetGlyphBitmapBox(builtin,fallback,scale,scale,&x0,&y0,&x1,&y1);
+        } else {
+            uint8_t record[UI_HANZI_RECORD];
+            if (!ui_hanzi_get_cached(&s_reader_hanzi,cp,record)) return 0;
+            x0=(int)floorf((int8_t)record[0]*(float)pixel_height/UI_HANZI_BASE_PX);
+        }
+        int stroke=s_stroke_adjust<0?-s_stroke_adjust:s_stroke_adjust;
+        return x0-(stroke+15)/16;
+    }
     stbtt_GetGlyphHMetrics(&font_info, gid, &advance, &lsb);
     return (int)floorf(lsb * stbtt_ScaleForPixelHeight(&font_info, (float)pixel_height));
 }

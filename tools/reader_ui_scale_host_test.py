@@ -77,7 +77,7 @@ static void ui_fill_rect_fast(EpdRect r,int color,uint8_t *fb){epd_fill_rect(r,c
 static void epd_fill_circle(int x,int y,int radius,int color,uint8_t *fb){(void)x;(void)y;(void)radius;(void)color;(void)fb;}
 static void epd_draw_circle(int x,int y,int radius,int color,uint8_t *fb){epd_fill_circle(x,y,radius,color,fb);}
 static void ui_fill_round_rect(uint8_t *fb,EpdRect r,int radius,int color){(void)fb;(void)radius;(void)color;assert(r.x>=0&&r.x+r.width<=684&&r.y>=0);
- if(image_probe&&r.width==69&&r.height==39){assert(image_text_count==2);for(unsigned i=0;i<2;++i)assert(image_text_boxes[i].x+image_text_boxes[i].width+12<=r.x);++image_switches;}
+ if(image_probe&&r.width==69&&r.height==39){assert(image_text_count==2);for(unsigned i=0;i<2;++i)assert(image_text_boxes[i].y+image_text_boxes[i].height<=r.y || image_text_boxes[i].x+image_text_boxes[i].width+12<=r.x);++image_switches;}
 }
 static void ui_draw_control_frame(uint8_t *fb,EpdRect r,int radius,int color){ui_fill_round_rect(fb,r,radius,color);}
 static void ui_draw_icon(uint8_t *fb,int x,int y,int px,int icon,int color){(void)fb;(void)x;(void)y;(void)px;(void)icon;(void)color;}
@@ -98,6 +98,7 @@ static unsigned app_settings_reader_full_pages(void){return 15;}
 static unsigned app_settings_reader_turn_effect(void){return 1;}
 static bool app_settings_reader_vertical_turn(void){return true;}
 static bool app_settings_reader_power_turn(void){return true;}
+static bool app_settings_reader_default_fullscreen(void){return true;}
 static bool app_settings_reader_immersive(void){return false;}
 static bool app_settings_reader_hide_images(void){return false;}
 '''
@@ -153,7 +154,7 @@ int main(void){uint8_t fb[1]={0};
    for(unsigned i=0;i<sizeof(rule_controls)/sizeof(rule_controls[0]);++i)for(unsigned j=0;j<i;++j)assert(!overlap(rule_controls[i],rule_controls[j]));
    for(int i=0;i<6;++i){EpdRect a=reader_font_card(i);assert(a.y>=reader_font_top()+100&&a.y+a.height<1141);for(int j=0;j<i;++j)assert(!overlap(a,reader_font_card(j)));}
    EpdRect slider=reader_slider_rect(0);assert(slider.y>reader_font_top()+100&&slider.y+slider.height<reader_font_card(0).y);
-   for(int i=0;i<8;++i){EpdRect a=reading_setting_rect(i);assert(a.y>=reading_settings_top()+100&&a.y+a.height<1141);for(int j=0;j<i;++j)assert(!overlap(a,reading_setting_rect(j)));}
+   for(int i=0;i<9;++i){EpdRect a=reading_setting_rect(i);assert(a.y>=reading_settings_top()+100&&a.y+a.height<1141);for(int j=0;j<i;++j)assert(!overlap(a,reading_setting_rect(j)));}
    for(int i=0;i<9;++i){EpdRect a=reader_font_pick_rect(i);assert(a.y>reader_font_picker_top()+120&&a.y+a.height<1141);for(int j=0;j<i;++j)assert(!overlap(a,reader_font_pick_rect(j)));}
    for(int edit=0;edit<2;++edit){s_bookmark_edit=edit;assert(bookmark_rows()>=3);for(int row=0;row<bookmark_rows();++row){EpdRect a=bookmark_row_rect(row);assert(a.y+a.height<=560+(edit?520:600));if(row)assert(!overlap(a,bookmark_row_rect(row-1)));}}
  }

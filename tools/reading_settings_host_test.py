@@ -25,6 +25,9 @@ static void app_settings_set_reader_full_pages(unsigned n){full_pages=n;}
 static unsigned app_settings_reader_turn_effect(void){return effect;}
 static void app_settings_set_reader_turn_effect(unsigned n){effect=n;}
 static app_redraw_t apply_reader_option(app_ctx_t *ctx,int i){(void)ctx;assert(i>=0&&i<4);++toggles[i];return APP_REDRAW_PAGE;}
+static bool default_fullscreen,save_fails;
+static bool app_settings_reader_default_fullscreen(void){return default_fullscreen;}
+static bool app_settings_set_reader_default_fullscreen(bool on){if(save_fails)return false;default_fullscreen=on;return true;}
 static void invalidate_prep(void){++invalidates;}
 '''
 source = ROOT/'main/apps/app_book.c'
@@ -34,35 +37,38 @@ for name in ('reader_ui_extra', 'reading_settings_top', 'reading_setting_rect', 
 unit += r'''
 int main(void){
     app_ctx_t ctx={0};
-    // 8个控件位于半屏内、不重叠；按键控制严格在翻页模式下一行。
-    // Eight controls stay inside the half sheet without overlap; key controls sit directly below turn mode.
-    for(int i=0;i<8;++i){
-        EpdRect a=reading_setting_rect(i);assert(a.x>=36&&a.x+a.width<=648&&a.y>=702&&a.y+a.height<=1122);
-        for(int j=i+1;j<8;++j){EpdRect b=reading_setting_rect(j);assert(a.x+a.width<=b.x||b.x+b.width<=a.x||a.y+a.height<=b.y||b.y+b.height<=a.y);}
+    // 9个控件不重叠；默认全屏与沉浸并排，按键控制占末行。
+    // Nine controls stay disjoint; fullscreen entry sits beside immersion and keys span the final row.
+    for(int i=0;i<9;++i){
+        EpdRect a=reading_setting_rect(i);assert(a.x>=36&&a.x+a.width<=648&&a.y>=590&&a.y+a.height<=1122);
+        for(int j=i+1;j<9;++j){EpdRect b=reading_setting_rect(j);assert(a.x+a.width<=b.x||b.x+b.width<=a.x||a.y+a.height<=b.y||b.y+b.height<=a.y);}
     }
-    EpdRect mode=reading_setting_rect(2),keys=reading_setting_rect(4);
-    assert(keys.x==mode.x&&keys.y>mode.y&&keys.y==910);
+    EpdRect mode=reading_setting_rect(2),keys=reading_setting_rect(8);
+    assert(keys.x==mode.x&&keys.y>mode.y&&keys.y==1006&&keys.width==612);
 #if KIIKO_BOARD_METALIO47
     const unsigned expected[]={15,20,30,0,5,10};
 #else
     const unsigned expected[]={15,30,0,5,10};
 #endif
-    for(unsigned i=0;i<sizeof(expected)/sizeof(expected[0]);++i){s_turns=100;assert(reading_settings_action(&ctx,120,750)==APP_REDRAW_PAGE);assert(full_pages==(int)expected[i]&&!s_turns);}
-    full_pages=77;reading_settings_action(&ctx,120,750);assert(full_pages==(KIIKO_BOARD_METALIO47?0:5));
-    for(unsigned i=0;i<6;++i){s_turns=4;reading_settings_action(&ctx,450,750);assert(effect==(int)((i+1)%3)&&s_turns==0);}
+    for(unsigned i=0;i<sizeof(expected)/sizeof(expected[0]);++i){s_turns=100;assert(reading_settings_action(&ctx,120,639)==APP_REDRAW_PAGE);assert(full_pages==(int)expected[i]&&!s_turns);}
+    full_pages=77;reading_settings_action(&ctx,120,639);assert(full_pages==(KIIKO_BOARD_METALIO47?0:5));
+    for(unsigned i=0;i<6;++i){s_turns=4;reading_settings_action(&ctx,450,639);assert(effect==(int)((i+1)%3)&&s_turns==0);}
     s_reader_panel=READER_PANEL_REFRESH_SETTINGS;
-    reading_settings_action(&ctx,120,850);assert(s_reader_panel==READER_PANEL_TURN_SETTINGS);
+    reading_settings_action(&ctx,120,743);assert(s_reader_panel==READER_PANEL_TURN_SETTINGS);
     s_reader_panel=READER_PANEL_REFRESH_SETTINGS;
-    reading_settings_action(&ctx,120,970);assert(s_reader_panel==READER_PANEL_KEY_SETTINGS);
+    reading_settings_action(&ctx,120,1055);assert(s_reader_panel==READER_PANEL_KEY_SETTINGS);
     for(int i=0;i<4;++i){EpdRect a=reading_toggle_rect(i);assert(reading_settings_action(&ctx,a.x+a.width-5,a.y+a.height-5)==APP_REDRAW_PAGE&&toggles[i]==1);}
+    EpdRect df=reading_toggle_rect(4);
+    assert(reading_settings_action(&ctx,df.x+30,df.y+30)==APP_REDRAW_PAGE&&default_fullscreen);
+    save_fails=true;assert(reading_settings_action(&ctx,df.x+30,df.y+30)==APP_REDRAW_NONE&&default_fullscreen);save_fails=false;
     s_reader_panel=READER_PANEL_REFRESH_SETTINGS;int before=invalidates;
-    assert(reading_settings_action(&ctx,342,760)==APP_REDRAW_NONE);
-    assert(reading_settings_action(&ctx,120,803)==APP_REDRAW_NONE);
+    assert(reading_settings_action(&ctx,342,640)==APP_REDRAW_NONE);
+    assert(reading_settings_action(&ctx,120,691)==APP_REDRAW_NONE);
     assert(reading_settings_action(&ctx,120,1130)==APP_REDRAW_NONE);
     assert(s_reader_panel==READER_PANEL_REFRESH_SETTINGS&&invalidates==before);
     reading_settings_action(&ctx,342,1170);assert(s_reader_panel==READER_PANEL_NONE);
     s_reader_panel=READER_PANEL_REFRESH_SETTINGS;
-    reading_settings_action(&ctx,342,579);assert(s_reader_panel==READER_PANEL_NONE);
+    reading_settings_action(&ctx,342,479);assert(s_reader_panel==READER_PANEL_NONE);
     puts("PASS: approved half-sheet bounds, nonoverlapping shared hit areas, key controls below turn mode, full-refresh/effect cycles, toggles, secondary pages, Done and inert gaps");
 }
 '''

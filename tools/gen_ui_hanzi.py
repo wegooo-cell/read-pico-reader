@@ -46,6 +46,7 @@ int render(uint32_t cp,uint8_t *out){
     record=(ctypes.c_uint8*RECORD)();raw=[]
     for cp in chars:
         assert lib.render(cp,record),f'missing source glyph {cp:x}'
+        assert record[4]==17, 'supplement advance changed; update the runtime metrics contract'
         raw.append(bytes(record))
     offsets=[0];blocks=b''
     for start in range(0,len(raw),BLOCK):

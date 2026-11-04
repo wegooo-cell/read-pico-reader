@@ -168,6 +168,9 @@ jobs:
             python3 tools/metalio_du14_white_host_test.py
           fi
           python3 tools/title_font_host_test.py
+          python3 tools/reader_hanzi_fallback_host_test.py
+          python3 tools/ui_hanzi_host_test.py
+          python3 tools/pico_builtin_font_host_test.py
           python3 tools/file_names_host_test.py
           python3 tools/txt_navigation_host_test.py
           if [ "${{ matrix.board }}" = "metalio47" ]; then

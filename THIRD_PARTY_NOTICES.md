@@ -34,7 +34,7 @@ remain in the source. This project is not an official MindReset release.
 | [CrossMux](https://github.com/0x1abin/crossmux) BLE report mapping and text-turn adaptations | MIT | [CrossMux notice](licenses/CrossMux-MIT.txt) |
 | FreeInk SDK text-turn waveform assembly, commit `96de1be6ce08eb732909e6e8149af8f892b9a2c5` | MIT | [FreeInk SDK notice](licenses/FreeInk-SDK-MIT.txt) |
 | [Metalio E-Ink4-Plus](https://github.com/CloudZao/Metalio-E-INK4-Plus) sample firmware — ESP32-S31 LCD/IOMUX output path, TPS65185 and 9555 board reference, C equivalents of the Xtensa SIMD pixel paths, the `s31_sleep` SDK compatibility module (source ad8edf4150a688737c0d7c00cae4413079b262ef), and the CX25601N charge policy/initialization re-expressed as C in `components/metalio_hw/metalio_charger.c` (source e703fd35269324cd163f1deae0a2fb5f7cf5f710) | MIT | [Metalio notice](licenses/Metalio-MIT.txt) |
-| Embedded Noto Sans SC Medium font subset and compressed common-Han bitmaps | SIL OFL-1.1 | [Font license](main/assets/OFL-Noto.txt) |
+| Embedded Noto Sans SC Medium subsets for Pico/S31, UI Han bitmaps and Pico body Han coverage | SIL OFL-1.1 | [Font license](main/assets/OFL-Noto.txt) |
 | [ESP Web Tools](https://github.com/esphome/esp-web-tools) browser flasher | Apache-2.0 | [Bundled web tool license](flash/vendor/LICENSE) |
 | Espressif TinyUSB component | Apache-2.0 | [Component license](components/espressif__esp_tinyusb/LICENSE) |
 
@@ -56,7 +56,7 @@ retaining its mindreset Apache-2.0 file notice and the complete FreeInk/CrossMux
 MIT notices linked above. Only ordinary text turns select it; vendor LUTs,
 scan timing and other screens are unchanged. Panel validation remains required.
 
-The firmware bundles only the embedded Noto Sans SC subset and common-Han bitmap supplement; users may supply
+The firmware bundles the embedded Noto Sans SC subset, common-Han UI bitmaps and, on Pico, compressed body Han coverage from the same Medium source; users may supply
 their own fonts on a TF card. The repository and flashing site do not provide
 additional font packages.
 
@@ -66,3 +66,5 @@ BLE 蓝牙翻页器的报告解析与按键映射参考 CrossMux 的 BleKeyboard
 
 `boards/metalio47/src/components/e0470_epaper_waveform/my_waveform_du14.h` is the unchanged header supplied by the user on2026-10-28 as manufacturer material, SHA256 `cac0efbcb2801114b36a4bee5eaa9c453dcd7d098210ef2739f853e86a0c39f4`. Its supplied file contains no explicit redistribution license; no Apache or project license is applied to this third-party table. It is included only by the explicit local S31 DU14 build flag.
 该头文件按用户提供的原始字节保留，仅显式本地实验构建包含；未将项目许可套用到厂家材料，未据此推定额外的发布许可。
+
+Unicode Unihan kTGH data is used to select ordinary-book characters and validate the first6500 entries of the2013 standardized Han table. Unicode data is distributed under the [Unicode License v3](licenses/Unicode-3.0.txt). Source: https://www.unicode.org/Public/17.0.0/ucd/Unihan.zip

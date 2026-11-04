@@ -49,6 +49,7 @@ tools/buzzer_score_wav
 # ESP-IDF specific build outputs
 *.bin
 !main/assets/*.bin
+!/boards/pico/src/main/assets/ui-hanzi.bin
 !/flash/bootloader.bin
 !/flash/partitions.bin
 !/flash/firmware.bin
@@ -126,3 +127,7 @@ Desktop.ini
 /build-*/
 /sdkconfig.pico
 /sdkconfig.metalio47
+
+# 两板内建扩展字库。/ Expanded embedded assets for both boards.
+!boards/metalio47/src/main/assets/builtin.ttf
+!boards/metalio47/src/main/assets/ui-hanzi.bin
