@@ -39,6 +39,7 @@ const EpdWaveform* display_main_switch_waveform(const EpdWaveform* source,enum E
     assert(source&&(mode==MODE_DU||mode==MODE_GL16));++switch_wave_calls;return source;
 }
 const EpdWaveform* display_reader_soft_turn_waveform(void){return &reader_soft;}
+const EpdWaveform* display_reader_text_turn_waveform(void){return &reader_soft;}
 const EpdWaveform* display_reader_text_waveform(void) {return &reader_soft;}
 static app_main_refresh_mode_t main_mode=APP_MAIN_REFRESH_FAST;
 app_main_refresh_mode_t app_settings_main_refresh_mode(void) {return main_mode;}

@@ -152,7 +152,10 @@ int main(void) {
         if(to==15&&from==15){assert(action==0||action==2);white_pushes+=action==2;}
     }
     for(int f=0;f<20;++f){int action=e0470_phase_action(binary,f,15,15);assert(action==0||action==2);binary_white+=action==2;}
-    assert(white_pushes>=3&&binary_white>0);
+    // 48相模式关闭本地白底补帧后，等白维护只剩厂家white tick的一相；裁剪档仍有3相。
+    // With the full-48 profile the local white pulses are off, leaving only the vendor white
+    // tick; the trimmed profile still keeps three.
+    assert(white_pushes>=(E0470_WAVEFORM_TRIM?3:1)&&binary_white>0);
     puts("PASS: page white maintenance stays separate from fixed-navigation/slider equal holds");
     // 点阵亮度随输入单调增加且稳定，不引入中灰；阅读插图原16灰输出仍保留。
     // Dot brightness increases monotonically and remains stable with no intermediate grays; existing 16-gray reader output is retained.

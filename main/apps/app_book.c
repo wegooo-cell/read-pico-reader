@@ -4432,11 +4432,26 @@ static bool reader_slider_feedback_present(app_ctx_t *ctx,app_redraw_t redraw) {
 #if KIIKO_BOARD_METALIO47
 static enum EpdDrawError reader_soft_present(app_ctx_t* ctx,EpdRect area) {
     // 用户2026-11-03：普通翻页不再走整页hl_update（约15ms/相），改用与水波纹/速读相同的
-    // 单带1K相位表引擎（约12ms/相），接近Pico翻页速度；波形仍是柔和翻页表。
+    // 单带1K相位表引擎（约12ms/相），接近Pico翻页速度。
+    // 用户2026-11-04：此路径只给纯文字用，波形含“白→灰直推”；图文页走下面reader_image_present。
     // User2026-11-03: ordinary turns leave the whole-page hl_update (~15 ms/phase) for the same
-    // single-band 1K phase-LUT engine as ripple/FastBW (~12 ms/phase), approaching Pico turn
-    // speed while keeping the soft-turn waveform.
+    // single-band 1K phase-LUT engine as ripple/FastBW (~12 ms/phase), approaching Pico speed.
+    // User2026-11-04: text-only path, whose waveform uses the white-side gray push; image pages
+    // go through reader_image_present below.
     return update_display_text_turn(ctx->hl, area, E0470_TURN_RTL);
+}
+
+// 用户2026-11-04：图文页按Pico整页全像素走原厂柔和翻页表，避免文字用的白→灰直推压坏插图灰阶。
+// User2026-11-04: image pages follow Pico's whole-page full-pixel soft turn with vendor grays, so
+// the text-only white-side gray push cannot flatten illustration tone.
+static enum EpdDrawError reader_image_present(app_ctx_t* ctx,EpdRect area) {
+    const EpdWaveform* wave=display_reader_soft_turn_waveform();
+    const EpdRect body=reader_area();
+    const bool whole=area.x==0&&area.y==0&&area.width==UI_LOCK_WIDTH&&area.height==UI_LOCK_HEIGHT;
+    const bool body_only=area.x==body.x&&area.y==body.y&&area.width==body.width&&area.height==body.height;
+    return body_only?reader_present_crop(ctx->hl,wave,MODE_GL16,area,true):whole
+        ? update_display_area_full_with(ctx->hl,wave,MODE_GL16,area)
+        : update_display_area_diff_with(ctx->hl,wave,MODE_GL16,area);
 }
 #endif
 
@@ -4542,7 +4557,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         // Image turns restore the PR59 whole-screen output: drive the status bar and footer
         // in the same pass instead of cropping to the body.
         (void)image_area;
-        err=reader_soft_present(ctx,(EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT});
+        err=reader_image_present(ctx,(EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT});
     }
 #else
     else if (image_gray_refresh && redraw == APP_REDRAW_AREA && !s_reader_cleanup && s_presented_view == (int)READING) {

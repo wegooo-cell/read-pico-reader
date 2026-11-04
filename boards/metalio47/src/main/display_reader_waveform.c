@@ -183,25 +183,65 @@ const EpdWaveform* display_reader_panel_gray4_waveform(bool erase_underlay) {
 #define READER_SOFT_TURN_BLACK 4
 #define READER_SOFT_TURN_EXTRA (READER_SOFT_TURN_WHITE + READER_SOFT_TURN_BLACK)
 static uint8_t s_soft_turn[E0470_FULL_GL16_FRAMES + READER_SOFT_TURN_EXTRA + 3][16][4];
+static uint8_t s_text_turn[E0470_FULL_GL16_FRAMES + READER_SOFT_TURN_EXTRA + 3][16][4];
 static EpdWaveformPhases s_soft_turn_phases;
+static EpdWaveformPhases s_text_turn_phases;
 static const EpdWaveformPhases* s_soft_turn_ranges[1];
+static const EpdWaveformPhases* s_text_turn_ranges[1];
 static EpdWaveformMode s_soft_turn_mode;
+static EpdWaveformMode s_text_turn_mode;
 static const EpdWaveformMode* s_soft_turn_modes[1];
+static const EpdWaveformMode* s_text_turn_modes[1];
 static EpdWaveform s_soft_turn_waveform;
+static EpdWaveform s_text_turn_waveform;
 static bool s_soft_turn_ready;
+static bool s_text_turn_ready;
 
-static void soft_turn_set(int phase,int to,int from,int action){
+static void turn_set(uint8_t (*lut)[16][4],int phase,int to,int from,int action){
     const int shift=6-2*(from%4);
-    uint8_t *p=&s_soft_turn[phase][to][from/4];
+    uint8_t *p=&lut[phase][to][from/4];
     *p=(uint8_t)((*p&~(3u<<shift))|((unsigned)action<<shift));
 }
 
-const EpdWaveform* display_reader_soft_turn_waveform(void){
-    if(s_soft_turn_ready)return &s_soft_turn_waveform;
+static int turn_get(uint8_t (*lut)[16][4],int phase,int to,int from){
+    return (lut[phase][to][from/4]>>(6-2*(from%4)))&3;
+}
+
+// 用户2026-11-04：文字页改回“白侧直接推灰”。灰阶标定页实测0.40档与原厂48相肉眼一致：
+// 白起点的中灰直接压 round((15-灰阶)×0.40) 相（1~6相），去掉原厂“压满黑→尾段擦白回推”，
+// 灰边与黑白端点同段出现，不再等尾段灰阶脉冲；其他起点仍用原厂序列。
+// 插图页仍用原厂灰阶表（见display_reader_soft_turn_waveform），避免直推压坏灰阶图。
+// User2026-11-04: text pages go back to the white-side gray push. The calibration page showed the
+// 0.40 profile matching the vendor 48-phase reference by eye: white-origin midgrays darken directly
+// with round((15-gray)*0.40) phases (1..6), dropping the vendor full-black-then-tail-erase so gray
+// edges appear with the black/white endpoints; all other origins keep the vendor sequence. Image
+// pages keep the vendor table via display_reader_soft_turn_waveform, so the push cannot flatten
+// illustration tone.
+#define READER_GRAY_DARKEN_SCALE 0.40f
+static void turn_white_to_gray(uint8_t (*lut)[16][4],int phases){
+    for(int v=1;v<15;++v){
+        int first=-1;
+        for(int f=0;f<phases;++f)
+            if(turn_get(lut,f,v,15)==1){first=f;break;}
+        if(first<0)continue;
+        int pulses=(int)((15-v)*READER_GRAY_DARKEN_SCALE+0.5f);
+        if(pulses<1)pulses=1;
+        if(pulses>15)pulses=15;
+        for(int f=0;f<phases;++f){
+            if(turn_get(lut,f,v,15)==0)continue;
+            turn_set(lut,f,v,15,f>=first&&f<first+pulses?1:0);
+        }
+    }
+}
+
+static const EpdWaveform* turn_waveform(bool gray_from_white){
+    bool *ready=gray_from_white?&s_text_turn_ready:&s_soft_turn_ready;
+    if(*ready)return gray_from_white?&s_text_turn_waveform:&s_soft_turn_waveform;
     const EpdWaveform *base=&E0470_WAVEFORM;
     const EpdWaveform *panel37=display_reader_panel37_waveform();
     if(panel37)base=panel37;
     const EpdWaveformPhases *gl=e0470_waveform_phases(base,MODE_GL16);
+    uint8_t (*lut)[16][4]=gray_from_white?s_text_turn:s_soft_turn;
     if(!gl||!gl->luts||gl->phase_times||gl->phases+READER_SOFT_TURN_EXTRA>
         (int)(sizeof(s_soft_turn)/sizeof(s_soft_turn[0])))return &E0470_WAVEFORM;
     int hold=0;
@@ -221,26 +261,33 @@ const EpdWaveform* display_reader_soft_turn_waveform(void){
     // Official full-pixel timing, equal black drops its erase phases, and twelve extra white
     // phases (for every white target, blanks included) are inserted before the settle holds;
     // four black re-drive phases then darken every black target after the whole-panel white push.
-    memcpy(s_soft_turn,gl->luts,(size_t)drive*16*4);
-    memset(s_soft_turn+drive,0,(size_t)READER_SOFT_TURN_EXTRA*16*4);
-    memcpy(s_soft_turn+drive+READER_SOFT_TURN_EXTRA,(const uint8_t*)gl->luts+(size_t)drive*16*4,
+    memcpy(lut,gl->luts,(size_t)drive*16*4);
+    if(gray_from_white)turn_white_to_gray(lut,drive);
+    memset(lut+drive,0,(size_t)READER_SOFT_TURN_EXTRA*16*4);
+    memcpy(lut+drive+READER_SOFT_TURN_EXTRA,(const uint8_t*)gl->luts+(size_t)drive*16*4,
            (size_t)hold*16*4);
     for(int f=0;f<drive;++f)
-        if(e0470_phase_action(gl,f,0,0)==2)soft_turn_set(f,0,0,0);
+        if(e0470_phase_action(gl,f,0,0)==2)turn_set(lut,f,0,0,0);
     for(int i=0;i<READER_SOFT_TURN_WHITE;++i)
         for(int from=0;from<16;++from)
-            soft_turn_set(drive+i,15,from,2);
+            turn_set(lut,drive+i,15,from,2);
     for(int i=0;i<READER_SOFT_TURN_BLACK;++i)
         for(int from=0;from<16;++from)
-            soft_turn_set(drive+READER_SOFT_TURN_WHITE+i,0,from,1);
-    s_soft_turn_phases=(EpdWaveformPhases){gl->phases+READER_SOFT_TURN_EXTRA,
-                                           (const uint8_t*)s_soft_turn,NULL};
-    s_soft_turn_ranges[0]=&s_soft_turn_phases;
-    s_soft_turn_mode=(EpdWaveformMode){MODE_GL16,1,s_soft_turn_ranges};
-    s_soft_turn_modes[0]=&s_soft_turn_mode;
-    s_soft_turn_waveform=(EpdWaveform){.num_modes=1,.num_temp_ranges=1,
-                                       .mode_data=s_soft_turn_modes,
-                                       .temp_intervals=base->temp_intervals};
-    s_soft_turn_ready=true;
-    return &s_soft_turn_waveform;
+            turn_set(lut,drive+READER_SOFT_TURN_WHITE+i,0,from,1);
+    EpdWaveformPhases *phases=gray_from_white?&s_text_turn_phases:&s_soft_turn_phases;
+    const EpdWaveformPhases **ranges=gray_from_white?s_text_turn_ranges:s_soft_turn_ranges;
+    EpdWaveformMode *mode=gray_from_white?&s_text_turn_mode:&s_soft_turn_mode;
+    const EpdWaveformMode **modes=gray_from_white?s_text_turn_modes:s_soft_turn_modes;
+    EpdWaveform *out=gray_from_white?&s_text_turn_waveform:&s_soft_turn_waveform;
+    *phases=(EpdWaveformPhases){gl->phases+READER_SOFT_TURN_EXTRA,(const uint8_t*)lut,NULL};
+    ranges[0]=phases;
+    *mode=(EpdWaveformMode){MODE_GL16,1,ranges};
+    modes[0]=mode;
+    *out=(EpdWaveform){.num_modes=1,.num_temp_ranges=1,.mode_data=modes,
+                       .temp_intervals=base->temp_intervals};
+    *ready=true;
+    return out;
 }
+
+const EpdWaveform* display_reader_soft_turn_waveform(void){ return turn_waveform(false); }
+const EpdWaveform* display_reader_text_turn_waveform(void){ return turn_waveform(true); }

@@ -1,5 +1,10 @@
 # 版本变更 / Changelog
 
+## 本地测试 / Local test — 2026-11-04
+
+- S31阅读波形定稿：整页刷新保持厂家完整48相；普通翻页12相擦白+4相重推黑并走单带快速引擎；48相模式关闭本地额外白/黑补帧。纯文字页对“白→中灰”改用白侧直接压黑（标定系数0.40，1~6相），灰边与黑白端点同段出现；图文/插图页按Pico整页全像素走原厂柔和翻页表，避免直推压坏插图灰阶。
+  S31 reader waveforms finalized: page refreshes keep the vendor full 48 phases; ordinary turns use twelve erase plus four black re-drive phases on the fast single-band engine, and the full-48 profile drops the local extra white/black pulses. Text-only pages push white-origin midgrays directly from white (calibrated 0.40, 1..6 phases) so gray edges settle with the endpoints; image pages follow Pico's whole-page full-pixel soft turn with the vendor table, keeping illustration tone.
+
 ## 本地测试 / Local test — 2026-11-03
 
 - 书架四个分页箭头独立处理按下/抬手，容许边缘轻微漂移；实际翻页清除旧按压刷新标记，保留取消、扫描门禁和首末页边界。
