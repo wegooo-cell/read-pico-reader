@@ -447,10 +447,37 @@ static bool s_fonts_reload_pending;
 // S31同次开书累计手动与运行时回退，正常恢复后再次回退视为新的一次。
 // S31 accumulates manual/runtime episodes per open book; recovery followed by fallback is a new episode.
 static unsigned s_font_fallbacks;
+static bool s_font_choice_pending, s_font_recovery_pending, s_font_restart_pending;
 #if KIIKO_BOARD_METALIO47
 static bool s_font_runtime_fallback_seen;
+typedef struct {
+    char path[TTF_FONT_PATH_MAX];
+    atomic_bool cancel, done;
+    ttf_font_prepared_t *prepared;
+    esp_err_t error;
+} reader_font_job_t;
+static reader_font_job_t *s_font_job;
+static void reader_font_worker(void *arg) {
+    reader_font_job_t *job = arg;
+    job->prepared = ttf_font_prepare(job->path, &job->cancel, &job->error);
+    atomic_store_explicit(&job->done, true, memory_order_release);
+    vTaskDelete(NULL);
+}
+static void reader_font_reload_cancel(void) {
+    reader_font_job_t *job = s_font_job;
+    if (!job) return;
+    atomic_store(&job->cancel, true);
+    // 不删除仍可能持有文件/SD锁的线程；每次读取会检查取消。
+    // Join cooperative reads instead of deleting a worker that may own file/SD locks.
+    while (!atomic_load_explicit(&job->done, memory_order_acquire)) vTaskDelay(1);
+    ttf_font_prepared_free(job->prepared);
+    free(job);
+    s_font_job = NULL;
+    s_font_choice_pending = false;
+}
+
 #endif
-static bool s_font_choice_pending, s_font_recovery_pending, s_font_restart_pending;
+
 static bool s_font_recovery_save_failed;
 static void reader_font_choice_begin(const char *path) {
     if (ttf_font_path_is_builtin(path)) {
@@ -459,6 +486,9 @@ static void reader_font_choice_begin(const char *path) {
     } else s_font_choice_pending = true;
 }
 static void reader_font_choice_finish(void) {
+#if KIIKO_BOARD_METALIO47
+    if (s_font_job) return;
+#endif
     if (!s_font_choice_pending) return;
     s_font_choice_pending = false;
     if (ttf_font_is_builtin()) {
@@ -4805,6 +4835,9 @@ static void track_ticket_stats(app_ctx_t* ctx) {
     if (s_stats_pending_ms >= 30000) flush_ticket_stats();
 }
 static void free_book(void) {
+#if KIIKO_BOARD_METALIO47
+    reader_font_reload_cancel();
+#endif
     reader_font_recovery_reset();
 #if KIIKO_BOARD_METALIO47
     if(s_ticket_cover_started) {
@@ -6313,81 +6346,98 @@ static app_redraw_t toggle_reader_fullscreen(app_ctx_t* ctx) {
 }
 
 static app_redraw_t select_reading_font_item(app_ctx_t* ctx, const ttf_font_item_t* item) {
-    if (item && ttf_font_path_is_builtin(item->path)) reader_font_choice_begin(item->path);
 #if KIIKO_BOARD_METALIO47
     (void)ctx;
-    if (!item || (ttf_font_ready() && !strcmp(ttf_font_path(), item->path) &&
-                  !strcmp(app_settings_font_path(), item->path))) return APP_REDRAW_NONE;
-    lock_draw();
-    invalidate_prep();
+    if (!item) return APP_REDRAW_NONE;
+    if (s_font_job && !strcmp(s_font_job->path, item->path)) return APP_REDRAW_NONE;
+    reader_font_reload_cancel();
+    if (ttf_font_ready() && !strcmp(ttf_font_path(), item->path) &&
+            !strcmp(app_settings_font_path(), item->path)) return APP_REDRAW_NONE;
+    reader_font_job_t *job = calloc(1, sizeof(*job));
+    if (!job) return APP_REDRAW_NONE;
+    copy_text(job->path, sizeof(job->path), item->path);
+    atomic_init(&job->cancel, false); atomic_init(&job->done, false);
+    reader_font_choice_begin(item->path);
+    s_font_job = job;
+    if (xTaskCreate(reader_font_worker, "reader_font", 12288, job, 1, NULL) != pdPASS) {
+        s_font_job = NULL; free(job); s_font_choice_pending = false;
+        return APP_REDRAW_NONE;
+    }
+    return APP_REDRAW_PAGE;
 #else
+
+    if (item && ttf_font_path_is_builtin(item->path)) reader_font_choice_begin(item->path);
     if (!item || !strcmp(ttf_font_path(), item->path)) return APP_REDRAW_NONE;
-#endif
     reader_font_choice_begin(item->path);
     char previous[TTF_FONT_PATH_MAX];
     copy_text(previous, sizeof(previous), ttf_font_path());
-#if KIIKO_BOARD_METALIO47
-#else
     if (ttf_font_open(item->path) != ESP_OK) {
         reader_font_choice_finish();
         return APP_REDRAW_PAGE;
     }
-#endif
     size_t off = book_layout_page_start_offset(s_page);
-#if KIIKO_BOARD_METALIO47
-    // 先等预绘制退出再换字库；加载、排版、保存全部成功才提交选择。
-    // Join prepainting before reloading; commit the choice only after load/layout/persistence succeed.
-    esp_err_t err = ttf_font_open(item->path);
-    bool ok = err == ESP_OK && !strcmp(ttf_font_path(), item->path) &&
-        book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
-    const char *failure = err == ESP_OK ? "字体排版失败，请重试" : "字体加载失败，请检查文件";
-    if (ok) {
-        app_settings_set_font_path(item->path);
-        ok = !strcmp(app_settings_font_path(), item->path);
-        if (!ok) failure = "字体保存失败，请重试";
-    }
-    if (ok) {
-        s_page = book_layout_page_for_offset(off);
-        copy_text(s_font_path, sizeof(s_font_path), item->path);
-        s_reader_notice[0] = 0;
-        ESP_LOGI(TAG, "reader font selected: %s recovery=%d", item->path, pico_boot_recovery());
-    } else {
-#else
     lock_draw();
     invalidate_prep();
     bool ok = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
     if (ok) s_page = book_layout_page_for_offset(off);
     else if (previous[0]) {
-#endif
         (void)ttf_font_open(previous);
-#if KIIKO_BOARD_METALIO47
-        bool restored = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
-        if (restored) {
-            s_page = book_layout_page_for_offset(off);
-            copy_text(s_font_path, sizeof(s_font_path), ttf_font_path());
-            copy_text(s_reader_notice, sizeof(s_reader_notice), failure);
-            s_reader_notice_until = esp_timer_get_time() / 1000 + 2200;
-        } else {
-            free_book(); s_view = SHELF;
-            copy_text(s_message, sizeof(s_message), "字体排版失败，请重新打开图书");
-        }
-        ESP_LOGW(TAG, "reader font rejected: %s err=%d restored=%d", item->path, (int)err, restored);
-#else
         (void)book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
-#endif
     }
     unlock_draw();
-#if KIIKO_BOARD_METALIO47
-    if (ok) save_progress();
-    else reader_font_choice_finish();
-#else
     if (!ok) { reader_font_choice_finish(); return APP_REDRAW_PAGE; }
     app_settings_set_font_path(item->path);
     copy_text(s_font_path, sizeof(s_font_path), item->path);
     save_progress();
+    return APP_REDRAW_PAGE;
 #endif
+}
+
+
+#if KIIKO_BOARD_METALIO47
+static app_redraw_t reader_font_reload_tick(app_ctx_t *ctx) {
+    (void)ctx;
+    reader_font_job_t *job = s_font_job;
+    if (!job || !atomic_load_explicit(&job->done, memory_order_acquire)) return APP_REDRAW_NONE;
+    s_font_job = NULL;
+    if (s_view != READING || !s_text || atomic_load(&job->cancel)) {
+        ttf_font_prepared_free(job->prepared); free(job); s_font_choice_pending = false;
+        return APP_REDRAW_NONE;
+    }
+    lock_draw();
+    invalidate_prep();
+    size_t off = book_layout_page_start_offset(s_page);
+    bool published = job->prepared != NULL;
+    if (published) ttf_font_publish(job->prepared);
+    bool ok = published && book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
+    const char *failure = published ? "字体排版失败，请重试" : "字体加载失败，请检查文件";
+    if (ok) {
+        app_settings_set_font_path(job->path);
+        ok = !strcmp(app_settings_font_path(), job->path);
+        if (!ok) failure = "字体保存失败，请重试";
+    }
+    if (!ok && published) {
+        // 旧字体直到新排版和持久化均成功才释放；失败交换回旧对象。
+        // Retain the old face through layout/persistence; swap it back on failure.
+        ttf_font_publish(job->prepared);
+        if (!book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px)) {
+            free_book(); s_view = SHELF;
+            copy_text(s_message, sizeof(s_message), "字体排版失败，请重新打开图书");
+        }
+    }
+    if (s_text) {
+        s_page = book_layout_page_for_offset(off);
+        copy_text(s_font_path, sizeof(s_font_path), ttf_font_path());
+        copy_text(s_reader_notice, sizeof(s_reader_notice), ok ? "" : failure);
+        if (!ok) s_reader_notice_until = esp_timer_get_time() / 1000 + 2200;
+    }
+    ttf_font_prepared_free(job->prepared);
+    unlock_draw();
+    free(job);
+    if (ok) save_progress(); else reader_font_choice_finish();
     return APP_REDRAW_PAGE;
 }
+#endif
 
 static int slider_index(EpdRect rect, int x, int count) {
     int span = rect.width - 128;
@@ -8596,6 +8646,10 @@ static app_redraw_t reader_font_recovery_tick(app_ctx_t *ctx) {
     return APP_REDRAW_DONE;
 }
 static app_redraw_t on_tick(app_ctx_t* ctx) {
+#if KIIKO_BOARD_METALIO47
+    app_redraw_t font_reload = reader_font_reload_tick(ctx);
+    if (font_reload != APP_REDRAW_NONE) return font_reload;
+#endif
     app_redraw_t recovery = reader_font_recovery_tick(ctx);
     if (recovery != APP_REDRAW_NONE) return recovery;
     if (s_reader_panel == READER_PANEL_FONT_RECOVERY) return APP_REDRAW_NONE;
@@ -8784,6 +8838,7 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
 }
 static void before_lock(app_ctx_t* ctx) {
 #if KIIKO_BOARD_METALIO47
+    reader_font_reload_cancel();
     if(s_reader_panel==READER_PANEL_ONLINE_FONTS){ui_online_fonts_close(&s_online_fonts);ttf_font_scan();s_font_page=0;s_reader_panel=READER_PANEL_FONT_PICKER;}
     s_chapter_warm_done=false;
     // Sleep joins/cancels the worker; a subsequent wake may retry a cold cover.

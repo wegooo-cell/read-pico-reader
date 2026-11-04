@@ -1,5 +1,5 @@
 /* 中文：S31 专用网页安装，先验证再写入；与 Pico 安装器隔离。 / English: Verify-before-write S31 installation isolated from the Pico installer. */
-import {require,equal,identity,partitionTable,selectedSlot} from './metalio-flash-core.js';
+import {require,equal,partitionTable,selectedSlot} from './metalio-flash-core.js';
 import {connectS31,prepareS31Flash,connectionMessage} from './metalio-connection.js?v=s31-direct-20261024';
 import {readS31Flash,verifyS31Flash} from './metalio-flash-reader.js?v=s31-direct-20261024';
 let active=false;
@@ -7,7 +7,7 @@ async function open(snapshot){
   if(active)return;active=true;
   const dialog=document.createElement('dialog');dialog.className='metalio-dialog';
   dialog.setAttribute('aria-labelledby','metalio-dialog-title');
-  dialog.innerHTML=`<span class="card-number">METALIO / ESP32-S31</span><h2 id="metalio-dialog-title">安装 kiikoread</h2><p data-version></p><p><strong>首次安装必须从 Metalio 官方固件刷入。</strong>正在使用其他第三方固件时，请先恢复 Metalio 官方固件。已有兼容 kiikoread 可直接更新。</p><p>在墨水屏上进入「设置 → BOOT 刷机」，再选择下载串口。连接校验通过后自动刷入，请保持 USB 连接。</p><label><input type="checkbox" data-clear>清除机内设置（默认保留，TF 卡文件保留）</label><p data-status role="status" aria-live="polite">尚未连接设备</p><progress max="100" value="0" aria-label="安装进度"></progress><details><summary>连接与校验记录</summary><pre data-log></pre></details><div class="dialog-actions"><button type="button" class="button primary" data-connect>连接并刷入</button><button type="button" class="button secondary" data-close>关闭</button></div>`;
+  dialog.innerHTML=`<span class="card-number">METALIO / ESP32-S31</span><h2 id="metalio-dialog-title">安装 kiikoread</h2><p data-version></p><p>支持直接从当前 S31 固件刷入，无需先恢复官方固件。兼容分区默认保留机内设置。</p><p>在墨水屏上进入「设置 → BOOT 刷机」，再选择下载串口。连接校验通过后自动刷入，请保持 USB 连接。</p><label><input type="checkbox" data-clear>清除机内设置（默认保留，TF 卡文件保留）</label><p data-status role="status" aria-live="polite">尚未连接设备</p><progress max="100" value="0" aria-label="安装进度"></progress><details><summary>连接与校验记录</summary><pre data-log></pre></details><div class="dialog-actions"><button type="button" class="button primary" data-connect>连接并刷入</button><button type="button" class="button secondary" data-close>关闭</button></div>`;
   document.body.appendChild(dialog);dialog.showModal();
   const q=s=>dialog.querySelector(s), status=q('[data-status]'), log=q('[data-log]'), progress=q('progress');
   const connect=q('[data-connect]'),close=q('[data-close]');
@@ -70,9 +70,9 @@ async function open(snapshot){
         plan={full:true,mac};say(`已识别 S31 ${mac}。将重新安装基础包并清除机内设置。`);
       }else{
         const slot=selectedSlot(protectedBefore.slice(0x5000,0x7000));
-        const current=identity(await read(slot.address,512,'核对当前应用身份'));
         const app=bundle.parts.find(p=>p.name==='firmware.bin');require(Math.ceil(app.data.length/4096)*4096<=slot.size,'固件超过启动槽容量。');
-        plan={full:false,slot,mac,current};say(`已识别 ${current}，正在刷入 ${snapshot.manifest.version}。`);
+        // 用户要求不检查当前固件品牌，按已确认的启动槽直接更新。 / Update the confirmed boot slot without inspecting the current firmware brand.
+        plan={full:false,slot,mac};say(`已连接 S31，正在刷入 ${snapshot.manifest.version}。`);
       }
       append(`不创建刷前备份；机内设置：${clear.checked?'清除':'保留'}，TF 文件保留。`);
       checking=false;await flashPlan();

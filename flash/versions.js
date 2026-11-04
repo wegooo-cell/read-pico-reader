@@ -77,7 +77,7 @@
     document.getElementById('usb-guide').href=device==='metalio'?'./metalio/#usb':'./manual/#first-use';
     document.getElementById('tf-guide').href=device==='metalio'?'./metalio/#tf':'./manual/#update';
     document.getElementById('tf-instructions').replaceChildren(document.createTextNode('升级文件名保持 '),Object.assign(document.createElement('code'),{textContent:model.filename}),document.createTextNode('，放入 TF 卡根目录。这是应用升级包，不能代替完整 USB 包。'));
-    document.getElementById('usb-instructions').textContent=device==='metalio'?'首次安装必须从 Metalio 官方固件刷入；其他第三方固件请先恢复官方系统。进入 BOOT 下载模式再连接，关闭其他占用串口的页面。已有兼容 kiikoread 默认保留设置；校验后直接刷入，不做刷前备份，写后由设备核验 MD5。':'安装时保留数据：不要勾选「擦除设备」。无法连接时，先在设置中进入 BOOT 模式。';
+    document.getElementById('usb-instructions').textContent=device==='metalio'?'支持直接从当前 S31 固件刷入，无需先恢复官方系统。进入 BOOT 下载模式再连接，关闭其他占用串口的页面。兼容分区默认保留设置；校验后直接刷入，不做刷前备份，写后由设备核验 MD5。':'安装时保留数据：不要勾选「擦除设备」。无法连接时，先在设置中进入 BOOT 模式。';
     document.getElementById('ota-instructions').textContent=device==='metalio'?'先通过 USB 或 TF 卡安装兼容的 Metalio 基础包，再连接 Wi-Fi，在「设置 → 系统升级」检查更新。GitHub Pages 优先，官网备用；保留设置与 TF 文件。':'连接 Wi-Fi，在「设置 → 系统升级」检查更新。GitHub Pages 优先，官网作为备用来源；旧版本先按兼容说明升级基础包。';
     hint.textContent='设备、版本与刷机包一一对应。安装前会校验固件身份与完整性。';
     releases=new Map([[model.manifest,{manifest:model.manifest}]]);

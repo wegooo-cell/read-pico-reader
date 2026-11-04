@@ -6,8 +6,8 @@ Both boards cover 7668 characters across embedded outlines and supplements, incl
 正文先使用所选字体已有的字形，缺字才查内建轮廓和补字。借用字形不改变字体选择，冷缓存排版与实际绘制使用相同字宽。界面和正文解压工作区独立，内存不足时保留下次重试机会。
 Reader text prefers the selected face, then borrows embedded outlines or supplements for missing glyphs. Borrowing preserves face selection and matching cold-layout/raster advances. UI and reader decode workspaces are independent; transient allocation failures remain retryable.
 
-Pico 使用 24px、16 级覆盖率补字和逐字墨量校正；S31 使用同源、同字符的紧凑单色补字，缩放沿用其覆盖率插值路径，以适应现有应用分区。两板保留原有 1263 个轮廓字符及 5637 个界面补字的像素与度量。大字号补字细节受原始位图分辨率限制。
-Pico uses 24px, 16-level coverage with per-glyph ink calibration. S31 uses compact monochrome supplements from the same source and character set, scaled by its existing coverage interpolation within its application partition. Preserve all original 1263 outline characters and 5637 UI supplement records. Large supplemental glyph detail is limited by the bitmap resolution.
+Pico 与 S31 使用相同的 24px、16 级覆盖率补字、四点插值和逐字墨量校正；补字字宽与边界按源字体计算。两板保留原有 1263 个轮廓字符及全部 6030 个界面补字的像素与度量。S31 移除不再参与显示的旧锁屏原图，为灰阶字库腾出空间，保留现有应用分区与锁屏样式。大字号补字细节受原始位图分辨率限制。
+Both boards use identical 24px,16-level coverage, four-tap interpolation and per-glyph ink calibration, with source-font advances and bounds. Preserve all1263 original outlines and all6030 legacy UI supplement pixels/metrics. S31 drops unused legacy lock artwork to retain its application partition and current lock styles. Large supplemental glyph detail remains limited by the bitmap resolution.
 
 字体来源为 Noto Sans SC Medium，适用 [SIL OFL](../main/assets/OFL-Noto.txt)。字符表来源及 Unicode 许可见 [常用字表](../tools/fixtures/reader-common-6500.txt) 与 [Unicode 许可](../licenses/Unicode-3.0.txt)。
 Fonts derive from Noto Sans SC Medium under the linked SIL OFL. Character-list provenance and the Unicode license are linked above.
@@ -18,8 +18,8 @@ Reproduce assets using static Medium with the SHA-256 above and FontTools 4.68.0
 ```sh
 python3 tools/gen_pico_builtin_font.py --src /path/to/medium.ttf
 cp boards/pico/src/main/assets/builtin.ttf boards/metalio47/src/main/assets/builtin.ttf
-python3 tools/gen_reader_hanzi_aa.py --src /path/to/medium.ttf \
-  --mono-out boards/metalio47/src/main/assets/ui-hanzi.bin
+python3 tools/gen_reader_hanzi_aa.py --src /path/to/medium.ttf
+cp boards/pico/src/main/assets/ui-hanzi.bin boards/metalio47/src/main/assets/ui-hanzi.bin
 ```
 
 两板测试视图运行 `pico_builtin_font_host_test.py`、`reader_hanzi_fallback_host_test.py` 和 `ui_hanzi_host_test.py`，验证字符覆盖、原轮廓像素、界面补字、字宽、字体回退及内存失败恢复。

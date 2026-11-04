@@ -12,7 +12,7 @@ ROOT=Path(__file__).resolve().parents[1]
 a=argparse.ArgumentParser();a.add_argument('--font',type=Path,default=ROOT/'main/assets/builtin.ttf');a.add_argument('--background',type=Path);a.add_argument('--output',type=Path);args=a.parse_args()
 with tempfile.TemporaryDirectory() as folder:
  p=Path(folder)
- (p/'esp_err.h').write_text('#pragma once\ntypedef int esp_err_t;\n#define ESP_OK 0\n#define ESP_FAIL -1\n#define ESP_ERR_NO_MEM 0x101\n#define ESP_ERR_NOT_FOUND 0x105\n#define ESP_ERR_INVALID_RESPONSE 0x108\n')
+ (p/'esp_err.h').write_text('#pragma once\ntypedef int esp_err_t;\n#define ESP_OK 0\n#define ESP_FAIL -1\n#define ESP_ERR_NO_MEM 0x101\n#define ESP_ERR_NOT_FOUND 0x105\n#define ESP_ERR_INVALID_STATE 0x103\n#define ESP_ERR_INVALID_RESPONSE 0x108\n')
  (p/'esp_log.h').write_text('#pragma once\nstatic inline void host_log(const char *tag,const char *fmt,...){(void)tag;(void)fmt;}\n#define ESP_LOGI(...) host_log(__VA_ARGS__)\n#define ESP_LOGW(...) host_log(__VA_ARGS__)\n#define ESP_LOGE(...) host_log(__VA_ARGS__)\n')
  (p/'esp_timer.h').write_text('#pragma once\n#include <stdint.h>\nstatic inline int64_t esp_timer_get_time(void){return 0;}\n')
  (p/'esp_heap_caps.h').write_text('''#pragma once

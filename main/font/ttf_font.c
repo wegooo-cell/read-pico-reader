@@ -14,13 +14,15 @@
  * User revision: titles reuse the active outlines/cache; coverage checks read the existing cmap without switching or loading another face.
  * 用户修订：正文缺字按需复用内建轮廓与现有补字，原字体优先；字宽和绘制采用相同回退度量。
  * User revision: missing body glyphs reuse embedded outlines/supplements on demand; native glyphs take priority and layout shares raster advances.
+ * 用户修订：S31补字对齐Pico的16级覆盖率、源字宽与逐字墨量校正，保留其独立装载和缓存策略。
+ * User revision: S31 supplements match Pico coverage, advances and ink calibration, retaining detached loading and cache policy.
  */
 
 #include "ttf_font.h"
 #include "text_glue.h"
 #include "../kiiko_board_config.h"
 #include "ttf_stroke_filter.h"
-#include "ui_hanzi_scale.h"
+#include "ui_hanzi_aa_scale.h"
 
 #include <dirent.h>
 #if KIIKO_BOARD_METALIO47
@@ -272,7 +274,20 @@ typedef struct {
 } ttf_slot_t;
 
 static ttf_slot_t s_slots[TTF_FONT_SLOTS];
+#if KIIKO_BOARD_METALIO47
+// 只有独立装载游标按线程保存；现有渲染游标和绘制锁契约不变。
+// Only the detached loader cursor is thread-local; retain the existing render cursor/lock contract.
+static ttf_slot_t *s_main_cur = &s_slots[TTF_FONT_SLOT_SYSTEM];
+static _Thread_local ttf_slot_t *s_loading;
+static _Thread_local const atomic_bool *s_load_cancel;
+static inline ttf_slot_t **font_cursor(void) { return s_loading ? &s_loading : &s_main_cur; }
+#define s_cur (*font_cursor())
+#define TTF_BENCH_ACTIVE (!s_loading && bench_on)
+static bool font_load_cancelled(void) { return s_load_cancel && atomic_load(s_load_cancel); }
+#else
 static ttf_slot_t* s_cur = &s_slots[TTF_FONT_SLOT_SYSTEM];
+#define TTF_BENCH_ACTIVE bench_on
+#endif
 static int s_cur_index = TTF_FONT_SLOT_SYSTEM;
 
 // 下面这组宏让 2000 多行现有函数体一行不改地作用在“当前槽”上。新增代码请直接写
@@ -364,13 +379,16 @@ static void put_be32(uint8_t* p, uint32_t v) {
 }
 
 static bool io_read_raw(uint32_t offset, void* dst, size_t n) {
+#if KIIKO_BOARD_METALIO47
+    if (font_load_cancelled()) return false;
+#endif
     if (font_mem != NULL) {
         if ((uint64_t)offset + n > font_mem_len) return false;
         memcpy(dst, font_mem + offset, n);
         return true;
     }
     if (font_fd < 0) return false;
-    int64_t t0 = bench_on ? esp_timer_get_time() : 0;
+    int64_t t0 = TTF_BENCH_ACTIVE ? esp_timer_get_time() : 0;
     bool ok = false;
     do {
         if (font_file_pos != offset) {
@@ -383,6 +401,9 @@ static bool io_read_raw(uint32_t offset, void* dst, size_t n) {
         uint8_t* out = dst;
         size_t done = 0;
         while (done < n) {
+#if KIIKO_BOARD_METALIO47
+            if (font_load_cancelled()) break;
+#endif
             size_t chunk = n - done;
             if (chunk > 16384) chunk = 16384;
             ssize_t got = read(font_fd, out + done, chunk);
@@ -395,7 +416,7 @@ static bool io_read_raw(uint32_t offset, void* dst, size_t n) {
         }
         ok = done == n;
     } while (0);
-    if (bench_on) bench.read_us += esp_timer_get_time() - t0;
+    if (TTF_BENCH_ACTIVE) bench.read_us += esp_timer_get_time() - t0;
     return ok;
 }
 
@@ -489,18 +510,21 @@ static int io_victim(void) {
 }
 
 static bool io_load_block(uint32_t base) {
+#if KIIKO_BOARD_METALIO47
+    if (font_load_cancelled()) return false;
+#endif
     if (io_find(base) >= 0) return true;
     if (io_data == NULL && !io_ensure()) return false;
     int slot = io_victim();
     uint8_t* dst = io_data + (size_t)slot * TTF_IO_BLOCK;
-    int64_t t0 = bench_on ? esp_timer_get_time() : 0;
+    int64_t t0 = TTF_BENCH_ACTIVE ? esp_timer_get_time() : 0;
     if (lseek(font_fd, (off_t)base, SEEK_SET) < 0) {
         font_file_pos = UINT32_MAX;
-        if (bench_on) bench.read_us += esp_timer_get_time() - t0;
+        if (TTF_BENCH_ACTIVE) bench.read_us += esp_timer_get_time() - t0;
         return false;
     }
     ssize_t got = read(font_fd, dst, TTF_IO_BLOCK);
-    if (bench_on) bench.read_us += esp_timer_get_time() - t0;
+    if (TTF_BENCH_ACTIVE) bench.read_us += esp_timer_get_time() - t0;
     if (got <= 0) {
         font_file_pos = UINT32_MAX;
         return false;
@@ -513,6 +537,9 @@ static bool io_load_block(uint32_t base) {
 }
 
 static bool file_read_at(uint32_t offset, void* dst, size_t n) {
+#if KIIKO_BOARD_METALIO47
+    if (font_load_cancelled()) return false;
+#endif
     if (n == 0) return true;
     if (font_mem != NULL) {
         if (io_from_map(offset, n, dst)) return true;
@@ -1905,7 +1932,11 @@ static void cache_reset(void) {
     }
     lru_head = NULL;
     lru_tail = NULL;
+#if KIIKO_BOARD_METALIO47
+    if (cache_bytes) s_cache_total -= cache_bytes;
+#else
     s_cache_total -= cache_bytes;
+#endif
     cache_bytes = 0;
     if (n > 0) {
         ESP_LOGI(TAG, "glyph cache dropped %u entries", (unsigned)n);
@@ -2013,20 +2044,26 @@ static int reader_missing_advance(uint32_t cp,int px) {
         int advance,lsb;stbtt_GetGlyphHMetrics(builtin,gid,&advance,&lsb);
         return (int)lroundf(advance*stbtt_ScaleForPixelHeight(builtin,(float)px));
     }
-    return ui_hanzi_has(cp)?(UI_HANZI_ADVANCE*px+UI_HANZI_BASE_PX/2)/UI_HANZI_BASE_PX:-1;
+    if(ui_hanzi_has(cp)&&builtin){
+        int han=stbtt_FindGlyphIndex(builtin,0x4e00),advance,lsb;
+        if(han){stbtt_GetGlyphHMetrics(builtin,han,&advance,&lsb);return (int)lroundf(advance*stbtt_ScaleForPixelHeight(builtin,(float)px));}
+    }
+    return -1;
 }
+static uint8_t s_cover[256];
+static void ttf_cover_lut_init(void);
 static glyph_entry_t* rasterize_glyph(uint32_t codepoint, int pixel_height) {
     int gid = stbtt_FindGlyphIndex(&font_info, (int)codepoint);
     const stbtt_fontinfo *raster_font=&font_info;
     bool borrowed=false,supplemental=false;
-    uint8_t extra[UI_HANZI_RECORD];
+    uint8_t extra[UI_HANZI_AA_RECORD];
     if (!gid) {
         const stbtt_fontinfo *builtin=reader_builtin_fallback();
         int fallback=builtin?stbtt_FindGlyphIndex(builtin,(int)codepoint):0;
         if (fallback) { raster_font=builtin;gid=fallback;borrowed=true; }
         else if (ui_hanzi_has(codepoint)) {
             // 内存不足时下次重试，不把方块缓存成该字。/ Retry after memory pressure; never cache .notdef for this character.
-            if (!ui_hanzi_get_cached(&s_reader_hanzi,codepoint,extra)) return NULL;
+            if (!ui_hanzi_get_aa_cached(&s_reader_hanzi,codepoint,extra)) return NULL;
             supplemental=true;
         }
     }
@@ -2035,10 +2072,7 @@ static glyph_entry_t* rasterize_glyph(uint32_t codepoint, int pixel_height) {
     float scale = stbtt_ScaleForPixelHeight(raster_font, (float)pixel_height);
     int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
     if (supplemental) {
-        x0=(int)floorf((int8_t)extra[0]*(float)pixel_height/UI_HANZI_BASE_PX);
-        y0=(int)floorf((int8_t)extra[1]*(float)pixel_height/UI_HANZI_BASE_PX);
-        x1=x0+(extra[2]*pixel_height+UI_HANZI_BASE_PX-1)/UI_HANZI_BASE_PX;
-        y1=y0+(extra[3]*pixel_height+UI_HANZI_BASE_PX-1)/UI_HANZI_BASE_PX;
+        ui_hanzi_aa_bounds(extra,pixel_height,&x0,&y0,&x1,&y1);
     } else stbtt_GetGlyphBitmapBox(raster_font, gid, scale, scale, &x0, &y0, &x1, &y1);
 
     int width = x1 - x0;
@@ -2068,8 +2102,8 @@ static glyph_entry_t* rasterize_glyph(uint32_t codepoint, int pixel_height) {
             return NULL;
         }
         if (supplemental) {
-            for (int y=0;y<height;++y)for(int x=0;x<width;++x)
-                entry->bitmap[y*width+x]=ui_hanzi_coverage(extra,width,height,x,y);
+            ttf_cover_lut_init();
+            ui_hanzi_aa_raster(extra,pixel_height,x0,y0,width,height,entry->bitmap,s_cover);
         } else stbtt_MakeGlyphBitmap(
             raster_font, entry->bitmap, width, height, width, scale, scale, gid
         );
@@ -2124,16 +2158,16 @@ static glyph_entry_t* rasterize_glyph(uint32_t codepoint, int pixel_height) {
 static const glyph_entry_t* get_glyph(uint32_t codepoint, int pixel_height) {
     if (!font_ready) return NULL;
     pixel_height = clamp_px(pixel_height);
-    if (bench_on) bench.glyphs++;
+    if (TTF_BENCH_ACTIVE) bench.glyphs++;
     glyph_entry_t* entry = cache_lookup(codepoint, pixel_height);
     if (entry != NULL) {
-        if (bench_on) bench.hits++;
+        if (TTF_BENCH_ACTIVE) bench.hits++;
         return entry;
     }
-    if (bench_on) bench.misses++;
-    int64_t t0 = bench_on ? esp_timer_get_time() : 0;
+    if (TTF_BENCH_ACTIVE) bench.misses++;
+    int64_t t0 = TTF_BENCH_ACTIVE ? esp_timer_get_time() : 0;
     entry = rasterize_glyph(codepoint, pixel_height);
-    if (bench_on) bench.raster_us += esp_timer_get_time() - t0;
+    if (TTF_BENCH_ACTIVE) bench.raster_us += esp_timer_get_time() - t0;
     return entry;
 }
 
@@ -2750,6 +2784,69 @@ esp_err_t ttf_font_open(const char* path) {
 #if KIIKO_BOARD_METALIO47
 }
 
+struct ttf_font_prepared { ttf_slot_t face, scratch; };
+static void unload_prepared_here(void) {
+    unload_here();
+    // 普通槽保留IO缓存供复用；独立对象销毁时必须连同归还。
+    // Resident slots retain IO caches; detached-object destruction must release those too.
+    heap_caps_free(s_cur->f_io_data); s_cur->f_io_data = NULL;
+    heap_caps_free(s_cur->f_io_run_buf); s_cur->f_io_run_buf = NULL;
+}
+
+
+ttf_font_prepared_t *ttf_font_prepare(const char *path, const atomic_bool *cancel, esp_err_t *error) {
+    *error = ESP_ERR_NO_MEM;
+    ttf_font_prepared_t *prepared = heap_caps_calloc(1, sizeof(*prepared), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!prepared) return NULL;
+    slot_init(&prepared->face);
+    s_loading = &prepared->face;
+    s_load_cancel = cancel;
+    // 装载时不抢占旧字库的整表映射空间，发布后沿已有分块缓存读取。
+    // Avoid duplicating live whole-table maps; after publication use the existing block cache.
+    s_loading->f_preview = true;
+    struct stat before = {0}, after = {0};
+    bool builtin = ttf_font_path_is_builtin(path);
+    if (font_load_cancelled()) *error = ESP_ERR_INVALID_STATE;
+    else if (builtin) {
+        s_loading->f_mem = builtin_ttf_start;
+        s_loading->f_mem_len = (uint32_t)(builtin_ttf_end - builtin_ttf_start);
+        strlcpy(s_loading->f_path, TTF_FONT_BUILTIN, sizeof(s_loading->f_path));
+        *error = load_opened_font();
+    } else if (stat(path, &before) || !S_ISREG(before.st_mode) || before.st_size <= 0) *error = ESP_ERR_NOT_FOUND;
+    else {
+        s_loading->f_fd = open_font_file(path);
+        *error = s_loading->f_fd < 0 ? ESP_ERR_NOT_FOUND : load_opened_font();
+        if (*error == ESP_OK && (stat(path, &after) || before.st_size != after.st_size ||
+                before.st_mtime != after.st_mtime)) *error = ESP_ERR_INVALID_STATE;
+    }
+    if (font_load_cancelled()) *error = ESP_ERR_INVALID_STATE;
+    s_loading->f_preview = false;
+    s_load_cancel = NULL;
+    if (*error != ESP_OK) {
+        unload_prepared_here();
+        s_loading = NULL;
+        heap_caps_free(prepared);
+        return NULL;
+    }
+    s_loading = NULL;
+    return prepared;
+}
+
+void ttf_font_publish(ttf_font_prepared_t *prepared) {
+    // 直接交换已分配的结构，不在提交点分配或释放字体。/ Swap allocated state without allocation or retirement at publication.
+    memcpy(&prepared->scratch, &s_slots[TTF_FONT_SLOT_SYSTEM], sizeof(ttf_slot_t));
+    memcpy(&s_slots[TTF_FONT_SLOT_SYSTEM], &prepared->face, sizeof(ttf_slot_t));
+    memcpy(&prepared->face, &prepared->scratch, sizeof(ttf_slot_t));
+}
+void ttf_font_prepared_free(ttf_font_prepared_t *prepared) {
+    if (!prepared) return;
+    ttf_slot_t *keep = s_loading;
+    s_loading = &prepared->face;
+    unload_prepared_here();
+    s_loading = keep;
+    heap_caps_free(prepared);
+}
+
 // 名称预览只借空闲书内字体槽，不替换活动阅读字体；槽满就由界面回退普通标签。
 // Name previews borrow an empty embedded slot without replacing the reader face; full slots use a UI label.
 bool ttf_font_draw_preview(const char *path, uint8_t *fb, int x, int y, int px,
@@ -2862,9 +2959,9 @@ int ttf_text_left_bearing_px(int pixel_height, const char* text) {
             int y0,x1,y1;float scale=stbtt_ScaleForPixelHeight(builtin,(float)pixel_height);
             stbtt_GetGlyphBitmapBox(builtin,fallback,scale,scale,&x0,&y0,&x1,&y1);
         } else {
-            uint8_t record[UI_HANZI_RECORD];
-            if (!ui_hanzi_get_cached(&s_reader_hanzi,cp,record)) return 0;
-            x0=(int)floorf((int8_t)record[0]*(float)pixel_height/UI_HANZI_BASE_PX);
+            uint8_t record[UI_HANZI_AA_RECORD];int y0,x1,y1;
+            if (!ui_hanzi_get_aa_cached(&s_reader_hanzi,cp,record)) return 0;
+            ui_hanzi_aa_bounds(record,pixel_height,&x0,&y0,&x1,&y1);
         }
         int stroke=s_stroke_adjust<0?-s_stroke_adjust:s_stroke_adjust;
         return x0-(stroke+15)/16;
@@ -2874,7 +2971,6 @@ int ttf_text_left_bearing_px(int pixel_height, const char* text) {
 }
 
 // 线性抗锯齿的中间灰在这块屏上偏亮。按 TTF_COVER_GAMMA 抬覆盖率，半透明边缘更深。
-static uint8_t s_cover[256];
 static bool s_antialias = true;
 void ttf_set_antialias(bool enabled) { s_antialias = enabled; }
 bool ttf_get_antialias(void) { return s_antialias; }

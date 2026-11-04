@@ -8,6 +8,26 @@ Agent entry for this tree. Humans can read it too. Product overview, hardware, p
 
 Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Taking over an in-flight task: read [docs/HANDOFF.md](docs/HANDOFF.md) first.
 
+## 双板正式发布 / Dual-board official publication
+
+用户2026-11-04明确要求推送Pico与S31在线刷机。本轮正式发布Pico rc105/S31 rc110：包括当前全部已验证本地功能，S31以8845为基准，Pico保留原灰阶字集与Moku波形。同步源码、GitHub Release、kiikoread.com刷机/TF下载及既有Pages OTA；归档原Pico rc104/S31 rc109并保留所有历史原字节。此授权取代此前对应仅本地、不上传/发布限制；不自动刷写设备、不修改供电/VCOM/分区。
+User explicitly authorizes official Pico rc105/S31 rc110 publication with current validated features, S31 based on8845 and Pico retaining its grayscale/Moku baseline. Synchronize source, Releases,kiikoread.com web/TF and existing Pages OTA. Archive original rc104/rc109 and preserve all historic bytes. This supersedes earlier local-only restrictions, without authorizing device flashes or changing power/VCOM/partitions.
+
+## S31同步灰阶补字 / S31 grayscale supplement parity
+
+用户2026-11-04要求把表中Pico改动同步S31：7668字覆盖/默认全屏/阅读线排版/缺字回退已具备；本轮S31也采用与Pico逐字节一致的PIF4、精确源字宽、16级灰阶、四点插值和逐字墨量校正。只移植补字路径，保留S31后台换字体、唤醒恢复、缓存预算、最新边缘/USB/JPEG优化和Moku波形。允许移除S31仅为旧尺寸检查而链接、已不参与显示的锁屏原图，改为真实UI/面板尺寸检查，为字库腾出空间；保留所有锁屏样式/界面像素、分区及Pico。先交付新本地测试页，不上传/发布官网。此明确要求取代此前S31仅PIF1的限制。
+User requests Pico feature parity on S31. The shared7668 coverage/fullscreen/guide/fallback already exist; now use the identical Pico PIF4 bytes, exact advances,16-level coverage, four-tap interpolation and per-glyph ink calibration. Port only supplements, retaining S31 detached loading/recovery/cache budgets, latest edge/USB/JPEG work and Moku waveforms. Remove obsolete S31 splash art linked solely for a size check, replacing it with a real canvas/panel check; retain lock styles/UI pixels, partitions and Pico. Local delivery only; supersedes the earlier S31 PIF1 restriction.
+
+## S31本地官方优化 / Local S31 driver and lifecycle refinements
+
+用户2026-11-04授权采用官方行首数据与启动时序修正，核实并保持唤醒物理全屏目标清白，优化USB排空后卸载、后台换字体和有界渐进JPEG分带/取消。仅交付S31本地刷机页；保留Pico、Moku阅读波形、SD降频及自动恢复，不上传或发布官网。此授权放开对应S31驱动/字体/JPEG生命周期，不更换面板LUT或供电顺序。
+User authorizes S31 row/start alignment, physical wake-target clearing, drained USB teardown, staged background font replacement and bounded cancellable progressive JPEG. Local S31 delivery only; retain Pico, Moku waveforms, SD compatibility/recovery, panel LUTs and power sequencing.
+
+## S31直接刷机 / Direct S31 installation
+
+用户2026-11-04要求S31刷机不识别旧固件是否为kiikoread，直接更新。取消旧应用品牌/项目名读取门禁，保留目标固件校验、芯片/分区/启动槽和数据保护；已授权刷入连接的S31本地测试包，默认保留设置与进度。此要求取代旧的“第三方固件先恢复官方”限制；本次不发布官网。
+User2026-11-04 requests S31 installation regardless of existing firmware branding. Remove current-app brand/project reads while retaining target integrity,chip/layout/boot-slot checks and data protection. Flash the connected S31 local test with settings/progress retained. This supersedes the old official-firmware prerequisite; no website publication.
+
 ## 双板源码整合 / Dual-board source integration
 
 用户2026-11-04要求合并PR75，并将本地保留改动对齐Pico/S31后提交上传源码。保留PR76的Moku波形；两板同步默认全屏、阅读线按钮、缺字回退及7668字符覆盖。Pico保留16级补字与墨量校正；S31保留PIF1省空间补字及板级缓存/恢复路径。原1263轮廓与5637界面补字像素不变。32px黑白试验仅本地归档，不纳入本次上传；不发布官网、不刷设备。此授权取代以上功能此前仅本地、不上传及S31字库冻结的范围。

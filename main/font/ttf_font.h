@@ -75,6 +75,17 @@ esp_err_t ttf_font_init(void);
 esp_err_t ttf_font_open(const char* path);
 esp_err_t ttf_font_open_builtin(void);
 #if KIIKO_BOARD_METALIO47
+#include <stdatomic.h>
+typedef struct ttf_font_prepared ttf_font_prepared_t;
+/// 后台准备独立字体，失败不动活动槽；取消在每次文件读取前检查。
+/// Prepare an independent face off-thread without touching live slots; reads cooperate with cancellation.
+ttf_font_prepared_t *ttf_font_prepare(const char *path, const atomic_bool *cancel, esp_err_t *error);
+/// 持绘制锁交换新旧字体；对象随后持有旧字体，可再次交换回滚。
+/// Swap while holding the draw lock; the object retains the old face for rollback.
+void ttf_font_publish(ttf_font_prepared_t *prepared);
+/// 未发布对象可在后台释放，旧活动字体须在绘制锁内释放。
+/// Discard unpublished faces off-thread; retired live faces require the draw lock.
+void ttf_font_prepared_free(ttf_font_prepared_t *prepared);
 /// 名称预览复用活动字库或短借空槽；调用方持有绘制锁，无整份字体常驻，不覆盖书内槽。
 /// Draw a centered name using the active face or an empty temporary slot; caller holds the draw lock.
 bool ttf_font_draw_preview(const char *path, uint8_t *fb, int x, int y, int px,

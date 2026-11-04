@@ -12,6 +12,8 @@
 #include "book_lock_collage.h"
 #include "metalio_hw.h"
 #include <stdlib.h>
+#include <stdatomic.h>
+#include "device/usbd_pvt.h"
 #include "driver/sdmmc_host.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -31,6 +33,54 @@ static tinyusb_msc_storage_handle_t s_storage;
 static bool s_usb_ready, s_msc_ready;
 static bool s_active;
 static bool s_cleanup_pending;
+enum { USB_RUNNING, USB_DRAINING, USB_PARKED };
+static atomic_int s_usb_stop_state;
+static atomic_bool s_usb_park_queued;
+
+// 在USB任务内确认已接纳的事件全部退出，再停车；不强删持有SD锁的任务。
+// Acknowledge accepted events on the USB task before parking; never kill a task holding SD locks.
+static void park_usb_task(void *unused) {
+    (void)unused;
+    if (atomic_load(&s_usb_stop_state) != USB_DRAINING) {
+        atomic_store(&s_usb_park_queued, false);
+        // 超时与新请求交错时补发一次，避免丢失排空请求。
+        // Requeue a raced retry after clearing the stale callback's ownership.
+        if (atomic_load(&s_usb_stop_state) == USB_DRAINING && !atomic_exchange(&s_usb_park_queued, true))
+            usbd_defer_func(park_usb_task, NULL, false);
+        return;
+    }
+    if (tud_task_event_ready()) { usbd_defer_func(park_usb_task, NULL, false); return; }
+    int expected = USB_DRAINING;
+    if (atomic_compare_exchange_strong(&s_usb_stop_state, &expected, USB_PARKED)) {
+        atomic_store(&s_usb_park_queued, false);
+        vTaskSuspend(NULL);
+    } else {
+        atomic_store(&s_usb_park_queued, false);
+        if (atomic_load(&s_usb_stop_state) == USB_DRAINING && !atomic_exchange(&s_usb_park_queued, true))
+            usbd_defer_func(park_usb_task, NULL, false);
+    }
+}
+static esp_err_t quiesce_usb_task(void) {
+    if (atomic_load(&s_usb_stop_state) == USB_PARKED) return ESP_OK;
+    atomic_store(&s_usb_stop_state, USB_DRAINING);
+    tud_disconnect();
+    // 旧超时请求可能尚在USB队列；不能另加一个相互排不空的停车回调。
+    // A timed-out callback may still be queued; never create mutually requeued parking callbacks.
+    if (!atomic_exchange(&s_usb_park_queued, true)) usbd_defer_func(park_usb_task, NULL, false);
+    TickType_t start = xTaskGetTickCount();
+    while (atomic_load(&s_usb_stop_state) != USB_PARKED) {
+        if (xTaskGetTickCount() - start >= pdMS_TO_TICKS(2000)) {
+            int expected = USB_DRAINING;
+            if (atomic_compare_exchange_strong(&s_usb_stop_state, &expected, USB_RUNNING)) {
+                tud_connect();
+                s_cleanup_pending = false;
+                return ESP_ERR_TIMEOUT;
+            }
+        }
+        vTaskDelay(1);
+    }
+    return ESP_OK;
+}
 
 // S31的USJ/UTMI独立，GPIO36只切物理通路，不做S3共享PHY切换。
 // S31 USJ/UTMI are separate; GPIO36 switches the board route, not an S3 shared PHY.
@@ -101,14 +151,19 @@ esp_err_t usb_storage_stop(void) {
         return restore_serial_phy();
     }
     s_cleanup_pending = true;
-    // 先断开电脑并等待同步写回调结束，再释放 USB 存储对象。
-    // Disconnect and let the synchronous write callback finish before freeing USB storage.
-    if (s_usb_ready) {
-        tud_disconnect();
-        vTaskDelay(pdMS_TO_TICKS(150));
-    }
     esp_err_t err = ESP_OK;
     esp_err_t route_err;
+    // 先排空并拆USB任务，再删除MSC对象；失败保留卡、对象与清理状态供重试。
+    // Drain and remove the USB task before MSC objects; retain card/handles on failure for retry.
+    if (s_usb_ready) {
+        err = quiesce_usb_task();
+        if (err != ESP_OK) return err;
+        err = tinyusb_driver_uninstall();
+        if (err != ESP_OK) goto cleanup;
+        s_usb_ready = false;
+        atomic_store(&s_usb_stop_state, USB_RUNNING);
+        atomic_store(&s_usb_park_queued, false);
+    }
     for (int attempt = 0; s_storage && attempt < 20; ++attempt) {
         err = tinyusb_msc_delete_storage(s_storage);
         if (err == ESP_OK) { s_storage = NULL; break; }
@@ -116,11 +171,6 @@ esp_err_t usb_storage_stop(void) {
         vTaskDelay(pdMS_TO_TICKS(50));
     }
     if (s_storage) goto cleanup;
-    if (s_usb_ready) {
-        err = tinyusb_driver_uninstall();
-        if (err != ESP_OK) goto cleanup;
-        s_usb_ready = false;
-    }
     if (s_msc_ready) {
         err = tinyusb_msc_uninstall_driver();
         if (err != ESP_OK) goto cleanup;

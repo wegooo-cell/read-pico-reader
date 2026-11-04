@@ -11,7 +11,9 @@ static int test_hw_error,test_alloc_fail,test_allocs,test_engines,test_hw_calls;
 static int64_t test_time;
 static int64_t test_time_step;
 static int64_t esp_timer_get_time(void){test_time+=test_time_step;return test_time;}
-static void vTaskDelay(int ticks){assert(ticks==1);test_time+=1000;}
+static unsigned test_cancel_after_yields;
+static void vTaskDelay(int ticks){assert(ticks==1);test_time+=1000;
+ if(test_cancel_after_yields && !--test_cancel_after_yields)metalio_jpeg_cancel();}
 static size_t heap_caps_get_free_size(int caps){(void)caps;return test_free;}
 static size_t heap_caps_get_largest_free_block(int caps){(void)caps;return test_largest;}
 static void *heap_caps_malloc(size_t bytes,int caps){(void)caps;return malloc(bytes);}

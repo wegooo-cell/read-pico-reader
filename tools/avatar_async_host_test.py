@@ -23,6 +23,8 @@ typedef enum {UI_AVATAR_UNAVAILABLE=-1,UI_AVATAR_PENDING,UI_AVATAR_READY} ui_ava
 #define pdPASS 1
 typedef int portMUX_TYPE;
 static int64_t mono;
+static unsigned jpeg_cancels;
+static __attribute__((unused)) void metalio_jpeg_cancel(void){++jpeg_cancels;}
 static bool media_ready_for_jobs=true;
 static bool read_pico_sd_io_ready(void){return media_ready_for_jobs;}
 static unsigned book_store_revision(void){return 0;}
@@ -70,6 +72,8 @@ uint8_t pixels[82*82];
  puts("PASS: real avatar entry/poll does no file IO or joining; single worker/two bounded sizes, fast repeat navigation, stale-page/media results discarded, unmount ownership and OOM/decode/task failures safe");
 }
 '''
+if (root/'.kiiko-source-view.json').exists() and 'metalio47' in (root/'.kiiko-source-view.json').read_text():
+ unit=unit.replace(' puts("PASS:', ' assert(jpeg_cancels>0);\n puts("PASS:')
 with tempfile.TemporaryDirectory(prefix='kiiko-avatar-') as folder:
  c=Path(folder)/'test.c';binary=Path(folder)/'test';c.write_text(unit)
  subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined',str(c),'-o',str(binary)],check=True)

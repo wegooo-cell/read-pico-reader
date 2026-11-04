@@ -6,6 +6,10 @@
 #include "ui_locale_format.h"
 #endif
 #include "ui_avatar.h"
+#if KIIKO_BOARD_METALIO47
+#include "metalio_jpeg.h"
+#endif
+
 #include "ui_wallpaper.h"
 #include "book_store.h"
 #include "read_pico_sd.h"
@@ -56,20 +60,23 @@ void ui_avatar_invalidate(void) {
     uint8_t *old[2];
     portENTER_CRITICAL(&s_avatar_lock);
     ++s_generation;s_path[0]=0;
+#if KIIKO_BOARD_METALIO47
+    bool cancel=s_running;
+#endif
     for(int i=0;i<2;++i){old[i]=s_pixels[i];s_pixels[i]=NULL;s_states[i]=UI_AVATAR_UNAVAILABLE;}
     portEXIT_CRITICAL(&s_avatar_lock);
+#if KIIKO_BOARD_METALIO47
+    if(cancel)metalio_jpeg_cancel();
+#endif
     for(int i=0;i<2;++i)free(old[i]);
 }
 void ui_avatar_request(const char *path,int side) {
     int slot=slot_for(side);
     if(slot<0)return;
     if(!path||!path[0]||strnlen(path,sizeof(s_path))>=sizeof(s_path)){ui_avatar_invalidate();return;}
-#if KIIKO_BOARD_METALIO47
-#else
     // 重挂时不能因切页重新启动TF头像任务；挂载完成后由原页面重新请求。
     // Navigation must not restart TF avatar I/O during remount; media-ready callbacks request it again.
     if(!strncmp(path,"/sdcard/",8)&&!read_pico_sd_io_ready())return;
-#endif
     // 路径切换仅释放小图，不 stat/fopen；缓存校验和解码都留给任务。
     // Path changes release thumbnails only; stat/open/cache checks and decoding stay in the worker.
     const unsigned revision=book_store_revision();
@@ -94,6 +101,9 @@ ui_avatar_state_t ui_avatar_poll(const char *path,int side,uint8_t *pixels) {
     return state;
 }
 bool ui_avatar_quiesce(unsigned timeout_ms) {
+#if KIIKO_BOARD_METALIO47
+    metalio_jpeg_cancel();
+#endif
     portENTER_CRITICAL(&s_avatar_lock);
     s_paused=true;++s_generation;
     for(int i=0;i<2;++i)if(s_states[i]==UI_AVATAR_PENDING)s_states[i]=UI_AVATAR_UNAVAILABLE;

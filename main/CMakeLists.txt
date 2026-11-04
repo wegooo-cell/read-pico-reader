@@ -143,7 +143,6 @@ idf_component_register(
     REQUIRES ${main_requires}
     INCLUDE_DIRS "." "app" "apps" "font" "ui" "factory" "book"
     EMBED_FILES
-        "assets/lock_4bpp.bin"
         "assets/builtin.ttf"
         "assets/ui-hanzi.bin"
         "assets/display-test.png"
