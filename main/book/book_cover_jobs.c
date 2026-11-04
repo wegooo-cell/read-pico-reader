@@ -7,6 +7,9 @@
 #include "book_title.h"
 #include "ui_image_dither.h"
 #include "read_pico_sd.h"
+#if KIIKO_BOARD_METALIO47
+#include "metalio_jpeg.h"
+#endif
 
 #include <stdlib.h>
 #include <string.h>
@@ -131,8 +134,14 @@ unsigned book_cover_jobs_begin(void) {
     if(!s_jobs)s_jobs=heap_caps_calloc(BOOK_COVER_JOB_SLOTS,sizeof(*s_jobs),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     uint8_t *old[BOOK_COVER_JOB_SLOTS*2]={0};
     portENTER_CRITICAL(&s_lock);unsigned generation=++s_generation;s_paused=false;
+#if KIIKO_BOARD_METALIO47
+    bool cancel=s_running;
+#endif
     if(s_jobs)for(unsigned i=0;i<BOOK_COVER_JOB_SLOTS;++i){old[i*2]=s_jobs[i].result.pixels;old[i*2+1]=s_jobs[i].automatic;memset(&s_jobs[i],0,sizeof(s_jobs[i]));}
     portEXIT_CRITICAL(&s_lock);
+#if KIIKO_BOARD_METALIO47
+    if(cancel)metalio_jpeg_cancel();
+#endif
     for(unsigned i=0;i<BOOK_COVER_JOB_SLOTS*2;++i)free(old[i]);
     return generation;
 }
@@ -174,9 +183,15 @@ int book_cover_jobs_take(unsigned generation,unsigned slot,book_cover_result_t *
     return status;
 }
 void book_cover_jobs_cancel(unsigned generation) {
+#if KIIKO_BOARD_METALIO47
+    bool cancel=false;
+#endif
     uint8_t *old[BOOK_COVER_JOB_SLOTS*2]={0};
     portENTER_CRITICAL(&s_lock);
     if(generation==s_generation){
+#if KIIKO_BOARD_METALIO47
+        cancel=s_running;
+#endif
         ++s_generation;s_paused=true;
         if(s_jobs)for(unsigned i=0;i<BOOK_COVER_JOB_SLOTS;++i){
             old[i*2]=s_jobs[i].result.pixels;old[i*2+1]=s_jobs[i].automatic;
@@ -184,6 +199,9 @@ void book_cover_jobs_cancel(unsigned generation) {
         }
     }
     portEXIT_CRITICAL(&s_lock);
+#if KIIKO_BOARD_METALIO47
+    if(cancel)metalio_jpeg_cancel();
+#endif
     for(unsigned i=0;i<BOOK_COVER_JOB_SLOTS*2;++i)free(old[i]);
 }
 bool book_cover_jobs_quiesce(unsigned timeout_ms) {

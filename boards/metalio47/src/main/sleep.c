@@ -848,6 +848,12 @@ bool lock_pin_grace_active(void) {
     return (uint64_t)now-locked_at<(uint64_t)app_settings_pin_grace_minutes()*60u;
 }
 
+// 唤醒只清完整物理目标，不裁成UI区域，也不修改面板参考帧或增加全刷。
+// Clear the full physical wake target, without UI cropping, reference changes or an extra refresh.
+static void lock_clear_wake_target(EpdiyHighlevelState *hl) {
+    memset(epd_hl_get_framebuffer(hl), 0xFF, (size_t)(epd_width() / 2) * epd_height());
+}
+
 void enter_lock_and_sleep(
     EpdiyHighlevelState* hl, int64_t* ignore_until_ms, sc7a20h_handle_t acc, cst836u_handle_t touch,
     bool reader_background
@@ -958,7 +964,7 @@ void enter_lock_and_sleep(
     // 仅清目标画布，保留面板和真实参考帧；当前页接着单次重绘，无额外白屏。
     // Clear only the target canvas, retaining panel/reference history for the next page presentation.
     read_pico_pmu_drain_events();
-    epd_hl_set_all_white(hl);
+    lock_clear_wake_target(hl);
     read_pico_pmu_drain_events();
     if (ignore_until_ms) {
         *ignore_until_ms = esp_timer_get_time() / 1000 + APP_LOCK_IGNORE_BOOT_MS;

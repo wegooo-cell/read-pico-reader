@@ -1,12 +1,6 @@
 /* 中文：只解析 S31 分区和已确认启动记录，不访问硬件。 / English: Parse only S31 layouts and confirmed boot records without hardware access. */
 export function require(condition,message){if(!condition)throw Error(message);}
 export function equal(a,b){return a.length===b.length&&a.every((v,i)=>v===b[i]);}
-export function identity(data){
-  const v=new DataView(data.buffer,data.byteOffset,data.byteLength);
-  require(data.length>=288&&data[0]===0xe9&&v.getUint16(12,true)===32&&v.getUint32(32,true)===0xabcd5432,'设备当前应用不是 Metalio S31 kiikoread。');
-  const field=at=>{const raw=data.slice(at,at+32);require(raw.includes(0),'当前应用标识损坏。');return new TextDecoder().decode(raw).split('\0')[0];};
-  require(field(80)==='Kiikoread_Metalio_S31','设备当前应用不是 Metalio 版 kiikoread。');return field(48);
-}
 export function partitionTable(data){
   require(data.length>=0xc00,'分区表不完整。');
   const expected=[['nvs',1,2,0x9000,0x4000],['otadata',1,0,0xd000,0x2000],['phy_init',1,1,0xf000,0x1000],['ota_0',0,16,0x10000,0x500000],['ota_1',0,17,0x510000,0x500000],['storage',1,0x81,0xa10000,0x5e0000],['coredump',1,3,0xff0000,0x10000]];

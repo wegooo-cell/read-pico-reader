@@ -9,7 +9,7 @@ from font_hanzi_host_support import subset_without_xing
 with tempfile.TemporaryDirectory(prefix='title-glyph-') as folder:
  w=Path(folder);font=args.font
  if font is None:font=w/'subset.ttf';font.write_bytes(subset_without_xing((ROOT/'main/assets/builtin.ttf').read_bytes()))
- (w/'esp_err.h').write_text('#pragma once\ntypedef int esp_err_t;\n#define ESP_OK 0\n#define ESP_FAIL -1\n#define ESP_ERR_NO_MEM 0x101\n#define ESP_ERR_NOT_FOUND 0x105\n#define ESP_ERR_INVALID_RESPONSE 0x108\n')
+ (w/'esp_err.h').write_text('#pragma once\ntypedef int esp_err_t;\n#define ESP_OK 0\n#define ESP_FAIL -1\n#define ESP_ERR_NO_MEM 0x101\n#define ESP_ERR_NOT_FOUND 0x105\n#define ESP_ERR_INVALID_STATE 0x103\n#define ESP_ERR_INVALID_RESPONSE 0x108\n')
  (w/'esp_log.h').write_text('#pragma once\nstatic inline void test_log(const char*t,const char*f,...){(void)t;(void)f;}\n#define ESP_LOGI(...) test_log(__VA_ARGS__)\n#define ESP_LOGW(...) test_log(__VA_ARGS__)\n#define ESP_LOGE(...) test_log(__VA_ARGS__)\n')
  (w/'esp_timer.h').write_text('#pragma once\n#include <stdint.h>\nstatic inline int64_t esp_timer_get_time(void){return 0;}\n')
  (w/'esp_heap_caps.h').write_text('#pragma once\n#include <stdlib.h>\n#define MALLOC_CAP_SPIRAM 1\n#define MALLOC_CAP_8BIT 2\nstatic inline void *heap_caps_malloc(size_t n,int c){(void)c;return malloc(n);}\nstatic inline void *heap_caps_calloc(size_t n,size_t s,int c){(void)c;return calloc(n,s);}\nstatic inline void heap_caps_free(void*p){free(p);}\nstatic inline size_t heap_caps_get_free_size(int c){(void)c;return 16u*1024u*1024u;}\nstatic inline size_t heap_caps_get_largest_free_block(int c){(void)c;return 16u*1024u*1024u;}\n')

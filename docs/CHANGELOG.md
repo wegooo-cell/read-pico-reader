@@ -1,6 +1,24 @@
 # 版本变更 / Changelog
 
+## Pico 0.3.3-rc105 / Metalio S31 0.3.3-rc110 — 2026-11-04
+
+- 两板内建覆盖7668字符，正文缺字回退、16级灰阶补字、缩放边缘及逐字墨量校正；保留系统字形与导入字体。支持默认全屏、紧凑阅读线按钮和稳定的上下操作栏/分页，修复书架分页箭头。
+  Both boards cover7668 characters with missing-glyph fallback,16-level supplements, scaled-edge and per-glyph ink calibration, retaining UI and imported faces. Include Default fullscreen, compact guide controls, stable reader chrome/pagination and shelf paging fixes.
+- 保留已合并的Pico阅读裁剪及Moku双板刷新方案。S31同步行首/启动对齐、完整物理唤醒目标清理、USB排空后卸载、后台换字体及有界渐进JPEG；保留TF降频兼容/自动恢复、唤醒字体恢复、路由器传书优化和保持浅睡。
+  Preserve merged Pico crop fixes and Moku refresh policies. S31 adds row/start alignment, physical wake-target clearing, drained USB teardown, detached font replacement and bounded progressive JPEG, retaining SD fallback/recovery, wake-font recovery, router transfer work and Keep-light sleep.
+- 官网USB、TF及联网OTA同步发布；保留原Pico rc104/S31 rc109刷机与下载入口、所有历史字节及现有分区。默认保留设置与进度；S31刷机不再检查旧固件品牌。
+  Publish matching web/TF/OTA builds, retaining original rc104/rc109 install/download entries, historic bytes and partitions. Preserve settings/progress by default; S31 no longer checks current-firmware branding.
+
 ## 本地测试 / Local test — 2026-11-04
+
+- S31内建补字对齐Pico：同样7668字覆盖、16级灰阶、源字宽、缩放边缘与逐字墨量校正，保留全部界面字形、原生/外置字体和既有刷新方案。移除仅用于旧尺寸检查的未使用锁屏位图，沿用原分区及锁屏样式，仅本地测试。
+  Align S31 supplements with Pico's7668-character coverage,16-level gray, source advances, scaled edges and per-glyph ink calibration. Retain UI glyphs,native/imported faces and refresh policies; remove unused lock art formerly linked for a size check, preserving partitions and lock styles. Local test only.
+
+- S31采用行首像素与启动时序对齐，唤醒重绘覆盖完整物理边缘；USB退出确认回调排空后再卸载，失败保留资源供重试。阅读字体后台准备、提交失败保留旧字库；渐进JPEG有界分带，必要时使用自有TF临时文件并协作取消。保留既有阅读波形、TF兼容恢复及Pico，仅本地测试。
+  S31 aligns row pixels/start timing and clears the full physical wake target. Drain USB callbacks before teardown, retaining resources on failure. Prepare reader fonts off-thread with old-face rollback; progressive JPEG uses bounded bands, owned SD backing when needed and cooperative cancellation. Preserve reader waveforms, SD compatibility/recovery and Pico; local test only.
+
+- S31网页刷机取消旧应用品牌检查，可直接从当前固件更新；保留目标固件校验、机型/分区/启动槽检查和默认数据保护。
+  S31 web installation accepts the current firmware without a brand check, retaining target integrity,chip/layout/boot-slot checks and data-preservation defaults.
 
 - S31阅读波形定稿：整页刷新保持厂家完整48相；普通翻页12相擦白+4相重推黑并走单带快速引擎；48相模式关闭本地额外白/黑补帧。纯文字页对“白→中灰”改用白侧直接压黑（标定系数0.40，1~6相），灰边与黑白端点同段出现；图文/插图页按Pico整页全像素走原厂柔和翻页表，避免直推压坏插图灰阶。
   S31 reader waveforms finalized: page refreshes keep the vendor full 48 phases; ordinary turns use twelve erase plus four black re-drive phases on the fast single-band engine, and the full-48 profile drops the local extra white/black pulses. Text-only pages push white-origin midgrays directly from white (calibrated 0.40, 1..6 phases) so gray edges settle with the endpoints; image pages follow Pico's whole-page full-pixel soft turn with the vendor table, keeping illustration tone.

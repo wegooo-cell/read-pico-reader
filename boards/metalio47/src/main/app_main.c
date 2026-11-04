@@ -71,8 +71,6 @@ static void restore_time_from_pmu(void) {
     if (settimeofday(&tv, NULL) == 0) ESP_LOGI(TAG, "system clock restored from Metalio PCF8563");
 }
 
-extern const uint8_t lock_4bpp_bin_start[] asm("_binary_lock_4bpp_bin_start");
-extern const uint8_t lock_4bpp_bin_end[] asm("_binary_lock_4bpp_bin_end");
 
 // VCOM 从 NVS 读取（默认 3000，实测最优）。V1.5 没有 Pico PMU，标定值只存本机 NVS。
 // Load VCOM from NVS (3000 by default, the measured optimum). V1.5 has no Pico
@@ -96,16 +94,13 @@ static bool volume_key_held(void) {
     return pressed_first && pressed_again;
 }
 
-// 锁屏后备位图保留面板尺寸检查；冷启动改用现有内建字形绘制。
-// Keep the panel-size check for fallback lock art; draw the cold splash using existing built-in glyphs.
-static bool images_match_panel(void) {
-    size_t lock_size = (size_t)(lock_4bpp_bin_end - lock_4bpp_bin_start);
-    size_t expected = (size_t)epd_width() * epd_height() / 2;
-    if (lock_size == expected) return true;
-    ESP_LOGE(
-        TAG, "Image size mismatch: lock %u expected %u",
-        (unsigned)lock_size, (unsigned)expected
-    );
+// 启动与锁屏均由当前字形/壁纸绘制；检查真实画布，不为旧资源尺寸保留整屏图片。
+// Splash/lock use current glyphs/wallpapers; check the actual canvas instead of linking unused legacy art.
+static bool canvas_matches_panel(void) {
+    const int width=epd_width(),height=epd_height();
+    if ((width==UI_LOCK_WIDTH && height==UI_LOCK_HEIGHT) ||
+        (width==UI_LOCK_HEIGHT && height==UI_LOCK_WIDTH)) return true;
+    ESP_LOGE(TAG,"Canvas/panel mismatch: %dx%d expected %dx%d",width,height,UI_LOCK_WIDTH,UI_LOCK_HEIGHT);
     return false;
 }
 
@@ -188,7 +183,7 @@ void app_main(void) {
     ESP_LOGI(TAG,"TPS65185 last VCOM register readback=%dmV",metalio_tps_vcom_mv());
     pmu_selftest_bind(hw.sensor);
 
-    if (!images_match_panel()) return;
+    if (!canvas_matches_panel()) return;
 
     EpdiyHighlevelState hl = hw.hl;
     uint8_t* framebuffer = hw.framebuffer;

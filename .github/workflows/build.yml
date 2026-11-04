@@ -59,6 +59,14 @@ jobs:
           python3 tools/metalio_mount_resume_host_test.py
           python3 tools/metalio_sd_access_host_test.py
           python3 tools/metalio_font_recovery_host_test.py
+          python3 tools/metalio_edge_alignment_host_test.py
+          python3 tools/metalio_font_staging_host_test.py
+          python3 tools/metalio_font_parity_host_test.py
+          python3 tools/reader_font_switch_host_test.py
+          python3 tools/reader_font_recovery_host_test.py
+          python3 tools/test_usb_storage.py
+          python3 tools/cover_jobs_host_test.py
+          python3 tools/avatar_async_host_test.py
           python3 tools/metalio_transfer_stream_host_test.py
           python3 tools/metalio_keep_light_host_test.py
           python3 tools/txt_utf16_host_test.py
@@ -103,6 +111,7 @@ jobs:
           python3 tools/reader_spacing_host_test.py
           python3 tools/test_book_toc.py
           node tools/flasher_integrity_host_test.cjs
+          node tools/metalio_direct_install_host_test.cjs
           python3 tools/vertical_punctuation_host_test.py
           python3 tools/vertical_number_host_test.py
 
@@ -128,6 +137,17 @@ jobs:
           if [ "${{ matrix.board }}" = pico ]; then
             python tools/lowzag_host_test.py --component build/boards/pico/source/managed_components/defensiblelogic__lowzag
           fi
+      - name: S31 progressive JPEG bounded-memory regression
+        if: matrix.board == 'metalio47'
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          jpeg_source=build/boards/metalio47/source/managed_components/espressif__libjpeg-turbo/libjpeg-turbo
+          cmake -S "$jpeg_source" -B "$RUNNER_TEMP/s31-jpeg-host" \
+            -DCMAKE_C_COMPILER=/usr/bin/cc -DENABLE_SHARED=OFF -DWITH_TURBOJPEG=OFF \
+            -DWITH_SIMD=OFF -DWITH_TOOLS=OFF -DWITH_TESTS=OFF
+          cmake --build "$RUNNER_TEMP/s31-jpeg-host" --target jpeg-static -j2
+          python3 tools/metalio_jpeg_host_test.py --jpeg-source "$jpeg_source/src" --jpeg-build "$RUNNER_TEMP/s31-jpeg-host"
       - uses: actions/upload-artifact@v4
         with:
           name: firmware-${{ matrix.board }}

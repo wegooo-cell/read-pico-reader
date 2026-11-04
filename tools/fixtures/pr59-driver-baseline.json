@@ -232,8 +232,8 @@
       "reason": "User2026-11-02 authorized merging PR71; this header gained the resume-wake flag used by the merged deep-sleep wake fix."
     },
     "boards/metalio47/src/main/sleep.c": {
-      "sha256": "ebd69695ba51323520a2434c8ea9f84e7d0b5cf7f55bc2bb629485f664ecbfe4",
-      "reason": "User2026-11-03 integrates PR73 charger suspend/resume with local keep-light sleep; retain all native power sequencing and wake/PIN gates."
+      "sha256": "348ee84c094c76d5d2f67d5fb5f51d9d37f1376d5ba059765d7dd721e28dae2c",
+      "reason": "User2026-11-04 explicitly verifies full physical wake-target clearing without changing back history or refreshing; retain PR73 charger, keep-light, native power sequence and wake/PIN gates."
     },
     "components/metalio_hw/CMakeLists.txt": {
       "sha256": "75f3504a8850c7275cbdd986d08947fe182661b1f308b3cf6480afb4f86ff36f",
@@ -321,6 +321,10 @@
     "components/epdiy/LICENSE": {
       "sha256": "9d0c6c1bf7bf8f9587b6959c3bc7f9271f2abb9bf48be8e4e782baa06bb22648",
       "user_decision": "用户2026-11-04的Pico进度线修复：同步epdiy既有修改说明，许可证条款不变。 / Document the user-requested Pico crop fix in the existing epdiy modification list; license terms unchanged."
+    },
+    "boards/metalio47/src/components/epdiy/src/output_lcd/lcd_driver.c": {
+      "sha256": "c4e9ac447b6e9db85647d10ec63a4d4f5ada444f3fa9ad3b9602b9d1dee3da10",
+      "reason": "User2026-11-04 adopts S31 data-only zero-prefix DMA and CKV-high frame start from vendor2.0.74; retain clocks, pipeline, interrupts, power and Moku waveforms."
     }
   }
 }

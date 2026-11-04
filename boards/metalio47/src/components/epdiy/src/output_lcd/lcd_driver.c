@@ -261,7 +261,7 @@ static IRAM_ATTR bool fill_bounce_buffer(uint8_t* buffer) {
     bool task_awoken = false;
 
     for (int i = 0; i < BOUNCE_BUF_LINES; i++) {
-        // 8bit 时 dummy 占前 1 字节；仍走 line_source 以免队列饿死。
+        // 按所选平台的行首布局取完整像素，仍消费每个已排队的行。/ Preserve row pixels with the selected prefix layout and drain every queued line.
         int buffer_offset = i * (lcd.line_bytes + lcd.dummy_bytes) + (lcd.dummy_bytes % 2);
         if (lcd.line_source_cb != NULL && lcd.lines_fed < (size_t)lcd.display_lines) {
             task_awoken |= lcd.line_source_cb(lcd.line_cb_payload, &buffer[buffer_offset]);
@@ -746,21 +746,13 @@ static void assign_lcd_parameters_from_config(
     // Also see:
     // https://blog.adafruit.com/2022/06/14/esp32uesday-hacking-the-esp32-s3-lcd-peripheral/
     //
-    // 厂家 2.0.76-debug（同芯片同面板）保持这个哑字节：一行 305 个有效拍，
-    // 数据窗口仍是 304 钟（317 钟含行起始/间隔，20MHz 下 CKV 高 15.9us、低 1.1us），
-    // 行尾再补 dummy_clocks_after_data=10 个 XCL 时钟（规格书 6.3.1）。S31 的
-    // phase cycles 虽然写成 (0,0,1)，前导这一拍仍按哑字节占位，整行对齐由
-    // 面板 1216 级源极移位寄存器自然丢掉最前面的 4 像素完成。这里与厂家保持
-    // 一致；此前把 S31 哑字节改成 0 的试验没有实机收益，已回退。
-    // The vendor 2.0.76-debug build (same chip, same panel) keeps this dummy
-    // byte: a line carries 305 active clocks while the data window stays 304
-    // clocks (317 with line start/blank => 15.9us CKV high at 20MHz), and
-    // dummy_clocks_after_data=10 extra XCL clocks follow the data (spec 6.3.1).
-    // Even though the S31 phase cycles read (0,0,1), the leading clock is still
-    // occupied by this dummy byte and the 1216-stage source register drops the
-    // four leading pixels, aligning the row. Match the vendor here; dropping the
-    // dummy byte on S31 showed no hardware benefit and has been reverted.
+    // 用户采用官方新对齐：S31只有数据阶段，DMA首字节即有效像素；行尾空钟保留。
+    // User adopts the vendor alignment: S31 data-only DMA begins with pixels; keep trailing clocks.
+#if defined(CONFIG_IDF_TARGET_ESP32S31)
+    lcd.dummy_bytes = 0;
+#else
     lcd.dummy_bytes = lcd.config.bus_width / 8;
+#endif
 
     // each bounce buffer holds a number of lines with data + dummy bytes each
     lcd.bb_size = BOUNCE_BUF_LINES * (lcd.line_bytes + lcd.dummy_bytes);
@@ -1259,7 +1251,10 @@ void IRAM_ATTR epd_lcd_start_frame() {
     start_ckv_cycles(initial_lines + 5);
     esp_rom_delay_us(lcd.ckv_period_us);
     gpio_set_level(lcd.config.bus.stv, 1);
+    // S31按CKV高电平等待后同步启动，不额外推迟一行。/ Start S31 after CKV high time without another full-row delay.
+#if !defined(CONFIG_IDF_TARGET_ESP32S31)
     esp_rom_delay_us(lcd.ckv_period_us);
+#endif
     esp_rom_delay_us(lcd.config.ckv_high_time / 10);
 
     // start LCD engine

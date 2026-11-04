@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "version": "0.3.3-rc104",
+  "version": "0.3.3-rc105",
   "project": "Read_Pico",
   "board": "RDP-G01-W",
   "layout": "pico-dual-4m-v1",
   "minimum_base_version": "0.3.3-rc72",
-  "url": "https://wegooo-cell.github.io/read-pico-reader/Pico-update-0.3.3-rc104.bin",
-  "size": 3659856,
-  "sha256": "281a21ffe26e9dfb4283165146e96896d1da4f6d2516ac4d8e1c5391ae427173",
-  "notes": "1. 普通翻页只刷正文，信息栏空闲后局刷\n2. 非全屏上下操作栏联动，修复工具栏点击\n3. 优化书架管理和选择图标\n4. 支持GIF首帧、脚注与JPEG兜底\n保留设置，可回退rc103。"
+  "url": "https://wegooo-cell.github.io/read-pico-reader/Pico-update-0.3.3-rc105.bin",
+  "size": 4141360,
+  "sha256": "0759b4c162bdbbe9634ba0a4969ed8ed619fcbc96db37bdd477822390a4e9d4f",
+  "notes": "1. 内建字体扩至7668字符，优化正文缺字和灰阶粗细\n2. 新增默认全屏、阅读线范围开关\n3. 优化锁屏唤醒字体、传书速度和首次书架加载\n4. 修复全屏点击、工具栏和书架分页\n保留设置，可回退rc104。"
 }

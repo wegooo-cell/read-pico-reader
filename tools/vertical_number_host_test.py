@@ -15,7 +15,7 @@ FONT = (ROOT / 'main/assets/builtin.ttf').read_bytes()
 HEADERS = {
     'esp_err.h': ('typedef int esp_err_t;\n#define ESP_OK 0\n#define ESP_FAIL -1\n'
                   '#define ESP_ERR_NO_MEM 0x101\n#define ESP_ERR_NOT_FOUND 0x105\n'
-                  '#define ESP_ERR_INVALID_RESPONSE 0x108\n'),
+                  '#define ESP_ERR_INVALID_STATE 0x103\n#define ESP_ERR_INVALID_RESPONSE 0x108\n'),
     'esp_log.h': ('#pragma once\nstatic inline void tlog(const char *t,const char *f,...){(void)t;(void)f;}\n'
                   '#define ESP_LOGI(...) tlog(__VA_ARGS__)\n#define ESP_LOGW(...) tlog(__VA_ARGS__)\n'
                   '#define ESP_LOGE(...) tlog(__VA_ARGS__)\n'),

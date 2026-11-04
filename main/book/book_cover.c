@@ -500,6 +500,7 @@ static bool jpeg_gray(const uint8_t *data, size_t size, unsigned out_width,
 #if KIIKO_BOARD_METALIO47
 #ifdef ESP_PLATFORM
     if(metalio_jpeg_gray(data,size,NULL,out_width,out_height,out))return true;
+    if(!metalio_jpeg_fallback_allowed())return false;
 #endif
 #endif
     if (size > UINT32_MAX) return false;
@@ -1440,6 +1441,7 @@ bool book_image_file_grayscale(const char *path, bool png, unsigned width, unsig
 #ifdef ESP_PLATFORM
             ok=metalio_jpeg_gray(NULL,(size_t)st.st_size,file,width,height,out);
             if(ok){fclose(file);return true;}
+            if(!metalio_jpeg_fallback_allowed()){fclose(file);return false;}
             clearerr(file);
             if(fseek(file,0,SEEK_SET)){fclose(file);return false;}
 #endif

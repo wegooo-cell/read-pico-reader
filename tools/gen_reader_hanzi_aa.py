@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
-"""中文：从同源Medium轮廓生成Pico正文灰阶汉字，保留界面单色像素。
-English: Generate Pico reader Han coverage from the same Medium outlines, retaining UI pixels.
+"""中文：从同源Medium轮廓生成两板正文灰阶汉字，保留界面单色像素。
+English: Generate both boards' reader Han coverage from the same Medium outlines, retaining UI pixels.
 """
 from pathlib import Path
 import argparse,ctypes,hashlib,json,struct,subprocess,tempfile,zlib
@@ -9,7 +9,7 @@ ROOT=Path(__file__).resolve().parents[1]
 BASE=24;BLOCK=32;RECORD=293
 
 def main():
- p=argparse.ArgumentParser();p.add_argument('--src',type=Path,required=True);p.add_argument('--out',type=Path,default=ROOT/'boards/pico/src/main/assets/ui-hanzi.bin');p.add_argument('--mono-out',type=Path,help='Optional S31 compact PIF1 output with identical UI pixels');p.add_argument('--extra',type=Path,default=ROOT/'main/font/reader_extra_hanzi.txt');a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('--src',type=Path,required=True);p.add_argument('--out',type=Path,default=ROOT/'boards/pico/src/main/assets/ui-hanzi.bin');p.add_argument('--mono-out',type=Path,help='Optional compact PIF1 reference output with identical UI pixels');p.add_argument('--extra',type=Path,default=ROOT/'main/font/reader_extra_hanzi.txt');a=p.parse_args()
  raw=a.src.read_bytes();n=struct.unpack_from('>H',raw,4)[0]
  tables={raw[12+i*16:16+i*16]:struct.unpack_from('>II',raw,20+i*16) for i in range(n)}
  with tempfile.TemporaryDirectory(prefix='reader-hanzi-generator-') as d:

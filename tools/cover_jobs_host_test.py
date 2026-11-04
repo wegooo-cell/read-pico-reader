@@ -25,6 +25,8 @@ unit=r'''
 #define pdPASS 1
 typedef int portMUX_TYPE;
 static int64_t mono;
+static unsigned jpeg_cancels;
+static __attribute__((unused)) void metalio_jpeg_cancel(void){++jpeg_cancels;}
 static bool media_ready_for_jobs=true;
 static bool read_pico_sd_io_ready(void){return media_ready_for_jobs;}
 static int jobs,decodes,fonts,writes,reads,mode,fail_alloc,task_ok=1,worker_context;
@@ -103,6 +105,8 @@ int main(void){
  puts("PASS: real bounded cover worker has no UI IO on queue/poll, packed hits skip gray/decode, stale generations and media cancellation discard results, UI-only auto glyphs, transient fallback not cached, all9 slots and OOM/task failures release resources");
 }
 '''
+if (root/'.kiiko-source-view.json').exists() and 'metalio47' in (root/'.kiiko-source-view.json').read_text():
+ unit=unit.replace(' puts("PASS:', ' assert(jpeg_cancels>0);\n puts("PASS:')
 with tempfile.TemporaryDirectory(prefix='kiiko-cover-jobs-') as folder:
  c=Path(folder)/'test.c';binary=Path(folder)/'test';c.write_text(unit)
  subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined','-I'+str(root/'main/book'),'-I'+str(root/'main/ui'),str(c),str(root/'main/ui/ui_image_dither.c'),'-o',str(binary)],check=True)

@@ -4,6 +4,7 @@
 from pathlib import Path
 import ast, json, subprocess, tempfile
 from home_cover_cache_host_test import function
+from metalio_font_job_host_support import FIXTURE,completion_wrapper
 ROOT=Path(__file__).resolve().parents[1]
 SRC=ROOT/'main/apps/app_book.c'
 view=ROOT/'.kiiko-source-view.json'
@@ -72,6 +73,7 @@ static void retry_progress(void){++retries;s_save_failed=save_fails;}
 static void app_restart_host(void){assert(checkpoints&&retries&&!s_save_failed);++restarts;}
 static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&y>=r.y&&x<r.x+r.width&&y<r.y+r.height;}
 '''
+unit+='#if KIIKO_BOARD_METALIO47\n#define FONT_STAGE_PUBLISHED() (builtin=ttf_font_path_is_builtin(active))\n'+FIXTURE+'\n#endif\n'
 for name in ('reader_font_choice_begin','reader_font_choice_finish','reader_font_recovery_reset',
  'reader_font_recovery_button','reader_font_recovery_gesture','reader_font_recovery_tick'):
     unit+=(('#if KIIKO_BOARD_METALIO47\n'+function('reader_font_fallback_observe',SRC)+'\n#endif\n') if name=='reader_font_recovery_tick' and has_observer else '')+function(name,SRC)+'\n'
@@ -162,6 +164,11 @@ assert function('gesture_event',SRC).index('reader_font_recovery_gesture')<funct
 with tempfile.TemporaryDirectory() as folder:
  p=Path(folder)
  selection=s[s.index('static app_redraw_t select_reading_font_item('):s.index('static int slider_index(')]
+ if 'static void reader_font_worker(' in s:
+  selection='#if KIIKO_BOARD_METALIO47\n'+function('reader_font_worker',SRC)+'\n'+function('reader_font_reload_cancel',SRC)+'\n#endif\n'+selection
+ wrapper=completion_wrapper().replace('assert(!locked);run_worker();', 'assert(!locked);unsigned before=s_font_fallbacks;reader_font_choice_finish();assert(s_font_fallbacks==before);run_worker();')
+ selection+='\n#if KIIKO_BOARD_METALIO47\n'+wrapper+'\n#else\nstatic app_redraw_t select_and_complete(app_ctx_t*c,const ttf_font_item_t*i){return select_reading_font_item(c,i);}\n#endif\n'
+ unit=unit.replace('assert(select_reading_font_item(', 'assert(select_and_complete(').replace('(void)select_reading_font_item(', '(void)select_and_complete(')
  for board in boards:
   selected=subprocess.run(['cc','-E','-P','-x','c',f'-DKIIKO_BOARD_METALIO47={board}','-'],input=selection,text=True,capture_output=True,check=True).stdout
   (p/'test.c').write_text(unit.replace('/* INSERT_SELECTION */',selected))
