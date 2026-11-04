@@ -13,7 +13,8 @@ License: LGPL-3.0-or-later (see idf_component.yml)
 - src/displays.c 只保留 4.7" 1216x684 单色面板（E0470_DISPLAY）
 - 波形表改为从 components/e0470_epaper_waveform 取
 - src/render.c / highlevel.c：差分按列裁剪、按 (from,to) 直方图无损跳过前导空相位、
-  统计各阶段耗时；output_lcd/render_lcd.c：可配置的帧前预填行数
+  统计各阶段耗时；Pico局刷在对齐差分后按精确像素屏蔽输出并只回写裁剪内后缓冲；
+  output_lcd/render_lcd.c：可配置的帧前预填行数
 
 This directory is a trimmed fork of epdiy v2.0.0: only the ESP32-S3 LCD render
 path and the display definition for this board are kept. Local changes are
@@ -39,7 +40,8 @@ License: LGPL-3.0-or-later (see idf_component.yml)
 - src/displays.c 只保留 4.7" 1216x684 单色面板（E0470_DISPLAY）
 - 波形表改为从 components/e0470_epaper_waveform 取
 - src/render.c / highlevel.c：差分按列裁剪、按 (from,to) 直方图无损跳过前导空相位、
-  统计各阶段耗时；output_lcd/render_lcd.c：可配置的帧前预填行数
+  统计各阶段耗时；Pico局刷在对齐差分后按精确像素屏蔽输出并只回写裁剪内后缓冲；
+  output_lcd/render_lcd.c：可配置的帧前预填行数
 
 This directory is a trimmed fork of epdiy v2.0.0: only the ESP32-S3 LCD render
 path and the display definition for this board are kept. Local changes are

@@ -309,6 +309,14 @@
       "user_decision": "用户2026-11-02授权直接合并PR72；记录合并后的Pico深睡唤醒PMU主机字节，使PR59固定基线仍有意义。 / User2026-11-02 authorized merging PR72 directly; record the merged Pico deep-wake PMU host bytes so the PR59 pin stays meaningful.",
       "pull_request": 72,
       "source_commit": "ba3d09e0ba95d06d04149465964428be3c81e998"
+    },
+    "components/epdiy/src/highlevel.c": {
+      "sha256": "92c50435e721b7fb1cefb4566ac193409babe21f7a7542283fb1596e84ae42a1",
+      "user_decision": "用户2026-11-04要求从最新main创建feature分支修复Pico进度线闪黑，版本不变。仅Pico精确屏蔽局刷裁剪外像素并同步后缓冲范围，S31执行代码与原波形保持。 / User2026-11-04 requests the Pico progress-track fix on a feature branch from latest main without version changes. Exact Pico scan masks and back-buffer bounds only; S31 executable code and waveforms remain unchanged."
+    },
+    "components/epdiy/LICENSE": {
+      "sha256": "9d0c6c1bf7bf8f9587b6959c3bc7f9271f2abb9bf48be8e4e782baa06bb22648",
+      "user_decision": "用户2026-11-04的Pico进度线修复：同步epdiy既有修改说明，许可证条款不变。 / Document the user-requested Pico crop fix in the existing epdiy modification list; license terms unchanged."
     }
   }
 }

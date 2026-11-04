@@ -1,5 +1,10 @@
 # 版本变更 / Changelog
 
+## 本地测试 / Local test — 2026-11-04
+
+- Pico局部刷新精确屏蔽裁剪范围外的像素，避免沉浸阅读普通翻页把底部未读进度线带入灰阶重驱而闪黑；后缓冲只提交实际刷新范围，保留原波形与页脚延迟更新，版本号不变。
+  Mask Pico partial updates to exact pixel bounds so immersive body turns do not re-drive the unread gray progress track. Commit only the scanned bounds, retaining waveforms, deferred footer updates and existing versions.
+
 ## 本地测试 / Local test — 2026-11-03
 
 - 书架四个分页箭头独立处理按下/抬手，容许边缘轻微漂移；实际翻页清除旧按压刷新标记，保留取消、扫描门禁和首末页边界。
