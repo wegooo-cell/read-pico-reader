@@ -1,6 +1,6 @@
 {
   "name": "kiikoread · Metalio EINK 4 Plus",
-  "version": "0.3.3-rc109",
+  "version": "0.3.3-rc110",
   "board": "metalio47",
   "experimental_pie_pixels": true,
   "experimental_text_ripple": true,
@@ -8,6 +8,7 @@
   "experimental_shelf37": false,
   "experimental_fast_reader_panels": false,
   "experimental_du14": false,
+  "experimental_trimmed_waveform": false,
   "experimental_main_clean": false,
   "experimental_network_probe": false,
   "local_transfer_start_test": false,
@@ -23,7 +24,7 @@
           "path": "bootloader.bin",
           "offset": 8192,
           "size": 22448,
-          "sha256": "e7624055ba9f878d51b85fa093014a72561b4748554e848afd301ca9a5a1a9ab"
+          "sha256": "4113dfc7af687c28f9717a26b429acdbde6a418c2746988a16a8ef723d83513a"
         },
         {
           "path": "partitions.bin",
@@ -34,8 +35,8 @@
         {
           "path": "firmware.bin",
           "offset": 65536,
-          "size": 5004960,
-          "sha256": "d5dfc25f624edb7181af893ca036d5eb24d9ef73f4e9bd7110c1d0d57bf9d171"
+          "size": 5081040,
+          "sha256": "9f60234af744f5fbef67bd6f23f1287c119d46573f803d568779349607d9902d"
         },
         {
           "path": "ota_data_initial.bin",
@@ -46,16 +47,16 @@
       ]
     }
   ],
-  "previous_version": "0.3.3-rc108",
-  "release_source_commit": "ae015054589f10d1d12e78feafc7fe9470d0d547",
-  "updated_at": "2026-11-01T17:52:40+08:00",
+  "previous_version": "0.3.3-rc109",
+  "release_source_commit": "52a1ba548f4573e6dcd9167298c4f2f8d916dc92",
+  "updated_at": "2026-11-04T21:48:24+08:00",
   "pico_ota": {
     "layout": "metalio-s31-dual-5m-v1",
-    "base_version": "0.3.3-rc109",
+    "base_version": "0.3.3-rc110",
     "minimum_base_version": "0.3.3-rc98",
     "online_ota_base_version": "0.3.3-rc98",
     "rollback": true
   },
-  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/metalio-s31-v0.3.3-rc109/kiikoread-metalio47-0.3.3-rc109-TF.zip",
-  "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/metalio-s31-v0.3.3-rc109/kiikoread-metalio47-0.3.3-rc109-USB.zip"
+  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/metalio-s31-v0.3.3-rc110/kiikoread-metalio47-0.3.3-rc110-TF.zip",
+  "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/metalio-s31-v0.3.3-rc110/kiikoread-metalio47-0.3.3-rc110-USB.zip"
 }

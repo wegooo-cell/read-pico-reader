@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "version": "0.3.3-rc109",
+  "version": "0.3.3-rc110",
   "project": "Kiikoread_Metalio_S31",
   "board": "Metalio-EINK4-Plus-S31",
   "layout": "metalio-s31-dual-5m-v1",
   "minimum_base_version": "0.3.3-rc98",
-  "url": "https://wegooo-cell.github.io/read-pico-reader/Metalio-S31-update-0.3.3-rc109.bin",
-  "size": 5004960,
-  "sha256": "d5dfc25f624edb7181af893ca036d5eb24d9ef73f4e9bd7110c1d0d57bf9d171",
-  "notes": "1. 非全屏上下操作栏联动，修复工具栏点击\n2. 优化书架管理和选择图标\n3. 支持GIF首帧与脚注弹窗\n4. 合入阅读刷新、灰阶裁剪和EPUB兼容更新\n仅S31；保留设置，可回退rc108。"
+  "url": "https://wegooo-cell.github.io/read-pico-reader/Metalio-S31-update-0.3.3-rc110.bin",
+  "size": 5081040,
+  "sha256": "9f60234af744f5fbef67bd6f23f1287c119d46573f803d568779349607d9902d",
+  "notes": "1. 内建7668字符与16级灰阶补字\n2. 修正屏幕边缘行首输出，保留Moku阅读波形\n3. 优化USB退出、后台换字体与渐进JPEG\n4. 新增默认全屏、阅读线范围和保持浅睡\n保留设置，可回退rc109。"
 }
