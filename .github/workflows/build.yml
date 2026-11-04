@@ -141,6 +141,7 @@ jobs:
         if: matrix.board == 'metalio47'
         shell: bash
         run: |
+          . "$IDF_PATH/export.sh"
           jpeg_source=build/boards/metalio47/source/managed_components/espressif__libjpeg-turbo/libjpeg-turbo
           cmake -S "$jpeg_source" -B "$RUNNER_TEMP/s31-jpeg-host" \
             -DCMAKE_C_COMPILER=/usr/bin/cc -DENABLE_SHARED=OFF -DWITH_TURBOJPEG=OFF \
