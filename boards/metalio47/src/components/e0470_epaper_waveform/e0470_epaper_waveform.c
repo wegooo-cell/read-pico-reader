@@ -356,12 +356,20 @@ void e0470_waveform_init(void) {
     // 完整48相与裁剪档都保留本地白底补帧（整页白维护合同依赖至少3相擦白）。
     // Both the full-48 and trimmed profiles keep the local white maintenance pulses here:
     // page-white-maintenance contracts require at least three erase pulses.
+    // 用户2026-11-04：48相模式关闭本地额外白/黑补帧，更接近官方/Pico原表行为；
+    // --s31-trimmed-waveform 回退裁剪档时才加回这些补帧。
+    // User2026-11-04: the full-48 profile disables the local extra white/black pulses to stay
+    // close to the vendor/Pico tables; they return only with --s31-trimmed-waveform.
+#if E0470_WAVEFORM_TRIM
     e0470_waveform_white_boost(e0470_gl16_data, E0470_GL16_FRAMES, 3);
     e0470_waveform_white_boost(e0470_full_gl16_live, E0470_FULL_GL16_FRAMES, 3);
+#endif
     // 完整 DU 表同样补白：全像素二进制推屏时白底要重新擦一次，否则只靠电荷保持。
     // The complete DU table gets the same tick so full-pixel binary passes re-drive white.
     e0470_waveform_white_tick(e0470_complete_du_data, E0470_FULL_DU_FRAMES);
+#if E0470_WAVEFORM_TRIM
     e0470_waveform_white_boost(e0470_complete_du_data, E0470_FULL_DU_FRAMES, 2);
+#endif
     // 文字沿用当前默认表的迁移顺序；只屏蔽非白等值像素，保留 15→15 的擦白补帧。
     // Text keeps the active GL order; hold equal pairs except the white one, which
     // keeps its erase pulses so full-pixel text pages re-drive the white background.
@@ -371,8 +379,8 @@ void e0470_waveform_init(void) {
             e0470_textturn_gl16_data[f][v][v / 4] &= (uint8_t)~(3u << (6 - 2 * (v % 4)));
         }
     }
-    e0470_waveform_white_boost(e0470_textturn_gl16_data, E0470_GL16_FRAMES, 2);
 #if E0470_WAVEFORM_TRIM
+    e0470_waveform_white_boost(e0470_textturn_gl16_data, E0470_GL16_FRAMES, 2);
     // 裁剪砍短黑饱和段；在末尾 hold 相之前补压黑，末尾 3 相仍保持，黑目标才能固定住。
     // Trim shortens the black saturation run; add the darkening just before the trailing holds,
     // keeping the final three phases as holds so black targets stay fixed.

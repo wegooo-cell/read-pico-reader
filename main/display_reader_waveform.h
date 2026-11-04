@@ -18,6 +18,12 @@ const EpdWaveform* display_reader_fast_text_waveform(void);
 /// 两板普通翻页分别派生本板波形：Pico等灰保持、变白补四相；S31沿Moku GL37补六相目标白。
 /// Ordinary uses board-native profiles: Pico holds equal grays and adds four changed-white phases; S31 retains Moku GL37 plus six white-target phases.
 const EpdWaveform* display_reader_soft_turn_waveform(void);
+#if KIIKO_BOARD_METALIO47
+/// S31纯文字翻页：白→中灰改为白侧直接推黑（0.40标定），灰边与黑白端点同段出现。
+/// S31 text-only turn: white-origin midgrays push dark directly from white (0.40 calibration),
+/// so gray edges appear with the black/white endpoints instead of the vendor tail.
+const EpdWaveform* display_reader_text_turn_waveform(void);
+#endif
 /// 只归一文字区域目标，保留真实back和区域外灰阶。/ Normalize only the text target, retaining real history and outside grays.
 bool display_reader_fast_text_prepare(EpdiyHighlevelState* hl,EpdRect area);
 

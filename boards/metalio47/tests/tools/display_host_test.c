@@ -51,6 +51,7 @@ static const EpdWaveform reader_soft = {5};
 static const EpdWaveform quiet_nav = {6};
 const EpdWaveform* display_main_navigation_waveform(void){return &quiet_nav;}
 const EpdWaveform* display_reader_soft_turn_waveform(void){return &reader_soft;}
+const EpdWaveform* display_reader_text_turn_waveform(void){return &reader_soft;}
 const EpdWaveform* display_reader_text_waveform(void) {return &reader_soft;}
 static enum EpdDrawError draw(EpdiyHighlevelState*,enum EpdDrawMode,int,bool);
 static int panel_entry_batches;

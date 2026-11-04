@@ -877,9 +877,12 @@ static enum EpdDrawError update_display_reader_turn_unlocked(EpdiyHighlevelState
     enum EpdDrawError intercepted;
     if (main_before_update(hl, &intercepted)) return intercepted;
     if(s_system_binary&&!main_gray)system_normalize(hl);
+    // 用户2026-11-04：单带文字翻页用“白→灰直推”表；图文页仍走原厂柔和翻页表。
+    // User2026-11-04: single-band text turns use the white-side gray push; image pages keep the
+    // vendor soft-turn table.
     const EpdWaveform* turn_waveform = main_gray?display_main_water_waveform():s_system_binary
         ? (system_navigation_gray_changed(hl)?display_main_navigation_waveform():display_main_bw_turn_waveform())
-        : (bands==1?display_reader_soft_turn_waveform():display_reader_text_waveform());
+        : (bands==1?display_reader_text_turn_waveform():display_reader_text_waveform());
     // 普通文字整轮在差分生成前预唤醒TPS，实际驱动仍由引擎按原顺序上电。
     // Pre-wake TPS before ordinary text differences; the engine still enables drive in the established sequence.
     const bool prepared=bands==1&&!s_system_binary&&!main_gray&&epd_pipeline_enabled();

@@ -113,5 +113,15 @@ with tempfile.TemporaryDirectory(prefix='s31-reader-profiles-') as temporary:
                 for oom in (0, 1):
                     dump = folder / 'normal.lut'
                     subprocess.run([str(exe), str(oom), str(dump)], check=True)
-                    expected = 53 if panel37 and not oom else 37 if trimmed else 48
+                    # 完整48相与panel37档=基表+12擦白+4推黑；裁剪档缺少可识别的尾部全保持相，
+                    # 波形构建按设计回退到基表本身（37相）。
+                    # Full-48 and panel37 builds append 12 white + 4 black phases; the trimmed
+                    # profile has no recognisable all-hold tail, so the builder falls back to its
+                    # 37-phase base table.
+                    if panel37 and not oom:
+                        expected = 53
+                    elif trimmed:
+                        expected = 37
+                    else:
+                        expected = 64
                     assert len(dump.read_bytes()) == expected * 64

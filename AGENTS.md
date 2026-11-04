@@ -10,6 +10,9 @@ Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Takin
 
 ## 当前工作：双板型本地整合 / Current work: local multi-board integration
 
+用户2026-11-04：S31阅读波形定稿并经真机确认——整页刷新完整48相、普通翻页12擦白+4推黑、单带快速引擎；48相模式关闭本地额外白/黑补帧。纯文字“白→中灰”改为白侧直接压黑（标定0.40，1~6相），灰边与黑白同段；图文页整页全像素走原厂柔和翻页表（对齐Pico），避免压坏插图灰阶。相关宿主测试与PR59基线按实际代码更新。
+User2026-11-04 finalizes the S31 reader waveforms after device confirmation: full 48-phase page refresh, twelve erase plus four black re-drive turn phases on the fast single-band engine, and no local extra white/black pulses in the full-48 profile. Text-only white-origin midgrays push dark directly from white (0.40 calibration, 1..6 phases) so gray edges settle with the endpoints; image pages use Pico's whole-page full-pixel vendor soft turn to keep illustration tone. Host tests and the PR59 pin follow the actual code.
+
 用户2026-11-03要求整合GitHub最新修改与本地未上传功能、修好CI并提供Pico/S31本地刷机页。采用PR71–74的唤醒、固定阅读正文、快充、统一备份及S31波形，保留本地TF保护、唤醒字体、传书队列、保持浅睡、书架提速、阅读线范围及分页箭头。仅交付本地测试，官网不发布；本轮明确整合要求取代旧文档中的对应功能冻结。
 User2026-11-03 requests integrating latest GitHub changes with all local work, repairing CI and delivering Pico/S31 local flashers. Adopt PR71–74 wake/overlay/charger/backup/waveforms while retaining local media/font/transfer/keep-light/shelf/guide/pager changes. Local delivery only, no website publication; this supersedes the affected older behavioral pins.
 

@@ -252,12 +252,12 @@
       "reason": "User2026-11-02 explicitly approved merging PR68 as authored; retain its Pico ripple erase/redrive phases and64-phase engine capacity."
     },
     "boards/metalio47/src/main/display_reader_waveform.c": {
-      "sha256": "36206a088c9071d40c7c61d9bda9df81be5df7c8c2c44d8f7b7466dc200e6f61",
+      "sha256": "e256413af08373f8cd394fd09ef352880dc60966b658d3ba05201cefbe6b08cf",
       "reason": "User2026-11-01 explicitly approved PR62 as authored, superseding the previous derived-waveform pin for this file.",
       "user_decision": "用户2026-11-03：S31残影/翻页优化定稿并直接提交合并（整页刷新恢复厂家完整48相，普通翻页对齐Pico的十二相擦白+四相重推黑）。/ User2026-11-03 finalizes the S31 ghosting/turn work and merges it directly (page refreshes use vendor full 48 phases; ordinary turns match Pico's twelve erase plus four black re-drive phases)."
     },
     "boards/metalio47/src/components/e0470_epaper_waveform/e0470_epaper_waveform.c": {
-      "sha256": "131ce2fb12f5c521ad3b0bad1d8c0ba838c204b59d5d165d7987252251430ccb",
+      "sha256": "fad0b3b9c22fe9af5ecbb02385b2381f0462bba30bbe38d018e1530fb4b2d3e3",
       "reason": "User2026-11-01 explicitly approved PR64 as authored, superseding the previous derived-waveform pin for this file.",
       "user_decision": "用户2026-11-03：S31残影/翻页优化定稿并直接提交合并（整页刷新恢复厂家完整48相，普通翻页对齐Pico的十二相擦白+四相重推黑）。/ User2026-11-03 finalizes the S31 ghosting/turn work and merges it directly (page refreshes use vendor full 48 phases; ordinary turns match Pico's twelve erase plus four black re-drive phases)."
     },
@@ -289,7 +289,7 @@
       "user_decision": "用户2026-11-03：S31残影/翻页优化定稿并直接提交合并（整页刷新恢复厂家完整48相，普通翻页对齐Pico的十二相擦白+四相重推黑）。/ User2026-11-03 finalizes the S31 ghosting/turn work and merges it directly (page refreshes use vendor full 48 phases; ordinary turns match Pico's twelve erase plus four black re-drive phases)."
     },
     "boards/metalio47/src/main/display.c": {
-      "sha256": "d29c3d64b432903857bb3a357f3d83689b2b8361607c4a5c3d247e8040d98d88",
+      "sha256": "f27d4f559cb3ede0115dfa84f11c8a907b64ca68831dbe740b781ebba637f050",
       "user_decision": "用户2026-11-03：S31残影/翻页优化定稿并直接提交合并（整页刷新恢复厂家完整48相，普通翻页对齐Pico的十二相擦白+四相重推黑）。/ User2026-11-03 finalizes the S31 ghosting/turn work and merges it directly (page refreshes use vendor full 48 phases; ordinary turns match Pico's twelve erase plus four black re-drive phases)."
     },
     "components/read_pico_pmu/README.md": {
@@ -309,6 +309,10 @@
       "user_decision": "用户2026-11-02授权直接合并PR72；记录合并后的Pico深睡唤醒PMU主机字节，使PR59固定基线仍有意义。 / User2026-11-02 authorized merging PR72 directly; record the merged Pico deep-wake PMU host bytes so the PR59 pin stays meaningful.",
       "pull_request": 72,
       "source_commit": "ba3d09e0ba95d06d04149465964428be3c81e998"
+    },
+    "main/display_reader_waveform.h": {
+      "sha256": "5d11da8c89d685551d9b93043af3be307c2a538228aa1b1f6c7b213a196b6f84",
+      "user_decision": "用户2026-11-03：S31残影/翻页优化定稿并直接提交合并（整页刷新恢复厂家完整48相，普通翻页对齐Pico的十二相擦白+四相重推黑）。/ User2026-11-03 finalizes the S31 ghosting/turn work and merges it directly (page refreshes use vendor full 48 phases; ordinary turns match Pico's twelve erase plus four black re-drive phases)."
     }
   }
 }
