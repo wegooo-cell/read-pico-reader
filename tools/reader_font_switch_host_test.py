@@ -87,6 +87,7 @@ int main(void){app_ctx_t ctx={0};ttf_font_item_t item={"new.ttf"};
  assert(freed&&s_view==SHELF&&s_message[0]&&!strcmp(saved,"old.ttf")&&!locked);
  puts("PASS: real reader staged font transaction retains the old face during loading, holds draw lock only on publication, invalidates prepared pages, preserves offset, commits only successful selection and safely handles load/layout/NVS/rollback failures");}
 '''
+(root/'build').mkdir(parents=True,exist_ok=True)
 with tempfile.TemporaryDirectory(dir=root/'build') as folder:
  p=Path(folder);split=unit.index(' reset();assert(select_reading_font_item(&ctx,NULL)');unit=unit[:split]+unit[split:].replace('assert(select_reading_font_item(', 'assert(select_and_complete(');(p/'test.c').write_text(unit)
  subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined',str(p/'test.c'),'-o',str(p/'test')],check=True)
