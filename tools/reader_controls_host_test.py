@@ -105,16 +105,16 @@ static void reset(app_ctx_t *ctx){
 }
 int main(void){
  s_reader_panel=READER_PANEL_RULE_SETTINGS;
- assert(tap_rule(450,920)==APP_REDRAW_PAGE&&rule_full&&raster_rule_full&&invalidations==1);
- assert(tap_rule(230,920)==APP_REDRAW_PAGE&&!rule_full&&!raster_rule_full&&invalidations==2);
+ assert(tap_rule(550,920)==APP_REDRAW_PAGE&&rule_full&&raster_rule_full&&invalidations==1);
+ assert(tap_rule(330,920)==APP_REDRAW_PAGE&&!rule_full&&!raster_rule_full&&invalidations==2);
  save_fail=true;
- assert(tap_rule(450,920)==APP_REDRAW_NONE&&!rule_full&&!raster_rule_full&&invalidations==2);
+ assert(tap_rule(550,920)==APP_REDRAW_NONE&&!rule_full&&!raster_rule_full&&invalidations==2);
  save_fail=false;
  assert(tap_rule(470,790)==APP_REDRAW_PAGE&&rule_style==2&&raster_rule_style==2);
  assert(tap_rule(70,1040)==APP_REDRAW_PAGE&&rule_offset==-2&&raster_rule_offset==-2);
  assert(tap_rule(280,1040)==APP_REDRAW_PAGE&&rule_offset==0&&raster_rule_offset==0);
  assert(tap_rule(70,790)==APP_REDRAW_PAGE&&!rule_style&&!raster_rule_style);
- assert(tap_rule(450,920)==APP_REDRAW_PAGE&&rule_full&&raster_rule_full);
+ assert(tap_rule(550,920)==APP_REDRAW_PAGE&&rule_full&&raster_rule_full);
  assert(tap_rule(70,1040)==APP_REDRAW_NONE&&rule_offset==0);
  assert(tap_rule(342,1150)==APP_REDRAW_PAGE&&s_reader_panel==READER_PANEL_FONT_SETTINGS);
  app_ctx_t ctx;ui_gesture_event_t e={.type=UI_GESTURE_SWIPE_U,.x0=342,.y0=1160,.x=342,.y=980};

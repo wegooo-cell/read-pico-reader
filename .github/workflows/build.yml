@@ -96,6 +96,7 @@ jobs:
           python3 tools/shelf_pager_host_test.py
           python3 tools/quick_layer_raster_host_test.py
           python3 tools/test_epd_difference_bounds.py --check-regression
+          python3 tools/pico_reader_crop_host_test.py
           python3 tools/test_s31_pie_dispatch.py
           python3 tools/test_lcd_frame_lifecycle.py
           sh tools/run_app_loop_host_tests.sh
@@ -167,6 +168,9 @@ jobs:
             python3 tools/metalio_du14_white_host_test.py
           fi
           python3 tools/title_font_host_test.py
+          python3 tools/reader_hanzi_fallback_host_test.py
+          python3 tools/ui_hanzi_host_test.py
+          python3 tools/pico_builtin_font_host_test.py
           python3 tools/file_names_host_test.py
           python3 tools/txt_navigation_host_test.py
           if [ "${{ matrix.board }}" = "metalio47" ]; then

@@ -5,40 +5,7 @@ from pathlib import Path
 import argparse,os,struct,subprocess,tempfile,zlib
 ROOT=Path(__file__).resolve().parents[1]
 p=argparse.ArgumentParser();p.add_argument('--font',type=Path);p.add_argument('--baseline-ui',type=Path);p.add_argument('--preview',type=Path);args=p.parse_args()
-def subset_without_xing(raw):
- b=bytearray(raw);u16=lambda at:struct.unpack_from('>H',b,at)[0];u32=lambda at:struct.unpack_from('>I',b,at)[0]
- records={bytes(b[12+16*i:16+16*i]):12+16*i for i in range(u16(4))}
- record=records[b'cmap'];base=u32(record+8);mapping={}
- for i in range(u16(base+2)):
-  at=base+4+8*i;platform,encoding,offset=struct.unpack_from('>HHI',b,at);o=base+offset
-  if platform not in (0,3):continue
-  if u16(o)==12:
-   for j in range(u32(o+12)):
-    first,last,gid=struct.unpack_from('>III',b,o+16+j*12)
-    for cp in range(first,last+1):
-     if gid+cp-first:mapping[cp]=gid+cp-first
-  elif u16(o)==4:
-   n=u16(o+6)//2;ends=o+14;starts=ends+n*2+2;deltas=starts+n*2;ranges=deltas+n*2
-   for j in range(n):
-    first,last,delta,distance=u16(starts+j*2),u16(ends+j*2),u16(deltas+j*2),u16(ranges+j*2)
-    for cp in range(first,last+1):
-     if cp==65535:continue
-     gid=u16(ranges+j*2+distance+2*(cp-first)) if distance else cp
-     gid=(gid+delta)&65535 if gid or not distance else 0
-     if gid:mapping[cp]=gid
- assert mapping.pop(ord('行'),None)
- groups=b''.join(struct.pack('>III',cp,cp,gid) for cp,gid in sorted(mapping.items()))
- fmt=struct.pack('>HHIII',12,0,16+len(groups),0,len(mapping))+groups
- cmap=struct.pack('>HHHHI',0,1,3,10,12)+fmt
- while len(b)%4:b.append(0)
- offset=len(b);b.extend(cmap)
- def checksum(data):
-  data=bytes(data)+b'\0'*((-len(data))%4)
-  return sum(struct.unpack('>'+str(len(data)//4)+'I',data))&0xffffffff
- struct.pack_into('>III',b,record+4,checksum(cmap),offset,len(cmap))
- head=u32(records[b'head']+8);struct.pack_into('>I',b,head+8,0)
- struct.pack_into('>I',b,head+8,(0xb1b0afba-checksum(b))&0xffffffff)
- return b
+from font_hanzi_host_support import subset_without_xing
 with tempfile.TemporaryDirectory(prefix='title-glyph-') as folder:
  w=Path(folder);font=args.font
  if font is None:font=w/'subset.ttf';font.write_bytes(subset_without_xing((ROOT/'main/assets/builtin.ttf').read_bytes()))

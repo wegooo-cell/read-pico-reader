@@ -198,6 +198,21 @@ static enum EpdDrawError hl_update_area(
     area.width = rotated_area.width;
     area.height = rotated_area.height;
 
+#if KIIKO_BOARD_METALIO47
+    // S31 retains its existing aligned scan/commit contract.
+#else
+    // Pico computes SIMD differences in32-column blocks, but only the requested
+    // pixels may be driven or committed. In portrait the padding can hit the footer.
+    if (area.x < 0) { area.width += area.x; area.x = 0; }
+    if (area.y < 0) { area.height += area.y; area.y = 0; }
+    if (area.width > epd_width() - area.x) area.width = epd_width() - area.x;
+    if (area.height > epd_height() - area.y) area.height = epd_height() - area.y;
+    if (area.width <= 0 || area.height <= 0) {
+        epd_leading_skip_discard();
+        return EPD_DRAW_SUCCESS;
+    }
+#endif
+
     uint32_t ts = esp_timer_get_time() / 1000;
 
     // FIXME: use crop information here, if available
@@ -229,6 +244,20 @@ static enum EpdDrawError hl_update_area(
         return EPD_DRAW_SUCCESS;
     }
 
+#if KIIKO_BOARD_METALIO47
+    // S31 retains its existing aligned scan/commit contract.
+#else
+    // Keep aligned interlacing, then mask its padding even for full-pixel GL16.
+    // Equal-gray LUT entries can contain black pulses, so equal framebuffer
+    // values alone cannot protect the unread progress track.
+    const int crop_end = area.x + area.width;
+    memset(state->dirty_columns, 0, (size_t)(area.x / 2));
+    if (area.x & 1) state->dirty_columns[area.x / 2] &= 0xF0;
+    if (crop_end & 1) state->dirty_columns[crop_end / 2] &= 0x0F;
+    memset(state->dirty_columns + (crop_end + 1) / 2, 0,
+           (size_t)(epd_width() / 2 - (crop_end + 1) / 2));
+#endif
+
     uint32_t t1 = esp_timer_get_time() / 1000;
 
     diff_area.x = 0;
@@ -250,9 +279,14 @@ static enum EpdDrawError hl_update_area(
 
     uint32_t t2 = esp_timer_get_time() / 1000;
 
-    // 回写范围和差分实际算过的列段一致：段外的像素没被驱动，back_fb 不能跟着改。
+    // Commit only the physical scan bounds; never consume deferred pixels outside them.
     int x_start, x_stop;
+#if KIIKO_BOARD_METALIO47
     epd_difference_column_range(area, &x_start, &x_stop);
+#else
+    x_start = area.x;
+    x_stop = area.x + area.width;
+#endif
     diff_area.x = x_start;
     diff_area.y = 0;
     diff_area.width = x_stop - x_start;

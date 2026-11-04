@@ -41,7 +41,7 @@ assert subtables, "No Unicode cmap in the embedded font"
 # Match ui_font_has_text: system glyphs come from both the TTF and the embedded Han supplement.
 hanzi = (root / "main/assets/ui-hanzi.bin").read_bytes()
 magic, count, px, block = struct.unpack_from("<4sIII", hanzi)
-assert magic == b"PIF1" and count <= 6763 and px == 24 and block == 32
+assert magic in (b"PIF1",b"PIF4") and count <= 6763 and px == 24 and block == 32
 assert 16 + count * 2 + ((count + 31) // 32 + 1) * 4 <= len(hanzi)
 hanzi_codepoints = set(struct.unpack_from("<" + "H" * count, hanzi, 16))
 

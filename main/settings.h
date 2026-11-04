@@ -146,6 +146,10 @@ void app_settings_set_reader_turn_effect(uint8_t effect);
 /// 阅读正文里短按电源键翻下一页；默认关闭。/ Short power press turns forward only in reader body; off by default.
 bool app_settings_reader_power_turn(void);
 void app_settings_set_reader_power_turn(bool on);
+/// 新开书使用的全屏偏好；锁屏恢复遵从记录。/ Fresh-entry preference; lock/resume keeps its recorded state.
+bool app_settings_reader_default_fullscreen(void);
+/// 保存成功后才更新偏好。/ Apply the preference only after a successful save.
+bool app_settings_set_reader_default_fullscreen(bool on);
 /// 沉浸全屏时隐藏阅读状态栏。/ Hide the reader status bar in immersive full screen.
 bool app_settings_reader_immersive(void);
 void app_settings_set_reader_immersive(bool on);

@@ -84,6 +84,7 @@ static void e0470_page_turn_set_tick_us(int t){assert(t==11090);}
 #define display_main_transition_shelf_page() ((void)0)
 #define update_display_reader_cleanup(...) push(11)
 #define update_display_full(...) push(12)
+static enum EpdDrawError update_display_image_gray(void *hl){return push_gray(hl,&E0470_FULL_WAVEFORM,MODE_GC16,(EpdRect){0,0,684,1216},22);}
 static enum EpdDrawError update_display_area_diff_with(void *h,const int *w,int m,EpdRect a){return push_gray(h,w,m,a,13);}
 static enum EpdDrawError update_display_area_full_with(void *h,const int *w,int m,EpdRect a){return push_gray(h,w,m,a,14);}
 #define update_display_area_with(...) push(15)
@@ -110,6 +111,7 @@ for name in ('reader_area','reader_fullscreen_progress_area','progress_rect'):
  unit+=function(name,root/'main/apps/app_book.c')+'\n'
 unit+='static enum EpdDrawError reader_present_crop(void *hl,const EpdWaveform *wave,int mode,EpdRect area,bool full){return full?update_display_area_full_with(hl,wave,mode,area):update_display_area_diff_with(hl,wave,mode,area); }\n'
 unit+=function('reader_soft_present',root/'main/apps/app_book.c')+'\n'
+unit+=function('reader_image_present',root/'main/apps/app_book.c')+'\n'
 unit+=function('present',root/'main/apps/app_book.c')
 unit+=r'''
 static void reset(void){
@@ -124,11 +126,12 @@ int main(void){
  app_ctx_t ctx={0};
  for(unsigned entry=0;entry<2;++entry)for(unsigned img=0;img<2;++img){
   reset();s_presented_view=entry?SEARCH:SHELF;images=img;background=img;s_turns=9;
-  present(&ctx,APP_REDRAW_PAGE);assert(calls==1&&selected==14&&s_turns==0&&s_presented_view==READING);
+  present(&ctx,APP_REDRAW_PAGE);assert(calls==1&&selected==22&&s_turns==0&&s_presented_view==READING);
+  assert(last_gray_wave==&E0470_FULL_WAVEFORM&&last_gray_mode==MODE_GC16&&last_gray_area.height==1216);
  }
  reset();s_presented_view=SEARCH;fail=1;s_turns=9;
- present(&ctx,APP_REDRAW_PAGE);assert(calls==1&&selected==14&&s_presented_view==SEARCH&&s_turns==9);
- fail=0;calls=0;present(&ctx,APP_REDRAW_PAGE);assert(calls==1&&selected==14&&s_presented_view==READING);
+ present(&ctx,APP_REDRAW_PAGE);assert(calls==1&&selected==22&&s_presented_view==SEARCH&&s_turns==9);
+ fail=0;calls=0;present(&ctx,APP_REDRAW_PAGE);assert(calls==1&&selected==22&&s_presented_view==READING);
 
  for(int full=0;full<2;++full){
   reset();s_reader_fullscreen=full;s_area=reader_area();s_reader_footer_pending=false;
@@ -175,7 +178,8 @@ int main(void){
   reset();tick=effect;immersive=hide_status;s_reader_fullscreen=full;s_area=reader_area();s_reader_footer_pending=false;s_reader_turn_pending=false;
   images=kind!=2;s_reader_image_refresh_pending=images!=0;s_reader_image_exit_pending=kind!=0;
   present(&ctx,APP_REDRAW_AREA);
-  assert(calls==1&&selected==20);assert_text_area();
+  assert(calls==1&&selected==14);assert(last_gray_wave==&soft_waveform&&last_gray_mode==MODE_GL16);
+  assert(last_gray_area.x==0&&last_gray_area.y==0&&last_gray_area.width==684&&last_gray_area.height==1216);
   assert(s_reader_image_frame==(images!=0)&&s_reader_text_frame==!images&&!s_reader_image_exit_pending);
  }
  // Manual/periodic cleanup takes priority even on image-bearing pages, and never uses a sparse GC mask.
@@ -186,11 +190,11 @@ int main(void){
   if(!kind)assert(last_gray_mode==MODE_GC16&&last_gray_wave==&E0470_FULL_WAVEFORM&&last_gray_area.y==0&&last_gray_area.height==1216);
  }
  reset();images=1;s_reader_image_refresh_pending=true;s_reader_turn_pending=false;
- present(&ctx,APP_REDRAW_PAGE);assert(calls==1&&selected==20);assert_text_area();
+ present(&ctx,APP_REDRAW_PAGE);assert(calls==1&&selected==14&&last_gray_wave==&soft_waveform&&last_gray_mode==MODE_GL16);
  // A failed image/exit output cannot become either displayed-image history or a text-only fast baseline.
  for(int exit=0;exit<2;++exit){
   reset();fail=1;images=!exit;s_reader_image_refresh_pending=!exit;s_reader_image_exit_pending=exit;
-  present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==20&&!s_reader_image_frame&&!s_reader_text_frame);
+  present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==14&&last_gray_wave==&soft_waveform&&!s_reader_image_frame&&!s_reader_text_frame);
  }
  reset();images=1;hide_images=true;s_reader_turn_pending=false;s_reader_fullscreen=false;s_reader_footer_pending=false;
  present(&ctx,APP_REDRAW_AREA);assert(!s_reader_image_frame);

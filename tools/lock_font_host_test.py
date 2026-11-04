@@ -2,7 +2,7 @@
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
-import subprocess
+import subprocess,sys
 import tempfile
 from home_cover_cache_host_test import function
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +19,8 @@ unit = r'''
 typedef struct {char path[288];bool reading;} app_lock_font_t;
 typedef struct {char path[288];} ttf_font_item_t;
 static bool s_reading,system_face,system_scale,recovery;
+static bool bitmap_reading;
+static bool ttf_set_reader_context(bool reading){bool changed=bitmap_reading!=reading;bitmap_reading=reading;return changed;}
 static char s_rejected[TTF_FONT_PATH_MAX],corrupt[288];
 static time_t s_rejected_mtime;
 static off_t s_rejected_size;
@@ -51,7 +53,8 @@ static int ttf_font_open(const char *path){++opens;if(!strcmp(path,missing)||!st
 static int ttf_font_open_builtin(void){return ttf_font_open("builtin");}
 static void ui_text_set_system_font(bool on){system_face=on;}
 static void ui_text_set_system_scale(bool on){system_scale=on;}
-static void ui_nav_status_font_context(bool reading,bool changed){(void)changed;assert(reading==s_reading);}
+static void ui_nav_status_font_context(bool reading,bool changed){(void)changed;assert(reading==s_reading);
+}
 '''
 for name in ('font_file', 'system_path', 'activate', 'app_font_activate_system', 'app_font_activate_reading',
              'app_font_retry_active', 'app_font_begin_lock', 'app_font_end_lock'):
@@ -101,6 +104,6 @@ int main(void){
 with tempfile.TemporaryDirectory(dir=ROOT / 'build') as folder:
     c, exe = Path(folder) / 'test.c', Path(folder) / 'test'
     c.write_text(unit)
-    subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
+    subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror','-Wno-unused-function', '-fsanitize=address,undefined',
                     str(c), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

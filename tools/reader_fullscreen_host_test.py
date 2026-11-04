@@ -27,7 +27,9 @@ enum {READING,TOC,SHELF,READER_PANEL_NONE,READER_PANEL_TOOLS};
 #define E0470_TURN_LTR -1
 #define ESP_LOGI(...) ((void)0)
 static char s_requested_open[288];
-static bool s_requested_fullscreen=true,s_requested_open_home;
+static bool s_requested_fullscreen=true,s_requested_open_home,s_requested_resume_mode;
+static bool default_fullscreen;
+static bool app_settings_reader_default_fullscreen(void){return default_fullscreen;}
 // Real reader_zoom_reset dependencies: keep its cleanup in the exercised turn path.
 #define READER_IMAGE_ZOOM_MIN 1000
 static bool s_zoom_active,s_image_pan_active,s_image_zoom_bw;
@@ -149,6 +151,10 @@ int main(void){
  assert(app_book_request_open("/sdcard/book.epub")&&!s_requested_fullscreen&&!s_requested_open_home);
  assert(app_book_request_resume("/sdcard/book.epub",false)&&!s_requested_fullscreen&&s_requested_open_home);
  assert(app_book_request_open_from_home("/sdcard/other.epub")&&!s_requested_fullscreen);
+ default_fullscreen=true;
+ assert(app_book_request_open("/sdcard/book.epub")&&s_requested_fullscreen&&!s_requested_resume_mode);
+ assert(app_book_request_resume("/sdcard/book.epub",false)&&!s_requested_fullscreen&&s_requested_resume_mode);
+ default_fullscreen=false;
  assert(!app_book_request_open(NULL)&&!app_book_request_open(""));
  for(int full=0;full<2;++full)for(int tools=0;tools<2;++tools)for(int dir=-1;dir<=1;dir+=2){
   reset(full,tools,2,0);size_t destination=book_layout_page_start_offset(s_page+dir);

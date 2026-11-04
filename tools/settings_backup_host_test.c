@@ -94,6 +94,7 @@ esp_err_t book_history_backup_restore(FILE *file) {
 static bool card_mounted = true;
 static char loaded_dirs[2][96];
 static bool commit_fails;
+static int loaded_default_full=-1;
 static int loaded_rule_full = -1;
 static int commit_count;
 static bool test_full_storage;static uint8_t loaded_full_pages;
@@ -149,6 +150,7 @@ static int loaded_shelf_order=-1;
 static bool test_shutdown_storage;static int loaded_shutdown;
 #endif
 esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
+    if(!strcmp(key,NVS_KEY_DEFAULT_FULLSCREEN)&&loaded_default_full>=0){*value=(uint8_t)loaded_default_full;return ESP_OK;}
     if (!strcmp(key, NVS_KEY_BOOK_RULE_FULL) && loaded_rule_full >= 0) { *value = (uint8_t)loaded_rule_full; return ESP_OK; }
 #if KIIKO_BOARD_METALIO47
     if(test_shutdown_storage&&!strcmp(key,NVS_KEY_SHUTDOWN_MODE)){*value=loaded_shutdown;return ESP_OK;}
@@ -160,6 +162,7 @@ esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
 #endif
  (void)h; if(test_full_storage&&!strcmp(key,NVS_KEY_READER_FULL)){*value=loaded_full_pages;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_TURN)&&loaded_turn>=0){*value=(uint8_t)loaded_turn;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_PARA)&&has_para){*value=loaded_para;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)&&has_tracking){*value=loaded_tracking;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)&&has_fine){*value=loaded_fine;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOME_COMPONENT)&&loaded_home>=0){*value=(uint8_t)loaded_home;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_AA)&&has_aa){*value=loaded_aa;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2)&&keys_v2){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)&&has_weight){*value=loaded_weight;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)&&has_adjust){*value=loaded_adjust;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_STYLE)&&loaded_shelf>=0){*value=(uint8_t)loaded_shelf;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_V22)&&loaded_shelf_v22){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_LOCK_STYLE)&&loaded_lock>=0){*value=(uint8_t)loaded_lock;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOLD_ACTION)&&has_hold){*value=loaded_hold;return ESP_OK;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])&&has_keys[i]){*value=loaded_keys[i];return ESP_OK;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH) && has_main_mode) { *value=loaded_main_mode;return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } return ESP_FAIL; }
 esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) {
+    if(!strcmp(key,NVS_KEY_DEFAULT_FULLSCREEN)&&!commit_fails)loaded_default_full=value;
     if (!strcmp(key, NVS_KEY_BOOK_RULE_FULL) && !commit_fails) loaded_rule_full = value;
 #if KIIKO_BOARD_METALIO47
     if(test_shutdown_storage&&!strcmp(key,NVS_KEY_SHUTDOWN_MODE))loaded_shutdown=value;
@@ -187,6 +190,7 @@ esp_err_t nvs_erase_key(nvs_handle_t h, const char *key) { (void)h; (void)key; r
 esp_err_t nvs_commit(nvs_handle_t h) { (void)h; ++commit_count; return commit_fails ? ESP_FAIL : ESP_OK; }
 
 int main(void) {
+
     // 原0/1设置继续有效，六种新排序可持久化且非法值安全回退。/ Preserve legacy0/1 and persist all six orders, safely rejecting invalid values.
     for(int order=0;order<6;++order){loaded_shelf_order=order;app_settings_init();assert(app_settings_shelf_order()==order&&app_settings_shelf_recent_sort()==(order==1||order==3));}
     assert(setup_initializations==6);
@@ -953,6 +957,24 @@ int main(void) {
         assert(app_settings_backup_restore()==ESP_OK&&app_settings_book_px()==55);
     }
     remove_backup_files();
+    // Default-fullscreen is independent of immersive style and restores legacy defaults safely.
+    loaded_default_full=-1;app_settings_init();assert(!app_settings_reader_default_fullscreen());
+    loaded_default_full=255;app_settings_init();assert(!app_settings_reader_default_fullscreen());
+    loaded_default_full=-1;
+    commit_fails=true;assert(!app_settings_set_reader_default_fullscreen(true)&&!app_settings_reader_default_fullscreen());commit_fails=false;
+    for(int full=0;full<2;++full)for(int immersive=0;immersive<2;++immersive){
+      assert(app_settings_set_reader_default_fullscreen(full));app_settings_set_reader_immersive(immersive);
+      s_reader_default_fullscreen=!full;app_settings_init();assert(app_settings_reader_default_fullscreen()==(bool)full);
+    }
+    assert(app_settings_set_reader_default_fullscreen(false));app_settings_set_reader_immersive(false);
+    for(int full=0;full<2;++full)for(int immersive=0;immersive<2;++immersive){
+      assert(app_settings_set_reader_default_fullscreen(full));app_settings_set_reader_immersive(immersive);
+      assert(app_settings_backup_save()==ESP_OK);
+      s_reader_default_fullscreen=!full;s_reader_immersive=!immersive;
+      assert(app_settings_backup_restore()==ESP_OK);
+      assert(app_settings_reader_default_fullscreen()==(bool)full&&app_settings_reader_immersive()==(bool)immersive);
+    }
+    assert(app_settings_set_reader_default_fullscreen(false));app_settings_set_reader_immersive(false);
     puts("settings backup host test passed (200% sizes, retired shelf migration, collage persistence/restore without wallpaper, unified backup name with both boards' legacy names)");
     return 0;
 }

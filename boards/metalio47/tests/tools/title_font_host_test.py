@@ -7,6 +7,7 @@ import struct
 import subprocess
 import tempfile
 from pathlib import Path
+from font_hanzi_host_support import font_hanzi_host_sources
 from home_cover_cache_host_test import function
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -275,7 +276,7 @@ int main(int argc,char **argv){
     subprocess.run(flags + ['-Dopen=title_test_open', '-Dclose=title_test_close', '-c',
                             str(ROOT / 'main/font/ttf_font.c'), '-o', str(work / 'ttf.o')], check=True)
     gc = '-Wl,-dead_strip' if os.uname().sysname == 'Darwin' else '-Wl,--gc-sections'
-    subprocess.run(flags + [str(work / 'test.c'), str(work / 'assets.c'), str(work / 'ttf.o'),
+    subprocess.run(flags +font_hanzi_host_sources(ROOT,work)+ [str(work / 'test.c'), str(work / 'assets.c'), str(work / 'ttf.o'),
                             str(ROOT / 'main/ui/ui_kit.c'), '-lm', gc, '-o', str(work / 'test')], check=True)
     args=[str(work / 'test'), str(work / 'system.ttf'), str(work / 'reader.ttf')]
     if os.environ.get('METALIO_TEST_USER_FONT'):args.append(os.environ['METALIO_TEST_USER_FONT'])

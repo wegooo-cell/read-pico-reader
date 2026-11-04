@@ -215,7 +215,9 @@ static delete_retry_t* s_delete_retries;
 static char s_latest_path[288],test_last_path[288];
 static bool s_save_failed;
 static char s_path[288],s_requested_open[288];
-static bool s_requested_open_home,s_reader_return_home,s_requested_fullscreen;
+static bool s_requested_open_home,s_reader_return_home,s_requested_fullscreen,s_requested_resume_mode;
+static bool app_settings_reader_default_fullscreen(void){return false;}
+static bool app_settings_set_reader_default_fullscreen(bool on){(void)on;return true;}
 static int test_open_calls;
 static char* s_text;
 static int s_unsaved,s_px=48,s_margin=36,s_line_spacing=130;
