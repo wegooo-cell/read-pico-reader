@@ -313,6 +313,14 @@
     "main/display_reader_waveform.h": {
       "sha256": "5d11da8c89d685551d9b93043af3be307c2a538228aa1b1f6c7b213a196b6f84",
       "user_decision": "用户2026-11-03：S31残影/翻页优化定稿并直接提交合并（整页刷新恢复厂家完整48相，普通翻页对齐Pico的十二相擦白+四相重推黑）。/ User2026-11-03 finalizes the S31 ghosting/turn work and merges it directly (page refreshes use vendor full 48 phases; ordinary turns match Pico's twelve erase plus four black re-drive phases)."
+    },
+    "components/epdiy/src/highlevel.c": {
+      "sha256": "92c50435e721b7fb1cefb4566ac193409babe21f7a7542283fb1596e84ae42a1",
+      "user_decision": "用户2026-11-04要求从最新main创建feature分支修复Pico进度线闪黑，版本不变。仅Pico精确屏蔽局刷裁剪外像素并同步后缓冲范围，S31执行代码与原波形保持。 / User2026-11-04 requests the Pico progress-track fix on a feature branch from latest main without version changes. Exact Pico scan masks and back-buffer bounds only; S31 executable code and waveforms remain unchanged."
+    },
+    "components/epdiy/LICENSE": {
+      "sha256": "9d0c6c1bf7bf8f9587b6959c3bc7f9271f2abb9bf48be8e4e782baa06bb22648",
+      "user_decision": "用户2026-11-04的Pico进度线修复：同步epdiy既有修改说明，许可证条款不变。 / Document the user-requested Pico crop fix in the existing epdiy modification list; license terms unchanged."
     }
   }
 }
