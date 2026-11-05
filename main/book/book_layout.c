@@ -80,6 +80,11 @@ static int s_last_line_x_end, s_last_line_used;
 // icon width to the line and record its exact x.
 static const html_note_t* s_inline_notes;
 static size_t s_inline_note_count;
+// 文字注号的版面矩形：文字注号没有图图标，命中区靠排版记下的行内位置。
+// On-page rects for text markers: they carry no icon, so their tap targets come from layout.
+typedef struct { size_t page, note; int x, y, w, h; } layout_note_marker_t;
+static layout_note_marker_t* s_note_markers;
+static size_t s_note_marker_count, s_note_marker_capacity;
 static book_layout_image_dims_fn s_dims_fn;
 static void* s_dims_ctx;
 
@@ -285,11 +290,14 @@ void book_layout_free(void) {
     free(s_line);
     free(s_images);
     free(s_page_img_start);
+    free(s_note_markers);
     s_pages = NULL;
     s_line = NULL; s_line_capacity = 0;
     s_images = NULL;
     s_page_img_start = NULL;
     s_image_count = s_image_capacity = 0;
+    s_note_markers = NULL;
+    s_note_marker_count = s_note_marker_capacity = 0;
     s_text = NULL;
     s_count = s_capacity = s_len = 0;
     s_px = 0;
@@ -420,6 +428,41 @@ static bool record_page_image(int image, int x, int y, int w, int h) {
     rec->height = (int16_t)h;
     if (s_page_img_start && s_count) s_page_img_start[s_count] = (uint32_t)s_image_count;
     return true;
+}
+
+static bool record_note_marker(size_t page, size_t note, int x, int y, int w, int h) {
+    if (s_note_marker_count == s_note_marker_capacity) {
+        size_t cap = s_note_marker_capacity ? s_note_marker_capacity * 2 : 16;
+        if (cap > PAGE_MAX * 4) return false;
+        layout_note_marker_t* grown = heap_caps_realloc(s_note_markers, cap * sizeof(*grown), PSRAM_CAPS);
+        if (!grown) return false;
+        s_note_markers = grown;
+        s_note_marker_capacity = cap;
+    }
+    s_note_markers[s_note_marker_count++] = (layout_note_marker_t){page, note, x, y, w, h};
+    return true;
+}
+
+int book_layout_page_note_marker_count(size_t page) {
+    int n = 0;
+    for (size_t i = 0; i < s_note_marker_count; ++i)
+        if (s_note_markers[i].page == page) ++n;
+    return n;
+}
+
+bool book_layout_page_note_marker_rect(size_t page, int i, int* note, int* x, int* y, int* w, int* h) {
+    int seen = 0;
+    for (size_t k = 0; k < s_note_marker_count; ++k) {
+        if (s_note_markers[k].page != page) continue;
+        if (seen++ != i) continue;
+        if (note) *note = (int)s_note_markers[k].note;
+        if (x) *x = s_note_markers[k].x;
+        if (y) *y = s_note_markers[k].y;
+        if (w) *w = s_note_markers[k].w;
+        if (h) *h = s_note_markers[k].h;
+        return true;
+    }
+    return false;
 }
 
 int book_layout_page_image_count(size_t page) {
@@ -1046,6 +1089,25 @@ bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks,
             int icon_y = (int)used + leading + (line_height - ih) / 2;
             if (icon_y < 0) icon_y = 0;
             if (!record_page_image(image, icon_x, icon_y, iw, ih)) goto fail;
+        }
+        // 文字注号没有图标占位，按行内位置记下命中矩形（宽约一个字）。
+        // Text markers carry no placeholder; record their in-line rect (about one em wide).
+        for (size_t ni = 0; ni < s_inline_note_count; ++ni) {
+            if (s_inline_notes[ni].image >= 0) continue;
+            const size_t marker = s_inline_notes[ni].marker_offset;
+            if (marker < off || marker >= next) continue;
+            char prefix[256];
+            size_t plen = marker - off;
+            if (plen >= sizeof(prefix)) continue;
+            memcpy(prefix, s_text + off, plen);
+            prefix[plen] = 0;
+            int px_w = 0;
+            if (plen) { slot_select_for(off); px_w = ttf_text_width_px(line_px, prefix); }
+            int marker_x = rect.x + indent + px_w;
+            int marker_y = (int)used + leading;
+            if (marker_y < 0) marker_y = 0;
+            if (!record_note_marker(s_count ? s_count - 1 : 0, ni, marker_x, marker_y,
+                                    line_px, line_height)) goto fail;
         }
         s_last_line_used = (int)used + leading;
         s_last_line_x_end = s_rect.x + indent + line_width;

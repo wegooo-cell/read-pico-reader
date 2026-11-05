@@ -1949,6 +1949,76 @@ static char *chapter_css(book_epub_t *book, const char *chapter_path,
     return css;
 }
 
+// 跨文件脚注：正文链接 "文件#片段" 的注释文本在另一个 XHTML 里，解析前先把文本抽出来。
+// 只收 ref/normal 注号；注释页里指回正文的 key/back 链接不算脚注。
+// Cross-file notes: the text behind a "file#fragment" body link lives in another XHTML, so
+// extract it before parsing. Only ref/normal markers qualify; key/back links in the note page
+// (which point back into the body) are not footnotes.
+#define EPUB_NOTE_MAX 12
+#define EPUB_NOTE_FILE_MAX (512u * 1024u)
+#define EPUB_NOTE_TEXT_MAX 2048u
+typedef struct {
+    char href[192]; ///< 正文原样 href / Verbatim body href
+    char* text; ///< 已提取的注释文本 / Extracted note text
+    size_t len; ///< 文本字节数 / Text bytes
+} epub_ext_note_t;
+
+static size_t epub_collect_ext_notes(book_epub_t* book, const char* chapter_path,
+                                     const char* html, size_t len,
+                                     epub_ext_note_t* notes, size_t max) {
+    size_t count = 0;
+    const char* p = html;
+    const char* end = html + len;
+    while (p < end && count < max) {
+        if (*p != '<') { ++p; continue; }
+        if (p + 2 >= end || (p[1] != 'a' && p[1] != 'A') ||
+            (p[2] != ' ' && p[2] != '\t' && p[2] != '>' && p[2] != '/')) { ++p; continue; }
+        const char* close = memchr(p + 2, '>', (size_t)(end - p - 2));
+        if (!close) break;
+        token_t t = {.attrs = {p + 2, (size_t)(close - p - 2)}};
+        char href[EPUB_PATH_CAP];
+        if (attribute(t, "href", href, sizeof(href))) {
+            char* hash = strchr(href, '#');
+            if (hash && hash > href && hash[1] &&
+                strncmp(hash + 1, "key", 3) && strncmp(hash + 1, "noteref", 7) &&
+                strncmp(hash + 1, "back", 4)) {
+                char target[EPUB_PATH_CAP];
+                char file[EPUB_PATH_CAP];
+                size_t file_len = (size_t)(hash - href);
+                bool duplicate = false;
+                for (size_t k = 0; k < count && !duplicate; ++k)
+                    duplicate = !strcmp(notes[k].href, href);
+                bool resolved = file_len > 0 && file_len < sizeof(file) &&
+                                (memcpy(file, href, file_len), file[file_len] = 0,
+                                 resolve_path(chapter_path, file, target));
+                int index = duplicate || !resolved ? -1 : zip_find(book->zip, target);
+                size_t n = index >= 0 ? zip_entry_size(book->zip, index) : 0;
+                if (!duplicate && n > 0 && n <= EPUB_NOTE_FILE_MAX) {
+                    char* page = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                    if (page && zip_extract(book->zip, index, page, n) == ESP_OK) {
+                        size_t text_len = 0;
+                        char* text = html_extract_id_text(page, n, hash + 1, &text_len);
+                        if (text && text_len >= 2 && text_len <= EPUB_NOTE_TEXT_MAX) {
+                            size_t copy_len = strlen(href);
+                            if (copy_len >= sizeof(notes[count].href)) copy_len = sizeof(notes[count].href) - 1;
+                            memcpy(notes[count].href, href, copy_len);
+                            notes[count].href[copy_len] = 0;
+                            notes[count].text = text;
+                            notes[count].len = text_len;
+                            ++count;
+                        } else {
+                            free(text);
+                        }
+                    }
+                    free(page);
+                }
+            }
+        }
+        p = close + 1;
+    }
+    return count;
+}
+
 esp_err_t book_epub_load_target(book_epub_t *book, size_t i, const char *anchor,
                                 size_t source_offset, size_t *anchor_offset, html_text_t *out) {
     if (!out) return ESP_ERR_INVALID_ARG;
@@ -1968,9 +2038,22 @@ esp_err_t book_epub_load_target(book_epub_t *book, size_t i, const char *anchor,
         fonts.resolve = epub_face_slot;
         fonts.ctx = book;
     }
-    err = html_to_blocks_with_css_target(text, len, css, css_len,
+    // 跨文件脚注：先把注释文本抽出来，解析器按原样 href 命中后复制进脚注表。
+    // Cross-file notes: extract the texts first; the parser matches the verbatim href and copies
+    // them into its note table.
+    epub_ext_note_t ext[EPUB_NOTE_MAX];
+    memset(ext, 0, sizeof(ext));
+    size_t ext_count = epub_collect_ext_notes(book, zip_entry_name(book->zip, book->chapters[i].zip_index),
+                                              text, len, ext, EPUB_NOTE_MAX);
+    html_ext_note_t ext_map[EPUB_NOTE_MAX];
+    for (size_t k = 0; k < ext_count; ++k)
+        ext_map[k] = (html_ext_note_t){ext[k].href, ext[k].text, ext[k].len};
+    err = html_to_blocks_with_css_notes(text, len, css, css_len,
                                          fonts.resolve ? &fonts : NULL,
-                                         anchor, source_offset, anchor_offset, out);
+                                         anchor, source_offset,
+                                         ext_count ? ext_map : NULL, ext_count,
+                                         anchor_offset, out);
+    for (size_t k = 0; k < ext_count; ++k) free(ext[k].text);
     if (err == ESP_OK) chapter_breaks_prepare(book, i, out);
     free(css); free(text); return err;
 }

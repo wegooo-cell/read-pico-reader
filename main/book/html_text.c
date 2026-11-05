@@ -74,9 +74,10 @@ typedef struct {
     // Inline tags switch faces too: record the slot per open depth and fall back on close.
     uint8_t family_at[CSS_ANCESTOR_MAX];
     bool family_rules;
-    // 脚注：正文 <a href="#id"> 注号 + 同章带 id 的注释文本；解析完成后再对齐文本切片。
-    // Footnotes: body <a href="#id"> markers plus same-chapter id elements; align text slices after parsing.
-    struct { char id[24]; size_t marker; int image; } note_refs[12];
+    // 脚注：正文 <a href="#id"> 注号 + 同章带 id 的注释文本；跨文件注号由 ext_notes 预先给出文本。
+    // Footnotes: body <a href="#id"> markers plus same-chapter id elements; cross-file markers get
+    // their text from the pre-extracted ext_notes table. Align text slices after parsing.
+    struct { char id[24]; size_t marker; int image; int ext; } note_refs[12];
     size_t note_ref_count;
     struct { char id[24]; size_t start, end, depth; } note_ids[16];
     size_t note_id_count;
@@ -85,6 +86,11 @@ typedef struct {
     size_t note_marker;
     int note_image;
     char note_target[24];
+    int note_ext;
+    size_t note_href_len;
+    char note_href[160];
+    const html_ext_note_t* ext_notes;
+    size_t ext_note_count;
 } writer_t;
 
 static unsigned char lower(unsigned char c) {
@@ -411,8 +417,14 @@ void html_text_free(html_text_t* text) {
     for (size_t i = 0; i < text->image_count; ++i) free(text->images[i]);
     free(text->images);
     free(text->runs);
-    free(text->notes);
+    html_notes_free(text->notes, text->note_count);
     *text = (html_text_t){0};
+}
+
+void html_notes_free(html_note_t* notes, size_t count) {
+    if (!notes) return;
+    for (size_t i = 0; i < count; ++i) free(notes[i].owned_text);
+    free(notes);
 }
 
 static esp_err_t reserve_text(writer_t* w, size_t extra) {
@@ -704,18 +716,31 @@ static esp_err_t add_inline_image(writer_t* w, const char* path) {
     return ESP_OK;
 }
 
-esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
-                                          const char* css, size_t css_len,
-                                          const html_font_map_t* fonts,
-                                          const char* anchor, size_t source_offset,
-                                          size_t* anchor_offset, html_text_t* out) {
+static int ext_note_lookup(const writer_t* w, const char* href, size_t href_len) {
+    if (!w->ext_notes) return -1;
+    for (size_t i = 0; i < w->ext_note_count; ++i) {
+        const char* h = w->ext_notes[i].href;
+        if (!h) continue;
+        if (strlen(h) == href_len && !memcmp(h, href, href_len)) return (int)i;
+    }
+    return -1;
+}
+
+esp_err_t html_to_blocks_with_css_notes(const char* html, size_t len,
+                                         const char* css, size_t css_len,
+                                         const html_font_map_t* fonts,
+                                         const char* anchor, size_t source_offset,
+                                         const html_ext_note_t* ext, size_t ext_count,
+                                         size_t* text_offset, html_text_t* out) {
     if (!out) return ESP_ERR_INVALID_ARG;
     *out = (html_text_t){0};
-    if (anchor_offset) *anchor_offset = 0;
+    if (text_offset) *text_offset = 0;
     if ((!html && len) || (!css && css_len)) return ESP_ERR_INVALID_ARG;
     if (len > HTML_TEXT_MAX_BYTES) return ESP_ERR_INVALID_SIZE;
     writer_t w = {0};
     w.fonts = fonts;
+    w.ext_notes = ext;
+    w.ext_note_count = ext_count;
     w.rules = heap_caps_malloc(CSS_RULE_MAX * sizeof(*w.rules), PSRAM_CAPS);
     if (w.rules == NULL) return ESP_ERR_NO_MEM;
     if (css_len) css_parse_rules(&w, css, css + css_len);
@@ -782,8 +807,10 @@ esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
                         target[sizeof(w.note_refs[0].id) - 1] = 0;
                         w.note_refs[w.note_ref_count].marker = w.note_marker;
                         w.note_refs[w.note_ref_count].image = w.note_image;
+                        w.note_refs[w.note_ref_count].ext = w.note_ext;
                         ++w.note_ref_count;
                         w.note_open = false;
+                        w.note_ext = -1;
                     }
                     // 记录 id 元素的结束位置；条目保留到解析完成，供注号引用查找。
                     // Record the id element end; keep entries until parsing finishes so refs can resolve.
@@ -831,16 +858,31 @@ esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
                         attr_value(html + at, html + end, "href", &href, &href_len) && href_len)
                         w.link_depth = w.depth;
                     // 以 # 开头的链接视为注号引用；同章带 id 的元素稍后给出注释文本。
-                    // A '#fragment' link is a footnote reference; a same-chapter id supplies the note text.
-                    if (!w.note_open && name_equal(name, "a") && href && href_len > 1 && href[0] == '#') {
-                        size_t n = href_len - 1;
-                        if (n >= sizeof(w.note_target)) n = sizeof(w.note_target) - 1;
-                        memcpy(w.note_target, href + 1, n);
-                        w.note_target[n] = 0;
-                        w.note_open = true;
-                        w.note_depth = w.depth;
-                        w.note_marker = w.text.len;
-                        w.note_image = -1;
+                    // 带路径的 "文件#片段" 只在跨文件脚注表命中时按注号处理，否则保留为普通链接。
+                    // A '#fragment' link is a footnote reference; a same-chapter id supplies the note
+                    // text. A path-prefixed "file#fragment" is a footnote only when the cross-file
+                    // table has it, otherwise it stays an ordinary link.
+                    if (!w.note_open && name_equal(name, "a") && href && href_len > 1) {
+                        w.note_target[0] = 0;
+                        w.note_ext = -1;
+                        if (href[0] == '#') {
+                            size_t n = href_len - 1;
+                            if (n >= sizeof(w.note_target)) n = sizeof(w.note_target) - 1;
+                            memcpy(w.note_target, href + 1, n);
+                            w.note_target[n] = 0;
+                            w.note_open = true;
+                        } else {
+                            int ext = ext_note_lookup(&w, href, href_len);
+                            if (ext >= 0) {
+                                w.note_ext = ext;
+                                w.note_open = true;
+                            }
+                        }
+                        if (w.note_open) {
+                            w.note_depth = w.depth;
+                            w.note_marker = w.text.len;
+                            w.note_image = -1;
+                        }
                     }
                     if (w.note_id_count < 16) {
                         const char* idv = NULL; size_t idlen = 0;
@@ -883,7 +925,7 @@ esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
                     if (name[0] == 'h' && name[1] >= '1' && name[1] <= '6' && !name[2])
                         w.heading_level = !closing && !self_closing ? (uint8_t)(name[1] - '0') : 0;
                 }
-                if (!closing && !skip[0] && anchor_offset) {
+                if (!closing && !skip[0] && text_offset) {
                     const char *value = NULL; size_t length = 0;
                     bool matched = tag_offset == source_offset;
                     if (!matched && anchor && *anchor &&
@@ -892,7 +934,7 @@ esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
                          attr_value(html + at, html + end, "name", &value, &length)) &&
                         length == strlen(anchor) && !memcmp(value, anchor, length)) matched = true;
                     if (matched)
-                        *anchor_offset = w.text.len + (!w.active && w.text.count ? 1 : 0);
+                        *text_offset = w.text.len + (!w.active && w.text.count ? 1 : 0);
                 }
                 continue;
             }
@@ -916,6 +958,22 @@ esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
         if (notes) {
             size_t used = 0;
             for (size_t r = 0; r < w.note_ref_count; ++r) {
+                // 跨文件脚注：解析器只记注号位置，文本在此复制进 owned_text。
+                // Cross-file notes: the parser records the marker; copy the pre-extracted text here.
+                if (w.note_refs[r].ext >= 0) {
+                    const html_ext_note_t* ext = &w.ext_notes[w.note_refs[r].ext];
+                    if (!ext->text || !ext->len) continue;
+                    char* copy = heap_caps_malloc(ext->len + 1, PSRAM_CAPS);
+                    if (!copy) break;
+                    memcpy(copy, ext->text, ext->len);
+                    copy[ext->len] = 0;
+                    notes[used].marker_offset = w.note_refs[r].marker;
+                    notes[used].text_len = ext->len;
+                    notes[used].image = w.note_refs[r].image;
+                    notes[used].owned_text = copy;
+                    ++used;
+                    continue;
+                }
                 // 注释文本里指回注号的链接不是脚注引用；范围自包含的也跳过。
                 // Back-links inside a note ("noteref") are not footnote refs, nor are self-containing ranges.
                 if (!strncmp(w.note_refs[r].id, "noteref", 7)) continue;
@@ -952,6 +1010,15 @@ fail:
     return err;
 }
 
+esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
+                                          const char* css, size_t css_len,
+                                          const html_font_map_t* fonts,
+                                          const char* anchor, size_t source_offset,
+                                          size_t* text_offset, html_text_t* out) {
+    return html_to_blocks_with_css_notes(html, len, css, css_len, fonts, anchor,
+                                          source_offset, NULL, 0, text_offset, out);
+}
+
 esp_err_t html_to_blocks_with_css_anchor(const char* html, size_t len,
                                           const char* css, size_t css_len,
                                           const char* anchor, size_t* anchor_offset,
@@ -967,4 +1034,189 @@ esp_err_t html_to_blocks_with_css(const char* html, size_t len,
 
 esp_err_t html_to_blocks(const char* html, size_t len, html_text_t* out) {
     return html_to_blocks_with_css(html, len, NULL, 0, out);
+}
+
+/* ---- 跨文件脚注抽取 / Cross-file note text extraction ---- */
+
+// 找到标签名起点与结束 '>'；返回 false 表示输入截断。返回标签名（小写，最多 15 字节）。
+// Locate a tag's name and its closing '>'; false when the input ends first. The lowercased name
+// is copied into `name` (at most 15 bytes).
+static bool tag_bounds(const char* html, size_t len, size_t pos, bool* closing,
+                       size_t* name_start, size_t* end, char* name, size_t name_cap) {
+    if (pos >= len || html[pos] != '<') return false;
+    size_t at = pos + 1;
+    *closing = at < len && html[at] == '/';
+    if (*closing) ++at;
+    size_t start = at;
+    while (at < len && name_char((unsigned char)html[at])) ++at;
+    size_t name_len = at - start;
+    if (!name_len || name_len >= name_cap) return false;
+    for (size_t i = 0; i < name_len; ++i) name[i] = (char)lower((unsigned char)html[start + i]);
+    name[name_len] = 0;
+    char quote = 0;
+    size_t scan = at;
+    for (; scan < len; ++scan) {
+        char c = html[scan];
+        if (quote) { if (c == quote) quote = 0; }
+        else if (c == '\'' || c == '"') quote = c;
+        else if (c == '>') break;
+    }
+    if (scan >= len) return false;
+    *name_start = start;
+    *end = scan;
+    return true;
+}
+
+// 跳过整个元素（含嵌套同名标签），返回结束 '>' 之后的偏移。
+// Skip a whole element including nested same-name tags; return the offset after its end.
+static size_t skip_element(const char* html, size_t len, size_t pos, const char* name) {
+    bool closing;
+    size_t name_start = 0, end = 0;
+    char tag[16];
+    if (!tag_bounds(html, len, pos, &closing, &name_start, &end, tag, sizeof(tag))) return len;
+    (void)name_start;
+    if (closing || strcmp(tag, name)) return end + 1;
+    if (end > pos && html[end - 1] == '/') return end + 1;
+    size_t depth = 1;
+    size_t scan = end + 1;
+    while (scan < len) {
+        if (html[scan] == '<') {
+            bool cl;
+            size_t ns, e;
+            char t[16];
+            if (!tag_bounds(html, len, scan, &cl, &ns, &e, t, sizeof(t))) break;
+            (void)ns;
+            if (!strcmp(t, name)) {
+                if (cl) {
+                    if (--depth == 0) return e + 1;
+                } else if (!(e > scan && html[e - 1] == '/')) {
+                    ++depth;
+                }
+            }
+            scan = e + 1;
+            continue;
+        }
+        ++scan;
+    }
+    return len;
+}
+
+char* html_extract_id_text(const char* html, size_t len, const char* id, size_t* text_len) {
+    if (text_len) *text_len = 0;
+    if (!html || !id || !id[0]) return NULL;
+    size_t id_len = strlen(id);
+    if (id_len > 64) return NULL;
+    for (size_t i = 0; i < id_len; ++i) {
+        unsigned char c = (unsigned char)id[i];
+        if (c <= ' ' || c == '"' || c == '\'' || c == '<' || c == '>' || c == '&') return NULL;
+    }
+    size_t pos = 0, tag_start = SIZE_MAX, tag_end = 0;
+    while (pos < len) {
+        if (html[pos] != '<' || (pos + 1 < len && (html[pos + 1] == '!' || html[pos + 1] == '?'))) {
+            ++pos;
+            continue;
+        }
+        bool closing;
+        size_t name_start = 0, end = 0;
+        char tag[16];
+        if (!tag_bounds(html, len, pos, &closing, &name_start, &end, tag, sizeof(tag))) break;
+        if (!closing) {
+            const char* value = NULL;
+            size_t value_len = 0;
+            // 属性解析从标签名之后开始（解析器其它调用点也这样传），否则首个空格会吞掉属性名。
+            // Attribute parsing starts after the tag name, matching the parser's other call sites;
+            // starting at the name makes the first space swallow the attribute name.
+            size_t name_end = name_start;
+            while (name_end < end && name_char((unsigned char)html[name_end])) ++name_end;
+            const char* attrs = html + name_end;
+            if ((attr_value(attrs, html + end, "id", &value, &value_len) ||
+                 attr_value(attrs, html + end, "name", &value, &value_len)) &&
+                value_len == id_len && !memcmp(value, id, id_len)) {
+                tag_start = pos;
+                tag_end = end;
+                break;
+            }
+        }
+        pos = end + 1;
+    }
+    if (tag_start == SIZE_MAX) return NULL;
+    bool closing;
+    size_t name_start = 0;
+    char tag[16];
+    if (!tag_bounds(html, len, tag_start, &closing, &name_start, &tag_end, tag, sizeof(tag))) return NULL;
+    (void)name_start;
+    if (tag_end > tag_start && html[tag_end - 1] == '/') return NULL;
+    // 找同名结束标签；窗口有界，避免病态输入扫描整章。
+    // Find the matching close tag with a bounded window so malformed input cannot scan the chapter.
+    const size_t window = 16384;
+    size_t limit = len - tag_end - 1 < window ? len : tag_end + 1 + window;
+    size_t depth = 1, scan = tag_end + 1, content_end = limit;
+    while (scan < limit) {
+        if (html[scan] != '<') { ++scan; continue; }
+        bool cl;
+        size_t ns = 0, e = 0;
+        char t[16];
+        if (!tag_bounds(html, limit, scan, &cl, &ns, &e, t, sizeof(t))) break;
+        (void)ns;
+        if (!strcmp(t, tag)) {
+            if (cl) {
+                if (--depth == 0) { content_end = scan; break; }
+            } else if (!(e > scan && html[e - 1] == '/')) {
+                ++depth;
+            }
+        }
+        scan = e + 1;
+    }
+    char* out = heap_caps_malloc(2049, PSRAM_CAPS);
+    if (!out) return NULL;
+    size_t used = 0;
+    bool pending_space = false;
+    for (size_t p = tag_end + 1; p < content_end;) {
+        if (html[p] == '<') {
+            bool cl;
+            size_t ns = 0, e = 0;
+            char t[16];
+            if (!tag_bounds(html, content_end, p, &cl, &ns, &e, t, sizeof(t))) break;
+            (void)ns;
+            if (!cl && (!strcmp(t, "a") || !strcmp(t, "script") || !strcmp(t, "style"))) {
+                p = skip_element(html, content_end, p, t);
+                continue;
+            }
+            p = e + 1;
+            continue;
+        }
+        uint32_t cp = 0;
+        size_t n = html[p] == '&' ? entity(html + p, content_end - p, &cp) : 0;
+        if (!n) n = utf8(html + p, content_end - p, &cp);
+        if (!n) { ++p; continue; }
+        p += n;
+        if (cp == 0xa0 || (cp < 128 && ascii_space((unsigned char)cp))) {
+            if (used) pending_space = true;
+            continue;
+        }
+        if (cp == 0x200b || cp == 0xfeff) continue;
+        char bytes[4];
+        size_t bytes_len;
+        if (cp < 0x80) { bytes[0] = (char)cp; bytes_len = 1; }
+        else if (cp < 0x800) {
+            bytes[0] = (char)(0xc0 | (cp >> 6)); bytes[1] = (char)(0x80 | (cp & 63)); bytes_len = 2;
+        } else if (cp < 0x10000) {
+            bytes[0] = (char)(0xe0 | (cp >> 12)); bytes[1] = (char)(0x80 | ((cp >> 6) & 63));
+            bytes[2] = (char)(0x80 | (cp & 63)); bytes_len = 3;
+        } else {
+            bytes[0] = (char)(0xf0 | (cp >> 18)); bytes[1] = (char)(0x80 | ((cp >> 12) & 63));
+            bytes[2] = (char)(0x80 | ((cp >> 6) & 63)); bytes[3] = (char)(0x80 | (cp & 63));
+            bytes_len = 4;
+        }
+        if (used + bytes_len + 1 > 2048) break;
+        if (pending_space && used) out[used++] = ' ';
+        pending_space = false;
+        memcpy(out + used, bytes, bytes_len);
+        used += bytes_len;
+    }
+    while (used && out[used - 1] == ' ') --used;
+    out[used] = 0;
+    if (!used) { free(out); return NULL; }
+    if (text_len) *text_len = used;
+    return out;
 }

@@ -1147,5 +1147,27 @@ int main(void) {
     drawn[0]=0;book_layout_draw_page(&fb,0,note_box,10);
     assert(!strcmp(drawn,"ABCDExplanation"));
     book_layout_free();book_layout_set_inline_images(NULL,0);html_text_free(&notes);
+    // 跨文件脚注：注释文本从另一个 XHTML 的 id 元素抽取，文字注号按行内矩形可命中。
+    // Cross-file notes: text comes from an id element in another XHTML, and the text marker
+    // gets an in-line tap rect.
+    const char *note_page="<p><a id='ref1'>※注１：示例注释。</a></p>";
+    size_t cross_len=0;
+    char *cross_text=html_extract_id_text(note_page,strlen(note_page),"ref1",&cross_len);
+    assert(cross_text&&cross_len>4);
+    assert(!html_extract_id_text(note_page,strlen(note_page),"missing",NULL));
+    html_ext_note_t ext={"other.xhtml#ref1",cross_text,cross_len};
+    const char *cross_body="<p>前文<a href='other.xhtml#ref1'>注１</a>后文</p>";
+    html_text_t cross={0};
+    assert(html_to_blocks_with_css_notes(cross_body,strlen(cross_body),NULL,0,NULL,NULL,SIZE_MAX,
+                                         &ext,1,NULL,&cross)==ESP_OK);
+    assert(cross.note_count==1&&cross.notes[0].owned_text&&cross.notes[0].image==-1);
+    book_layout_set_inline_images(cross.notes,cross.note_count);
+    assert(book_layout_build_blocks(cross.utf8,cross.len,cross.blocks,cross.count,note_box,10));
+    assert(book_layout_page_note_marker_count(0)==1);
+    int cross_note=-1,cross_x=0,cross_y=0,cross_w=0,cross_h=0;
+    assert(book_layout_page_note_marker_rect(0,0,&cross_note,&cross_x,&cross_y,&cross_w,&cross_h));
+    assert(cross_note==0&&cross_w>0&&cross_h>0&&
+           cross_x>=note_box.x&&cross_x+cross_w<=note_box.x+note_box.width);
+    book_layout_free();book_layout_set_inline_images(NULL,0);html_text_free(&cross);free(cross_text);
     puts("book_layout_host_test: PASS; English word wrapping/hyphens, source offsets, idle rows/columns and bounded large chapters");
 }
