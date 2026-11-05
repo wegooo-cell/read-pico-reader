@@ -68,6 +68,9 @@ int main(int argc,char **argv){
 '''
 with tempfile.TemporaryDirectory(prefix='plc-') as folder:
     p = Path(folder)
+    # 新缓存根与旧根都落到临时目录，升级回退路径也能被本测试覆盖。
+    # Redirect both the new cache root and the legacy fallback root into the temp dir.
+    unit = unit.replace('/sdcard/.kiikoread', str(p/'card'))
     unit = unit.replace('/sdcard/.readpico', str(p/'card'))
     (p/'test.c').write_text(unit)
     subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',

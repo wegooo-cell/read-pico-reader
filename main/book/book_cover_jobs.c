@@ -15,6 +15,9 @@
 #include <string.h>
 #include <sys/stat.h>
 #include "esp_heap_caps.h"
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#endif
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -67,6 +70,9 @@ static void prepare(cover_job_slot_t *job,unsigned generation) {
         if(result<0){free(gray);return;}
         if(!current(generation)){free(gray);return;}
         if(!result){
+#ifdef ESP_PLATFORM
+            ESP_LOGW("cover", "auto pending %s", q->path);
+#endif
             if(q->artwork_only){free(gray);return;}
             job->result.pixels=gray;job->state=AUTO;return;
         }
@@ -89,7 +95,9 @@ static void prepare(cover_job_slot_t *job,unsigned generation) {
     job->result.white_edge=q->natural?false:white_edge(gray,sw,sh,q);free(gray);
     if(!current(generation)){free(bits);return;}
     book_fast_cover_key_t key={q->width,q->height,q->stride,q->contrast,q->phase};
-    if(job->auto_cache||!from_auto)book_cover_fast_cache_write_checked(q->path,q->title,q->author,key,bits,job->result.white_edge,st.st_size,st.st_mtime);
+    // 只有真封面才落盘快刷缓存；默认封面留在内存，避免把失败固化。
+    // Persist fast rasters only for real covers; generated defaults stay in RAM.
+    if(!from_auto)book_cover_fast_cache_write_checked(q->path,q->title,q->author,key,bits,job->result.white_edge,st.st_size,st.st_mtime);
     job->result.pixels=bits;job->result.fast=true;
 ready:
     job->result.width=q->width;job->result.height=q->height;

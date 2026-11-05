@@ -58,6 +58,9 @@ User2026-11-03 requests thorough S31 reader-entry cleanup after shelf ghosts on 
 
 ## 当前工作：双板型本地整合 / Current work: local multi-board integration
 
+用户2026-11-05：书架缓存统一到 TF 根目录 `.kiikoread`（`shelf.idx` 位置索引、`covers/` 成品点阵、`index/` 元数据），开机先按索引上屏，目录核对与封面任务后台执行；封面按页加载、逐本显示并显示加载进度，首次打开书籍时预热该书封面缓存；默认封面不再落盘当真封面，旧缓存目录可回退。
+User2026-11-05 moves shelf caches under TF:/kiikoread (`shelf.idx` position index, `covers/` finished rasters, `index/` metadata). Boot paints from the index first and reconciles/loads covers in the background; covers load page by page, appear one by one with progress, and a book's cover is warmed when first opened. Generated default covers are never persisted as real covers, and legacy cache folders remain readable.
+
 用户2026-11-05：跨文件脚注落地并经S31真机确认——正文`文件#片段`链接到目标XHTML的id元素取注释文本，注释页回跳 key/back/noteref 跳过；文字注号按排版矩形可点，图标注号保持原行为。宿主测试增加跨文件抽取与文字注号命中覆盖。
 User2026-11-05 lands cross-file footnotes, confirmed on the S31: body `file#fragment` links pull the note text from the target XHTML's id element, skipping key/back/noteref back-links in note pages; text markers are tappable from their typeset rect while icon markers keep their old behaviour. Host tests cover the extraction and text-marker hit rect.
 
