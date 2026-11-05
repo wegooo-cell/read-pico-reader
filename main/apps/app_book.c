@@ -973,7 +973,7 @@ static unsigned prepare_cover_batch(app_ctx_t *ctx,bool cache_only) {
         book_cover_result_t result={0};int state=book_cover_jobs_take(s_cover_generation,row,&result);
         if(!state)continue;
         s_cover_pending_mask&=~bit;s_cover_decode_mask&=~bit;
-        if(state<0)continue;
+        if(state<0){ESP_LOGW(TAG,"cover row=%d failed",row);continue;}
         free(s_covers[row].gray);free(s_covers[row].fast_bits);
         s_covers[row].gray=result.fast?NULL:result.pixels;
         s_covers[row].fast_bits=result.fast?result.pixels:NULL;
@@ -985,13 +985,21 @@ static unsigned prepare_cover_batch(app_ctx_t *ctx,bool cache_only) {
     return changed;
 }
 
-// 分批只用于准备，不能让几张已解码封面先出现在屏幕或点击反馈中。
-// Chunk preparation only: neither page painting nor press feedback reveals an incomplete cover group.
+// 分批只用于准备；用户2026-11-05改为逐本揭示，先出来的先显示，同时充当加载进度。
+// Chunk preparation stays bounded; per the 2026-11-05 request covers are now revealed one by one
+// as they finish, doubling as loading progress instead of waiting for a complete page group.
 static bool shelf_cover_frame_ready(void) {
     return s_view != SHELF || s_cover_pending_mask == 0;
 }
 static unsigned shelf_cover_reveal_mask(void) {
-    return shelf_cover_frame_ready() ? s_cover_dirty_mask : 0;
+    return s_cover_dirty_mask;
+}
+static bool shelf_loading_hint_active(void) {
+    return !strncmp(s_message, "正在加载", strlen("正在加载"));
+}
+static void shelf_loading_hint_update(int done, int total) {
+    if (total <= 0) return;
+    snprintf(s_message, sizeof(s_message), "正在加载书架 %d/%d", done, total);
 }
 
 static void prepare_covers(app_ctx_t* ctx) {
@@ -1036,6 +1044,10 @@ static void prepare_covers(app_ctx_t* ctx) {
     }
     prepare_fast_covers();
     (void)prepare_cover_batch(ctx, true);
+    ESP_LOGI(TAG, "covers leaf=%d pending=%x decode=%x packed=%d style=%d visible=%d count=%d",
+             ctx->leaf ? 1 : 0, s_cover_pending_mask, s_cover_decode_mask,
+             (int)app_settings_main_fast_refresh(), app_settings_shelf_style(),
+             s_visible_count, s_count);
 }
 
 // 首帧短暂汇合TF缓存命中，让题头、书架和封面一起显示；冷解码不无限阻塞。
@@ -5377,6 +5389,57 @@ static bool open_book_impl(app_ctx_t* ctx, const char* path) {
     ESP_LOGI(TAG, "opened kind=%d chapters=%u pages=%u px=%d", book_kind(), (unsigned)book_chapter_count(), (unsigned)book_layout_page_count(), s_px);
     return true;
 }
+/* ---- 首次打开书籍时预热封面缓存 / Warm the cover cache when a book first opens ---- */
+// 用户2026-11-05：首次打开书籍就把封面解码并落盘，之后书架直接命中，不再当场解码。
+// User2026-11-05: decode and persist the cover when a book is first opened so the shelf can hit
+// the cache instead of decoding on the spot later.
+// 注意：EPUB 元数据解析必须在打开的调用线程完成，后台任务只保留封面队列轮询。
+// Note: EPUB metadata parsing stays on the opening thread; the worker only polls the cover queue,
+// because a 3 KB task stack cannot host zip/xml parsing and would reboot the device.
+typedef struct {
+    char path[BOOK_STORE_PATH_MAX];
+    char title[256];
+    char author[128];
+} cover_warm_arg_t;
+static void cover_warm_task(void* arg) {
+    cover_warm_arg_t* task = (cover_warm_arg_t*)arg;
+    if (!task) { vTaskDelete(NULL); return; }
+    for (int i = 0; i < 40 && !read_pico_sd_io_ready(); ++i) vTaskDelay(pdMS_TO_TICKS(100));
+    // 阅读页先完成首刷，再占用 SD 生成缓存，避免拖慢打开。
+    // Let the reader paint first, then use the card for the cache so opening stays fast.
+    vTaskDelay(pdMS_TO_TICKS(1500));
+    if (read_pico_sd_io_ready()) {
+        unsigned generation = book_cover_jobs_begin();
+        book_cover_job_t request = {.width = BOOK_COVER_W, .height = BOOK_COVER_H};
+        copy_text(request.path, sizeof(request.path), task->path);
+        copy_text(request.title, sizeof(request.title), task->title);
+        copy_text(request.author, sizeof(request.author), task->author);
+        if (book_cover_jobs_submit(generation, 0, &request)) {
+            for (int i = 0; i < 100; ++i) {
+                book_cover_result_t result = {0};
+                int state = book_cover_jobs_take(generation, 0, &result);
+                if (state > 0) { free(result.pixels); break; }
+                if (state < 0) break;
+                vTaskDelay(pdMS_TO_TICKS(50));
+            }
+        }
+    }
+    free(task);
+    vTaskDelete(NULL);
+}
+static void cover_cache_warm_async(const char* path) {
+    if (!path || !*path || strncmp(path, "/sdcard/", 8)) return;
+    cover_warm_arg_t* arg = heap_caps_malloc(sizeof(*arg), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!arg) arg = malloc(sizeof(*arg));
+    if (!arg) return;
+    memset(arg, 0, sizeof(*arg));
+    copy_text(arg->path, sizeof(arg->path), path);
+    // 元数据解析放在调用线程（主任务栈足够），后台任务不做 ZIP/XML 解析。
+    // Parse metadata on the calling thread; the background task never runs zip/xml parsing.
+    (void)book_epub_metadata_cached(arg->path, arg->title, sizeof(arg->title),
+                                    arg->author, sizeof(arg->author));
+    if (xTaskCreate(cover_warm_task, "cover_warm", 4096, arg, 1, NULL) != pdPASS) free(arg);
+}
 static bool open_book(app_ctx_t *ctx, const char *path) {
     if (!book_cover_jobs_quiesce(2000)) {
         copy_text(s_message,sizeof(s_message),"封面任务正在收尾，请稍后再试");return false;
@@ -5393,6 +5456,7 @@ static bool open_book(app_ctx_t *ctx, const char *path) {
     }
     bool ok = open_book_impl(ctx, path);
     pico_boot_book_end(ok);
+    if (ok) cover_cache_warm_async(s_path);
     return ok;
 }
 static bool open_requested_book(app_ctx_t* ctx) {
@@ -5814,6 +5878,137 @@ static void shelf_added_load(void) {
     book_added_load(items, (size_t)s_count);
     free(items);
 }
+/* ---- 书架位置索引缓存 / Shelf position index cache ---- */
+// 用户2026-11-05：书架缓存统一放 TF 根目录 .kiikoread；启动先读位置索引直接上屏，
+// 目录与封面在后台核对，不再每次开机逐本 stat/解析。图片缓存沿用 covers/ 下的成品点阵。
+// User2026-11-05: keep shelf caches under TF:/kiikoread. Boot loads the position index for the
+// first frame and reconciles the directory/covers in the background; the covers/ folder keeps
+// finished rasters so decoding never repeats.
+#define SHELF_CACHE_DIR "/sdcard/.kiikoread"
+#define SHELF_CACHE_PATH SHELF_CACHE_DIR "/shelf.idx"
+#define SHELF_CACHE_MAGIC UINT32_C(0x4B534853)
+#define SHELF_CACHE_VERSION 1u
+#define SHELF_CACHE_MAX_ENTRIES 4096
+typedef struct { uint32_t magic, version, count, checksum; } shelf_cache_header_t;
+typedef struct {
+    char path[BOOK_STORE_PATH_MAX];
+    char name[256];
+    char author[128];
+    uint32_t size, recent;
+    uint64_t added;
+    uint16_t chapter;
+    uint8_t pct, flags;
+} shelf_cache_entry_t;
+static uint32_t shelf_cache_hash(const void* data, size_t size) {
+    const uint8_t* p = data;
+    uint32_t hash = UINT32_C(2166136261);
+    while (size--) hash = (hash ^ *p++) * UINT32_C(16777619);
+    return hash;
+}
+static void shelf_cache_save(void) {
+    if (!s_count || s_count > SHELF_CACHE_MAX_ENTRIES) return;
+    if (mkdir(SHELF_CACHE_DIR, 0777) && errno != EEXIST) return;
+    char temp[64];
+    snprintf(temp, sizeof(temp), SHELF_CACHE_PATH ".tmp");
+    FILE* file = fopen(temp, "wb");
+    if (!file) return;
+    shelf_cache_header_t header = {.magic = SHELF_CACHE_MAGIC, .version = SHELF_CACHE_VERSION,
+                                   .count = (uint32_t)s_count, .checksum = 0};
+    bool ok = fwrite(&header, 1, sizeof(header), file) == sizeof(header);
+    uint32_t sum = 0;
+    for (int i = 0; ok && i < s_count; ++i) {
+        shelf_cache_entry_t e;
+        memset(&e, 0, sizeof(e));
+        copy_text(e.path, sizeof(e.path), s_shelf[i].path);
+        copy_text(e.name, sizeof(e.name), s_shelf[i].name);
+        copy_text(e.author, sizeof(e.author), s_shelf[i].author);
+        e.size = s_shelf[i].size;
+        e.recent = s_shelf[i].recent;
+        e.added = s_shelf[i].added;
+        e.chapter = s_shelf[i].chapter;
+        e.pct = s_shelf[i].pct;
+        e.flags = (uint8_t)((s_shelf[i].is_flash ? 1u : 0u) | (s_shelf[i].has_progress ? 2u : 0u) |
+                            (s_shelf[i].favorite ? 4u : 0u));
+        sum = (sum ^ shelf_cache_hash(&e, sizeof(e))) * UINT32_C(16777619);
+        ok = ok && fwrite(&e, 1, sizeof(e), file) == sizeof(e);
+    }
+    if (ok) {
+        header.checksum = sum;
+        ok = fseek(file, 0, SEEK_SET) == 0 && fwrite(&header, 1, sizeof(header), file) == sizeof(header);
+    }
+    if (fclose(file) != 0) ok = false;
+    if (!ok) { remove(temp); return; }
+    remove(SHELF_CACHE_PATH);
+    if (rename(temp, SHELF_CACHE_PATH) != 0) remove(temp);
+}
+// 读索引时逐条核对文件仍存在且字节数一致；不吻合的条目丢弃，由后台重扫补回。
+// Validate every entry against the card while reading; mismatches are dropped and the background
+// rescan brings the listing up to date.
+static bool shelf_cache_load(app_ctx_t* ctx) {
+    FILE* file = fopen(SHELF_CACHE_PATH, "rb");
+    if (!file) return false;
+    shelf_cache_header_t header;
+    bool ok = fread(&header, 1, sizeof(header), file) == sizeof(header) &&
+              header.magic == SHELF_CACHE_MAGIC && header.version == SHELF_CACHE_VERSION &&
+              header.count <= SHELF_CACHE_MAX_ENTRIES;
+    uint32_t sum = 0;
+    bool stale = false;
+    int kept = 0;
+    if (ok) {
+        s_count = 0;
+        for (uint32_t i = 0; ok && i < header.count; ++i) {
+            shelf_cache_entry_t e;
+            if (fread(&e, 1, sizeof(e), file) != sizeof(e)) { ok = false; break; }
+            sum = (sum ^ shelf_cache_hash(&e, sizeof(e))) * UINT32_C(16777619);
+            struct stat st;
+            if (stat(e.path, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size < 0 ||
+                (uint32_t)st.st_size != e.size) { stale = true; continue; }
+            if (!shelf_reserve()) { ok = false; break; }
+            shelf_entry_t item;
+            memset(&item, 0, sizeof(item));
+            copy_text(item.path, sizeof(item.path), e.path);
+            copy_text(item.name, sizeof(item.name), e.name);
+            copy_text(item.author, sizeof(item.author), e.author);
+            item.size = e.size;
+            item.chapter = e.chapter;
+            item.pct = e.pct;
+            item.recent = e.recent;
+            item.added = e.added;
+            item.is_flash = (e.flags & 1u) != 0;
+            item.has_progress = (e.flags & 2u) != 0;
+            item.favorite = (e.flags & 4u) != 0;
+            item.search_match = read_pico_search_match(item.name, s_query);
+            s_shelf[s_count++] = item;
+            ++kept;
+        }
+    }
+    fclose(file);
+    if (!ok || (header.count && sum != header.checksum) || !kept) { s_count = 0; return false; }
+    shelf_added_load();
+    shelf_categories_recount();
+    sort_shelf(ctx);
+    if (s_view == SHELF) shelf_category_restore(ctx);
+    s_latest_path[0] = 0;
+    char last[BOOK_STORE_PATH_MAX];
+    if (book_progress_last_path(last, sizeof(last))) {
+        for (int i = 0; i < s_count; ++i)
+            if (!strcmp(s_shelf[i].path, last) && !s_shelf[i].removed) {
+                copy_text(s_latest_path, sizeof(s_latest_path), last);
+                break;
+            }
+    }
+    read_pico_sd_info_t sd = {0};
+    (void)read_pico_sd_get_info(&sd);
+    s_cache_sd_present = sd.present;
+    s_cache_sd_mounted = sd.mounted;
+    s_cache_shelf_style = app_settings_shelf_style();
+    s_store_revision = book_store_revision();
+    s_progress_revision = book_progress_revision();
+    s_shelf_cache_valid = true;
+    s_visible_count = s_count;
+    ESP_LOGI(TAG, "shelf cache books=%d stale=%d", s_count, (int)stale);
+    return true;
+}
 static void scan_shelf(app_ctx_t* ctx) {
     const uint32_t progress_revision=book_progress_revision();
     shelf_category_init();
@@ -5900,6 +6095,9 @@ static void scan_shelf(app_ctx_t* ctx) {
     s_store_revision = book_store_revision();
     s_progress_revision = progress_revision;
     s_shelf_cache_valid = !unreadable && !truncated;
+    // 扫描完成后更新位置索引，下次开机先按索引上屏。
+    // Refresh the position index after a complete scan so the next boot can paint from it first.
+    if (s_shelf_cache_valid) shelf_cache_save();
     ESP_LOGI(TAG, "shelf books=%d roots=%d", s_count, n);
 }
 
@@ -7709,17 +7907,33 @@ static void on_enter(app_ctx_t* ctx) {
         refresh_cached_progress(ctx);
         (void)open_requested_book(ctx);
     } else {
-        s_count = s_visible_count = 0;
-        s_message[0] = 0;
-        s_storage[0] = 0;
-        invalidate_covers();
         // 已指定文件可直接打开；书架目录留到真正进入书架时再扫描。
         // Open a requested file directly; scan the shelf only when it is actually shown.
         if (open_requested_book(ctx)) {
             s_scan_pending = false;
             return;
         }
-        read_pico_sd_start_probe();
+        // 用户2026-11-05：加载期间给一条小提示，扫描/封面准备完成后的重绘会清掉它。
+        // User2026-11-05: show a short hint while loading; the repaint after scan/covers clears it.
+        copy_text(s_message, sizeof(s_message), "正在加载书架…");
+        // 用户2026-11-05：先读 .kiikoread/shelf.idx 直接上屏，目录和封面留给后台核对，
+        // 避免每次开机逐本 stat、解析元数据并重解码封面。
+        // User2026-11-05: paint from .kiikoread/shelf.idx first and reconcile in the background,
+        // instead of stat/parsing every book and re-decoding covers on every boot.
+        if (shelf_cache_load(ctx)) {
+            // 索引只恢复列表；封面槽位清空后由缓存/后台重新装，避免沿用上一页的槽位状态。
+            // The index restores the list only; clear cover slots so they reload from the card.
+            invalidate_covers();
+            s_scan_pending = true;
+            s_poll_ms = ctx->now_ms;
+            read_pico_sd_start_probe();
+        } else {
+            s_count = s_visible_count = 0;
+            s_message[0] = 0;
+            s_storage[0] = 0;
+            invalidate_covers();
+            read_pico_sd_start_probe();
+        }
     }
 
 }
@@ -8744,7 +8958,11 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
     }
     app_redraw_t background = reader_background_tick();
     if (background != APP_REDRAW_NONE) return background;
-    if (s_scan_pending && ctx->now_ms - s_poll_ms >= 500) {
+    // 缓存索引上屏后先让封面任务占住 SD，再后台核对目录；最多等 8 秒。
+    // After painting from the cached index let the cover jobs own the card first; cap the wait at 8 s.
+    const bool cover_busy = s_view == SHELF && s_cover_pending_mask != 0;
+    if (s_scan_pending && ctx->now_ms - s_poll_ms >= 500 &&
+        (!cover_busy || ctx->now_ms - s_poll_ms >= 8000)) {
         s_poll_ms = ctx->now_ms;
         read_pico_sd_info_t info = {0};
         if (read_pico_sd_get_info(&info) == ESP_ERR_NOT_FINISHED) return APP_REDRAW_NONE;
@@ -8760,6 +8978,16 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
         // Reveal only a complete cover group; placeholders and failed output cannot consume pending artwork.
         unsigned changed=shelf_cover_reveal_mask();
         if (ctx->request_app) return APP_REDRAW_NONE;
+        // 用户2026-11-05：逐本揭示时把底部加载提示一起刷新，兼作进度条；整页完成后清掉提示。
+        // User2026-11-05: redraw the loading hint with each partial reveal so it doubles as a
+        // progress line, and clear it once the whole page is ready.
+        const int rows_now = shelf_rows();
+        int done = 0;
+        for (int row = 0; row < rows_now; ++row)
+            if (!(s_cover_pending_mask & (1u << row))) ++done;
+        const bool hint_active = shelf_loading_hint_active();
+        if (changed && s_cover_pending_mask) shelf_loading_hint_update(done, rows_now);
+        else if (changed && hint_active) s_message[0] = 0;
         EpdRect area = {0};
         for (int row = 0; row < shelf_rows(); ++row) {
             if (!(changed & (1u << row))) continue;
@@ -8774,6 +9002,17 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
             }
         }
         if (area.width) {
+            // 提示行在网格下方，单独并进本次 push 的区域。
+            // The hint lives below the grid, so union its band into this push.
+            if (changed) {
+                EpdRect hint = {0, 960, UI_LOCK_WIDTH, 60};
+                int right = area.x + area.width > hint.x + hint.width ? area.x + area.width : hint.x + hint.width;
+                int bottom = area.y + area.height > hint.y + hint.height ? area.y + area.height : hint.y + hint.height;
+                if (hint.x < area.x) area.x = hint.x;
+                if (hint.y < area.y) area.y = hint.y;
+                area.width = right - area.x;
+                area.height = bottom - area.y;
+            }
             render(ctx, ctx->fb);
             s_area = area;
             s_mode = s_view == SHELF && app_settings_main_fast_refresh() ? MODE_DU : MODE_GL16;
@@ -8786,9 +9025,9 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
     warm_shelf_lock_cover(ctx);
     if (ctx->request_app) return APP_REDRAW_NONE;
 #if KIIKO_BOARD_METALIO47
-    // 相邻页只预取已经落盘的封面，每250ms最多一张；触摸和当前页优先。
-    // Prefetch one existing disk thumbnail per idle tick; touch and visible covers take priority.
-    if(s_view==SHELF && !s_cover_pending_mask && !ctx->consumed && !ctx->request_app &&
+    // 用户2026-11-05：书架按页加载——切到哪一页才加载那一页的封面，不再空闲预取相邻页。
+    // User2026-11-05: load shelf covers page by page; no idle prefetch of neighbouring pages.
+    if(0 && s_view==SHELF && !s_cover_pending_mask && !ctx->consumed && !ctx->request_app &&
        !ctx->request_menu && !ctx->request_return && !(ctx->touch && ctx->touch->touched)) {
         int rows=shelf_rows();
         if(s_cover_prefetch_leaf!=ctx->leaf) {

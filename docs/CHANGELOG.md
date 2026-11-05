@@ -2,6 +2,9 @@
 
 ## 本地测试 / Local test — 2026-11-05
 
+- 书架缓存迁到 TF 根目录 `.kiikoread`：`shelf.idx` 位置索引 + `covers/` 成品点阵 + `index/` 元数据索引。开机先按索引上屏，目录核对、封面任务在后台进行；封面按页加载（切到哪页加载哪页），逐本出现并显示「正在加载书架 x/9」进度，首次打开书籍时后台预热该书的封面缓存。默认封面不再写入真封面缓存，解码失败不会固化成假封面；旧目录缓存可回退复用。
+  Shelf caches now live under TF:/kiikoread: `shelf.idx` position index, `covers/` finished rasters and `index/` metadata. Boot paints from the index first and reconciles/loads covers in the background; covers load page by page, appear one by one with a `loading x/9` progress line, and a book's cover is warmed when it is first opened. Generated default covers are never persisted as real ones, and legacy cache folders remain readable.
+
 - 跨文件脚注：正文里的 `文件#片段` 链接现在会到目标 XHTML 的 id 元素取注释文本，弹窗显示；注释页里指回正文的 key/back/noteref 回跳链接自动跳过。文字注号（如“注１”）也按排版位置可点，热区按字号放大；图标注号保持原行为。
   Cross-file footnotes: body links of the form `file#fragment` now pull the note text from the target XHTML's id element and show it in the pop-up; key/back/noteref back-links inside note pages are skipped. Text markers (e.g. "注１") are tappable from their typeset position with a padded hotspot; icon markers keep their old behaviour.
 

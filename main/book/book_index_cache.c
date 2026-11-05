@@ -31,7 +31,7 @@ bool book_index_cache_prepare_file(const char* source, const char* tag, uint32_t
         .magic=CACHE_MAGIC, .version=version, .source_size=(uint32_t)size,
         .modified=modified, .path_hash=hash,
     };
-    int n=snprintf(path,cap,"/sdcard/.readpico/index/%016llx-%s.bin",(unsigned long long)hash,tag);
+    int n=snprintf(path,cap,"/sdcard/.kiikoread/index/%016llx-%s.bin",(unsigned long long)hash,tag);
     return n>0 && (size_t)n<cap;
 }
 
@@ -46,6 +46,17 @@ bool book_index_cache_prepare(const char* source, const char* tag, uint32_t vers
 FILE* book_index_cache_open_read(const char* path, const book_index_cache_header_t* expected) {
     if (!path || !expected) return NULL;
     FILE* file = fopen(path, "rb");
+    // 用户2026-11-05：索引缓存迁到 TF:/kiikoread/index，旧 .readpico/index 仍可复用。
+    // User2026-11-05: index caches moved to TF:/kiikoread/index; legacy .readpico/index remains readable.
+    if (!file) {
+        static const char prefix[] = "/sdcard/.kiikoread/index/";
+        if (!strncmp(path, prefix, sizeof(prefix) - 1)) {
+            char legacy[160];
+            int n = snprintf(legacy, sizeof(legacy), "/sdcard/.readpico/index/%s",
+                             path + sizeof(prefix) - 1);
+            if (n > 0 && (size_t)n < sizeof(legacy)) file = fopen(legacy, "rb");
+        }
+    }
     if (!file) return NULL;
     book_index_cache_header_t found;
     bool ok = fread(&found, 1, sizeof(found), file) == sizeof(found) &&
@@ -59,8 +70,8 @@ FILE* book_index_cache_open_read(const char* path, const book_index_cache_header
 FILE* book_index_cache_open_write(const char* path, const book_index_cache_header_t* header,
                                   char* temp, size_t temp_cap) {
     if (!path || !header || !temp || !temp_cap) return NULL;
-    if (mkdir("/sdcard/.readpico", 0777) && errno != EEXIST) return NULL;
-    if (mkdir("/sdcard/.readpico/index", 0777) && errno != EEXIST) return NULL;
+    if (mkdir("/sdcard/.kiikoread", 0777) && errno != EEXIST) return NULL;
+    if (mkdir("/sdcard/.kiikoread/index", 0777) && errno != EEXIST) return NULL;
     int n = snprintf(temp, temp_cap, "%s.tmp", path);
     if (n <= 0 || (size_t)n >= temp_cap) return NULL;
     FILE* file = fopen(temp, "wb");
