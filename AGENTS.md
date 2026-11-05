@@ -58,6 +58,9 @@ User2026-11-03 requests thorough S31 reader-entry cleanup after shelf ghosts on 
 
 ## 当前工作：双板型本地整合 / Current work: local multi-board integration
 
+用户2026-11-05：跨文件脚注落地并经S31真机确认——正文`文件#片段`链接到目标XHTML的id元素取注释文本，注释页回跳 key/back/noteref 跳过；文字注号按排版矩形可点，图标注号保持原行为。宿主测试增加跨文件抽取与文字注号命中覆盖。
+User2026-11-05 lands cross-file footnotes, confirmed on the S31: body `file#fragment` links pull the note text from the target XHTML's id element, skipping key/back/noteref back-links in note pages; text markers are tappable from their typeset rect while icon markers keep their old behaviour. Host tests cover the extraction and text-marker hit rect.
+
 用户2026-11-04：S31阅读波形定稿并经真机确认——整页刷新完整48相、普通翻页12擦白+4推黑、单带快速引擎；48相模式关闭本地额外白/黑补帧。纯文字“白→中灰”改为白侧直接压黑（标定0.40，1~6相），灰边与黑白同段；图文页整页全像素走原厂柔和翻页表（对齐Pico），避免压坏插图灰阶。相关宿主测试与PR59基线按实际代码更新。
 User2026-11-04 finalizes the S31 reader waveforms after device confirmation: full 48-phase page refresh, twelve erase plus four black re-drive turn phases on the fast single-band engine, and no local extra white/black pulses in the full-48 profile. Text-only white-origin midgrays push dark directly from white (0.40 calibration, 1..6 phases) so gray edges settle with the endpoints; image pages use Pico's whole-page full-pixel vendor soft turn to keep illustration tone. Host tests and the PR59 pin follow the actual code.
 

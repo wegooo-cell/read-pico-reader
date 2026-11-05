@@ -53,14 +53,26 @@ typedef struct {
     size_t run_count; ///< 本块的 run 数；零表示整块用系统字体 / Runs owned by this block; zero means the system face throughout
 } blk_t;
 
-/// 脚注：正文里 #note 引用所在的正文字节位置与同章注释文本切片；image 为图标序号，-1 表示文字注号。
-/// Footnote: normalized text offset of the #note reference, plus the same-chapter note text slice;
-/// `image` is the marker icon index, or -1 when the marker is text.
+/// 跨文件脚注候选：正文 href="文件#片段" 与预解析出的注释文本；解析器按原样 href 匹配。
+/// Cross-file footnote candidate: a body href="file#fragment" plus its pre-extracted note text;
+/// the parser matches on the verbatim href.
+typedef struct {
+    const char* href; ///< 正文里的原样 href / Verbatim href from the body
+    const char* text; ///< 已提取的注释文本，借用 / Pre-extracted note text, borrowed
+    size_t len; ///< 注释文本字节数 / Note text byte count
+} html_ext_note_t;
+
+/// 脚注：正文里注号所在的正文字节位置与注释文本；同章注释用 text_start/text_len 切片，
+/// 跨文件注释用 owned_text。image 为图标序号，-1 表示文字注号。
+/// Footnote: normalized text offset of the marker plus the note text. Same-chapter notes slice
+/// `text_start`/`text_len`; cross-file notes own `owned_text`. `image` is the marker icon index,
+/// or -1 when the marker is text.
 typedef struct {
     size_t marker_offset; ///< 注号在规范化正文中的位置 / Reference offset in normalized text
     size_t text_start; ///< 注释文本起点 / Note text start
     size_t text_len; ///< 注释文本长度 / Note text length
     int image; ///< 注号图标序号，文字注号为 -1 / Marker image index, -1 for a text marker
+    char* owned_text; ///< 跨文件注释文本，模块分配；NULL 表示用正文切片 / Owned cross-file note text; NULL means the body slice
 } html_note_t;
 
 typedef struct {
@@ -96,5 +108,21 @@ esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
                                           const html_font_map_t* fonts,
                                           const char* anchor, size_t source_offset,
                                           size_t* text_offset, html_text_t* out);
+/// 同上，另带跨文件脚注表：href 命中 ext 的链接按脚注处理，注释文本复制进 owned_text。
+/// Same as above plus cross-file notes: links whose href matches an ext entry become footnotes
+/// and their text is copied into owned_text.
+esp_err_t html_to_blocks_with_css_notes(const char* html, size_t len,
+                                         const char* css, size_t css_len,
+                                         const html_font_map_t* fonts,
+                                         const char* anchor, size_t source_offset,
+                                         const html_ext_note_t* ext, size_t ext_count,
+                                         size_t* text_offset, html_text_t* out);
+/// 释放脚注表及其 owned_text；可重复调用。/ Free the note table and any owned note text; safe to repeat.
+void html_notes_free(html_note_t* notes, size_t count);
+/// 从 XHTML 里取 id 元素内的纯文本（跳过标签与其中的链接/脚本），限长且分配在 PSRAM。
+/// 解析失败返回 NULL。调用方负责 free。
+/// Extract the plain text of the element carrying `id` (skipping tags, nested anchors and
+/// scripts), bounded and PSRAM-allocated; NULL when the anchor is missing. Caller frees it.
+char* html_extract_id_text(const char* html, size_t len, const char* id, size_t* text_len);
 /// 释放文本与块表并清零；可重复调用。/ Free text and blocks and reset; safe to repeat.
 void html_text_free(html_text_t* text);

@@ -98,6 +98,11 @@ bool book_layout_page_image_at(size_t page, int i, int* image, int* y, int* widt
 /// Raw x of image i: the row-end x for inline footnote icons, -1 for block images (centred).
 bool book_layout_page_image_rect(size_t page, int i, int* image, int* x, int* y, int* width, int* height);
 
+/// 本页文字注号的命中矩形数；图片注号不在此列。/ Tap targets for text footnote markers on this page; icon markers are excluded.
+int book_layout_page_note_marker_count(size_t page);
+/// 取本页第 i 个文字注号：注表下标与行内矩形；越界返回 false。/ Text marker i of this page: note index and inline rect; false when out of range.
+bool book_layout_page_note_marker_rect(size_t page, int i, int* note, int* x, int* y, int* w, int* h);
+
 int book_layout_page_image(size_t page);
 /// 布局代次，重排或释放后改变，用于使页内位图缓存失效。/ Layout generation changes after rebuild/free, invalidating page bitmap caches.
 uint32_t book_layout_generation(void);
