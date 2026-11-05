@@ -82,3 +82,5 @@ int read_pico_sd_start_recovery(void);
 int epd_rotated_display_width(void);
 int epd_rotated_display_height(void);
 void epd_fill_triangle(int,int,int,int,int,int,uint8_t,uint8_t*);
+
+void read_pico_transfer_resume_after_sleep(void);

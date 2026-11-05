@@ -11,6 +11,12 @@
 
 ## 本地测试 / Local test — 2026-11-04
 
+- Pico四种锁屏样式入锁统一执行一次GC16白底清理，再显示完整锁屏图，避免旧阅读文字透出；正常路径不恢复原三轮预清屏。拼贴圆锁提示保持局部GC16，浅睡解锁仍从真实显示记录一次GC16恢复页面，随后恢复网络并重新开始按键保护和空闲计时。临时白画布分配或刷新失败保留原清屏兜底；图片透明度、密码校验、深睡启动和S31不变。
+  All four Pico lock styles present one white GC16 target before the complete lock image to prevent old-text ghosting, without three normal preclear cycles. Keep local collage feedback, one-pass light-sleep page restoration, deferred networking and renewed input guards. Retain clearing on allocation/scan failure, image alpha, PIN authentication, deep boot and S31 behavior.
+
+- Pico透明书封在内存充足时复用校验中解压的书封层，省去第二遍读卡和解压；完整校验后才修改当前底图，低内存沿用原路径，版本不变。
+  Pico transparent covers reuse decoded pixels from complete cache validation when memory permits, avoiding a second read/decode before composition. Retain the low-memory path and existing versions.
+
 - S31内建补字对齐Pico：同样7668字覆盖、16级灰阶、源字宽、缩放边缘与逐字墨量校正，保留全部界面字形、原生/外置字体和既有刷新方案。移除仅用于旧尺寸检查的未使用锁屏位图，沿用原分区及锁屏样式，仅本地测试。
   Align S31 supplements with Pico's7668-character coverage,16-level gray, source advances, scaled edges and per-glyph ink calibration. Retain UI glyphs,native/imported faces and refresh policies; remove unused lock art formerly linked for a size check, preserving partitions and lock styles. Local test only.
 

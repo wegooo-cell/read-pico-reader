@@ -37,6 +37,7 @@ static int fat_rename(const char *src,const char *dst){
 #define rename fat_rename
 static unsigned budget=8u*1024u*1024u;
 static size_t used,peak;
+static size_t fail_alloc_above;
 static size_t read_bytes,read_calls,fail_read_at;
 static size_t measured_read(void *p,size_t bytes,size_t n,FILE *f){
  ++read_calls;if(fail_read_at&&read_calls==fail_read_at)return 0;
@@ -47,7 +48,7 @@ static struct {void *p;size_t n;} allocs[64];
 static void test_free(void *p){for(unsigned i=0;i<64;++i)if(allocs[i].p==p&&p){used-=allocs[i].n;allocs[i].p=NULL;break;}free(p);}
 #define free test_free
 static size_t heap_caps_get_free_size(unsigned flags){(void)flags;return budget>used?budget-used:0;}
-static void *heap_caps_malloc(size_t n,unsigned flags){(void)flags;if(used+n>budget)return NULL;
+static void *heap_caps_malloc(size_t n,unsigned flags){(void)flags;if(used+n>budget||(fail_alloc_above&&n>=fail_alloc_above))return NULL;
  void *p=malloc(n);if(!p)return NULL;
  for(unsigned i=0;i<64;++i)if(!allocs[i].p){allocs[i].p=p;allocs[i].n=n;used+=n;if(used>peak)peak=used;return p;}
  abort();}
@@ -248,6 +249,18 @@ int main(int argc,char **argv){
    memcpy(fb,original,BYTES);budget=256*1024;read_bytes=read_calls=0;
    assert(book_lock_bookmark_draw(fb,path)&&!memcmp(fb,expected,BYTES)&&used==0);
    assert(read_bytes<old_bytes&&read_calls<old_calls);
+#if !KIIKO_BOARD_METALIO47
+   size_t row_bytes=read_bytes,row_calls=read_calls;
+   memcpy(fb,original,BYTES);budget=8u*1024u*1024u;read_bytes=read_calls=0;peak=0;
+   assert(book_lock_bookmark_draw(fb,path)&&!memcmp(fb,expected,BYTES)&&used==0);
+   assert(read_bytes<row_bytes&&read_calls<row_calls&&peak<=684u*1216u*2u);
+   if(fixture==0&&rotation==0&&seed==0)
+    printf("Validated memory layer: fread calls %zu -> %zu, bytes %zu -> %zu; identical output\n",row_calls,read_calls,row_bytes,read_bytes);
+   // Fragmentation/allocation failure must retain the original row path and exact output.
+   memcpy(fb,original,BYTES);fail_alloc_above=512u*1024u;read_bytes=read_calls=0;
+   assert(book_lock_bookmark_draw(fb,path)&&!memcmp(fb,expected,BYTES)&&used==0);
+   assert(read_bytes==row_bytes&&read_calls==row_calls);fail_alloc_above=0;
+#endif
    if(fixture==0&&rotation==0&&seed==0){
     struct stat packed;assert(!stat(SEAL_CACHE,&packed));
     size_t raw_size=sizeof(seal_header_t)+684u*684u*2u;
@@ -258,7 +271,26 @@ int main(int argc,char **argv){
  }
  rotation=0;budget=256*1024;assert(book_lock_bookmark_draw(fb,argv[2]));
  seal_header_t probe;FILE *pf=fopen(SEAL_CACHE,"rb");assert(pf&&fread(&probe,1,sizeof(probe),pf)==sizeof(probe));fclose(pf);
- read_calls=0;pf=seal_open(&probe);assert(pf);fclose(pf);size_t verified_reads=read_calls;
+#if !KIIKO_BOARD_METALIO47
+ // Validate fully before exposing decoded bytes; failed reads/checksum free temporary memory.
+ budget=8u*1024u*1024u;uint8_t *layer=NULL;
+ read_calls=0;pf=seal_open(&probe,&layer);assert(pf&&layer&&used==(size_t)probe.width*probe.height*2);fclose(pf);free(layer);
+ assert(!used);read_calls=0;fail_read_at=5;layer=(uint8_t*)1;
+ assert(!seal_open(&probe,&layer)&&!layer&&!used);fail_read_at=0;
+ seal_header_t wrong=probe;wrong.key++;assert(!seal_open(&wrong,&layer)&&!layer&&!used);
+ FILE *corrupt_file=fopen(SEAL_CACHE,"rb+");assert(corrupt_file);seal_header_t corrupt_header=probe;corrupt_header.checksum^=1;
+ assert(fwrite(&corrupt_header,1,sizeof(corrupt_header),corrupt_file)==sizeof(corrupt_header));fclose(corrupt_file);
+ assert(!seal_open(&probe,&layer)&&!layer&&!used);
+ corrupt_file=fopen(SEAL_CACHE,"rb+");assert(corrupt_file&&fwrite(&probe,1,sizeof(probe),corrupt_file)==sizeof(probe));fclose(corrupt_file);
+ budget=256*1024;
+#endif
+ read_calls=0;
+#if KIIKO_BOARD_METALIO47
+ pf=seal_open(&probe);
+#else
+ pf=seal_open(&probe,NULL);
+#endif
+ assert(pf);fclose(pf);size_t verified_reads=read_calls;
  memcpy(fb,original,BYTES);read_calls=read_bytes=0;fail_read_at=verified_reads+1+35;peak=0;
  assert(!book_lock_bookmark_draw(fb,argv[2])&&used==0&&peak<=684u*2u*23u);
  fail_read_at=0;

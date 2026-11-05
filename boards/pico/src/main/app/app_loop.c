@@ -260,6 +260,16 @@ void app_lock_ignore_for(int64_t ms) {
     s_lock_ignore_until_ms = esp_timer_get_time() / 1000 + ms;
 }
 
+// 网络恢复可能阻塞；收齐期间的旧按键后，再开始原保护窗口和空闲计时。
+// Network restoration may block. Drain queued keys before restarting the existing guard and idle clocks.
+static void finish_lock_resume(app_ctx_t *ctx, int64_t *last_input_ms) {
+    read_pico_transfer_resume_after_sleep();
+    read_pico_pmu_drain_events();
+    ctx->now_ms = esp_timer_get_time() / 1000;
+    *last_input_ms = ctx->now_ms;
+    s_lock_ignore_until_ms = ctx->now_ms + APP_LOCK_IGNORE_BOOT_MS;
+}
+
 // 引导出口只接受已经持久化的完成/跳过，子页返回仍由引导拥有。
 // Setup owns child returns and accepts global exits only after persisted Finish/Skip.
 static void setup_navigation_guard(app_ctx_t *ctx,const app_desc_t *current){
@@ -913,6 +923,7 @@ void app_loop_run(const app_loop_config_t* config) {
                         ctx.pressed = false;
                         ctx.released = false;
                         app_present(&ctx, current, APP_REDRAW_PAGE);
+                        finish_lock_resume(&ctx, &last_input_ms);
                     }
                 } else if (action == UI_POWER_ACTION_RESTART) {
                     power_dialog_open = false;
@@ -1101,6 +1112,7 @@ void app_loop_run(const app_loop_config_t* config) {
                         ctx.pressed = false;
                         ctx.released = false;
                         app_present(&ctx, current, APP_REDRAW_PAGE);
+                        finish_lock_resume(&ctx, &last_input_ms);
                     } else {
                         power_dialog_open = true;
                         ui_power_dialog_reset(&power_dialog, touch.touched);
@@ -1147,6 +1159,7 @@ void app_loop_run(const app_loop_config_t* config) {
                         // Still the same page; redraw so the lock image does not stay.
                         if (menu_open) present_menu(&ctx, current, menu_leaf, &feedback);
                         else app_present(&ctx, current, APP_REDRAW_PAGE);
+                        finish_lock_resume(&ctx, &last_input_ms);
                     }
                 }
             }
@@ -1268,6 +1281,7 @@ void app_loop_run(const app_loop_config_t* config) {
             ctx.pressed = ctx.released = false;
             if (menu_open) present_menu(&ctx, current, menu_leaf, &feedback);
             else app_present(&ctx, current, APP_REDRAW_PAGE);
+            finish_lock_resume(&ctx, &last_input_ms);
         }
         if (menu_open && feedback.updates > 0
             && ctx.now_ms - feedback.last_ms >= UI_SETTLE_IDLE_MS) {
