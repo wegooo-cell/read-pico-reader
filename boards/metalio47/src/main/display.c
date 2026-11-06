@@ -1082,6 +1082,13 @@ enum EpdDrawError update_display_full(EpdiyHighlevelState* hl) {
 
 // 只由设置中的主动屏幕修复调用；采用S31已有清屏而非Pico盲刷参数。
 // User-triggered Settings repair only; reuse S31 clear, never Pico blind-drive parameters.
+// 用户2026-11-06：修复力度推到最多——连续多轮整屏黑白盲刷（每轮 3 个清屏循环，共 12 循环），
+// 再连做 3 次完整 48 相 GC16 全刷。目的是把顽固残影压到最低，耗时约 5-7 秒。
+// User2026-11-06: maximum repair strength -- several rounds of full-frame blind black/white
+// driving (three clear cycles each, twelve cycles total) followed by three complete 48-phase
+// GC16 cleans, to clear stubborn ghosting. Takes roughly 5-7 seconds.
+#define S31_REPAIR_CLEAR_ROUNDS 4
+#define S31_REPAIR_WHITE_CYCLES 3
 enum EpdDrawError display_panel_repair(EpdiyHighlevelState* hl) {
     if(!hl||!hl->front_fb||!hl->back_fb)return EPD_DRAW_INVALID_CROP;
     LATENCY_DISPLAY_BEGIN();
@@ -1089,14 +1096,22 @@ enum EpdDrawError display_panel_repair(EpdiyHighlevelState* hl) {
     continuous_du_reset();s_full_refresh_requested=false;
     display_main_transition_cancel();
     epd_poweroff();use_scan_for(&E0470_FULL_WAVEFORM,MODE_GC16);epd_poweron();
-    enum EpdDrawError result=epd_clear_checked();
+    enum EpdDrawError result=EPD_DRAW_SUCCESS;
+    // 盲刷主力度：每轮 epd_clear_checked 内部是 10 黑 + 13 白 + 3 收尾相，整屏推相位。
+    // Blind drive: each epd_clear_checked round is 10 black + 13 white + 3 cleanup phases.
+    for(int round=0;round<S31_REPAIR_CLEAR_ROUNDS&&result==EPD_DRAW_SUCCESS;++round) {
+        result=epd_clear_checked();
+        vTaskDelay(1);
+    }
+    // 收尾再连做多次完整 48 相 GC16 全刷，确保最后一次波形完整停在白场。
+    // Finish with several complete 48-phase GC16 cleans so the last waveform settles to white.
+    for(int pass=0;pass<S31_REPAIR_WHITE_CYCLES&&result==EPD_DRAW_SUCCESS;++pass) {
+        result=update_display_from_white_with_unlocked(hl,&E0470_FULL_WAVEFORM,MODE_GC16);
+        vTaskDelay(1);
+    }
     // 仅物理清屏成功才把白底作为参考；失败保留真实旧参考并请求完整恢复。
     // Only a successful physical clear establishes white history; failure requests full recovery.
-    if(result==EPD_DRAW_SUCCESS) {
-        result=update_display_from_white_with_unlocked(hl,&E0470_FULL_WAVEFORM,MODE_GC16);
-        if(result!=EPD_DRAW_SUCCESS)result=main_recover(hl,result);
-    }
-    else (void)read_pico_epd_release_drive();
+    if(result!=EPD_DRAW_SUCCESS)result=main_recover(hl,result);
     s_main_fault=result!=EPD_DRAW_SUCCESS;
     if(s_main_fault)s_full_refresh_requested=true;
     rails_keepalive();pico_online_display_end(held);
