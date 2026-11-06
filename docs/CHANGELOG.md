@@ -2,6 +2,9 @@
 
 ## 本地测试 / Local test — 2026-11-06
 
+- 阅读页底部进度显示本章页码：`当前页/本章页数 + 全书百分比`，与阅读统计“本章跳转”使用同一份页码；左侧章节名保持不变。
+  The reader footer now shows the page inside the current chapter (`page/chapter pages` plus the whole-book percentage), using the same page count as the stats chapter-jump sheet; the chapter name on the left is unchanged.
+
 - 修复跨文件脚注弹窗乱码：零宽字符清洗时后续字节误从当前章节正文读取，导致自带注释文本的多字节汉字解码错误；现在统一从注释文本源读取。
   Fix garbled cross-file footnote cards: the zero-width cleanup read continuation bytes from the chapter body instead of the note's own text, corrupting multi-byte characters. It now reads from the note source throughout.
 

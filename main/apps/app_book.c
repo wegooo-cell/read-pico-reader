@@ -3991,8 +3991,12 @@ static void draw_reader_images(uint8_t *fb, size_t page, EpdRect body) {
     }
 }
 static void reader_footer_progress(char *text,size_t cap,size_t page) {
-    size_t total=book_chapter_count(),current=total?(s_chapter<total?s_chapter+1:total):0;
-    snprintf(text,cap,"%u/%u  %u%%",(unsigned)current,(unsigned)total,percent(page));
+    // 用户2026-11-06：页脚显示本章页码（与阅读统计“本章跳转”同一份页码），不再显示章节序号。
+    // User2026-11-06: show the page position inside the chapter (same count as the stats chapter
+    // jump sheet) instead of the chapter index.
+    const size_t pages = book_layout_page_count();
+    const unsigned current = pages ? (unsigned)(page < pages ? page + 1 : pages) : 0;
+    snprintf(text,cap,"%u/%u  %u%%",current,(unsigned)pages,percent(page));
 }
 // 独立绘制信息栏，先清理预读帧中的旧字形；物理刷新仍由正文/空闲局刷各自控制。
 // Paint independent metadata over clean cached bounds; body and idle updates control their own physical scans.
