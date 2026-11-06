@@ -2,6 +2,9 @@
 
 ## 本地测试 / Local test — 2026-11-06
 
+- S31 屏幕修复加强：盲刷黑白从 3 个清屏循环提高到 12 个（4 轮 × 每轮 10 黑 + 13 白 + 3 收尾相），收尾再连做 3 次完整 48 相 GC16 全刷，耗时约 5-7 秒，用于清顽固残影。
+  S31 panel repair is stronger: blind black/white driving goes from three clear cycles to twelve (four rounds of 10 black + 13 white + 3 cleanup phases each), followed by three complete 48-phase GC16 cleans; it takes about 5-7 seconds and targets stubborn ghosting.
+
 - 阅读页底部进度显示本章页码：`当前页/本章页数 + 全书百分比`，与阅读统计“本章跳转”使用同一份页码；左侧章节名保持不变。
   The reader footer now shows the page inside the current chapter (`page/chapter pages` plus the whole-book percentage), using the same page count as the stats chapter-jump sheet; the chapter name on the left is unchanged.
 
