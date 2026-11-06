@@ -1,5 +1,10 @@
 # 版本变更 / Changelog
 
+## 本地测试 / Local test — 2026-11-06
+
+- 修复跨文件脚注弹窗乱码：零宽字符清洗时后续字节误从当前章节正文读取，导致自带注释文本的多字节汉字解码错误；现在统一从注释文本源读取。
+  Fix garbled cross-file footnote cards: the zero-width cleanup read continuation bytes from the chapter body instead of the note's own text, corrupting multi-byte characters. It now reads from the note source throughout.
+
 ## 本地测试 / Local test — 2026-11-05
 
 - 书架缓存迁到 TF 根目录 `.kiikoread`：`shelf.idx` 位置索引 + `covers/` 成品点阵 + `index/` 元数据索引。开机先按索引上屏，目录核对、封面任务在后台进行；封面按页加载（切到哪页加载哪页），逐本出现并显示「正在加载书架 x/9」进度，首次打开书籍时后台预热该书的封面缓存。默认封面不再写入真封面缓存，解码失败不会固化成假封面；旧目录缓存可回退复用。
