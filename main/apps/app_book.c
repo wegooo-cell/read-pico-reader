@@ -3817,14 +3817,17 @@ static void draw_reader_footnote_card(uint8_t *fb, size_t page, EpdRect body) {
         else if (c >= 0xc0) n = 2;
         if (i + n > note->text_len) break;
         uint32_t cp = c;
-        if (n == 2) cp = ((uint32_t)(c & 0x1f) << 6) | ((unsigned char)s_text[note->text_start + i + 1] & 0x3f);
+        // 跨文件注释必须继续从 note_src 取后续字节；从正文切片取会拼出乱码。
+        // Continuation bytes must also come from note_src; reading them from the body slice
+        // corrupts cross-file note text.
+        if (n == 2) cp = ((uint32_t)(c & 0x1f) << 6) | ((unsigned char)note_src[i + 1] & 0x3f);
         else if (n == 3) cp = ((uint32_t)(c & 0x0f) << 12) |
-            (((unsigned char)s_text[note->text_start + i + 1] & 0x3f) << 6) |
-            ((unsigned char)s_text[note->text_start + i + 2] & 0x3f);
+            (((unsigned char)note_src[i + 1] & 0x3f) << 6) |
+            ((unsigned char)note_src[i + 2] & 0x3f);
         else if (n == 4) cp = ((uint32_t)(c & 0x07) << 18) |
-            (((unsigned char)s_text[note->text_start + i + 1] & 0x3f) << 12) |
-            (((unsigned char)s_text[note->text_start + i + 2] & 0x3f) << 6) |
-            ((unsigned char)s_text[note->text_start + i + 3] & 0x3f);
+            (((unsigned char)note_src[i + 1] & 0x3f) << 12) |
+            (((unsigned char)note_src[i + 2] & 0x3f) << 6) |
+            ((unsigned char)note_src[i + 3] & 0x3f);
         i += n;
         if (cp == 0x200b || cp == 0x200c || cp == 0x200d || cp == 0x2060 || cp == 0xfeff || cp == 0x00ad)
             continue;
