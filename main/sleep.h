@@ -64,8 +64,8 @@ void enter_lock_and_sleep(
 #if KIIKO_BOARD_METALIO47
 #else
 
-/// 主动拼贴锁屏在保存进度/切字体前清白并显示圆锁；不适用于自动休眠、直接关机或升级/上传中。
-/// Show white and a lock badge before manual-lock saves/font changes; not for idle sleep, direct shutdown or active OTA/uploads.
+/// 主动拼贴在保存进度/切字体前局部GC16显示圆锁，保留其余当前画面；不适用于自动休眠、直接关机或升级/上传中。
+/// Present a local GC16 lock badge before manual-collage saves/font changes, retaining the surrounding frame; not for idle sleep, shutdown or OTA/uploads.
 void app_lock_feedback(EpdiyHighlevelState *hl);
 #endif
 

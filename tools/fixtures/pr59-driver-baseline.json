@@ -220,16 +220,14 @@
   },
   "approved_overrides": {
     "boards/pico/src/main/sleep.c": {
-      "sha256": "35cc7516fe6679abf0db29c411371bbee17a33f78f77f39b8d41d7d68cba52ec",
-      "pull_request": 71,
-      "source_commit": "24e70e0057c44da826270822f4c831f5911de0e5",
-      "reason": "User2026-11-02 authorized merging PR71; record the merged one-press deep-sleep wake content so the PR59 pin stays meaningful."
+      "sha256": "7c6b16ce79b251024c4170f690e52fba23ff96b0b67a9710fc83b1bfe3c1a411",
+      "user_decision": "用户2026-11-04要求Pico四种锁屏样式一起优化且保留保护：正常锁屏/浅睡解锁单次GC16、页面恢复后重启网络，拼贴提示只局部GC16；反馈/绘图/输出失败保留原清屏，缓存/PIN/深睡策略及波形不变。 / User2026-11-04 extends the Pico optimization to all four lock styles: one GC16 lock/light-wake restore, deferred network restart and local GC16 collage feedback; retain clearing on feedback/art/output failure and preserve cache/PIN/deep-sleep/waveform behavior. 用户2026-11-04报告透明书封透字并要求修复：仅透明书封入锁增加一次原GC16白目标后输出最终图，不改原表、供电与解锁逻辑，分配/显示失败沿用清屏兜底。 / User2026-11-04 authorizes one calibrated white GC16 target before transparent-cover art to address ghosting, retaining raw tables, power, unlock logic and allocation/display-failure recovery. 用户确认透明书封不再透字后要求其他类型一并修复：将一次GC16白目标+最终图扩展到Pico四种锁屏，异常清屏与解锁保护保持。 / After device confirmation, the user requests the same white-target plus final-image sequence for all four Pico lock styles, retaining failure recovery and unlock protection."
     },
     "main/sleep.h": {
-      "sha256": "2d071d9bf4b9d494437afd76a53fee523f0ed65bd1fba71c369260fb65eedadd",
+      "sha256": "0c067e19583e5ee75fd726f0bf773482b280346b795f88fd80ec2f175b99f4c5",
       "pull_request": 71,
       "source_commit": "24e70e0057c44da826270822f4c831f5911de0e5",
-      "reason": "User2026-11-02 authorized merging PR71; this header gained the resume-wake flag used by the merged deep-sleep wake fix."
+      "reason": "Retain the merged PR71 API; User2026-11-04 all-style Pico lock optimization updates only the local-GC16 collage-feedback contract comment. No declarations or S31 behavior changed."
     },
     "boards/metalio47/src/main/sleep.c": {
       "sha256": "348ee84c094c76d5d2f67d5fb5f51d9d37f1376d5ba059765d7dd721e28dae2c",
