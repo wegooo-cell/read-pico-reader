@@ -18,6 +18,16 @@
  * User revision: port official a2a63a6 peripheral/IOE parking and CPU light-sleep retention while preserving ten-minute light sleep, PIN and reader checkpoints.
  * 冻结：沿用实际后缓冲，不把圆锁当白色；不增加帧副本，自动休眠/其他样式/失败回退保留原流程。
  * Frozen: Retain true history including the badge, add no frame copy and preserve idle/other-style/failure recovery.
+ * 用户2026-11-04：透明书封正常锁屏直接从真实旧帧做一次GC16，省去三轮预清屏；绘图/输出失败与其他样式保留原清屏。
+ * User2026-11-04: transparent covers use one GC16 from true history; preserve original clearing for art/output failures and other styles.
+ * 用户2026-11-04追加：透明书封正常解锁保留实际显示的后缓冲，由主循环一次GC16恢复原页面；失败与其他样式保留原清屏。
+ * User2026-11-04 follow-up: retain true history on transparent-cover unlock for one caller GC16 restore; failures and other styles retain clearing.
+ * 用户2026-11-04追加：上述锁屏/浅睡解锁与网络后置扩展到Pico全部四种样式；拼贴反馈仅局部GC16圆锁，失败保留清屏恢复。
+ * User2026-11-04 additionally extends single-pass lock/unlock and deferred networking to all four Pico styles; collage feedback uses a local GC16 badge, retaining failure clearing.
+ * 用户2026-11-04透字反馈：透明书封入锁恢复一次GC16白目标再显示最终图；临时白画布用后释放，不改素材、缓存、解锁或其他样式。
+ * User2026-11-04 ghosting report: transparent locks add one white GC16 target before final art; free the temporary white canvas and preserve assets, caching, unlocks and other styles.
+ * 用户确认透明书封透字消失，要求其余样式同样处理：四种入锁均先白目标再最终图，素材/缓存/解锁与异常兜底保留。
+ * After confirming the cover fix, the user requests the same protection for other styles: all four locks use white then final art, preserving assets, caches, unlocks and failure recovery.
  */
 #include "ui_avatar.h"
 #include "book_cover_jobs.h"
@@ -67,7 +77,7 @@
 #include "ui_lock_feedback.h"
 
 static const char* TAG = "read_pico";
-static bool s_lock_feedback_visible;
+static bool s_lock_feedback_visible, s_lock_feedback_failed;
 
 #define APP_LOCK_LIGHT_SLEEP_MS (10U * 60U * 1000U)
 #define APP_LOCK_KEY_POLL_US (2LL * 1000 * 1000)
@@ -78,7 +88,7 @@ static bool s_lock_feedback_visible;
 
 
 void app_lock_feedback(EpdiyHighlevelState *hl) {
-    s_lock_feedback_visible = false;
+    s_lock_feedback_visible = s_lock_feedback_failed = false;
     if (!hl || app_settings_lock_style() != 2 || pico_online_busy()) return;
     read_pico_transfer_status_t transfer = {0};
     read_pico_transfer_get_status(&transfer);
@@ -86,13 +96,13 @@ void app_lock_feedback(EpdiyHighlevelState *hl) {
     uint8_t *framebuffer = epd_hl_get_framebuffer(hl);
     if (!framebuffer || epd_rotated_display_width() < 97 || epd_rotated_display_height() < 97) return;
     display_main_transition_cancel();
-    // 原GC16清白适用于任意旧灰阶，不用只保证黑白端点的短DU擦整屏，无额外定时停留。
-    // Calibrated GC16 whitens any prior gray; endpoint-only short DU must not erase a whole gray page.
-    epd_hl_set_all_white(hl);
-    if (update_display_full(hl) != EPD_DRAW_SUCCESS) return;
+    // 只在实际当前画面上覆盖圆锁；局部GC16保留灰阶，不先清白整屏。
+    // Overlay the badge on true history with local GC16; never whiten the whole page first.
+    memcpy(framebuffer,hl->back_fb,(size_t)epd_width()*epd_height()/2);
     EpdRect area = ui_lock_feedback_draw(framebuffer);
-    s_lock_feedback_visible = update_display_area_diff_with(hl, &E0470_FOLLOW_WAVEFORM,
-        MODE_DU, area) == EPD_DRAW_SUCCESS;
+    s_lock_feedback_visible = update_display_area_full_with(hl, &E0470_WAVEFORM,
+        MODE_GC16, area) == EPD_DRAW_SUCCESS;
+    s_lock_feedback_failed = !s_lock_feedback_visible;
 }
 
 static bool draw_wallpaper(uint8_t *framebuffer) {
@@ -598,12 +608,29 @@ bool lock_pin_grace_active(void) {
            (uint32_t)now - locked_at < (uint32_t)app_settings_pin_grace_minutes() * 60u;
 }
 
+// 所有锁屏样式先用一次原GC16白目标擦旧字，再输出已合成锁图；不恢复三轮盲清屏。
+// All lock styles clear old text with one calibrated white GC16 target before final art, without three blind-clear cycles.
+static enum EpdDrawError present_clean_lock(EpdiyHighlevelState *hl) {
+    const size_t bytes = (size_t)epd_width() * epd_height() / 2;
+    uint8_t *white = heap_caps_aligned_alloc(16, bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!white) return EPD_DRAW_FAILED_ALLOC;
+    memset(white, 255, bytes);
+    // 仅替换临时状态的目标指针，共用真实后缓冲；最终锁图及ctx->fb始终不被擦白。
+    // A temporary state shares real history but targets white; never overwrite the final art or ctx->fb.
+    EpdiyHighlevelState clean = *hl;
+    clean.front_fb = white;
+    enum EpdDrawError result = update_display_full(&clean);
+    heap_caps_free(white);
+    if (result != EPD_DRAW_SUCCESS) return result;
+    return update_display_full(hl);
+}
+
 void enter_lock_and_sleep(
     EpdiyHighlevelState* hl, int64_t* ignore_until_ms, sc7a20h_handle_t acc, cst836u_handle_t touch,
     bool reader_background
 ) {
-    bool feedback_visible = s_lock_feedback_visible;
-    s_lock_feedback_visible = false;
+    bool feedback_failed = s_lock_feedback_failed;
+    s_lock_feedback_visible = s_lock_feedback_failed = false;
     // Refuse to interrupt an active upload. The caller repaints its page when
     // this function returns, and the user can lock again after the transfer.
     bool radio_paused = read_pico_transfer_pause_for_sleep();
@@ -613,8 +640,8 @@ void enter_lock_and_sleep(
         return;
     }
     uint8_t* framebuffer = epd_hl_get_framebuffer(hl);
-    // 主动拼贴在白底圆锁上准备最终画面；其他入口仍保留旧页面，只改RAM。
-    // Prepare manual collages behind the white lock badge; other entries keep their prior page while drawing RAM.
+    // 主动拼贴只在当前页上局部显示圆锁；各样式在RAM中准备完整最终画面。
+    // Manual collages show a local badge over the current page; compose each complete final frame in RAM.
     uint8_t lock_style = app_settings_lock_style();
     // 透明书封保留当前页面作为底图，不清白、不重排阅读页，也不读取旧阅读快照。
     // Keep the current page beneath the PNG; no white reset, reader reflow or old reader snapshot.
@@ -634,10 +661,11 @@ void enter_lock_and_sleep(
         ui_lock_fallback_draw(framebuffer);
     }
     enum EpdDrawError result = EPD_DRAW_SUCCESS;
-    if (feedback_visible) result = update_display_full(hl);
-    if (!feedback_visible || result != EPD_DRAW_SUCCESS) {
-        // 反馈成功时不再重复清白；GC16从真实圆锁历史输出。自动/其他样式/失败保留原清屏。
-        // A successful badge needs no second white clear; GC16 uses its true history. Idle/other/fault paths retain original clearing.
+    const bool direct_frame = !feedback_failed && lock_drawn;
+    if (direct_frame) result = present_clean_lock(hl);
+    if (!direct_frame || result != EPD_DRAW_SUCCESS) {
+        // 所有样式从真实后缓冲输出；绘图或输出失败仍清白，再按白基准重试最终图。
+        // All styles use true history; art/output failures retain clearing and the from-white final frame.
         epd_poweron();
         epd_clear();
         result = epd_hl_update_screen_from_white(hl, MODE_GC16, 25);
@@ -679,14 +707,19 @@ void enter_lock_and_sleep(
     pico_boot_clear_resume();
     s_lock_hint_hl=NULL;
     if (system_lock) app_font_end_lock(&lock_font);
-    read_pico_transfer_resume_after_sleep();
+    // 所有样式的Wi-Fi/HTTP均由调用者恢复页面后重启，避免网络初始化挡住首帧。
+    // Callers restart Wi-Fi/HTTP after restoring the page for every style.
 
-    // 参考帧和屏幕都归零，回到主循环后由当前页自己画一遍，不必知道是哪一页。
-    // Zero the reference frame and the panel; the current page redraws after the loop resumes, without knowing which page it is.
+    // 成功显示的所有样式保留实际锁图/密码界面后缓冲，主循环各唤醒入口均请求一次GC16恢复原页面。
+    // Retain actual cover/PIN history after a successful lock; every caller requests one GC16 page restore.
+    // 不复制旧正文或伪造白基准；绘图/显示失败仍走原清屏。
+    // Never replay a saved reader frame or fabricate white history; art/output failures keep the old clear.
     read_pico_pmu_drain_events();
-    epd_poweron();
-    epd_clear();
-    epd_hl_set_all_white(hl);
+    if (!lock_drawn || result != EPD_DRAW_SUCCESS) {
+        epd_poweron();
+        epd_clear();
+        epd_hl_set_all_white(hl);
+    }
     read_pico_pmu_drain_events();
     if (ignore_until_ms) {
         *ignore_until_ms = esp_timer_get_time() / 1000 + APP_LOCK_IGNORE_BOOT_MS;

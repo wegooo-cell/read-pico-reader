@@ -89,6 +89,8 @@ jobs:
           python3 tools/boot_panel_actions_host_test.py
           python3 tools/lock_pin_host_test.py
           python3 tools/lock_screen_host_test.py
+          python3 tools/lock_style_host_test.py
+          python3 tools/pico_lock_clean_frame_host_test.py
           python3 tools/font_picker_catalog_host_test.py
           python3 tools/font_catalog_host_test.py
           python3 tools/power_double_click_host_test.py
@@ -137,6 +139,16 @@ jobs:
           if [ "${{ matrix.board }}" = pico ]; then
             python tools/lowzag_host_test.py --component build/boards/pico/source/managed_components/defensiblelogic__lowzag
           fi
+      - name: Verify transparent-cover pixels and cache reads
+        if: matrix.board == 'pico'
+        shell: bash
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends zlib1g-dev
+          python3 tools/board_source_view.py --board "${{ matrix.board }}" --tests --output build/bookmark-tests/${{ matrix.board }}
+          KIIKO_TEST_BOARD="${{ matrix.board }}" \
+          KIIKO_LIBPNG_PATH="$PWD/build/boards/${{ matrix.board }}/source/managed_components/espressif__libpng/libpng" \
+            python3 build/bookmark-tests/${{ matrix.board }}/tools/book_lock_bookmark_host_test.py
       - name: S31 progressive JPEG bounded-memory regression
         if: matrix.board == 'metalio47'
         shell: bash
