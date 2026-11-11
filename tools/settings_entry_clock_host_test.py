@@ -18,6 +18,7 @@ unit=r'''
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
 #define UI_GRAY_WHITE 255
+#define UI_NAV_BACKGROUND_GRAY 0xe0
 #define UI_GRAY_BLACK 0
 #define SETTINGS_ROW_H settings_main_row_height()
 #define SETTINGS_ICON_PX 32
@@ -153,7 +154,7 @@ int main(void){
  assert(clock_present(&ctx,APP_REDRAW_AREA)&&s_reader_clock_minute==101);
  s_reader_clock_minute=100;
  s_reader_fullscreen=immersive=false;wallpaper=true;
- assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA&&background_paints==1&&fb[0]==29);
+ assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA&&background_paints==0&&fb[0]==UI_NAV_BACKGROUND_GRAY);
  failed=1;assert(clock_present(&ctx,APP_REDRAW_AREA)&&s_reader_clock_minute==100);
  assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA);failed=0;
  assert(clock_present(&ctx,APP_REDRAW_AREA)&&s_reader_clock_minute==101);

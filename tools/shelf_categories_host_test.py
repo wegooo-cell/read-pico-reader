@@ -40,7 +40,7 @@ static const char *books_root="/sdcard/books";
 static const char *app_settings_books_dir(void){return books_root;}
 static int style;
 static int app_settings_shelf_style(void){return style;}
-static int shelf_rows(void){return style==5?4:9;}
+static int shelf_rows(void){return style==5?8:9;}
 static void invalidate_covers(void){}
 typedef struct{int leaf;}app_ctx_t;
 typedef struct{char path[288];int pages[2],count;bool available;}shelf_category_t;
@@ -50,7 +50,8 @@ static char s_category_root[288];
 static int s_view=SHELF;
 static bool s_scan_pending,s_shelf_cache_valid,s_recent_sort;
 static int s_count,s_visible_count,s_filter;
-typedef struct{char path[288],name[256];bool removed,search_match,is_flash,favorite;uint32_t recent;}shelf_entry_t;
+static unsigned s_shelf_order;
+typedef struct{char path[288],name[256];bool removed,search_match,is_flash,favorite;uint32_t recent;uint64_t added;}shelf_entry_t;
 static shelf_entry_t s_shelf[40];
 '''
 for name in ('shelf_category_add','shelf_category_init','shelf_category_name','shelf_category_matches','shelf_category_remember','shelf_category_restore','shelf_categories_recount','shelf_matches','compare_books','sort_shelf'):
@@ -92,5 +93,5 @@ int main(void){
 unit=unit.replace('while(s_category_count<s_category_capacity)shelf_category_add("/not-a-real-path");','while(s_category_count<s_category_capacity){char path[288];snprintf(path,sizeof(path),"/fill/%d",s_category_count);shelf_category_add(path);}')
 with tempfile.TemporaryDirectory() as directory:
  c=Path(directory)/'shelf.c';binary=c.with_suffix('');c.write_text(unit)
- subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(root/'main/book'),str(c),'-o',str(binary)],check=True)
+ subprocess.run(['cc','-Dshelf_display_style=app_settings_shelf_style','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(root/'main/book'),str(c),'-o',str(binary)],check=True)
  subprocess.run([str(binary)],check=True)

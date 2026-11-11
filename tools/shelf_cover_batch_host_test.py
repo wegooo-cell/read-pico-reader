@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess,tempfile
 from home_cover_cache_host_test import function
 ROOT=Path(__file__).resolve().parents[1];book=ROOT/'main/apps/app_book.c'
+retry_covers = 's_cover_retry_count' in book.read_text()
 unit=r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -18,6 +19,7 @@ typedef struct{int x,y,width,height;}EpdRect;
 enum{SHELF,MANAGE,BULK};
 typedef struct{bool touched;}touch_t;
 typedef struct{int leaf;bool request_app,request_return,request_menu;int64_t now_ms;touch_t *touch;}app_ctx_t;
+#define BOOK_ROWS 9
 #define UI_LOCK_WIDTH 684
 #define SHELF_FAST_COVER_STRIDE 21
 #define TAG "test"
@@ -34,7 +36,7 @@ static bool s_shelf_page_pending;
 static int64_t fake_us;static unsigned ready_after;
 static int64_t esp_timer_get_time(void){return fake_us;}
 static void vTaskDelay(unsigned ticks){assert(ticks==1);fake_us+=1000;if(ready_after&&fake_us>=(int64_t)ready_after*1000)ready_mask=511;}
-static bool read_pico_sd_io_ready(void){return true;}
+static __attribute__((unused)) bool read_pico_sd_io_ready(void){return true;}
 
 static struct{int index;uint8_t *gray,*fast_bits;unsigned width,height,fast_contrast,fast_phase;bool fast_white_edge;}s_covers[9];
 static struct{char path[32],name[32],author[32];bool removed;}s_shelf[9];
@@ -53,6 +55,14 @@ int book_cover_jobs_take(unsigned generation,unsigned slot,book_cover_result_t *
  if(failed_mask&(1u<<slot))return -1;if(!(ready_mask&(1u<<slot)))return 0;
  *result=(book_cover_result_t){.pixels=malloc(1),.width=164,.height=214,.fast=fast};assert(result->pixels);return 1;}
 '''
+unit+=r'''
+enum{BOOK_SHELF_PAGE_MISS,BOOK_SHELF_PAGE_WAIT,BOOK_SHELF_PAGE_HIT};
+typedef int book_shelf_page_state_t;
+static bool s_shelf_page_loading,s_shelf_page_cached;
+static book_shelf_page_state_t book_shelf_page_poll(void){return BOOK_SHELF_PAGE_MISS;}
+static unsigned shelf_page_mask(app_ctx_t *ctx){(void)ctx;return 511;}
+static void prepare_covers(app_ctx_t *ctx){(void)ctx;assert(false);}
+'''
 for name in ['prepare_cover_batch','shelf_cover_frame_ready','shelf_cover_reveal_mask','warm_shelf_lock_cover','gather_cover_entry']:
  unit+=function(name,book)+'\n'
 present=function('present',book)
@@ -67,7 +77,7 @@ static void reset(app_ctx_t *ctx){for(unsigned i=0;i<9;++i){free(s_covers[i].gra
 int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
  for(int mode=0;mode<3;++mode){fast=mode==1;reset(&ctx);
   assert(!prepare_cover_batch(&ctx,true)&&queued==511&&!shelf_cover_frame_ready());
-  ready_mask=7;assert(prepare_cover_batch(&ctx,false)==7&&s_cover_dirty_mask==7&&shelf_cover_reveal_mask()==7);
+  ready_mask=7;assert(prepare_cover_batch(&ctx,false)==7&&s_cover_dirty_mask==7&&shelf_cover_reveal_mask()==(TEST_COVER_RETRIES?7:0));
   s_cover_batch_present_pending=false;ack_present(APP_REDRAW_PAGE,EPD_DRAW_SUCCESS);assert(s_cover_dirty_mask==7);
   ready_mask=511;assert(prepare_cover_batch(&ctx,false)==504&&shelf_cover_reveal_mask()==511);
   s_cover_batch_present_pending=true;s_cover_present_mask=511;ack_present(APP_REDRAW_AREA,EPD_DRAW_FAULT);assert(s_cover_dirty_mask==511);
@@ -81,21 +91,27 @@ int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
  nav_stop=3;assert(!prepare_cover_batch(&ctx,true)&&ctx.request_app&&queued==3);
  // 失败不再永久丢弃：先退避重试两次，第三次才留占位并在稍后再试。
  // A failure is not dropped forever: retry twice with backoff, then leave a placeholder.
- reset(&ctx);ready_mask=511;failed_mask=4;assert(prepare_cover_batch(&ctx,true)==507&&!shelf_cover_frame_ready());
+ reset(&ctx);ready_mask=511;failed_mask=4;assert(prepare_cover_batch(&ctx,true)==507);
+#if TEST_COVER_RETRIES
+ assert(!shelf_cover_frame_ready());
  assert(!s_covers[2].gray&&!s_covers[2].fast_bits);
  assert(s_cover_retry_count[2]==1&&s_cover_retry_ms[2]>ctx.now_ms);
  assert(prepare_cover_batch(&ctx,true)==0);assert(s_cover_retry_count[2]==1);
  ctx.now_ms=s_cover_retry_ms[2];assert(prepare_cover_batch(&ctx,true)==0&&s_cover_retry_count[2]==2);
  ctx.now_ms=s_cover_retry_ms[2];assert(prepare_cover_batch(&ctx,true)==0&&s_cover_retry_count[2]==3&&s_cover_pending_mask==0);
+ #endif
  assert(shelf_cover_frame_ready());
+ assert(!s_covers[2].gray&&!s_covers[2].fast_bits);
  s_cover_warm_mask=3;ctx.now_ms=2000;warm_shelf_lock_cover(&ctx);assert(warm_calls==1&&s_cover_warm_mask==2);
  for(unsigned i=0;i<9;++i){free(s_covers[i].gray);free(s_covers[i].fast_bits);}
  puts("PASS: all3 modes queue without IO, gather warm hits within 60ms with immediate nav cancellation, reveal per ready cell, retain dirty covers through placeholder/failed displays, retry transient failures with backoff, prioritize touch/navigation and degrade missing/OOM slots safely");
 }
 '''
-assert 'const bool artwork = s_view != SHELF || !(s_cover_pending_mask & (1u << row));' in function('draw_shelf_cover',book)
+artwork = ('s_view != SHELF || !(s_cover_pending_mask & (1u << row))'
+           if retry_covers else 'shelf_cover_frame_ready()')
+assert 'const bool artwork = '+artwork+';' in function('draw_shelf_cover',book)
 assert 's_cover_batch_present_pending = true;' in function('on_tick',book)
 with tempfile.TemporaryDirectory() as d:
  c=Path(d)/'test.c';exe=Path(d)/'test';c.write_text(unit)
- subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(ROOT/'main/book'),str(c),'-o',str(exe)],check=True)
+ subprocess.run(['cc',f'-DTEST_COVER_RETRIES={int(retry_covers)}','-Dshelf_display_style=app_settings_shelf_style','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(ROOT/'main/book'),str(c),'-o',str(exe)],check=True)
  subprocess.run([str(exe)],check=True)

@@ -84,6 +84,7 @@ int ttf_text_width_px(int px, const char* text) {
     return width + n * test_slot_advance[test_slot];
 }
 int ttf_ascender_px(int px) { return px; }
+void ttf_measure_line_px(int px,const char *text,int *above,int *below){(void)text;*above=px;*below=0;}
 int ttf_text_left_bearing_px(int px, const char* text) {
     (void)px; (void)text; return test_opener_bearing;
 }

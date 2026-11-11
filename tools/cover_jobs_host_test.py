@@ -47,6 +47,7 @@ static int64_t esp_timer_get_time(void){return mono;}
 static int mock_stat(const char *p,struct stat *st){assert(worker_context);++reads;if(*p=='X')return -1;memset(st,0,sizeof(*st));st->st_mode=S_IFREG;st->st_size=100;st->st_mtime=200;return 0;}
 #define stat(p,s) mock_stat(p,s)
 static book_cover_job_t request(const char *p){book_cover_job_t q={.width=164,.height=214,.stride=21,.contrast=100};strcpy(q.path,p);strcpy(q.title,"title");return q;}
+static int chapter_reads;static uint16_t book_cached_chapter_count(const char*p,uint32_t n,int64_t m){assert(worker_context&&p&&n==100&&m==200);++chapter_reads;return 37;}
 static bool book_auto_cover_render(const char*,const char*,const char*,unsigned,unsigned,uint8_t*);
 static bool book_title_from_path(const char *p,char *out,size_t cap){(void)p;(void)out;(void)cap;return false;}
 '''
@@ -62,6 +63,8 @@ int book_cover_load_io(const char*p,const char*t,const char*a,uint8_t*out,bool l
  if(mode==2){mode=0;assert(!book_cover_jobs_quiesce(0));}
  return *p=='N'?0:1;
 }
+int book_cover_load_sized_io(const char*p,const char*t,const char*a,uint8_t*out,unsigned w,unsigned h,bool*cache){(void)t;(void)a;assert(worker_context&&w==51&&h==70);++decodes;memset(out,*p,w*h);*cache=true;return *p=='N'?0:1;}
+void book_cover_store_sized(const char*p,const char*t,const char*a,const uint8_t*out,unsigned w,unsigned h,int64_t n,int64_t m){(void)p;(void)t;(void)a;assert(worker_context&&w==51&&h==70&&n==100&&m==200&&out[0]==33);++writes;}
 static bool book_auto_cover_render(const char*p,const char*t,const char*a,unsigned w,unsigned h,uint8_t*out){(void)p;(void)t;(void)a;assert(!worker_context&&w==176&&h==240);++fonts;memset(out,33,w*h);return true;}
 static void run(void){worker_context=1;if(!setjmp(done))task_fn(NULL);worker_context=0;}
 int main(void){
@@ -101,11 +104,20 @@ int main(void){
  generation=book_cover_jobs_begin();assert(book_cover_jobs_submit(generation,0,&q));assert(!book_cover_jobs_quiesce(20));run();assert(book_cover_jobs_quiesce(0));
  generation=book_cover_jobs_begin();for(unsigned slot=0;slot<9;++slot){q=request("A");assert(book_cover_jobs_submit(generation,slot,&q));}run();
  for(unsigned slot=0;slot<9;++slot){assert(book_cover_jobs_take(generation,slot,&result)==1);free(result.pixels);}
+ generation=book_cover_jobs_begin();q=request("A");q.metadata_only=true;
+ int old_decodes=decodes;largest=0;assert(book_cover_jobs_idle());assert(book_cover_jobs_submit(generation,0,&q));assert(!book_cover_jobs_idle());run();assert(!book_cover_jobs_idle());
+ assert(book_cover_jobs_take(generation,0,&result)==1&&result.metadata&&result.chapters==37&&!result.pixels&&decodes==old_decodes&&!largest&&chapter_reads==1);assert(book_cover_jobs_idle());
+ generation=book_cover_jobs_begin();q=request("A");q.list=true;q.width=51;q.height=70;largest=0;
+ assert(book_cover_jobs_submit(generation,0,&q));run();assert(book_cover_jobs_take(generation,0,&result)==1&&result.width==51&&result.height==70&&largest==3570);free(result.pixels);
+ generation=book_cover_jobs_begin();q=request("N");q.list=true;q.width=51;q.height=70;
+ assert(book_cover_jobs_submit(generation,0,&q));run();old_writes=writes;before_fonts=fonts;
+ assert(book_cover_jobs_take(generation,0,&result)==0&&fonts==before_fonts+1);run();
+ assert(book_cover_jobs_take(generation,0,&result)==1&&result.width==51&&result.height==70&&result.pixels[0]==33&&writes==old_writes+1);free(result.pixels);
  assert(book_cover_jobs_quiesce(0));free(s_jobs);s_jobs=NULL;assert(!live);
  puts("PASS: real bounded cover worker has no UI IO on queue/poll, packed hits skip gray/decode, stale generations and media cancellation discard results, UI-only auto glyphs, transient fallback not cached, all9 slots and OOM/task failures release resources");
 }
 '''
-if (root/'.kiiko-source-view.json').exists() and 'metalio47' in (root/'.kiiko-source-view.json').read_text():
+if (root/'.kiiko-source-view.json').exists() and __import__('json').loads((root/'.kiiko-source-view.json').read_text())['board']=='metalio47':
  unit=unit.replace(' puts("PASS:', ' assert(jpeg_cancels>0);\n puts("PASS:')
 with tempfile.TemporaryDirectory(prefix='kiiko-cover-jobs-') as folder:
  c=Path(folder)/'test.c';binary=Path(folder)/'test';c.write_text(unit)

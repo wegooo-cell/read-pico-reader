@@ -31,6 +31,8 @@
  * User authorizes a separate GL37 panel experiment on2026-10-24: only verified same-body overlays/sliders use vendor trimming; default, body reflow and cleaning remain48 phases.
  * 用户2026-10-25另授权书架16灰GL37本地实验：封面/书夹/外围同轮缩短，跨主页保留两相擦白；其他场景及完整清理不改。
  * User authorizes a separate shelf16-gray GL37 experiment on2026-10-25: shorten art/chrome together, keep two root-switch white drives; retain other scenes/full cleanup.
+ * 用户2026-11-10修订：S31快刷仅真实跨主页独立启用背景同向补白（一般六相、进出书架八相及两相释放），保留原字形/灰阶迁移、底栏边界及扫描节拍。
+ * User2026-11-10: independently enable six white-background drives (eight entering/leaving shelves) plus two holds only on real S31 fast root switches, retaining native glyph/gray transitions, navigation bounds and scan cadence.
  * 用户2026-10-28优先主页面切换清残影：显式本地开关为真实根页切换补四拍变白、两拍释放；模式、灰阶、底栏裁剪及其他场景保持。
  * User prioritizes root-switch ghosting on2026-10-28: an explicit local flag adds four changed-white drives/two release holds only on real root switches, retaining modes/grays/navigation crops and other scenes.
 
@@ -163,6 +165,12 @@ static const void* s_main_armed;
 static bool s_main_fault;
 static bool s_main_ui_prefill_slow;
 static bool s_main_switch_erase;
+// 只由四个主页真实快刷切换作用域授予，避免同页/文件子页/阅读继承。
+// Granted only by real fast switches among the four roots, never inherited by same-page/child/reader output.
+static bool s_main_fast_background;
+bool display_main_fast_background_set(bool active) {
+    bool previous=s_main_fast_background;s_main_fast_background=active;return previous;
+}
 static unsigned s_main_white_phases=6;
 unsigned display_main_quality_set(unsigned white_phases) {
     unsigned previous=s_main_white_phases;
@@ -177,6 +185,8 @@ static bool main_background_mode(void) {
     return mode==APP_MAIN_REFRESH_FAST||mode==APP_MAIN_REFRESH_WATER;
 }
 static const EpdWaveform* main_switch_quality_waveform(const EpdWaveform* wave,enum EpdDrawMode mode) {
+    if(s_main_fast_background)
+        return display_main_fast_background_waveform_with_phases(wave,mode,s_main_white_phases);
     return main_background_mode()?display_main_background_waveform_with_phases(wave,mode,s_main_white_phases):
         main_clean_waveform(wave,mode);
 }

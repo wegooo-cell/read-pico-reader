@@ -71,6 +71,7 @@ static int edge_returns,back_ripples,monochrome_calls,last_ripple_dir;
 static bool binary_scope,navigation_scope;
 unsigned display_main_quality_set(unsigned v){(void)v;return 0;}
 enum EpdDrawError update_display_main_turn(EpdiyHighlevelState*h,EpdRect r,int d){return update_display_water_turn(h,r,d);}
+bool display_main_fast_background_set(bool v){(void)v;return false;}
 bool display_main_switch_erase_set(bool v){(void)v;return false;}
 bool display_main_shelf_home_erase_set(bool v){(void)v;return false;}
 bool app_sleep_media_ready(void){return true;}

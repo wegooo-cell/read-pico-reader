@@ -118,6 +118,7 @@ static bool s_nav_contact_down,s_nav_polled;
 // 锁屏占用整屏后旧主页面底栏不再是物理基准；解锁第一帧必须完整绘制。
 // A lock screen replaces the old navigation baseline; the first unlocked frame must render complete navigation.
 static void main_lock_boundary(void) {
+    (void)ble_pt_take_standby();
     ui_click_feedback_reset();
     quick_reset();
     s_presented_main = NULL;
@@ -263,6 +264,7 @@ void app_lock_ignore_for(int64_t ms) {
 // 网络恢复可能阻塞；收齐期间的旧按键后，再开始原保护窗口和空闲计时。
 // Network restoration may block. Drain queued keys before restarting the existing guard and idle clocks.
 static void finish_lock_resume(app_ctx_t *ctx, int64_t *last_input_ms) {
+    (void)ble_pt_take_standby();
     read_pico_transfer_resume_after_sleep();
     read_pico_pmu_drain_events();
     ctx->now_ms = esp_timer_get_time() / 1000;
@@ -379,7 +381,10 @@ void app_present(app_ctx_t* ctx,const app_desc_t* app,app_redraw_t redraw) {
     const bool shelf_switch=root_switch &&
         (app_index_of(s_presented_root)==1 || app_index_of(app)==1);
     unsigned previous=display_main_quality_set(white_switch?(shelf_switch?8u:6u):0u);
+    bool prior_fast_background=display_main_fast_background_set(root_switch &&
+        app_settings_main_refresh_mode()==APP_MAIN_REFRESH_FAST);
     app_present_impl(ctx,app,redraw);
+    display_main_fast_background_set(prior_fast_background);
     display_main_quality_set(previous);
 }
 
@@ -864,6 +869,7 @@ void app_loop_run(const app_loop_config_t* config) {
                     cancel_gesture(&ctx, current, &gesture);
                     ctx.consumed = true;
                 }
+                if (action == UI_QUICK_OPEN) app_book_pause_auto();
                 if (action == UI_QUICK_OPEN || action == UI_QUICK_CLOSE) quick_present(&ctx, current, false);
                 else if (action == UI_QUICK_WIFI) {
                     quick_toggle_wifi();
@@ -1077,6 +1083,7 @@ void app_loop_run(const app_loop_config_t* config) {
         }
 
         ctx.now_ms = esp_timer_get_time() / 1000;
+        display_reader_keep_rails(current == &app_book && app_book_reader_open() && !ctx.request_app);
         rails_idle_check(ctx.now_ms);
 
         // 电源键短按默认锁屏；阅读正文可选择将它用于下一页。
@@ -1227,6 +1234,7 @@ void app_loop_run(const app_loop_config_t* config) {
             pico_online_busy();
         ble_pt_sync(app_settings_ble_turner() && !wifi_busy);
         ble_pt_poll();
+        bool remote_standby=ble_pt_take_standby();
         if (s_quick.open || quick_input_owned) {
             // 覆盖层期间丢弃页内蓝牙输入，关闭后不重放翻页或学习事件。
             // Discard page BLE input while covered, without replaying turns or learning edges after closing.
@@ -1246,7 +1254,7 @@ void app_loop_run(const app_loop_config_t* config) {
         if (!power_dialog_open && !s_quick.open && !quick_input_owned && !menu_open &&
             !current->holds_pmu && !usb_storage_active() && !touch.touched &&
             !ui_click_feedback_active() && !ctx.request_app && !ctx.request_menu && !ctx.request_return &&
-            ui_nav_refresh_power(ctx.fb)) {
+            (current!=&app_book||app_book_status_bar_visible())&&ui_nav_refresh_power(ctx.fb)) {
             // 普通/水波纹保留状态栏灰阶边缘，快刷保持原黑白局刷。
             // Retain gray header edges in ordinary/water modes and short binary updates in fast mode.
             bool fast=app_settings_main_refresh_mode()==APP_MAIN_REFRESH_FAST;
@@ -1262,13 +1270,17 @@ void app_loop_run(const app_loop_config_t* config) {
             ctx.request_app || ctx.request_menu || ctx.request_return;
         if (idle_blocked || requested_idle != idle_minutes) last_input_ms = ctx.now_ms;
         idle_minutes = requested_idle;
+        // Recognized standby uses the existing lock/resume path, with normal lock safety gates.
+        extern const app_desc_t app_book;
+        bool remote_lock=remote_standby && !menu_open && !s_quick.open && !quick_input_owned &&
+            current==&app_book && app_book_reader_body_visible();
         if (!idle_blocked && ctx.now_ms >= s_lock_ignore_until_ms &&
-            auto_lock_due(ctx.now_ms, last_input_ms, idle_minutes)) {
+            (remote_lock || auto_lock_due(ctx.now_ms, last_input_ms, idle_minutes))) {
             held_key = -1;
             cancel_gesture(&ctx, current, &gesture);
             if (menu_pressed >= 0) menu_feedback(&ctx, current, menu_leaf, menu_pressed, false, &feedback);
             menu_pressed = UI_MENU_HIT_NONE;
-            prepare_lock(&ctx, current, false);
+            prepare_lock(&ctx, current, remote_lock);
             extern const app_desc_t app_book;
             main_lock_boundary();
             enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp,

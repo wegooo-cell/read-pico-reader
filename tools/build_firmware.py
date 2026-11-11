@@ -94,6 +94,7 @@ def export(build, output, board):
     experimental_shelf37 = board == 'metalio47' and cache.exists() and 'METALIO_SHELF37_EXPERIMENT:BOOL=ON' in cache.read_text(encoding='utf-8')
     experimental_fast_panels = board == 'metalio47' and cache.exists() and 'METALIO_FAST_READER_PANELS:BOOL=ON' in cache.read_text(encoding='utf-8')
     experimental_du14 = board == 'metalio47' and cache.exists() and 'METALIO_DU14_EXPERIMENT:BOOL=ON' in cache.read_text(encoding='utf-8')
+    settings_short = board == 'metalio47' and cache.exists() and 'METALIO_SETTINGS_SHORT_MOTION:BOOL=ON' in cache.read_text(encoding='utf-8')
     experimental_trimmed_waveform = board == 'metalio47' and cache.exists() and 'METALIO_TRIMMED_WAVEFORM:BOOL=ON' in cache.read_text(encoding='utf-8')
     experimental_main_clean = board == 'metalio47' and cache.exists() and 'METALIO_MAIN_CLEAN_EXPERIMENT:BOOL=ON' in cache.read_text(encoding='utf-8')
     experimental_main_clean |= board == 'pico' and cache.exists() and 'PICO_MAIN_CLEAN_EXPERIMENT:BOOL=ON' in cache.read_text(encoding='utf-8')
@@ -110,6 +111,7 @@ def export(build, output, board):
                 'experimental_shelf37': bool(experimental_shelf37),
                 'experimental_fast_reader_panels': bool(experimental_fast_panels),
                 'experimental_du14': bool(experimental_du14),
+                'experimental_settings_short_motion': bool(settings_short),
                 'experimental_trimmed_waveform': bool(experimental_trimmed_waveform),
               'experimental_main_clean': bool(experimental_main_clean),
                 'experimental_network_probe': bool(experimental_network),
@@ -162,6 +164,7 @@ def export(build, output, board):
               'experimental_shelf37': bool(experimental_shelf37),
               'experimental_fast_reader_panels': bool(experimental_fast_panels),
               'experimental_du14': bool(experimental_du14),
+              'experimental_settings_short_motion': bool(settings_short),
               'experimental_trimmed_waveform': bool(experimental_trimmed_waveform),
               'experimental_main_clean': bool(experimental_main_clean),
               'experimental_network_probe': bool(experimental_network),
@@ -199,6 +202,7 @@ def build_one(board, args):
                '-DMETALIO_SHELF37_EXPERIMENT=' + ('ON' if board == 'metalio47' and args.s31_shelf37 else 'OFF'),
                '-DMETALIO_FAST_READER_PANELS=' + ('ON' if board == 'metalio47' and args.s31_fast_reader_panels else 'OFF'),
                '-DMETALIO_DU14_EXPERIMENT=' + ('ON' if board == 'metalio47' and args.s31_du14 else 'OFF'),
+               '-DMETALIO_SETTINGS_SHORT_MOTION=' + ('ON' if board == 'metalio47' and getattr(args,'s31_settings_short_motion',False) else 'OFF'),
                '-DMETALIO_TRIMMED_WAVEFORM=' + ('ON' if board == 'metalio47' and args.s31_trimmed_waveform else 'OFF'),
                '-DMETALIO_MAIN_CLEAN_EXPERIMENT=' + ('ON' if board == 'metalio47' and args.s31_main_clean else 'OFF'),
                '-DPICO_MAIN_CLEAN_EXPERIMENT=' + ('ON' if board == 'pico' and args.pico_main_clean else 'OFF'),
@@ -302,6 +306,7 @@ def main():
     parser.add_argument('--s31-shelf37', action='store_true', help='Explicit local S31 GL37 shelf art/chrome experiment; other pages/cleanup stay unchanged')
     parser.add_argument('--s31-fast-reader-panels', action='store_true', help='Explicit local four-gray16 font/reading settings experiment')
     parser.add_argument('--s31-du14', action='store_true', help='Explicit local S31 vendor14-phase binary experiment; gray/cleanup keep their tables')
+    parser.add_argument('--s31-settings-short-motion', action='store_true', help='Local S31 settings-motion-only DU14; reader/other pages and idle white recovery stay unchanged')
     parser.add_argument('--s31-trimmed-waveform', action='store_true', help='Local S31 rollback to the trimmed 37-phase waveform; normal builds keep vendor full 48')
     parser.add_argument('--pico-main-clean', action='store_true', help='Local Pico root-switch erasure using its own LUTs within40 phases')
     parser.add_argument('--s31-main-clean', action='store_true', help='Local S31 root-switch quality: six/eight changed-white drives plus two release holds')
@@ -322,6 +327,8 @@ def main():
         parser.error('--s31-fast-reader-panels requires metalio47 or all')
     if args.s31_du14 and args.board == 'pico':
         parser.error('--s31-du14 requires metalio47 or all')
+    if args.s31_settings_short_motion and args.board == 'pico':
+        parser.error('--s31-settings-short-motion requires metalio47 or all')
     if args.s31_trimmed_waveform and args.board == 'pico':
         parser.error('--s31-trimmed-waveform requires metalio47 or all')
     if args.pico_main_clean and args.board == 'metalio47':

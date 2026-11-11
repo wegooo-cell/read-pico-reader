@@ -5,6 +5,7 @@
 #include "read_pico_pmu.h"
 #include "power_double_click.h"
 #include "metalio_charger.h"
+#include "metalio_soc_filter.h"
 #include "metalio_hw.h"
 #include "esp_system.h"
 #include "esp_mac.h"
@@ -16,6 +17,7 @@
 #include <time.h>
 #include <string.h>
 static pmu_snapshot_t state;
+static metalio_soc_filter_t s_soc_filter;
 static bool ready,held,long_sent,candidate;
 static bool keys_paused;
 static uint32_t key_epoch;
@@ -27,6 +29,12 @@ static read_pico_pmu_key_action_t action;
 static power_double_click_t s_wake_click;
 static TaskHandle_t key_task;
 static portMUX_TYPE key_lock=portMUX_INITIALIZER_UNLOCKED;
+// 由原主线程在初始化/唤醒边界重置显示滤波；原始电压仍供硬件状态读取。
+// The original main thread resets display filtering at init/wake boundaries; raw voltage remains available.
+static void battery_reset(void) {
+    metalio_soc_filter_reset(&s_soc_filter,esp_timer_get_time());
+    state.flags&=~(PMU_STATUS_BATTERY_VALID|PMU_STATUS_CHARGING_ACTIVE);battery_at=0;
+}
 static unsigned unbcd(unsigned v) { return (v&15)>9 || (v>>4)>9 ? 255 : (v>>4)*10+(v&15); }
 static unsigned bcd(unsigned v) { return (v/10<<4)|(v%10); }
 static esp_err_t rtc_read(void) {
@@ -109,6 +117,9 @@ esp_err_t read_pico_pmu_keys_pause(void) {
     return can_pause?ESP_OK:ESP_ERR_INVALID_STATE;
 }
 void read_pico_pmu_keys_resume(void) {
+    // 唤醒后重新等待3秒采样，避免继续使用锁屏前的显示电量；硬件充电策略不变。
+    // Recalibrate display SOC after a3s wake delay instead of reusing stale lock-time values; charging hardware is unchanged.
+    battery_reset();
     metalio_ai_clear();
     // 改方向后须两次稳定低电平才承接按住；单次毛刺/读错不能在松开时伪造解锁。
     // Require two stable low samples after direction restore; a glitch/read fault must not synthesize an unlock on release.
@@ -148,7 +159,7 @@ static esp_err_t charger_init(void) {
     return err;
 }
 static void battery(void) {
-    int64_t now=esp_timer_get_time(); if (battery_at && now-battery_at<2000000) return;
+    int64_t now=esp_timer_get_time(); if (battery_at && now-battery_at<1000000) return;
     battery_at=now;
     if (!charger_initialized && now>=charger_retry_at) {
         (void)charger_init(); charger_retry_at=now+30000000;
@@ -158,17 +169,21 @@ static void battery(void) {
     if (metalio_read(0x55,0x08,r,2)==ESP_OK) {
         unsigned mv=r[0]|r[1]<<8;
         if (mv>=2500 && mv<=5000) {
-            // 百分比只取BQ27220的StateOfCharge(0x2C)；电压仅作读数合理性检查，不换算SOC。
-            // Percentage comes only from BQ27220 StateOfCharge(0x2C); voltage validates the sample, never estimates SOC.
-            state.battery_mv=mv; state.flags|=PMU_STATUS_BATTERY_VALID; unsigned soc;
-            if (metalio_read(0x55,0x2c,r,2)==ESP_OK && (soc=(unsigned)(r[0]|r[1]<<8))<=100) state.soc_permille=soc*10;
-            else state.flags &= ~PMU_STATUS_BATTERY_VALID;
+            // 只把电压作为本轮原始采样；显示百分比由官方曲线/滤波得到，不读未标定的SOC寄存器。
+            // Keep raw voltage here; the vendor curve/filter computes display SOC without the uncalibrated SOC register.
+            state.battery_mv=mv;state.flags|=PMU_STATUS_BATTERY_VALID;
         }
     }
     // 官方BQ27220说明：0x0C为有符号mA，±5mA死区；VBUS_STAT因关闭DPDM不能判断插电。
     // Vendor BQ27220 guidance:0x0C is signed mA with a±5mA deadband; disabled DPDM makes VBUS_STAT unsuitable for detecting input.
     const bool current_ok=metalio_read(0x55,0x0c,r,2)==ESP_OK;
     const int current_ma=current_ok?(int16_t)((unsigned)r[0]|(unsigned)r[1]<<8):0;
+    int level=0;bool display_charging=false;
+    const bool display_valid=metalio_soc_filter_update(&s_soc_filter,
+        (state.flags&PMU_STATUS_BATTERY_VALID)&&current_ok,state.battery_mv,(int16_t)current_ma,
+        now,&level,&display_charging);
+    if(display_valid)state.soc_permille=(unsigned)level*10;
+    else state.flags&=~PMU_STATUS_BATTERY_VALID;
     uint8_t charger=0,control=0,otg=0;
     const bool status_ok=metalio_read(0x6b,0x1e,&charger,1)==ESP_OK;
     const bool control_ok=metalio_read(0x6b,0x16,&control,1)==ESP_OK;
@@ -185,7 +200,9 @@ static void battery(void) {
     if(known)charge_valid_at=now;
     else charging=was_charging&&charge_valid_at&&now-charge_valid_at<6000000;
     state.charge_state=known?(charging?PMU_CHARGE_CHARGING:PMU_CHARGE_NOT_CHARGING):PMU_CHARGE_UNKNOWN;
-    if(charging)state.flags|=PMU_STATUS_CHARGING_ACTIVE;
+    // 充电芯片状态用于诊断；状态栏按官方原始电流方向，显示满电时隐藏闪电。
+    // Retain charger state for diagnostics; the UI follows vendor current direction and hides lightning at displayed full.
+    if(display_valid&&display_charging)state.flags|=PMU_STATUS_CHARGING_ACTIVE;
     state.status_ok=(state.flags&PMU_STATUS_BATTERY_VALID)!=0 || charger_ok || current_ok || (!known&&charging);
     // 单次I2C失败仅短暂保留已确认图标；明确拔电/停止/OTG立即清除，六秒内无有效依据则过期。
     // Briefly retain a confirmed icon through an I2C fault; explicit discharge/disable/OTG clears it immediately, and evidence expires within six seconds.
@@ -202,6 +219,7 @@ static void battery(void) {
 }
 esp_err_t read_pico_pmu_init(i2c_master_bus_handle_t bus,const read_pico_pmu_config_t *cfg) {
     (void)bus;(void)cfg; ready=metalio_ioe()!=NULL; state.present=ready;
+    battery_reset();
     if (ready) { held=candidate=metalio_key_down(); down_since=candidate_since=esp_timer_get_time()/1000; battery(); (void)rtc_read(); }
     if (ready && !key_task && xTaskCreate(key_feed,"metalio_keys",2048,NULL,5,&key_task)!=pdPASS) ready=false;
     return ready?ESP_OK:ESP_ERR_INVALID_STATE;

@@ -13,6 +13,10 @@ def function(path, name):
         depth+=(src[at]=='{')-(src[at]=='}'); at+=1
     return src[match.start():at]+'\n'
 
+adapter=root/'components/read_pico_pmu/metalio_power_adapter.c'
+assert 'battery_reset();' in function('components/read_pico_pmu/metalio_power_adapter.c','read_pico_pmu_keys_resume')
+assert 'battery_reset();' in function('components/read_pico_pmu/metalio_power_adapter.c','read_pico_pmu_init')
+assert '0x2c' not in function('components/read_pico_pmu/metalio_power_adapter.c','battery')
 unit=r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -20,6 +24,8 @@ unit=r'''
 #include <stdio.h>
 #include <string.h>
 #include "read_pico_pmu_protocol.h"
+#include "metalio_soc_filter.h"
+static metalio_soc_filter_t s_soc_filter;
 #define ESP_OK 0
 #define ESP_FAIL -1
 #define ESP_ERR_INVALID_RESPONSE -2
@@ -47,18 +53,18 @@ static bool metalio_charger_ready(void){return charger_ready_result;}
 static esp_err_t metalio_read(unsigned a,unsigned r,void *out,size_t n){
  ++reads;if(all_fault||(int)a==fail_address||(int)r==fail_reg||(a==0x55&&r==0x0c&&!current_ok))return ESP_FAIL;
  unsigned value= a==0x55?(r==8?mv:r==0x0c?(uint16_t)current_ma:soc):r==0x1e?raw:r==0x16?ctrl:r==0x18?otg:0x42;
- assert((a==0x55&&(r==8||r==0x2c||r==0x0c)&&n==2)||(a==0x6b&&(r==0x1e||r==0x16||r==0x18)&&n==1));
+ assert((a==0x55&&(r==8||r==0x0c)&&n==2)||(a==0x6b&&(r==0x1e||r==0x16||r==0x18)&&n==1));
  uint8_t *p=out;p[0]=value&255;if(n==2)p[1]=value>>8;return ESP_OK;
 }
 static int volume_lock,volume_events[8];
 static unsigned volume_head,volume_count;
 '''
-for name in ('charger_init','battery'):
+for name in ('battery_reset','charger_init','battery'):
     unit+=function('components/read_pico_pmu/metalio_power_adapter.c',name)
 for name in ('metalio_volume_sample','metalio_take_volume','metalio_volume_clear'):
     unit+=function('components/metalio_hw/metalio_hw.c',name)
 unit+=r'''
-static void sample(void){clock_us+=2000000;battery();}
+static void sample(void){clock_us+=1000000;battery();}
 int main(void){
  (void)esp_err_to_name;
  // 适配器只委托新驱动：不自行探测寄存器，ready 完全取自驱动。
@@ -82,44 +88,31 @@ int main(void){
  battery();assert(charger_init_calls==5&&!charger_initialized);
  charger_init_result=ESP_OK;charger_ready_result=true;
  clock_us=32000000;battery();assert(charger_init_calls==6&&charger_initialized);
- battery_at=clock_us=0;ctrl=0x20;otg=0;
- sample();assert(state.status_ok&&state.battery_mv==4000&&state.soc_permille==650);
- assert((state.flags&PMU_STATUS_BATTERY_VALID)&&(state.flags&PMU_STATUS_CHARGING_ACTIVE));
- // 相同电压可有任意有效SOC，电压变化也不改变百分比；I2C失败不得以电压补算。
- // Valid SOC is independent of voltage; failed gauge reads never fall back to a voltage curve.
- for(unsigned value=0;value<=100;value++){
-  soc=value;mv=4000;sample();assert((state.flags&PMU_STATUS_BATTERY_VALID)&&state.soc_permille==value*10);
- }
- soc=37;for(mv=2500;mv<=5000;mv+=100){sample();assert((state.flags&PMU_STATUS_BATTERY_VALID)&&state.soc_permille==370);}
- mv=4000;fail_reg=0x2c;sample();assert(!(state.flags&PMU_STATUS_BATTERY_VALID));fail_reg=-1;soc=65;sample();
- int reads_before=reads;clock_us+=1999999;battery();assert(reads==reads_before);clock_us++;battery();assert(reads>reads_before);
+ // 真实adapter：启动3秒未知，使用电流方向选择官方电压曲线，绝不读0x2C。
+ // Actual adapter:3s startup unknown, current-selected vendor voltage curves and no0x2C reads.
+ battery_at=clock_us=0;ctrl=0x20;otg=0;current_ok=true;current_ma=100;mv=4000;
+ s_soc_filter=(metalio_soc_filter_t){0};battery_reset();
+ sample();assert(!(state.flags&PMU_STATUS_BATTERY_VALID)&&state.battery_mv==4000);
+ sample();assert(!(state.flags&PMU_STATUS_BATTERY_VALID));
+ sample();assert((state.flags&PMU_STATUS_BATTERY_VALID)&&state.soc_permille==700&&(state.flags&PMU_STATUS_CHARGING_ACTIVE));
+ int reads_before=reads;clock_us+=999999;battery();assert(reads==reads_before);clock_us++;battery();assert(reads>reads_before);
+ // 诊断充电阶段不干预官方显示电流方向；原充电控制代码与寄存器不由此测试替换。
+ // Diagnostic charger stages never override vendor display current direction; charger control/registers are untouched.
  for(unsigned stage=0;stage<4;stage++){
-  raw=stage<<3;ctrl=0x20;otg=0;sample();assert(!!(state.flags&PMU_STATUS_CHARGING_ACTIVE)==(stage!=0));
-  ctrl=0;sample();assert(!(state.flags&PMU_STATUS_CHARGING_ACTIVE));
-  ctrl=0x20;otg=0x40;sample();assert(!(state.flags&PMU_STATUS_CHARGING_ACTIVE));
+  raw=stage<<3;current_ma=-6;sample();assert(!(state.flags&PMU_STATUS_CHARGING_ACTIVE));
+  current_ma=6;sample();assert(state.flags&PMU_STATUS_CHARGING_ACTIVE);
  }
- raw=8;ctrl=0x20;otg=0;fail_reg=0x16;sample();assert(state.charge_state==PMU_CHARGE_UNKNOWN&&!(state.flags&PMU_STATUS_CHARGING_ACTIVE));
- fail_reg=-1;fail_address=0x55;sample();assert(!(state.flags&PMU_STATUS_BATTERY_VALID)&&state.status_ok);
- fail_address=0;soc=101;sample();assert(!(state.flags&PMU_STATUS_BATTERY_VALID));
- soc=0;sample();assert((state.flags&PMU_STATUS_BATTERY_VALID)&&state.soc_permille==0);
- soc=100;sample();assert(state.soc_permille==1000);
- fail_address=0x6b;mv=2000;sample();assert(state.status_ok&&!(state.flags&PMU_STATUS_BATTERY_VALID)&&(state.flags&PMU_STATUS_CHARGING_ACTIVE));
- // 实际电流独立补足CHG_STAT漏报；明确停止与OTG优先，I2C未知只短暂保留。
- // Actual current covers missing CHG_STAT; explicit stop/OTG wins, and unknown I2C only retains evidence briefly.
- fail_address=0;mv=4000;soc=50;raw=0;ctrl=0x20;otg=0;current_ok=true;current_ma=6;
- sample();assert(state.flags&PMU_STATUS_CHARGING_ACTIVE);
- raw=8;current_ma=-6;sample();assert(state.flags&PMU_STATUS_CHARGING_ACTIVE);
- raw=0;sample();assert(!(state.flags&PMU_STATUS_CHARGING_ACTIVE));
- raw=0;current_ma=5;sample();assert(!(state.flags&PMU_STATUS_CHARGING_ACTIVE));
- current_ma=6;ctrl=0;sample();assert(!(state.flags&PMU_STATUS_CHARGING_ACTIVE));
- ctrl=0x20;otg=0x40;sample();assert(!(state.flags&PMU_STATUS_CHARGING_ACTIVE));
- otg=0;fail_reg=0x1e;sample();assert(state.flags&PMU_STATUS_CHARGING_ACTIVE);
- fail_reg=-1;fail_address=0x6b;sample();assert(state.flags&PMU_STATUS_CHARGING_ACTIVE);
- current_ok=false;all_fault=true;sample();assert(state.status_ok&&(state.flags&PMU_STATUS_CHARGING_ACTIVE));
- sample();assert(state.flags&PMU_STATUS_CHARGING_ACTIVE);
- sample();assert(!state.status_ok&&!(state.flags&PMU_STATUS_CHARGING_ACTIVE));
- all_fault=false;fail_address=0;raw=8;sample();assert(state.flags&PMU_STATUS_CHARGING_ACTIVE);
- raw=0;sample();assert(!(state.flags&PMU_STATUS_CHARGING_ACTIVE));
+ fail_address=0x55;sample();assert(!(state.flags&PMU_STATUS_BATTERY_VALID)&&!(state.flags&PMU_STATUS_CHARGING_ACTIVE)&&state.status_ok);
+ fail_address=0;current_ok=false;sample();assert(!(state.flags&PMU_STATUS_BATTERY_VALID));
+ current_ok=true;fail_reg=8;sample();assert(!(state.flags&PMU_STATUS_BATTERY_VALID));fail_reg=-1;
+ mv=2000;sample();assert(!(state.flags&PMU_STATUS_BATTERY_VALID));
+ mv=4300;current_ma=100;for(int i=0;i<240;++i)sample();assert(state.soc_permille==1000&&!(state.flags&PMU_STATUS_CHARGING_ACTIVE));
+ // 唤醒即清有效标志；新采样延迟3秒，实际低压重新定标，而非保留睡前100%。
+ // Wake invalidates immediately; new samples recalibrate after3s instead of preserving the pre-sleep100%.
+ battery_reset();assert(!(state.flags&PMU_STATUS_BATTERY_VALID));mv=3702;current_ma=-100;
+ sample();assert(!(state.flags&PMU_STATUS_BATTERY_VALID));sample();assert(!(state.flags&PMU_STATUS_BATTERY_VALID));
+ sample();assert((state.flags&PMU_STATUS_BATTERY_VALID)&&state.soc_permille==500&&!(state.flags&PMU_STATUS_CHARGING_ACTIVE));
+ mv=3300;for(int i=0;i<400;++i)sample();assert((state.flags&PMU_STATUS_BATTERY_VALID)&&state.soc_permille==0);
  metalio_volume_sample(0xffff,0);metalio_volume_sample(0xfeff,10);metalio_volume_sample(0xfeff,34);assert(!metalio_take_volume());
  metalio_volume_sample(0xfeff,35);assert(metalio_take_volume()==-1&&!metalio_take_volume());
  metalio_volume_sample(0xffff,50);metalio_volume_sample(0xffff,75);
@@ -129,7 +122,7 @@ int main(void){
   metalio_volume_sample(0xfdff,250+i*100);metalio_volume_sample(0xfdff,275+i*100);
  }
  assert(volume_count==8);metalio_volume_clear();assert(!volume_count&&!metalio_take_volume());
- puts("PASS: actual S31 battery cadence and all charger stages plus valid SOC, adapter delegation with 30s retry, debounced/bounded volume queue and sleep drain");
+ puts("PASS: actual S31 official voltage display,1Hz reads,3s unknown/wake,100% icon suppression and current/voltage faults, adapter delegation with 30s retry, debounced/bounded volume queue and sleep drain");
 }
 '''
 with tempfile.TemporaryDirectory() as d:
@@ -137,10 +130,10 @@ with tempfile.TemporaryDirectory() as d:
     base=[CC,'-std=c11','-Wall','-Wextra','-Werror','-g']
     includes=['-I'+str(root/'components/read_pico_pmu/include')]
     try:
-        subprocess.run(base+['-fsanitize=address,undefined']+includes+[str(p/'test.c'),'-o',str(p/'test')],check=True,capture_output=True)
+        subprocess.run(base+['-fsanitize=address,undefined']+includes+[str(p/'test.c'),str(root/'components/read_pico_pmu/metalio_soc_filter.c'),'-o',str(p/'test')],check=True,capture_output=True)
     except subprocess.CalledProcessError:
         # 本机 MinGW 可能没有 libasan/libubsan；回退到不带 sanitizer 的构建。
         # The local MinGW may lack libasan/libubsan; retry without sanitizers.
         print('note: -fsanitize=address,undefined unavailable, building without it')
-        subprocess.run(base+includes+[str(p/'test.c'),'-o',str(p/'test')],check=True)
+        subprocess.run(base+includes+[str(p/'test.c'),str(root/'components/read_pico_pmu/metalio_soc_filter.c'),'-o',str(p/'test')],check=True)
     subprocess.run([str(p/'test')],check=True)

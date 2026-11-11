@@ -31,6 +31,7 @@ unit = r'''
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include "ui_image_dither.h"
 #define BOOK_ROWS 13
 #define BOOK_GRID_ROWS 9
@@ -50,13 +51,14 @@ enum {SHELF,MANAGE,BULK};
 static bool s_bulk_grid;
 static EpdRect ui_book_manage_cover(bool grid,int row){(void)grid;(void)row;assert(false);return (EpdRect){0};}
 static int s_view=SHELF,rows=9,contrast=100,phase_shift,style=2;
-static unsigned s_cover_generation;
-static int s_cover_prefetch_leaf;
+static unsigned s_cover_generation,s_chapters_pending;static bool s_chapters_started,s_chapters_changed,s_prefetch_active;static int s_prefetch_step;static int64_t s_prefetch_after;
 static void book_cover_jobs_cancel(unsigned g){(void)g;}
 static void metalio_cover_cache_clear(void){}
 static bool fast=true,alloc_fail;
 static size_t free_psram=4*1024*1024,allocated_bytes;
 static void release_guard_cache(void){}
+static void book_shelf_page_pause(void){}
+static bool s_shelf_page_key_valid,s_shelf_page_loading,s_shelf_page_cached,s_shelf_page_cache_allowed;
 static unsigned allocations,s_cover_pending_mask,s_cover_decode_mask,s_cover_warm_mask,s_cover_dirty_mask,s_cover_present_mask;
 static struct {int index;uint8_t *gray,*fast_bits;unsigned width,height;uint8_t fast_contrast,fast_phase;bool fast_white_edge;} s_covers[BOOK_ROWS];
 static int app_settings_shelf_style(void){return style;}
@@ -85,7 +87,7 @@ for name in ('shelf_cover_image', 'invalidate_covers', 'release_fast_covers', 'f
 unit += r'''
 typedef struct {int leaf;} app_ctx_t;
 typedef struct {uint8_t pct;uint32_t chapter,last_open_s;} book_progress_t;
-typedef struct {char path[288];bool removed,has_progress;uint32_t size,chapter,recent;uint8_t pct;} shelf_entry_t;
+typedef struct {char path[288];bool removed,has_progress,chapters_checked;uint32_t size,chapter,chapters,recent;uint8_t pct;} shelf_entry_t;
 static shelf_entry_t s_shelf[1];
 static int s_count=1,sorts;
 static uint32_t s_progress_revision=UINT32_MAX,progress_revision=1;
@@ -167,10 +169,10 @@ int main(void) {
     for(int i=0;i<9;++i)seed_gray(i);prepare_fast_covers();assert(allocated_bytes==40446);
     for(int row=0;row<9;++row)verify_bitmap(row);
     before=allocations;for(int i=0;i<80;++i)prepare_fast_covers();assert(allocations==before);
-    invalidate_covers();style=5;rows=4;
-    for(int i=0;i<4;++i){seed_gray(i);s_covers[i].width=i==0?176:i==1?70:160;s_covers[i].height=i==0?100:i==1?240:160;}
-    prepare_fast_covers();assert(allocated_bytes==4u*4494);
-    for(int row=0;row<4;++row){EpdRect image=shelf_cover_image(row);assert(image.width<=120&&image.height<=156&&image.width>0&&image.height>0);assert(fast_cover_matches(row,image));assert(!s_covers[row].gray);assert(image.x==71&&image.width==120&&image.height==156);}
+    invalidate_covers();style=5;rows=8;
+    for(int i=0;i<8;++i){seed_gray(i);s_covers[i].width=i==0?176:i==1?70:160;s_covers[i].height=i==0?100:i==1?240:160;}
+    prepare_fast_covers();assert(allocated_bytes==8u*4494);
+    for(int row=0;row<8;++row){EpdRect image=shelf_cover_image(row);assert(image.width<=120&&image.height<=156&&image.width>0&&image.height>0);assert(fast_cover_matches(row,image));assert(!s_covers[row].gray);assert(image.x==48&&image.width==51&&image.height==70);}
     invalidate_covers();style=2;rows=9;
     app_ctx_t ctx={0};strcpy(s_shelf[0].path,"/test.epub");s_shelf[0].size=100;s_shelf[0].recent=42;
     for(int i=0;i<80;++i)refresh_cached_progress(&ctx);
@@ -187,7 +189,7 @@ int main(void) {
 with tempfile.TemporaryDirectory(dir=ROOT / 'build') as directory:
     src, exe = Path(directory) / 'test.c', Path(directory) / 'test'
     src.write_text(unit)
-    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-g', '-fsanitize=address,undefined',
+    subprocess.run(['cc','-Dshelf_display_style=app_settings_shelf_style', '-std=c11', '-Wall', '-Wextra', '-Werror', '-g', '-fsanitize=address,undefined',
                     '-I' + str(ROOT / 'main/ui'), str(src), str(ROOT / 'main/ui/ui_image_dither.c'),
                     '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-# 中文：真实列表绘制、原比例封面和双行标题的边界检查与原生预览。
-# English: Native list painting, aspect-fill covers, two-line bounds and a native preview.
+# 中文：真实列表绘制、原比例封面和单行标题的边界检查与原生预览。
+# English: Native list painting, aspect-fill covers, single-line bounds and a native preview.
 import argparse
 from pathlib import Path
 from font_hanzi_host_support import font_hanzi_host_sources
@@ -51,6 +51,14 @@ size_t heap_caps_get_free_size(int c){(void)c;return capacity-live;}
 size_t heap_caps_get_largest_free_block(int c){(void)c;return capacity-live;}
 void lock_pin_wipe(void *p,unsigned n){volatile uint8_t *b=p;while(n--)*b++=0;}
 static enum EpdRotation display_rotation=EPD_ROT_PORTRAIT;
+static struct{int width,height;} host_display={1216,684};
+static typeof(host_display)*display=&host_display;
+typedef struct{uint64_t words[8];} metalio_cover_key_t;
+static bool display_pipeline_enabled(void){return false;}
+static int app_settings_system_contrast(void){return 100;}
+static uint32_t esp_rom_crc32_le(uint32_t seed,const uint8_t *p,size_t n){while(n--)seed=seed*31+*p++;return seed;}
+static bool metalio_cover_cache_get_rows(const metalio_cover_key_t*k,uint8_t*p,int stride,int span,int rows){(void)k;(void)p;(void)stride;(void)span;(void)rows;return false;}
+static bool metalio_cover_cache_put_rows(const metalio_cover_key_t*k,const uint8_t*p,int stride,int span,int rows){(void)k;(void)p;(void)stride;(void)span;(void)rows;return false;}
 int epd_width(void){return display_rotation==EPD_ROT_PORTRAIT||display_rotation==EPD_ROT_INVERTED_PORTRAIT?1216:684;}
 int epd_height(void){return display_rotation==EPD_ROT_PORTRAIT||display_rotation==EPD_ROT_INVERTED_PORTRAIT?684:1216;}
 int epd_rotated_display_width(void){return 684;}int epd_rotated_display_height(void){return 1216;}
@@ -59,6 +67,7 @@ typedef struct {uint16_t x,y;} Coord_xy;
 #define _swap_int(a,b) {int temp=a;a=b;b=temp;}
 static uint8_t ui_contrast_gray(uint8_t gray){return gray;}
 '''
+ if 'static void draw_axis_line(' in (ROOT/'components/epdiy/src/epdiy.c').read_text():unit+=function('draw_axis_line',ROOT/'components/epdiy/src/epdiy.c')+'\n'
  for n in ('_rotate','epd_draw_pixel','epd_get_pixel','epd_draw_hline','epd_draw_vline','epd_fill_rect','epd_draw_circle','epd_fill_circle_helper','epd_fill_circle','epd_write_line','epd_draw_line'):
   unit+=function(n,ROOT/'components/epdiy/src/epdiy.c')+'\n'
  for n in ('ui_rotate_rect_to_fb','ui_fill_rect_fast','ui_blit_mono_bitmap','clamp_radius','draw_arc','ui_draw_round_rect','ui_fill_round_rect','ui_inset_rect','ui_draw_control_frame','ui_draw_separator'):unit+=function(n,ROOT/'main/ui/ui_kit.c')+'\n'
@@ -78,15 +87,18 @@ static int s_view=0,style=5,s_pressed_control=-1;
 static bool s_bulk_grid;
 enum {SHELF,BULK};
 static unsigned s_cover_pending_mask;
+static bool s_shelf_page_cached;
+static unsigned book_shelf_page_favorite_edges(void){return 0;}
+static bool book_shelf_page_copy_cover(uint8_t *fb,unsigned row,EpdRect image){(void)fb;(void)row;(void)image;assert(false);return false;}
 #define SHELF_BOOK_LIFT_PX 16
 #define SHELF_LIST_BOUNCE_PX 8
 #define SHELF_FAST_COVER_STRIDE 21
 #define SHELF_FAST_COVER_WIDTH 164
-static struct {uint8_t *gray,*fast_bits;unsigned width,height;bool fast_white_edge;} s_covers[4];
-typedef struct {char name[256],author[128];bool has_progress,favorite;unsigned pct;} shelf_entry_t;
+static struct {uint8_t *gray,*fast_bits;unsigned width,height;bool fast_white_edge;} s_covers[8];
+typedef struct {char name[256],author[128];bool has_progress,favorite;unsigned pct;uint16_t chapter,chapters;} shelf_entry_t;
 static shelf_entry_t *s_shelf;
-static int s_visible_count=4;
-static int shelf_rows(void){return 4;}
+static int s_visible_count=8;
+static int shelf_rows(void){return 8;}
 static int app_settings_shelf_style(void){return style;}
 static bool app_settings_main_fast_refresh(void){return false;}
 static void ui_acrylic_bw_rect(uint8_t *fb,EpdRect r){(void)fb;(void)r;assert(0);}
@@ -96,33 +108,34 @@ static int ui_content_width(void){return 612;}
 #define UI_GAP 20
 #define UI_BTN_H 60
 int ui_text_fixed_width_px(int px,const char *v){return ttf_text_width_px(px,v);}
-static void ui_text_fixed_vc(uint8_t *fb,int x,int cy,int px,const char *v,enum EpdFontFlags align,bool inv){int a=0,b=0;ttf_measure_line_px(px,v,&a,&b);ttf_draw_text_px(fb,x,cy+(a-b)/2,px,v,align,inv?15:0,15);}
-static void ui_text_fixed_ink_vc(uint8_t *fb,int x,int cy,int px,const char *v,enum EpdFontFlags align,uint8_t ink){int a=0,b=0;ttf_measure_line_px(px,v,&a,&b);ttf_draw_text_px(fb,x,cy+(a-b)/2,px,v,align,ink>>4,15);}
+static char rendered_title[260];
+static void ui_text_fixed_vc(uint8_t *fb,int x,int cy,int px,const char *v,enum EpdFontFlags align,bool inv){if(x==120&&px==ttf_em_height_px(26))snprintf(rendered_title,sizeof(rendered_title),"%s",v);int a=0,b=0;ttf_measure_line_px(px,v,&a,&b);ttf_draw_text_px(fb,x,cy+(a-b)/2,px,v,align,inv?15:0,15);}
+static void ui_text_fixed_ink_vc(uint8_t *fb,int x,int cy,int px,const char *v,enum EpdFontFlags align,uint8_t ink){if(x!=120)assert(ink==UI_GRAY_BLACK);int a=0,b=0;ttf_measure_line_px(px,v,&a,&b);ttf_draw_text_px(fb,x,cy+(a-b)/2,px,v,align,ink>>4,15);}
 #define ui_text_vc ui_text_fixed_vc
 static void ui_hairline(uint8_t *fb,int y,int x,int w,uint8_t c){epd_draw_hline(x,y,w,c,fb);}
 static void copy_text(char *d,size_t n,const char *v){snprintf(d,n,"%s",v);}
 static void fit_text(char *v,int px,int w){while(*v&&ui_text_fixed_width_px(px,v)>w){size_t n=strlen(v)-1;while(n&&((unsigned char)v[n]&0xc0)==0x80)--n;v[n]=0;}}
 '''
  unit+='#define FEEDBACK_SHADOW '+str(int('area.width += 2' in function('paint_list_cover_feedback',ROOT/'main/apps/app_book.c')))+'\n'
- for n in ('row_rect','shelf_cover_image','shelf_cover_frame_ready','draw_favorite_icon','draw_shelf_favorite_icon','cover_favorite_needs_white_edge','draw_shelf_cover','paint_list_cover_feedback','draw_list_title','draw_list_row'):
+ for n in ('row_rect','shelf_cover_image','shelf_cover_frame_ready','draw_favorite_icon','draw_shelf_favorite_icon','cover_favorite_needs_white_edge','shelf_cover_white_edge','draw_shelf_cover_favorite','draw_shelf_cover','paint_list_cover_feedback','draw_list_title','draw_list_row'):
   unit+=function(n,ROOT/'main/apps/app_book.c')+'\n'
  unit+=r'''
 static void save(const char *path,uint8_t *frame){FILE *f=fopen(path,"wb");assert(f);for(int y=0;y<1216;++y)for(int x=0;x<684;++x){uint8_t v=(pixel(frame,x,y)>>4)*17;assert(fwrite(&v,1,1,f)==1);}assert(!fclose(f));}
 int main(int argc,char **argv){
  assert(argc==4);assert(ttf_font_open(argv[1])==ESP_OK);uint8_t *fb=malloc(684*1216/2);assert(fb);
- memset(fb,0xee,684*1216/2);
+ memset(fb,0xff,684*1216/2);
  ui_text_fixed_vc(fb,36,44,22,"09:41",EPD_DRAW_ALIGN_LEFT,false);
  ui_text_fixed_vc(fb,578,44,22,"78%",EPD_DRAW_ALIGN_RIGHT,false);
  ui_draw_round_rect(fb,(EpdRect){602,33,37,20},4,0);epd_fill_rect((EpdRect){607,38,23,10},0,fb);
  ui_text_fixed_vc(fb,36,122,52,"书架",EPD_DRAW_ALIGN_LEFT,false);
- ui_fill_round_rect(fb,(EpdRect){442,94,97,54},18,255);ui_draw_round_rect(fb,(EpdRect){442,94,97,54},18,0x70);ui_text_fixed_vc(fb,490,121,20,"管理",EPD_DRAW_ALIGN_CENTER,false);
- ui_fill_round_rect(fb,(EpdRect){551,94,97,54},18,255);ui_draw_round_rect(fb,(EpdRect){551,94,97,54},18,0x70);ui_text_fixed_vc(fb,599,121,20,"+ 导入",EPD_DRAW_ALIGN_CENTER,false);
- epd_fill_rect((EpdRect){36,195,612,2},0x60,fb);ui_fill_round_rect(fb,(EpdRect){36,184,612,788},20,255);ui_draw_control_frame(fb,(EpdRect){36,184,612,788},20,0x50);
- shelf_entry_t items[4]={{"我与地坛","史铁生",true,true,42},{"十八岁出门远行","余华",true,false,18},{"夏天、烟火和我的尸体","乙一",false,true,0},{"活山","娜恩 · 谢泼德",true,false,100}};
+ ui_fill_round_rect(fb,(EpdRect){420,94,92,54},18,255);ui_draw_round_rect(fb,(EpdRect){420,94,92,54},18,0x70);ui_text_fixed_vc(fb,466,121,20,"管理",EPD_DRAW_ALIGN_CENTER,false);
+ ui_fill_round_rect(fb,(EpdRect){524,94,124,54},14,255);ui_draw_round_rect(fb,(EpdRect){524,94,124,54},14,0x70);ui_text_fixed_vc(fb,573,121,20,"最近阅读",EPD_DRAW_ALIGN_CENTER,false);
+
+ shelf_entry_t items[8]={{"我与地坛","史铁生",true,true,42},{"十八岁出门远行","余华",true,false,18},{"夏天、烟火和我的尸体","乙一",false,true,0},{"活山","娜恩 · 谢泼德",true,false,100},{"那些女孩","克莱尔 · 吉根",true,false,67},{"长标题长标题长标题长标题长标题长标题长标题长标题长标题","",true,false,7},{"示例七","作者七",true,false,35},{"示例八","作者八",true,false,8}};
  s_shelf=items;app_ctx_t ctx={.fb=fb};
- for(int i=0;i<4;++i){char path[1024];snprintf(path,sizeof(path),"%s/%d.raw",argv[2],i);FILE *f=fopen(path,"rb");assert(f);assert(fread(&s_covers[i].width,4,1,f)==1&&fread(&s_covers[i].height,4,1,f)==1);unsigned bytes=s_covers[i].width*s_covers[i].height;assert(bytes<=176*240);s_covers[i].gray=malloc(bytes);assert(s_covers[i].gray&&fread(s_covers[i].gray,1,bytes,f)==bytes);fclose(f);
- EpdRect r=shelf_cover_image(i);assert(r.x>=64&&r.x+r.width<=198&&r.y>=184+i*197&&r.y+r.height<=184+(i+1)*197);
- assert(r.x==71&&r.width==120&&r.height==156);
+ for(int i=0;i<8;++i){items[i].chapter=i;items[i].chapters=38;char path[1024];snprintf(path,sizeof(path),"%s/%d.raw",argv[2],i);FILE *f=fopen(path,"rb");assert(f);assert(fread(&s_covers[i].width,4,1,f)==1&&fread(&s_covers[i].height,4,1,f)==1);unsigned bytes=s_covers[i].width*s_covers[i].height;assert(bytes<=176*240);s_covers[i].gray=malloc(bytes);assert(s_covers[i].gray&&fread(s_covers[i].gray,1,bytes,f)==bytes);fclose(f);
+ EpdRect r=shelf_cover_image(i);assert(r.x>=48&&r.x+r.width<=99&&r.y>=184+i*96&&r.y+r.height<=184+(i+1)*96);
+ assert(r.x==48&&r.width==51&&r.height==70);
  book_crop_t crop=book_cover_crop(s_covers[i].width,s_covers[i].height,r.width,r.height);
  assert(crop.width&&crop.height&&crop.x+crop.width<=s_covers[i].width&&crop.y+crop.height<=s_covers[i].height);
  assert(abs((int)crop.width*r.height-(int)crop.height*r.width)<=r.height);
@@ -132,7 +145,7 @@ int main(int argc,char **argv){
  uint8_t *before=malloc(684*1216/2);assert(before);memcpy(before,fb,684*1216/2);
  s_pressed_control=i;EpdRect area=paint_list_cover_feedback(&ctx,i);
  assert(area.x==r.x&&area.y==r.y-8&&area.width==r.width+(FEEDBACK_SHADOW?2:0)&&area.height==r.height+8+(FEEDBACK_SHADOW?6:0));
- assert(area.y>=184+i*197&&area.y+area.height<184+(i+1)*197);
+ assert(area.y>=184+i*96&&area.y+area.height<184+(i+1)*96);
  assert(((area.y&3)==(r.y&3)));
  for(int y=0;y<1216;++y)for(int x=0;x<684;++x)
   if(x<area.x||x>=area.x+area.width||y<area.y||y>=area.y+area.height)
@@ -140,9 +153,9 @@ int main(int argc,char **argv){
  assert(pixel(fb,r.x+20,r.y+r.height-1)==240);
  s_pressed_control=-1;paint_list_cover_feedback(&ctx,i);assert(!memcmp(before,fb,684*1216/2));
  free(before);free(s_covers[i].gray);}
- for(int row=0;row<3;++row)for(int yy=0;yy<2;++yy)assert(pixel(fb,300,184+row*197+196+yy)<128);
- assert(pixel(fb,36,260)<128&&pixel(fb,37,260)<128&&pixel(fb,38,260)>=240);
- ui_text_fixed_vc(fb,342,1060,17,"15本书 · 01/04",EPD_DRAW_ALIGN_CENTER,false);
+ for(int row=0;row<8;++row)assert(pixel(fb,300,184+row*96+95)==0xd0);
+ assert(pixel(fb,36,260)==240&&pixel(fb,37,260)==240);
+ ui_text_fixed_vc(fb,342,1060,17,"第 1 页 · 共 3 页",EPD_DRAW_ALIGN_CENTER,false);
  ui_text_fixed_vc(fb,226,1060,22,"<",EPD_DRAW_ALIGN_CENTER,false);ui_text_fixed_vc(fb,458,1060,22,">",EPD_DRAW_ALIGN_CENTER,false);
  epd_draw_hline(0,1096,684,0x90,fb);epd_fill_rect((EpdRect){224,1097,54,4},0,fb);
  const char *nav[]={"首页","书架","文件管理","设置"};for(int i=0;i<4;++i){ui_draw_round_rect(fb,(EpdRect){65+i*171,1132,35,34},3,0);ui_text_fixed_vc(fb,85+i*171,1190,17,nav[i],EPD_DRAW_ALIGN_CENTER,false);}
@@ -159,25 +172,34 @@ int main(int argc,char **argv){
  s_cover_pending_mask=0;draw_shelf_cover(fb,row_rect(0),0,items[0].name,items[0].favorite);
  assert(memcmp(placeholder,fb,684*1216/2));free(s_covers[0].gray);s_covers[0].gray=NULL;
  free(placeholder);
- // 长标题强制双行且仅触碰右侧文字区，避免作者和进度被覆盖。
- // A long title stays in the two-line text region without touching author/progress.
- memset(fb,255,684*1216/2);draw_list_title(fb,"名字很长名字很长名字很长名字很长名字很长名字很长名字很长",258);
- for(int y=0;y<1216;++y)for(int x=0;x<684;++x)if(pixel(fb,x,y)!=240)assert(x>=244&&x<622&&y>=237&&y<313);
- free(fb);ttf_font_unload();puts("PASS: native list painting and bounded bounce/settle with no extra frame; uniform boxes, aspect-fill crop, 4 rows, favorites, progress, two-line UTF-8 bounds");
+ // 长标题强制单行且仅触碰右侧文字区，避免作者和进度被覆盖。
+ // A long title stays in the single-line text region without touching author/progress.
+ memset(fb,255,684*1216/2);draw_list_title(fb,"名字很长名字很长名字很长名字很长名字很长名字很长名字很长",258,381);
+ for(int y=0;y<1216;++y)for(int x=0;x<684;++x)if(pixel(fb,x,y)!=240)assert(x>=120&&x<501&&y>=260&&y<302);
+ const char *thirteen="一二三四五六七八九十一二三";
+ draw_list_title(fb,thirteen,258,381);assert(!strcmp(rendered_title,thirteen));
+ draw_list_title(fb,"一二三四五六七八九十一二三四五",258,381);assert(!strcmp(rendered_title,"一二三四五六七八九十一二三..."));
+ draw_list_title(fb,"abcdefghijklmno",258,381);assert(!strcmp(rendered_title,"abcdefghijklm..."));
+ draw_list_title(fb,"一二三四五六七八九十一二三四五",258,250);assert(ui_text_fixed_width_px(ttf_em_height_px(26),rendered_title)<=250&&strstr(rendered_title,"..."));
+ memset(fb,255,684*1216/2);shelf_entry_t dense={.has_progress=true,.pct=100,.chapter=65534,.chapters=65535};snprintf(dense.name,sizeof(dense.name),"%s四五",thirteen);draw_list_row(fb,0,&dense);
+ int chapter_width=ui_text_fixed_width_px(22,"65535 / 65535 章");
+ int track_x=644-(ui_text_fixed_width_px(24,"100%")+16+chapter_width+24);
+ assert(120+ui_text_fixed_width_px(ttf_em_height_px(26),rendered_title)<=track_x-8);
+ free(fb);ttf_font_unload();puts("PASS: native list painting and bounded bounce/settle with no extra frame; uniform boxes, aspect-fill crop, 8 rows, favorites, inline chapters and short progress, single-line UTF-8 bounds");
 }
 '''
  (p/'test.c').write_text(unit)
- flags=['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-variable','-Wno-unused-function','-Wno-missing-field-initializers','-fsanitize=address,undefined','-ffunction-sections','-fdata-sections','-I'+str(p),'-I'+str(ROOT/'main/ui'),'-I'+str(ROOT/'main/font'),'-I'+str(ROOT/'main')]
+ flags=['cc','-Dshelf_display_style=app_settings_shelf_style','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-variable','-Wno-unused-function','-Wno-missing-field-initializers','-fsanitize=address,undefined','-ffunction-sections','-fdata-sections','-I'+str(p),'-I'+str(ROOT/'main/ui'),'-I'+str(ROOT/'main/font'),'-I'+str(ROOT/'main/book'),'-I'+str(ROOT/'main')]
  subprocess.run(flags+['-c',str(ROOT/'main/font/ttf_font.c'),'-o',str(p/'ttf.o')],check=True)
  subprocess.run(flags+font_hanzi_host_sources(ROOT,p)+[str(p/'test.c'),str(p/'assets.c'),str(p/'ttf.o'),str(ROOT/'main/ui/ui_gesture.c'),str(ROOT/'main/ui/ui_image_dither.c'),'-Wl,-dead_strip','-lm','-o',str(p/'test')],check=True)
  if args.covers or args.output:
   from PIL import Image
- for i in range(4):
+ for i in range(8):
   if args.covers:
    img=Image.open(args.covers/f'{i+1:02}.png').convert('L');img.thumbnail((176,240),Image.Resampling.LANCZOS)
   import struct
   if args.covers: dims=img.size; pixels=img.tobytes()
-  else: dims=((176,80,150,176)[i],(120,240,150,240)[i]); pixels=bytes([80+i*45])*(dims[0]*dims[1])
+  else: dims=((176,80,150,176,140,160,120,176)[i],(120,240,150,240,210,220,170,240)[i]); pixels=bytes([(80+i*45)%256])*(dims[0]*dims[1])
   (p/f'{i}.raw').write_bytes(struct.pack('<II',*dims)+pixels)
  subprocess.run([str(p/'test'),str(args.font.resolve()),str(p),str(p/'list.raw')],check=True)
  if args.output:

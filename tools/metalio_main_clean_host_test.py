@@ -160,9 +160,13 @@ with tempfile.TemporaryDirectory(prefix='s31-main-clean-') as folder:
 #include <stdio.h>
 typedef struct {int ignored;}app_ctx_t;
 typedef enum{APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL,APP_REDRAW_DONE}app_redraw_t;
-typedef struct app_desc_s{int index;bool visible,persistent_navigation,binary_ui;bool(*main_page_visible)(app_ctx_t*);bool(*grayscale_ui)(app_ctx_t*);}app_desc_t;
+typedef struct app_desc_s{int index;bool visible,persistent_navigation,binary_ui,white_child_transition;bool(*navigation_visible)(app_ctx_t*);bool(*main_page_visible)(app_ctx_t*);bool(*grayscale_ui)(app_ctx_t*);}app_desc_t;
 static const app_desc_t *s_presented_root,*s_presented_main,*drawing;
 static unsigned quality,observed;
+enum{APP_MAIN_REFRESH_FAST=1};
+static int app_settings_main_refresh_mode(void){return 0;}
+static bool fast_background;
+static bool display_main_fast_background_set(bool v){bool old=fast_background;fast_background=v;return old;}
 static bool erase,home,binary,nav;
 static app_ctx_t ctx;
 static int app_index_of(const app_desc_t *app){return app->index;}

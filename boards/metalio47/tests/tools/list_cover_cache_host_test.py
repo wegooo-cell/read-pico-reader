@@ -32,6 +32,7 @@ unit = r'''
 #define MALLOC_CAP_SPIRAM 1
 #define MALLOC_CAP_8BIT 2
 typedef int esp_err_t;
+typedef struct {unsigned x,y,width,height;} book_crop_t;
 typedef struct {uint32_t magic,schema,template_version,width,height;uint64_t file_size;int64_t modified;uint64_t path_hash,text_hash;} cover_cache_header_t;
 static unsigned source_w=300,source_h=600,requests,decoded;
 static size_t available=8u*1024u*1024u;
@@ -47,7 +48,7 @@ static bool book_image_dimensions(const uint8_t *data,size_t bytes,bool png,unsi
 static bool book_image_grayscale(const uint8_t *data,size_t bytes,bool png,unsigned w,unsigned h,uint8_t *out){(void)png;assert(data&&bytes==1&&w&&h&&w<=176&&h<=240);++decoded;if(decode_fail)return false;memset(out,61,w*h);return true;}
 static bool book_auto_cover_render(const char *p,const char *t,const char *a,unsigned w,unsigned h,uint8_t *out){(void)p;(void)t;(void)a;assert(w==176&&h==240);memset(out,191,w*h);return true;}
 '''
-for name in ('cover_hash', 'cover_cache_key', 'ram_key', 'book_cover_load_list_gray_impl', 'book_cover_load_list_gray'):
+for name in ('cover_hash', 'cover_cache_key', 'ram_key', 'book_cover_crop', 'fast_cover_checksum', 'list_cache_path', 'list_cache_commit', 'book_cover_load_list_gray_sized_impl','book_cover_load_list_gray_impl', 'book_cover_load_list_gray'):
     unit += function(name, source) + '\n'
 unit += r'''
 int main(int argc,char **argv){
@@ -67,7 +68,7 @@ int main(int argc,char **argv){
  available=8u*1024u*1024u;error=ESP_ERR_NO_MEM;assert(book_cover_load_list_gray(path,"title","author",out,true,&pending,&w,&h));assert(stat(cache,&(struct stat){0})!=0);
  error=ESP_OK;decode_fail=true;assert(book_cover_load_list_gray(path,"title","author",out,true,&pending,&w,&h));assert(stat(cache,&(struct stat){0})!=0);
  decode_fail=false;assert(book_cover_load_list_gray(path,"title","author",out,true,&pending,&w,&h));assert(!remove(cache));metalio_cover_cache_clear();
- error=ESP_ERR_NOT_FOUND;assert(book_cover_load_list_gray(path,"title","author",out,true,&pending,&w,&h)&&w==176&&h==240);assert(book_cover_load_list_gray(path,"title","author",out,false,&pending,&w,&h));
+ error=ESP_ERR_NOT_FOUND;assert(book_cover_load_list_gray(path,"title","author",out,true,&pending,&w,&h)&&w==176&&h==240);assert(!book_cover_load_list_gray(path,"title","author",out,false,&pending,&w,&h)&&pending);
  for(unsigned i=176*240;i<sizeof(out);++i)assert(out[i]==0xab);
  metalio_cover_cache_clear();
  puts("PASS: uncropped wide/tall/square covers, exact cache dimensions, 30 warm reads, corrupt metadata, 1.5MiB reserve, OOM/decode failure retry and generated fallback bounds");
@@ -75,7 +76,7 @@ int main(int argc,char **argv){
 '''
 with tempfile.TemporaryDirectory(prefix='plc-') as folder:
     p = Path(folder)
-    unit = unit.replace('/sdcard/.metalio_s31', str(p/'card'))
+    unit = unit.replace('/sdcard/.kiikoread', str(p/'card')).replace('/sdcard/.metalio_s31', str(p/'legacy'))
     (p/'test.c').write_text(unit)
     subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
                     '-I'+str(ROOT/'main/book'),'-I'+str(ROOT/'tools/metalio_cache_host_stubs'),str(p/'test.c'),str(ROOT/'main/book/metalio_cover_cache.c'),'-pthread', '-o', str(p/'test')], check=True)

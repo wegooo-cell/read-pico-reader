@@ -1,6 +1,6 @@
 include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/board.cmake")
 if(KIIKO_BOARD_METALIO47)
-kiiko_board_sources(kiiko_selected_sources "${CMAKE_CURRENT_LIST_DIR}" "metalio_power_adapter.c")
+kiiko_board_sources(kiiko_selected_sources "${CMAKE_CURRENT_LIST_DIR}" "metalio_power_adapter.c" "metalio_soc_filter.c")
 idf_component_register(
     SRCS ${kiiko_selected_sources}
     INCLUDE_DIRS "include"

@@ -24,6 +24,10 @@ bool app_book_resume_context(char *p,size_t c,bool *f) { (void)p;(void)c;(void)f
 #include <string.h>
 
 const app_desc_t app_book = {.title="book"};
+bool test_reader_open;
+static bool reader_rails_held;
+bool display_main_fast_background_set(bool active){(void)active;return false;}
+void display_reader_keep_rails(bool active) {reader_rails_held=active;}
 const app_desc_t app_transfer = {.title="transfer"};
 static int power_open_draws, power_controls_draws, power_final_draws;
 static int power_trigger_step = -1, shutdowns, restarts;
@@ -58,7 +62,7 @@ static int quick_draws, quick_gl, quick_du, wifi_starts, wifi_stops, ble_resets,
 static app_redraw_t long_key(app_ctx_t* c, int k) { assert(k==UI_KEY_2); ++long_keys; c->request_menu=true; return APP_REDRAW_NONE; }
 static app_redraw_t response;
 static bool request_on_touch, request_on_tick, menu_on_tick, menu_on_touch, cancel_clobber;
-static bool home_on_touch, home_on_tick, home_on_key, start_second;
+static bool home_on_touch, home_on_tick, home_on_key, start_second, start_reader;
 static int home_enters, home_renders, last_menu_leaf, rendered_leaf;
 static const app_desc_t* menu_background;
 static app_desc_t first, second;
@@ -262,6 +266,7 @@ static app_redraw_t tick(app_ctx_t*c) {
 }
 static app_redraw_t consume_power(app_ctx_t*c) {(void)c;lock_due=false;return APP_REDRAW_DONE;}
 static void reset(void) {
+    test_reader_open=reader_rails_held=start_reader=false;
     wake_present_before=network_resumes=0;resume_test=fresh_key_sent=resume_drain_blocked=false;resume_delay_us=fresh_key_at_us=0;resume_queued_action=queued_action=resume_drains=0;
     edge_enabled=edge_blocked=power_reported=false;edge_returns=back_ripples=power_header_draws=0;power_change_step=-1;
     memset(frame,0,sizeof(frame));panel_marker=0;check_clean_action=false;clean_action_fulls=0;
@@ -289,7 +294,7 @@ static void reset(void) {
     second=(app_desc_t){.title="second",.render=render,.on_enter=enter};
 }
 static void add(int x,int y,int count,int error) {samples[sample_count++]=(sample_t){x,y,count,error};}
-static void run(void) {app_loop_config_t cfg={.fb=frame,.first_app=start_second?&second:&first};if(!setjmp(done))app_loop_run(&cfg);}
+static void run(void) {app_loop_config_t cfg={.fb=frame,.first_app=start_reader?&app_book:start_second?&second:&first};if(!setjmp(done))app_loop_run(&cfg);}
 static app_redraw_t consumed_return_tick(app_ctx_t*c) { if(step==0){c->leaf=7;c->request_app=&second;}else c->request_return=true;return APP_REDRAW_NONE; }
 static app_redraw_t return_tick(app_ctx_t*c) { c->request_return=true; return APP_REDRAW_NONE; }
 static app_redraw_t origin_tick(app_ctx_t*c) { c->leaf=7; if(step==0 && request_on_tick)c->request_app=&second; return APP_REDRAW_NONE; }
@@ -319,6 +324,12 @@ static bool child_view;
 static bool child_root(app_ctx_t *ctx){(void)ctx;return !child_view;}
 static app_redraw_t child_cycle(app_ctx_t *ctx){(void)ctx;child_view=!child_view;return APP_REDRAW_PAGE;}
 int main(void) {
+    for(int open=0;open<2;++open){
+        reset();start_reader=true;test_reader_open=open;
+        add(0,0,0,0);add(0,0,0,0);run();assert(reader_rails_held==!!open);
+    }
+    reset();test_reader_open=true;add(0,0,0,0);add(0,0,0,0);run();assert(!reader_rails_held);
+    puts("PASS: real Pico loop retains rails only for the current open reader, including idle/no-redraw iterations");
     for(int white=0;white<2;++white)for(int binary=0;binary<2;++binary){
         reset();child_view=false;first.enter_full=true;first.persistent_navigation=true;
         first.white_child_transition=white;first.binary_ui=binary;first.main_page_visible=child_root;first.on_tick=child_cycle;

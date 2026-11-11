@@ -25,6 +25,12 @@ static size_t s_len;
 static size_t* s_pages;
 static size_t s_count;
 static size_t s_capacity;
+// 阅读器可选的竖直留白策略；默认关闭，保持其他调用方的原始分页。
+// Optional reader spacing policy, disabled by default to preserve other callers' pagination.
+static bool s_vertical_balance;
+static int *s_page_y;
+static int64_t s_page_text_bottom;
+static bool s_page_has_text;
 static book_layout_draw_cursor_t *s_idle_draw;
 static char* s_line;
 static size_t s_line_capacity;
@@ -287,6 +293,7 @@ uint32_t book_layout_generation(void) { return s_generation; }
 void book_layout_free(void) {
     ++s_generation;
     free(s_pages);
+    free(s_page_y);s_page_y=NULL;s_page_text_bottom=0;s_page_has_text=false;
     free(s_line);
     free(s_images);
     free(s_page_img_start);
@@ -304,6 +311,11 @@ void book_layout_free(void) {
     s_blocks = NULL;
     s_block_count = 0;
     s_image_rect = (EpdRect){0, 0, 0, 0};
+}
+
+void book_layout_set_vertical_balance(bool enabled) { s_vertical_balance=enabled; }
+int book_layout_page_top_padding(size_t page) {
+    return s_page_y&&page<s_count?s_page_y[page]:0;
 }
 
 void book_layout_set_spacing(unsigned line_percent, unsigned paragraph_percent) {
@@ -457,7 +469,7 @@ bool book_layout_page_note_marker_rect(size_t page, int i, int* note, int* x, in
         if (seen++ != i) continue;
         if (note) *note = (int)s_note_markers[k].note;
         if (x) *x = s_note_markers[k].x;
-        if (y) *y = s_note_markers[k].y;
+        if (y) *y = s_note_markers[k].y+book_layout_page_top_padding(page);
         if (w) *w = s_note_markers[k].w;
         if (h) *h = s_note_markers[k].h;
         return true;
@@ -517,8 +529,49 @@ static int gap_for(int height, bool heading) {
     return (int)((unsigned)height * s_paragraph_percent / (heading ? 150 : 100));
 }
 
+// 最后一行只要求字形格及阅读线完整可见，不为行后的空行距占位。
+// The final row reserves its glyph cell and guide, without unused leading after it.
+static int line_fit_height(int px,int pitch) {
+    if(!s_vertical_balance||s_vertical||!s_line||!s_line[0]||strstr(s_line,"\xEF\xBF\xBC"))return pitch;
+    int height=px+4;
+    if(height>pitch)height=pitch;
+    if(s_reading_line) {
+        int guide=px+(pitch-px)/2+s_reading_line_offset+2;
+        if(guide>height)height=guide;
+    }
+    return height;
+}
+// 仅在页尾名义字格放不下时量实际字形；其余行沿原测宽路径，避免整章提前栅格化。
+// Measure actual ink only when the nominal tail cell overflows, avoiding eager glyph rasterization for the chapter.
+static int line_page_height(int px,int pitch,size_t off,int64_t top) {
+    int height=line_fit_height(px,pitch);
+    if(!s_vertical_balance||s_vertical||top+height<=s_rect.height||top>=s_rect.height||
+       !s_line||!s_line[0]||strstr(s_line,"\xEF\xBF\xBC"))return height;
+    slot_select_for(off);int baseline=ttf_ascender_px(px),above=0,below=0;
+    ttf_draw_set_runs(s_line_run_count?s_line_runs:NULL,s_line_run_count);
+    ttf_measure_line_px(px,s_line,&above,&below);
+    ttf_draw_set_runs(NULL,0);ttf_font_select(TTF_FONT_SLOT_SYSTEM);
+    if(above+below>0) {
+        int actual=baseline+below+2;
+        if(s_reading_line) {
+            int guide=px+(pitch-px)/2+s_reading_line_offset+2;
+            if(guide>actual)actual=guide;
+        }
+        if(actual>0&&actual<height)height=actual;
+    }
+    return height;
+}
+static void finish_balanced_page(void) {
+    if(!s_vertical_balance||s_vertical||!s_count||!s_page_y||!s_page_has_text||
+       (s_count==1&&s_lead_height)||s_image_count>s_page_img_start[s_count-1])return;
+    int64_t slack=(int64_t)s_rect.height-s_page_text_bottom;
+    if(slack>0)s_page_y[s_count-1]=(int)(slack/2);
+}
+
 static bool append_page(size_t off) {
     if (s_count == PAGE_MAX) return false;
+    const blk_t *following=block_at(off);
+    if(!following||following->image<0)finish_balanced_page();
     if (s_count == s_capacity) {
         size_t cap = s_capacity ? s_capacity * 2 : 16;
         size_t* pages = heap_caps_realloc(s_pages, cap * sizeof(*pages), PSRAM_CAPS);
@@ -529,9 +582,16 @@ static bool append_page(size_t off) {
         uint32_t* starts = heap_caps_realloc(s_page_img_start, (cap + 1) * sizeof(*starts), PSRAM_CAPS);
         if (!starts) return false;
         s_page_img_start = starts;
+        if(s_vertical_balance&&!s_vertical) {
+            int *padding=heap_caps_realloc(s_page_y,cap*sizeof(*padding),PSRAM_CAPS);
+            if(!padding)return false;
+            s_page_y=padding;
+        }
         s_capacity = cap;
     }
     s_pages[s_count] = off;
+    if(s_page_y)s_page_y[s_count]=0;
+    s_page_text_bottom=0;s_page_has_text=false;
     s_last_line_x_end = 0;
     s_last_line_used = 0;
     s_page_img_start[s_count] = (uint32_t)s_image_count;
@@ -1064,12 +1124,14 @@ bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks,
                        &line_width, &indent, &align, &margin_before, &margin_after)) goto fail;
         (void)line_width; (void)indent; (void)align;
         line_height = line_height_for(line_px);
-        if (line_height > rect.height) goto fail;
         int leading = used ? margin_before : 0;
-        if (used + leading + line_height > rect.height) {
+        int fit_height=line_page_height(line_px,line_height,off,used+leading);
+        if (fit_height > rect.height) goto fail;
+        if (used + leading + fit_height > rect.height) {
             if (!append_page(off)) goto fail;
             used = 0;
             leading = 0;
+            fit_height=line_fit_height(line_px,line_height);
         }
         // 记下这一行里的行内注号图标：x 用行内前缀宽度估算，y 落在该行内。
         // Record inline markers on this line: x from the measured prefix, y inside the line.
@@ -1107,8 +1169,9 @@ bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks,
             int marker_y = (int)used + leading;
             if (marker_y < 0) marker_y = 0;
             if (!record_note_marker(s_count ? s_count - 1 : 0, ni, marker_x, marker_y,
-                                    line_px, line_height)) goto fail;
+                                    line_px, fit_height)) goto fail;
         }
+        if(s_line[0]){s_page_has_text=true;s_page_text_bottom=used+leading+fit_height;}
         s_last_line_used = (int)used + leading;
         s_last_line_x_end = s_rect.x + indent + line_width;
         used += leading + line_height;
@@ -1351,6 +1414,7 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
     // text lays out alongside it.
     if (book_layout_page_image(page) >= 0 && book_layout_page_image_count(page) == 0) return;
     if (s_vertical) { draw_vertical_page(fb, page, rect); return; }
+    rect.y+=book_layout_page_top_padding(page);
     size_t off = s_pages[page];
     size_t end = page + 1 < s_count ? s_pages[page + 1] : s_len;
     int64_t used = page == 0 ? s_lead_height : 0;
@@ -1384,7 +1448,7 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
                        &line_width, &indent, &align, &margin_before, &margin_after)) { if(s_idle_draw)s_idle_draw->failed=true; return; }
         int line_height = line_height_for(line_px);
         int leading = used ? margin_before : 0;
-        if (used + leading + line_height > rect.height) return;
+        if (used + leading + line_page_height(line_px,line_height,off,used+leading) > rect.height) return;
         used += leading;
         if (s_line[0]) {
             int x = rect.x + indent;

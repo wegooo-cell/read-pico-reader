@@ -295,6 +295,35 @@ static bool epub_cache_load(const char* source, book_epub_t* book) {
     return true;
 }
 
+
+static bool epub_cache_skip_text(FILE *file) {
+    uint16_t n;char bytes[64];
+    if(fread(&n,sizeof(n),1,file)!=1||n>EPUB_TITLE_CAP)return false;
+    while(n){size_t k=n<sizeof(bytes)?n:sizeof(bytes);if(fread(bytes,1,k,file)!=k)return false;n-=(uint16_t)k;}
+    return true;
+}
+// 不打开ZIP或创建书源；只验证已有索引的有界记录与字符串。
+// Do not open ZIP or create a source; validate only bounded records/strings from an existing index.
+uint16_t book_epub_cached_chapter_count(const char *source,uint32_t size,int64_t modified) {
+    char path[112];book_index_cache_header_t key;
+    if(!book_index_cache_prepare_file(source,"epub",EPUB_CACHE_VERSION,size,modified,path,sizeof(path),&key))return 0;
+    FILE *cache=book_index_cache_open_read(path,&key);if(!cache)return 0;
+    epub_cache_payload_t p={0};
+    bool ok=fread(&p,1,sizeof(p),cache)==sizeof(p)&&p.count&&p.count<=EPUB_CHAPTER_MAX&&
+        p.authored_count<=EPUB_NAV_MAX&&p.body_scanned<=1;
+    uint32_t previous=0;
+    for(uint32_t i=0;ok&&i<p.count;++i){
+        chapter_t e;ok=fread(&e,sizeof(e),1,cache)==1&&e.zip_index>=0&&e.offset>=previous&&e.offset<=p.total;
+        if(ok){previous=e.offset;ok=epub_cache_skip_text(cache);}
+    }
+    for(uint32_t i=0;ok&&i<p.authored_count;++i){
+        nav_entry_t e;ok=fread(&e,sizeof(e),1,cache)==1&&e.chapter<p.count&&
+            epub_cache_skip_text(cache)&&epub_cache_skip_text(cache);
+    }
+    ok=ok&&fgetc(cache)==EOF&&!ferror(cache);fclose(cache);
+    return ok?(uint16_t)p.count:0;
+}
+
 static void epub_cache_save(const char* source, const book_epub_t* book) {
     char path[112], temp[120]; book_index_cache_header_t key;
     if (!book_index_cache_prepare(source, "epub", EPUB_CACHE_VERSION, path, sizeof(path), &key)) return;

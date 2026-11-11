@@ -17,6 +17,7 @@
 #define BYTES (W * H / 2)
 const EpdWaveform E0470_WAVEFORM = {0}, E0470_FOLLOW_WAVEFORM = {1},
     E0470_FULL_WAVEFORM = {2}, E0470_GRAY8_WAVEFORM = {3};
+const EpdWaveform PICO_SETTINGS_MOTION_WAVEFORM = {11};
 static const EpdWaveform main_gray = {4}, main_exit = {5}, main_water = {6}, main_bw = {7}, main_acrylic = {8}, main_acrylic_clean = {9};
 static const EpdWaveform reader_soft = {10};
 const EpdWaveform* display_reader_text_waveform(void) {return &reader_soft;}
@@ -33,6 +34,8 @@ const EpdWaveform* display_main_shelf_waveform(enum EpdDrawMode mode) {assert(mo
 const EpdWaveform* display_main_bw_waveform(void) {return &main_bw;}
 static unsigned quality_calls;
 static unsigned quality_strength;
+static unsigned fast_background_wave_calls;
+const EpdWaveform* display_main_fast_background_waveform_with_phases(const EpdWaveform* wave,enum EpdDrawMode mode,unsigned white){assert(white==6||white==8);++fast_background_wave_calls;(void)mode;return wave;}
 const EpdWaveform* display_main_clean_waveform_with_phases(const EpdWaveform* source,enum EpdDrawMode mode,unsigned phases){
     assert(source&&(mode==MODE_DU||mode==MODE_GL16));assert(phases==6||phases==8);
     ++quality_calls;quality_strength=phases;return source;
@@ -145,7 +148,7 @@ static enum EpdDrawError draw(EpdiyHighlevelState* state, enum EpdDrawMode mode,
     last_mode = mode; last_wave=state->waveform;
     if (mode == MODE_DU) {
         ++bw_calls;
-        if (state->waveform == &E0470_FOLLOW_WAVEFORM) assert(scan == READ_PICO_EPD_SCAN_FAST);
+        if (state->waveform == &E0470_FOLLOW_WAVEFORM || state->waveform == &PICO_SETTINGS_MOTION_WAVEFORM) assert(scan == READ_PICO_EPD_SCAN_FAST);
         else {
             assert((state->waveform == &main_bw || state->waveform == &main_exit || state->waveform == &E0470_WAVEFORM) && scan == READ_PICO_EPD_SCAN_FULL);
             ++complete_bw_calls; exit_calls += state->waveform == &main_exit;
@@ -728,6 +731,25 @@ int main(void) {
         else assert(gray_calls>=1);
         assert(!clears);
     }
+    // 列表差分短DU保留FAST/64行预填；80帧不累计整页清理，静止后不重复扫描。
+    // Differential list DU retains FAST/64-line prefill;80 frames never promote and identical targets stop scanning.
+    for(int mode=APP_MAIN_REFRESH_NORMAL;mode<=APP_MAIN_REFRESH_WATER;++mode){
+        reset();main_mode=mode;
+        for(int step=0;step<80;++step){
+            for(int y=0;y<H;++y)memset(front+(size_t)y*(W/2)+160/2,255,(1088-160)/2);
+            front[200*(W/2)+(200+step*2)/2]=0;
+            memcpy(final,front,BYTES);
+            assert(update_display_area_diff_with(&hl,&PICO_SETTINGS_MOTION_WAVEFORM,MODE_DU,
+                (EpdRect){0,160,H,1088-160})==EPD_DRAW_SUCCESS);
+            assert(last_wave==&PICO_SETTINGS_MOTION_WAVEFORM&&last_mode==MODE_DU&&scan==READ_PICO_EPD_SCAN_FAST&&prefill==64);
+            assert(calls==step+1&&!full_calls&&bw_calls==step+1&&!complete_bw_calls&&!gray_calls&&!gc_calls&&!clears&&!nav_draws);
+            assert_final();
+        }
+    }
+    assert(update_display_area_diff_with(&hl,&PICO_SETTINGS_MOTION_WAVEFORM,MODE_DU,
+        (EpdRect){0,160,H,1088-160})==EPD_DRAW_SUCCESS);
+    assert(calls==80&&!full_calls&&!clears&&!nav_draws);assert_final();
+    puts("PASS: Pico settings-motion changed-only DU retains FAST/64 prefill across240 frames, unchanged targets skip output, no forced pixel/background maintenance and no page-count promotion");
     puts("PASS: loading-time control feedback preserves pending main transitions in all three modes");
     puts("PASS: protected Cat/Kehai short motion retains FOLLOW/DU/FAST in normal, fast and ripple; unchanged targets skip scans and failures rebuild the exact frame");
     assert(!ota_display_depth);
@@ -747,6 +769,12 @@ int main(void) {
         assert(display_main_quality_set(0)==scope);
     }
     puts("main navigation: 200 complete BW transitions; calibrated gray bands, empty shelf slots, identical-target skips, allocation failure and three output-failure recoveries; moving markers, nibble/32-column boundaries and default outputs passed");
+    reset();main_mode=APP_MAIN_REFRESH_FAST;target(14);display_main_quality_set(6);
+    assert(!display_main_fast_background_set(true));unsigned fast_before=fast_background_wave_calls;
+    display_main_transition_arm(&owner_a,false,true);
+    assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS);assert_final();
+    assert(fast_background_wave_calls>fast_before&&full_calls>=1&&!gc_calls&&!clears&&last_area.height<=UI_NAV_MARKER_SCAN_END);
+    display_main_fast_background_set(false);
     return 0;
 }
 

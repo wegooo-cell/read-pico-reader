@@ -47,6 +47,9 @@ extern const EpdWaveform E0470_FULL_WAVEFORM;
 #if KIIKO_BOARD_METALIO47
 /// 本地S31实验的原始14相DU；未启用时返回NULL，不修改参考表。/ Raw local S31 DU14; NULL when disabled, without modifying reference tables.
 const EpdWaveform* e0470_du14_waveform(void);
+/// 仅S31设置列表滑动的本地14相差分；同色保持，关闭实验返回NULL，不影响阅读/整理表。
+/// S31 settings-motion-only local14-phase differences; hold equal pairs, NULL when disabled, independent of reader/settle profiles.
+const EpdWaveform* e0470_settings_motion_waveform(void);
 
 /// 旧 API 兼容名；S31 本地版沿用参考表，不启用 Pico 的 8 灰阶表。
 /// Legacy compatibility name: S31 uses the reference tables without Pico 8-gray calibration.

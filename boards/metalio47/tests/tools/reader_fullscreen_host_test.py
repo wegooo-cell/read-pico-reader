@@ -17,6 +17,7 @@ unit = r'''
 #include <stdio.h>
 #include <stdlib.h>
 #include "book/book_file_path.h"
+#include "reader_controls.h"
 typedef struct {int x,y,width,height;} EpdRect;
 typedef struct {int64_t now_ms;int leaf;bool consumed,user_activity;} app_ctx_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL} app_redraw_t;
@@ -51,7 +52,7 @@ static int s_water_turn_dir;
 static unsigned s_stats_pending_turns,s_session_turns,s_turns,s_unsaved;
 static int64_t s_last_turn_ms,s_stats_activity_ms;
 static bool s_save_failed;
-static int s_turn_direction;
+static int s_turn_direction __attribute__((unused));
 static char s_message[128];
 static unsigned layout_span=100,reflows,paints,saves,failed_reflows;
 static uint8_t full_pages;
@@ -61,6 +62,7 @@ static void lock_draw(void){assert(!draw_locked);draw_locked=true;}
 static void unlock_draw(void){assert(draw_locked);draw_locked=false;}
 static void invalidate_prep(void){}
 static bool immersive,persisted_immersive,hide_images,vertical,power_turn;
+#define UI_LOCK_WIDTH 684
 static unsigned style_saves;
 static bool app_settings_reader_immersive(void){return immersive;}
 static void app_settings_set_reader_immersive(bool v){immersive=persisted_immersive=v;++style_saves;}
@@ -72,7 +74,9 @@ static void app_settings_set_book_vertical(bool v){vertical=v;}
 static void book_layout_set_vertical(bool v){(void)v;}
 static bool app_settings_reader_power_turn(void){return power_turn;}
 static void app_settings_set_reader_power_turn(bool v){power_turn=v;}
-static EpdRect body_rect(void){return(EpdRect){0,0,684,app_settings_reader_immersive()?180:100};}
+static EpdRect body_rect(void){
+ return(EpdRect){0,0,684,app_settings_reader_immersive()?180:100};
+}
 static char s_chapter_heading_title[8],s_chapter_heading_label[8],s_reader_notice[128];
 static size_t s_chapter_lead_skip,s_image_count;static unsigned s_chapter_lead_row_height;
 static bool s_reader_footer_pending,s_reader_image_refresh_pending;
@@ -117,6 +121,7 @@ static void app_settings_set_book_indent_adjust(int8_t px){adjustment=px;}
 static void book_layout_set_first_line_indent(unsigned em){assert(draw_locked);layout_indent=em;}
 static void book_layout_set_first_line_indent_adjust(int px){assert(draw_locked);layout_adjustment=px;}
 """
+unit+='static bool s_rc_auto_turning,s_rc_auto_waiting;\nstatic reader_auto_clock_t s_rc_auto;\n'+function('rc_pause_auto',ROOT/'main/apps/book_reader_controls_runtime.inc')+'\n'
 unit += function('apply_reader_indent', BOOK) + '\n'
 for name in ('reader_zoom_reset', 'app_book_request_open', 'app_book_request_open_from_home', 'app_book_request_resume',
              'toggle_reader_fullscreen', 'apply_reader_option', 'reader_turn_chrome', 'turn_page'):
@@ -130,9 +135,18 @@ static bool s_scan_pending;
 static int s_pressed_control;
 static void pause_reader_prep(void){}
 '''
+
+controls=(ROOT/'main/reader_controls.h').read_text()
+
+unit+="const reader_controls_config_t*app_settings_reader_controls(void){static reader_controls_config_t c;static bool loaded;if(!loaded){c=reader_controls_defaults(false);loaded=true;}return &c;}\n"
+runtime=ROOT/'main/apps/book_reader_controls_runtime.inc'
+execute=function('rc_execute',runtime);begin=execute.index('    case RC_TOOLS:');end=execute.index('    case RC_TOOLS_TOGGLE:',begin)
+unit+='static void rc_invalidate(void){}\nstatic app_redraw_t rc_execute(app_ctx_t*ctx,unsigned action){switch(action){\n'+execute[begin:end]+'default:return APP_REDRAW_NONE;}}\n'
+unit+=function('rc_bottom_swipe',runtime)+'\n'
 unit += function('reader_tools_swipe', BOOK) + '\n'
 unit += r'''
 static void reset(bool full,bool tools,size_t page,size_t chapter){
+ s_text_len=900;
  s_reader_image_frame=s_reader_image_exit_pending=false;
  immersive=persisted_immersive=false;style_saves=0;s_text="text";s_view=READING;s_reader_fullscreen=full;layout_span=100;s_page=page;s_chapter=chapter;
  s_reader_panel=tools?READER_PANEL_TOOLS:READER_PANEL_NONE;s_reader_slider=2;
@@ -142,6 +156,7 @@ static void reset(bool full,bool tools,size_t page,size_t chapter){
 }
 int main(void){
  app_ctx_t ctx={.now_ms=1000};
+ reader_auto_start(&s_rc_auto,1000,1);assert(toggle_reader_fullscreen(&ctx)==APP_REDRAW_FULL&&s_rc_auto.running&&s_rc_auto_waiting);
  reset(true,false,2,0);size_t anchor=book_layout_page_start_offset(s_page);
  assert(apply_reader_indent(&ctx,2,-7)==APP_REDRAW_PAGE&&adjustment==-7&&layout_adjustment==-7&&indent==2);
  assert(book_layout_page_start_offset(s_page)==anchor&&saves==1);
@@ -240,6 +255,6 @@ int main(void){
 with tempfile.TemporaryDirectory(dir=ROOT / 'build') as folder:
     c, exe = Path(folder) / 'test.c', Path(folder) / 'test'
     c.write_text(unit)
-    subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined','-I'+str(ROOT/'main'),
+    subprocess.run(['cc','-DKIIKO_BOARD_METALIO47=1', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function', '-fsanitize=address,undefined','-I'+str(ROOT/'main'),
                     str(c), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

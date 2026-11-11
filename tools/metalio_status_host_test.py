@@ -12,6 +12,7 @@ unit=r'''
 #include <time.h>
 #define UI_LOCK_WIDTH 684
 #define UI_GRAY_WHITE 0xf0
+#define UI_NAV_BACKGROUND_GRAY 0xe0
 #define UI_GRAY_BLACK 0
 #define UI_STATUS_TIME_PX 28
 #define UI_STATUS_PERCENT_PX 28
@@ -33,6 +34,7 @@ static const uint8_t *s_status_framebuffer;
 static int s_power_signature=-1000;
 static unsigned header_clears,bolts,bolt_wells;
 static uint8_t fb[684*1216/2],preview[sizeof(fb)];
+static uint8_t ui_read_pixel(const uint8_t*p,int x,int y){assert(x==0&&y==0);return p[0]>>4;}
 static int epd_width(void){return 1216;}static int epd_height(void){return 684;}
 static const pmu_snapshot_t *read_pico_pmu_get(void){return &state;}
 static int pmu_battery_percent(const pmu_snapshot_t *p){assert(p==&state);return soc;}
@@ -49,7 +51,7 @@ static void ui_fill_round_rect(uint8_t *p,EpdRect r,int radius,uint8_t gray){
  if(r.x==614&&r.width==26&&r.height==20){assert(gray==0);++bolt_wells;}
  ui_draw_round_rect(p,r,radius,gray);
 }
-static void epd_fill_rect(EpdRect r,uint8_t gray,uint8_t *p){assert(r.x==0&&r.y==12&&r.width==684&&r.height==56&&gray==0xf0);memset(p+12*342,0xff,56*342);++header_clears;}
+static void epd_fill_rect(EpdRect r,uint8_t gray,uint8_t *p){assert(r.x==0&&r.y==12&&r.width==684&&r.height==56&&(gray==0xf0||gray==UI_NAV_BACKGROUND_GRAY));memset(p+12*342,gray|(gray>>4),56*342);++header_clears;}
 void ui_nav_status(uint8_t *fb);
 '''
 nav=(root/'main/ui/ui_nav.c').read_text()
@@ -77,6 +79,8 @@ int main(void){
  ui_clear_page(fb);soc=10;assert(!ui_nav_refresh_power(fb)&&!ui_status_visible(fb)); // immersive/image frame
  ui_nav_status(fb);assert(ui_status_visible(fb));soc=11;assert(ui_nav_refresh_power(fb));
  soc=-1;charging=false;assert(ui_nav_refresh_power(fb)&&!ui_nav_refresh_power(fb));
+ fb[0]=0xee;soc=9;assert(ui_nav_refresh_power(fb)&&fb[12*342]==0xee);
+ fb[0]=0xff;soc=8;assert(ui_nav_refresh_power(fb)&&fb[12*342]==0xff);
  puts("PASS: actual charge insertion/removal/SOC-change detection, zero repeated redraw, 684x56 header-only crop, low-SOC black well/white bolt outline, immersive/fullscreen suppression, offscreen preview isolation");
 }
 '''

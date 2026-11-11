@@ -1,4 +1,7 @@
 /*
+ * 用户2026-11-11追加：补齐加载提示、贴顶小收藏、封面进度开关、调色板同页入口及进度/升降排序；保留已完成首页与阅读功能。
+ * 阅读修订取代旧自动暂停约束：0–10秒±1秒，切换全屏/操作不关闭开关，安全菜单暂缓计时；离书/锁屏/书末保留安全停止。两板原按键页、状态栏避让、控件对齐及黑框提示一并修复。
+ * User2026-11-11: complete the remaining shelf previews and retain existing Home/reader work. Auto turns use0–10s steps, keep enabled across fullscreen/manual input, defer in menus and stop at lifecycle/end boundaries. Restore native board-specific key pages, aligned controls, protected touch headers and black notice outlines.
  * SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -46,6 +49,8 @@ static bool reader_full_pages_valid(uint8_t pages) {
 
 #define TAG "settings"
 #define NVS_NS KIIKO_BOARD_SETTINGS_NAMESPACE
+#include "settings_reader_controls.inc"
+#include "settings_shelf_followup.inc"
 #define NVS_KEY_SLEEP "sleep"
 #define NVS_KEY_SHUTDOWN_MODE "shutdown"
 #define NVS_KEY_WAKE_PRESSES "wake_press"
@@ -81,6 +86,7 @@ static bool reader_full_pages_valid(uint8_t pages) {
 #define NVS_KEY_POWER_TURN "rd_power"
 #define NVS_KEY_IMMERSIVE "rd_immersive"
 #define NVS_KEY_DEFAULT_FULLSCREEN "rd_full_start"
+#define NVS_KEY_EQUAL_MARGINS "rd_equal"
 #define NVS_KEY_HIDE_IMAGES "rd_no_image"
 #define NVS_KEY_HOLD_REFRESH "rd_hold_full"
 #define NVS_KEY_HOLD_ACTION "rd_key_hold"
@@ -150,6 +156,7 @@ static uint8_t s_book_line = 130, s_book_para = 50, s_book_margin = 24;
 static bool s_reader_power_turn;
 static bool s_reader_immersive;
 static bool s_reader_default_fullscreen;
+static bool s_reader_equal_margins;
 static bool s_reader_hide_images;
 static bool s_reader_hold_refresh;
 static const char *s_reader_key_names[] = {"rd_key_l", "rd_key_m", "rd_key_r"};
@@ -230,6 +237,7 @@ static void load_lock_sleep_policy(nvs_handle_t h) {
 }
 #endif
 void app_settings_init(void) {
+    s_reader_controls_loaded=false;s_shelf_badges=true;
     // 缺省与读取失败采用新默认，随后仅由有效的已保存选择覆盖。
     // Use current defaults on missing/failed reads, then apply valid saved preferences.
     s_home_full_refresh = true;
@@ -361,6 +369,8 @@ void app_settings_init(void) {
     if (nvs_get_u8(h, NVS_KEY_IMMERSIVE, &immersive) == ESP_OK) s_reader_immersive = immersive == 1;
     uint8_t default_fullscreen=0;
     s_reader_default_fullscreen = nvs_get_u8(h,NVS_KEY_DEFAULT_FULLSCREEN,&default_fullscreen)==ESP_OK && default_fullscreen==1;
+    uint8_t equal_margins=0;
+    s_reader_equal_margins=nvs_get_u8(h,NVS_KEY_EQUAL_MARGINS,&equal_margins)==ESP_OK&&equal_margins==1;
     uint8_t hold_refresh = 0;
     if (nvs_get_u8(h, NVS_KEY_HOLD_REFRESH, &hold_refresh) == ESP_OK) s_reader_hold_refresh = hold_refresh == 1;
     for (unsigned i = 0; i < 3; ++i) {
@@ -388,8 +398,9 @@ void app_settings_init(void) {
     s_ai_short=nvs_get_u8(h,"ai_short",&ai_short)==ESP_OK&&ai_short<APP_AI_ACTION_COUNT?(app_ai_action_t)ai_short:APP_AI_REFRESH;
 #endif
     s_shelf_order = 0;
-    if (nvs_get_u8(h, NVS_KEY_SHELF_RECENT, &recent_sort) == ESP_OK) s_shelf_order = recent_sort < 6 ? recent_sort : 0;
+    if (nvs_get_u8(h, NVS_KEY_SHELF_RECENT, &recent_sort) == ESP_OK) s_shelf_order = recent_sort < 8 ? recent_sort : 0;
     s_shelf_recent_sort = s_shelf_order == 1 || s_shelf_order == 3;
+    uint8_t badges=1;if(nvs_get_u8(h,"shelf_badges",&badges)==ESP_OK&&badges<=1)s_shelf_badges=badges;
     if (nvs_get_u8(h, NVS_KEY_BOOK_FONTS, &book_fonts) == ESP_OK) s_book_fonts = book_fonts == 1;
     if (nvs_get_u8(h, NVS_KEY_BOOK_VERTICAL, &book_vertical) == ESP_OK) s_book_vertical = book_vertical == 1;
     s_book_tracking = -APP_BOOK_TRACK_MIN;
@@ -806,6 +817,18 @@ bool app_settings_set_reader_default_fullscreen(bool on) {
     return true;
 }
 bool app_settings_reader_immersive(void) { return s_reader_immersive; }
+bool app_settings_reader_equal_margins(void) { return s_reader_equal_margins; }
+bool app_settings_set_reader_equal_margins(bool on) {
+    if(on==s_reader_equal_margins)return true;
+    nvs_handle_t h;
+    if(nvs_open(NVS_NS,NVS_READWRITE,&h)!=ESP_OK)return false;
+    esp_err_t err=nvs_set_u8(h,NVS_KEY_EQUAL_MARGINS,on?1:0);
+    if(err==ESP_OK)err=nvs_commit(h);
+    nvs_close(h);
+    if(err!=ESP_OK)return false;
+    s_reader_equal_margins=on;
+    return true;
+}
 void app_settings_set_reader_immersive(bool on) {
     if (s_reader_immersive == on) return;
     s_reader_immersive = on;
@@ -920,12 +943,13 @@ void app_settings_set_fast_charge(bool on) {
 }
 bool app_settings_shelf_recent_sort(void) { return s_shelf_recent_sort; }
 uint8_t app_settings_shelf_order(void) { return s_shelf_order; }
-void app_settings_set_shelf_order(uint8_t order) {
-    if (order >= 6 || order == s_shelf_order) return;
-    s_shelf_order = order;
-    s_shelf_recent_sort = order == 1 || order == 3;
-    nvs_put_u8(NVS_KEY_SHELF_RECENT, order);
+bool app_settings_try_shelf_order(uint8_t order){
+    if(order>=8)return false;
+    if(order==s_shelf_order)return true;
+    if(!shelf_preference_put(NVS_KEY_SHELF_RECENT,order))return false;
+    s_shelf_order=order;s_shelf_recent_sort=order==1||order==3;return true;
 }
+void app_settings_set_shelf_order(uint8_t order){(void)app_settings_try_shelf_order(order);}
 void app_settings_set_shelf_recent_sort(bool on) {
     app_settings_set_shelf_order(on ? 1 : 0);
 }
@@ -1014,8 +1038,7 @@ void app_settings_set_shelf_style(uint8_t style) {
     if (style < 1 || style > 6) return;
     if (style == 3 || style == 4) style = 2;
     if (s_shelf_style == style) return;
-    s_shelf_style = style;
-    nvs_put_u8(NVS_KEY_SHELF_STYLE, style);
+    if(shelf_preference_put(NVS_KEY_SHELF_STYLE,style))s_shelf_style=style;
 }
 const char* app_settings_books_dir(void) { return s_books_dir; }
 const char* app_settings_fonts_dir(void) { return s_fonts_dir; }
@@ -1144,7 +1167,7 @@ static bool backup_home_valid(const settings_backup_home_t *v) {
 static unsigned backup_version(const settings_backup_v1_t *backup) {
     if (memcmp(backup->magic, "PICOSET", 7)) return 0;
     unsigned char c = backup->magic[7];
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : 0;
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1224,7 +1247,7 @@ static bool backup_card_ready(void) {
 esp_err_t app_settings_backup_save(void) {
     if (!backup_card_ready()) return ESP_ERR_INVALID_STATE;
     settings_backup_v1_t backup = {0};
-    memcpy(backup.magic, "PICOSETM", sizeof(backup.magic));
+    memcpy(backup.magic, "PICOSETP", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -1239,7 +1262,7 @@ esp_err_t app_settings_backup_save(void) {
     f[BK_TURN] = s_reader_turn_effect;
     f[BK_POWER_TURN] = s_reader_power_turn;
     // v22：独立入口与沉浸位，保留固定布局与旧版读取。/ Independent entry/immersion bits; retain layout and legacy decoding.
-    f[BK_IMMERSIVE] = (uint8_t)s_reader_immersive + 2*(uint8_t)s_reader_default_fullscreen;
+    f[BK_IMMERSIVE] = (uint8_t)s_reader_immersive + 2*(uint8_t)s_reader_default_fullscreen + 4*(uint8_t)s_reader_equal_margins;
     f[BK_TRACKING] = s_book_tracking;
     // v21把范围与样式封在同一校验字段，旧版本0..2始终跟随文字。
     // V21 seals span and style together; legacy0..2 always follow text.
@@ -1318,6 +1341,10 @@ esp_err_t app_settings_backup_save(void) {
     for(unsigned i=0;i<4;++i)bookmark.checksum[i]=bookmark_hash>>(8*i);
     if(ok)ok=fwrite(&bookmark,1,sizeof(bookmark),file)==sizeof(bookmark);
     backup_erase_secret(&wifi, sizeof(wifi));
+    reader_controls_config_t controls=*app_settings_reader_controls();
+    if(ok)ok=fwrite(&controls,1,sizeof(controls),file)==sizeof(controls);
+    settings_backup_shelf_t shelf=backup_shelf_make(s_shelf_order,s_shelf_badges);
+    if(ok)ok=fwrite(&shelf,1,sizeof(shelf),file)==sizeof(shelf);
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
     if (ok) ok = fsync(fileno(file)) == 0;
@@ -1360,7 +1387,7 @@ static bool backup_valid(const settings_backup_v1_t *backup) {
         f[BK_SYS_CONTRAST] < 100 || f[BK_SYS_CONTRAST] > 140 || f[BK_SYS_CONTRAST] % 10 ||
         f[BK_LOCK] > 3 || f[BK_BOOK_PX] < BOOK_READER_PX_MIN || f[BK_BOOK_PX] > BOOK_READER_PX_MAX ||
         f[BK_SHAKE] > 1 || !reader_full_pages_valid(f[BK_FULL_PAGES]) ||
-        f[BK_TURN] > READER_TURN_EFFECT_MAX || f[BK_POWER_TURN] > 1 || f[BK_IMMERSIVE] > (backup_version(backup)>=22 ? 3 : 1) ||
+        f[BK_TURN] > READER_TURN_EFFECT_MAX || f[BK_POWER_TURN] > 1 || f[BK_IMMERSIVE] > (backup_version(backup)>=23 ? 7 : backup_version(backup)>=22 ? 3 : 1) ||
         f[BK_TRACKING] > (backup_version(backup)>=20 ? APP_BOOK_TRACK_COUNT-1 : backup_version(backup)==19 ? 20 : 4) || f[BK_READING_LINE] > (backup_version(backup) >= 21 ? 5 : 2) ||
         f[BK_LINE_SPACING] < 110 || f[BK_LINE_SPACING] > 150 ||
         f[BK_MARGIN] > 60 ||
@@ -1472,6 +1499,11 @@ esp_err_t app_settings_backup_restore(void) {
     if (ok && version >= 16) ok = fread(&home, 1, sizeof(home), file) == sizeof(home) && backup_home_valid(&home);
     if(ok && version>=18)ok=fread(&bookmark,1,sizeof(bookmark),file)==sizeof(bookmark)&&
         backup_background_valid(&bookmark)&&backup_path_valid(bookmark.path,sizeof(bookmark.path));
+    reader_controls_config_t controls=reader_controls_defaults(KIIKO_BOARD_METALIO47);
+    if(ok&&version>=24)ok=fread(&controls,1,sizeof(controls),file)==sizeof(controls)&&reader_controls_valid(&controls);
+    reader_controls_normalize(&controls);
+    settings_backup_shelf_t shelf=backup_shelf_make((profile.home_full_refresh&4)?1:0,true);
+    if(ok&&version>=25)ok=fread(&shelf,1,sizeof(shelf),file)==sizeof(shelf)&&backup_shelf_valid(&shelf);
     bool has_history = ok && version >= 6;
     if (has_history) {
         history_position = ftell(file);
@@ -1536,7 +1568,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOME_COMPONENT, home.component);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOME_GOAL, home.minutes);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HIDE_IMAGES, (profile.home_full_refresh & 2) != 0);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_SHELF_RECENT, (profile.home_full_refresh & 4) != 0);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_SHELF_RECENT, shelf.order);
     if (err == ESP_OK) err = nvs_set_str(h, NVS_KEY_DEVICE_NAME, profile.device_name);
     if (err == ESP_OK) err = nvs_set_str(h, NVS_KEY_AVATAR, profile.avatar);
     if (err == ESP_OK) err = nvs_set_str(h, NVS_KEY_STATUS_SIGNATURE, profile.status_signature);
@@ -1550,7 +1582,8 @@ esp_err_t app_settings_backup_restore(void) {
     BACKUP_SET_U8(NVS_KEY_READER_TURN, BK_TURN);
     BACKUP_SET_U8(NVS_KEY_POWER_TURN, BK_POWER_TURN);
     if (err == ESP_OK) err = nvs_set_u8(h,NVS_KEY_IMMERSIVE,backup.flags[BK_IMMERSIVE]&1);
-    if (err == ESP_OK) err = nvs_set_u8(h,NVS_KEY_DEFAULT_FULLSCREEN,version>=22 && backup.flags[BK_IMMERSIVE]>=2);
+    if (err == ESP_OK) err = nvs_set_u8(h,NVS_KEY_DEFAULT_FULLSCREEN,version>=22 && (backup.flags[BK_IMMERSIVE]&2)!=0);
+    if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_EQUAL_MARGINS,version>=23 && (backup.flags[BK_IMMERSIVE]&4)!=0);
     if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_BOOK_TRACK,192+backup.flags[BK_TRACKING]);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_INDENT, indent);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_INDENT_ADJUST, adjust.encoded);
@@ -1580,10 +1613,13 @@ esp_err_t app_settings_backup_restore(void) {
     BACKUP_SET_STR(NVS_KEY_FONTS_DIR, backup.fonts_dir);
 #undef BACKUP_SET_U8
 #undef BACKUP_SET_STR
+    if(err==ESP_OK)err=nvs_set_blob(h,"rd_controls",&controls,sizeof(controls));
+    if(err==ESP_OK)err=nvs_set_u8(h,"shelf_badges",shelf.badges);
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
     if (err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); return err; }
 
+    s_reader_controls=controls;s_reader_controls_loaded=true;
     memcpy(s_reader_keys, keys.actions, sizeof(s_reader_keys));
     s_reader_hold_action = hold.action;
     s_book_weight = fine_weight/APP_BOOK_WEIGHT_SUBSTEPS+2;
@@ -1600,7 +1636,7 @@ esp_err_t app_settings_backup_restore(void) {
     s_main_refresh = main_refresh;
     s_reader_hide_images = (profile.home_full_refresh & 2) != 0;
     s_shelf_recent_sort = (profile.home_full_refresh & 4) != 0;
-    s_shelf_order = s_shelf_recent_sort ? 1 : 0;
+    s_shelf_order=shelf.order;s_shelf_recent_sort=s_shelf_order==1||s_shelf_order==3;s_shelf_badges=shelf.badges;
     strlcpy(s_device_name, profile.device_name, sizeof(s_device_name));
     strlcpy(s_avatar, profile.avatar, sizeof(s_avatar));
     strlcpy(s_status_signature, profile.status_signature, sizeof(s_status_signature));
@@ -1614,7 +1650,8 @@ esp_err_t app_settings_backup_restore(void) {
     s_reader_turn_effect = f[BK_TURN];
     s_reader_power_turn = f[BK_POWER_TURN];
     s_reader_immersive = (f[BK_IMMERSIVE]&1)!=0;
-    s_reader_default_fullscreen = version>=22 && f[BK_IMMERSIVE]>=2;
+    s_reader_default_fullscreen = version>=22 && (f[BK_IMMERSIVE]&2)!=0;
+    s_reader_equal_margins = version>=23 && (f[BK_IMMERSIVE]&4)!=0;
     s_book_tracking = f[BK_TRACKING];
     s_book_indent = indent;
     s_book_indent_adjust = adjust.encoded;

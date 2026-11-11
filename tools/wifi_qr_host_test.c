@@ -44,5 +44,12 @@ int main(void) {
     assert(!ui_wifi_qr_prepare(NULL,"readpico"));
     ui_wifi_qr_draw(image,(EpdRect){0,0,SIDE,SIDE});
     for(size_t i=0;i<sizeof(image);i++)assert(image[i]==255);
-    puts("QR raster and invalid-cache reset passed");
+    char cloud[901];memset(cloud,'x',900);cloud[900]=0;
+    assert(ui_wifi_qr_prepare_text(cloud));
+    ui_wifi_qr_draw(image,(EpdRect){0,0,SIDE,SIDE});save("build/wifi-qr-cloud.pgm");
+    assert(!ui_wifi_qr_prepare_text("invalid\ntext"));
+    assert(!ui_wifi_qr_prepare_text(NULL));
+    ui_wifi_qr_draw(image,(EpdRect){0,0,SIDE,SIDE});
+    for(size_t i=0;i<sizeof(image);i++)assert(image[i]==255);
+    puts("PASS: QR raster including long cloud payload and invalid-cache reset");
 }

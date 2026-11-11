@@ -239,9 +239,8 @@
       "reason": "User2026-11-03 authorized the CX25601N charger driver; this CMakeLists only adds metalio_charger.c to the S31-only source list."
     },
     "components/read_pico_pmu/metalio_power_adapter.c": {
-      "sha256": "a3ee90b75cd911422c9af4c8c600f09bfa7acbfa7e481251acce186d5936a2e7",
-      "user_decision": "2026-11-03",
-      "reason": "User2026-11-03 authorized the CX25601N charger optimization; charger_init now delegates to metalio_charger while battery status decoding stays unchanged."
+      "sha256": "4f6a59806ff47d3c59a9e23bde6a0fbdf539e69d4985a9173433a1f14bb59516",
+      "reason": "User2026-11-09: align S31 displayed battery estimation/filter/wake reset to official v2.0.77; preserve charger control and Pico."
     },
     "boards/pico/src/main/display_reader_waveform.c": {
       "sha256": "231de8d85f6b6d9d7575ec37f18021c1b9d058ecd584ddbb18cdbf5fb2f10d19",
@@ -255,14 +254,16 @@
       "user_decision": "用户2026-11-03：S31残影/翻页优化定稿并直接提交合并（整页刷新恢复厂家完整48相，普通翻页对齐Pico的十二相擦白+四相重推黑）。/ User2026-11-03 finalizes the S31 ghosting/turn work and merges it directly (page refreshes use vendor full 48 phases; ordinary turns match Pico's twelve erase plus four black re-drive phases)."
     },
     "boards/metalio47/src/components/e0470_epaper_waveform/e0470_epaper_waveform.c": {
-      "sha256": "fad0b3b9c22fe9af5ecbb02385b2381f0462bba30bbe38d018e1530fb4b2d3e3",
+      "sha256": "c7dbea4dc78ce57d9b87e5406caff4b6126da25386bc3279892afa3f3a321e76",
       "reason": "User2026-11-01 explicitly approved PR64 as authored, superseding the previous derived-waveform pin for this file.",
-      "user_decision": "用户2026-11-03：S31残影/翻页优化定稿并直接提交合并（整页刷新恢复厂家完整48相，普通翻页对齐Pico的十二相擦白+四相重推黑）。/ User2026-11-03 finalizes the S31 ghosting/turn work and merges it directly (page refreshes use vendor full 48 phases; ordinary turns match Pico's twelve erase plus four black re-drive phases)."
+      "user_decision": "用户2026-11-03：S31残影/翻页优化定稿并直接提交合并（整页刷新恢复厂家完整48相，普通翻页对齐Pico的十二相擦白+四相重推黑）。/ User2026-11-03 finalizes the S31 ghosting/turn work and merges it directly (page refreshes use vendor full 48 phases; ordinary turns match Pico's twelve erase plus four black re-drive phases).",
+      "settings_short_motion_authorization": "User2026-11-07 requests an opt-in S31 settings-only14-phase motion accessor, keeping global DU14 off and existing reader/idle/raw profiles unchanged; local delivery only."
     },
     "components/e0470_epaper_waveform/include/e0470_epaper_waveform.h": {
-      "sha256": "45c3c161ec5f64d10eb735a4fe3822054aa6147573f849499051a72526f0a079",
+      "sha256": "748f1506470a50792bb9229eb4d7f67464e429c6bfaa9934504e832c781592ac",
       "reason": "User2026-11-01 explicitly approved PR64 as authored, superseding the previous derived-waveform pin for this file.",
-      "user_decision": "用户2026-11-03：S31残影/翻页优化定稿并直接提交合并（整页刷新恢复厂家完整48相，普通翻页对齐Pico的十二相擦白+四相重推黑）。/ User2026-11-03 finalizes the S31 ghosting/turn work and merges it directly (page refreshes use vendor full 48 phases; ordinary turns match Pico's twelve erase plus four black re-drive phases)."
+      "user_decision": "用户2026-11-03：S31残影/翻页优化定稿并直接提交合并（整页刷新恢复厂家完整48相，普通翻页对齐Pico的十二相擦白+四相重推黑）。/ User2026-11-03 finalizes the S31 ghosting/turn work and merges it directly (page refreshes use vendor full 48 phases; ordinary turns match Pico's twelve erase plus four black re-drive phases).",
+      "settings_short_motion_authorization": "User2026-11-07 requests an opt-in S31 settings-only14-phase motion accessor, keeping global DU14 off and existing reader/idle/raw profiles unchanged; local delivery only."
     },
     "boards/metalio47/src/components/read_pico/read_pico_sd.c": {
       "sha256": "6447cc070ff5cceefc7f4e8fb1ccaa006c2be5d019aadc5babf8b59ef3ecc7fd",
@@ -323,6 +324,33 @@
     "boards/metalio47/src/components/epdiy/src/output_lcd/lcd_driver.c": {
       "sha256": "c4e9ac447b6e9db85647d10ec63a4d4f5ada444f3fa9ad3b9602b9d1dee3da10",
       "reason": "User2026-11-04 adopts S31 data-only zero-prefix DMA and CKV-high frame start from vendor2.0.74; retain clocks, pipeline, interrupts, power and Moku waveforms."
+    },
+    "main/display.h": {
+      "sha256": "d752e1db7932db3bab8abb08c7e2753efe7d8f2f189919a5a5925f9e3412279c",
+      "reason": "User2026-11-05 explicitly requests Pico reader idle rail retention; expose only the Pico lifecycle setter, preserving S31, waveform bytes, voltages and existing power-off sequencing."
+    },
+    "boards/pico/src/main/display.c": {
+      "sha256": "0432fb775f549c1091da119bfc07941fc409c46612516fa5d5dcc36fd7c3ab39",
+      "reason": "User2026-11-05 enables Pico reader idle HV retention with neutral pixel/VCOM release, exit/lock revocation and retained fault timeout; preserve original waveforms, voltages, timing and S31.",
+      "pico_settings_motion_authorization": "User2026-11-07 reports excessive dark ghosts during Pico settings motion; add only a scoped12-phase FOLLOW-derived profile (retain black7,white12/equal-white2) and recognize its FAST identity. Full-pixel list motion only; preserve existing Moku profiles, scan timing, reader/idle, power and S31. Local-only delivery."
+    },
+    "components/e0470_epaper_waveform/CMakeLists.txt": {
+      "sha256": "595e9561dd93e7be298d3cd8372ae0e08024512bafd636513cc842fb105e5d1a",
+      "settings_short_motion_authorization": "User2026-11-07 requests an opt-in S31 settings-only14-phase motion accessor, keeping global DU14 off and existing reader/idle/raw profiles unchanged; local delivery only."
+    },
+    "boards/pico/src/main/display_main_waveform.c": {
+      "sha256": "9556d91253fbbd3254eaf51c8669f4c25ea9e08069c101fc6985daa65536a458",
+      "pico_settings_motion_authorization": "User2026-11-07 reports excessive dark ghosts during Pico settings motion; add only a scoped12-phase FOLLOW-derived profile (retain black7,white12/equal-white2) and recognize its FAST identity. Full-pixel list motion only; preserve existing Moku profiles, scan timing, reader/idle, power and S31. Local-only delivery.",
+      "pico_settings_steady_motion_authorization": "User2026-11-07 reports white flashing during held Pico settings drags in8853. Remove only scoped equal-white maintenance and use changed-only DU12; retain changed-white12/black7, existing FAST timing and800ms idle53 recovery. Existing Moku tables,reader,power and S31 unchanged; local delivery only."
+    },
+    "main/display_main_waveform.h": {
+      "sha256": "559702bbde33d5e93734c0e01a7cb5f5c4d6822dd4872c2017aa0da0a2afa197",
+      "pico_settings_motion_authorization": "User2026-11-07 reports excessive dark ghosts during Pico settings motion; add only a scoped12-phase FOLLOW-derived profile (retain black7,white12/equal-white2) and recognize its FAST identity. Full-pixel list motion only; preserve existing Moku profiles, scan timing, reader/idle, power and S31. Local-only delivery.",
+      "pico_settings_steady_motion_authorization": "User2026-11-07 reports white flashing during held Pico settings drags in8853. Remove only scoped equal-white maintenance and use changed-only DU12; retain changed-white12/black7, existing FAST timing and800ms idle53 recovery. Existing Moku tables,reader,power and S31 unchanged; local delivery only."
+    },
+    "components/read_pico_pmu/CMakeLists.txt": {
+      "sha256": "3e5542a8d6408cce9dfe6d268ad5f038c190b69a8b9e2147152c3f6bcb4aa937",
+      "reason": "User2026-11-09: align S31 displayed battery estimation/filter/wake reset to official v2.0.77; preserve charger control and Pico."
     }
   }
 }

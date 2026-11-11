@@ -12,6 +12,12 @@ const EpdWaveform* display_main_shelf_exit_waveform(void);
 const EpdWaveform* display_main_water_waveform(void);
 /// 快刷首帧保留原DU并保持所有等值像素，亚克力首帧不驱动。/ Fast first pass retains original DU while holding every equal pair, including skipped acrylic.
 const EpdWaveform* display_main_bw_waveform(void);
+#if !KIIKO_BOARD_METALIO47
+/// Pico列表滑动专用12相：保留FOLLOW8黑推，变白补四相，所有等值保持；仅列表变化像素输出。
+/// Pico list-only12 phases retain FOLLOW8 black drives, add four changed-white drives and hold all equals; changed list pixels only.
+extern const EpdWaveform PICO_SETTINGS_MOTION_WAVEFORM;
+const EpdWaveform* display_settings_motion_waveform(void);
+#endif
 
 /// 普通模式灰边交错，端点/相数/推动数量不变；OOM回退原柔和灰阶。
 /// Ordinary gray-edge interleaving keeps endpoints/phase counts/pulse counts; OOM falls back to original soft grays.
@@ -27,6 +33,10 @@ const EpdWaveform* display_main_clean_waveform_with_phases(
     const EpdWaveform* source, enum EpdDrawMode mode, unsigned white_phases
 );
 
+/// 用户批准的快刷跨根页背景维护：独立于实验开关，六/八相全目标白及两相释放。
+/// Approved board-native fast root maintenance: six/eight white-target drives and two holds, independent of experiment flags.
+const EpdWaveform* display_main_fast_background_waveform_with_phases(
+    const EpdWaveform* source,enum EpdDrawMode mode,unsigned white_phases);
 #if KIIKO_BOARD_METALIO47
 /// S31快刷/水波纹根页同轮维护所有目标白；六/八相预算不变，等黑/等灰不新增推动。
 /// S31 fast/ripple roots maintain all white targets in the same six/eight-phase budget without new equal-black/gray drives.

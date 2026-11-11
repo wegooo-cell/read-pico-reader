@@ -81,3 +81,7 @@ esp_err_t book_resume_io(void);
 int book_chapter_prefetch_step(size_t chapter);
 #else
 #endif
+
+/// 优先读小型章节摘要，缺失时只校验已有索引并保存摘要；不解析书籍，未知返回0。
+/// Prefer tiny summaries; otherwise validate an existing index and save its count, without parsing a book; unknown returns zero.
+uint16_t book_cached_chapter_count(const char *path,uint32_t size,int64_t modified);
