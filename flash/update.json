@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "version": "0.3.3-rc105",
+  "version": "0.3.3-rc106",
   "project": "Read_Pico",
   "board": "RDP-G01-W",
   "layout": "pico-dual-4m-v1",
   "minimum_base_version": "0.3.3-rc72",
-  "url": "https://wegooo-cell.github.io/read-pico-reader/Pico-update-0.3.3-rc105.bin",
-  "size": 4141360,
-  "sha256": "0759b4c162bdbbe9634ba0a4969ed8ed619fcbc96db37bdd477822390a4e9d4f",
-  "notes": "1. 内建字体扩至7668字符，优化正文缺字和灰阶粗细\n2. 新增默认全屏、阅读线范围开关\n3. 优化锁屏唤醒字体、传书速度和首次书架加载\n4. 修复全屏点击、工具栏和书架分页\n保留设置，可回退rc104。"
+  "url": "https://wegooo-cell.github.io/read-pico-reader/Pico-update-0.3.3-rc106.bin",
+  "size": 4131856,
+  "sha256": "8b47b1f2c69bc75090533da3434c0491493d0e50a8a38bd8d4ef43f85a97a82c",
+  "notes": "阅读设置重新分组，排版、翻页和手势三页等高。\n自动翻页支持1–10秒，每次增减1秒，切换全屏后继续。\n触摸手势支持自定义，左右横滑固定翻页。\n补齐书架阅读进度、已读标记和进度排序。"
 }

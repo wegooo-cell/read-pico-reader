@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "version": "0.3.3-rc110",
+  "version": "0.3.3-rc111",
   "project": "Kiikoread_Metalio_S31",
   "board": "Metalio-EINK4-Plus-S31",
   "layout": "metalio-s31-dual-5m-v1",
   "minimum_base_version": "0.3.3-rc98",
-  "url": "https://wegooo-cell.github.io/read-pico-reader/Metalio-S31-update-0.3.3-rc110.bin",
-  "size": 5081040,
-  "sha256": "9f60234af744f5fbef67bd6f23f1287c119d46573f803d568779349607d9902d",
-  "notes": "1. 内建7668字符与16级灰阶补字\n2. 修正屏幕边缘行首输出，保留Moku阅读波形\n3. 优化USB退出、后台换字体与渐进JPEG\n4. 新增默认全屏、阅读线范围和保持浅睡\n保留设置，可回退rc109。"
+  "url": "https://wegooo-cell.github.io/read-pico-reader/Metalio-S31-update-0.3.3-rc111.bin",
+  "size": 5128816,
+  "sha256": "a78ad067798190856272b9f3565996130ecfed1918048e87cf94affb2b849bce",
+  "notes": "阅读设置重新分组，排版、翻页和手势三页等高。\n自动翻页支持1–10秒，每次增减1秒，切换全屏后继续。\n触摸手势支持自定义，左右横滑固定翻页。\n补齐书架阅读进度、已读标记和进度排序。"
 }
