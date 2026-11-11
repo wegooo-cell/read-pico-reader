@@ -2209,8 +2209,17 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
     if (!cancel_time_sync(true)) return ESP_ERR_INVALID_STATE;
     if (!claim_config()) return ESP_ERR_INVALID_STATE;
     if (s_wifi || s_netif || s_http) { release_config(); return ESP_ERR_INVALID_STATE; }
-    // 传输服务持有临时BLE租约；仅联网保持共存，对时与配置仍串行。/ Transfer owns a temporary BLE lease; network-only retains coexistence and configuration stays serialized.
-    if(!cfg->network_only) {
+    // 传输服务持有临时BLE租约。用户2026-11-11：BLE 控制器约占40KB内部RAM；rc111 下即使
+    // “仅联网”会话（连接路由器/对时/云端）在内部RAM不足时也必须先停BLE，否则 WiFi 静态RX
+    // 缓冲初始化失败，界面显示“连接启动失败”。RAM 充裕时仍保留原有BLE共存行为。
+    // Transfer owns a temporary BLE lease. User2026-11-11: the BLE controller holds ~40 KB of
+    // internal RAM; under rc111 a network-only session (router connect/time sync/cloud) must also
+    // release it when memory is tight, otherwise WiFi static RX buffers fail to init and the UI
+    // reports "connection start failed". Keep the old coexistence behaviour when RAM is ample.
+    const bool low_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < 100u * 1024u;
+    if (!cfg->network_only || low_internal) {
+        if (cfg->network_only) ESP_LOGW("transfer", "wifi network-only: release BLE for memory (internal free=%u)",
+                                        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
         const esp_err_t reserve=ble_pt_network_acquire();
         if(reserve!=ESP_OK){release_config();return reserve;}
         s_ble_network_reserved=true;
@@ -2249,8 +2258,52 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
     if (err != ESP_OK) goto fail;
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     init.nvs_enable = false; // 与原厂S31一致；凭据只由本设备设置区管理。/ Reference S31 RAM-only driver config.
-    transfer_s31_bulk_receive_config(&init, !cfg->network_only);
-    err = esp_wifi_init(&init); if (err != ESP_OK) goto fail;
+    // 用户2026-11-11：rc111 后台对时/云端同步会短暂占用内部RAM，传书首次启动可能只剩约60KB，
+    // WiFi 静态RX缓冲初始化失败并在界面显示“连接启动失败”。启动前等待其它网络会话释放内存，
+    // 并对 esp_wifi_init 做有界重试，用户不必反复点重试。
+    // User2026-11-11: rc111 background time/cloud sync can briefly hold internal RAM; the first
+    // transfer start then fails to init the WiFi RX buffers and the UI reports "connection start
+    // failed". Wait for those sessions to release memory and retry init a bounded number of times.
+    const size_t min_internal = 92u * 1024u;
+    const size_t min_largest = 24u * 1024u;
+    // WiFi 静态RX缓冲需要连续的 DMA 可见内部内存；只看 free 不够，DMA 最大块也必须够。
+    // Static WiFi RX buffers need a contiguous DMA-capable internal block, so bound that too.
+    const size_t min_dma_largest = 16u * 1024u;
+    const int64_t wait_deadline = esp_timer_get_time() + INT64_C(4000000);
+    while ((heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < min_internal ||
+            heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < min_largest ||
+            heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA) < min_dma_largest) &&
+           esp_timer_get_time() < wait_deadline) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    const size_t pre_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    const size_t pre_largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    const size_t pre_dma_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    const size_t pre_dma_largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    // 用户2026-11-11：独占传书原先固定把静态RX池抬到16槽（约27KB内部RAM）。rc111 下内部堆
+    // 余量不足时，软热点信标/关联分配会失败并直接崩在射频库或反复 ASSOC_FAIL；保持 BLE 开启时
+    // 传书前内部 RAM 只有约90KB，必须给 WiFi 启动留足余量，因此阈值取128KB，只有蓝牙关闭等
+    // 余量充裕的场景才启用大池。
+    // User2026-11-11: the bulk path used to force 16 static RX buffers (~27 KB internal RAM).
+    // With rc111's smaller internal headroom the SoftAP beacon/association allocations failed and
+    // crashed the radio library or looped on ASSOC_FAIL; with BLE kept on only ~90 KB is free
+    // before transfer, so require 128 KB and enable the larger pool only when memory is ample.
+    const bool bulk_rx = !cfg->network_only && pre_internal >= 128u * 1024u;
+    ESP_LOGI("transfer", "wifi pre-init internal free=%u largest=%u dma free=%u largest=%u bulk=%d",
+             (unsigned)pre_internal, (unsigned)pre_largest,
+             (unsigned)pre_dma_free, (unsigned)pre_dma_largest, (int)bulk_rx);
+    transfer_s31_bulk_receive_config(&init, bulk_rx);
+    err = esp_wifi_init(&init);
+    for (int retry = 0; err != ESP_OK && retry < 3; ++retry) {
+        ESP_LOGW("transfer", "wifi init retry=%d err=%s internal free=%u largest=%u",
+                 retry + 1, esp_err_to_name(err),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+        (void)esp_wifi_deinit();
+        vTaskDelay(pdMS_TO_TICKS(250));
+        err = esp_wifi_init(&init);
+    }
+    if (err != ESP_OK) goto fail;
     s_wifi = true;
     s_active_static_rx = init.static_rx_buf_num;
     s_active_rx_ba = init.rx_ba_win;
@@ -2337,6 +2390,11 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
         err = httpd_register_uri_handler(s_http, &routes[i]); if (err != ESP_OK) goto fail;
     }
     }
+    ESP_LOGI("transfer", "wifi start internal free=%u largest=%u dma free=%u largest=%u",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA));
     err = esp_wifi_start(); if (err != ESP_OK) goto fail;
     s_started = true;
 #ifdef KIIKO_LOCAL_NETWORK_PROBE

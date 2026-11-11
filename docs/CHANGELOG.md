@@ -8,6 +8,9 @@
 - S31 rc111 整页书架缓存：含“默认/生成封面”的页面不再写入整页缓存（封面任务结果新增 generated 标记），整页缓存 artwork 版本 3→4 作废旧缓存；生成封面也不再进入 RAM/精简列表缓存，避免一次解码失败被当成真封面固化。全部为真封面的页面保留原缓存加速，失败的书每次进入都会重新尝试解码。S31 本地测试（rc111 同步源码），未发布官网/OTA。
   S31 rc111 whole-page shelf cache: pages containing a generated default cover are no longer captured (the cover result now carries a generated flag), and the page-cache artwork version is bumped 3→4 to discard old entries; generated covers also stop entering the RAM/sized-list caches so a single decode failure cannot masquerade as a real cover. Pages made only of real covers keep the cache acceleration and failed books retry decoding on every entry. Local S31 test on the rc111 sync source; nothing is published.
 
+- S31 rc111 WiFi/传书内存：BLE 控制器约占 40KB 内部 RAM；“仅联网”会话（连接路由器/对时/云端同步）原设计不释放 BLE，rc111 下开始前内部 RAM 只剩约 61KB，WiFi 静态 RX 缓冲初始化失败（`wifi:malloc buffer fail`）并在界面提示“连接启动失败”。现在内部 RAM <100KB 时会话开始前也释放 BLE；传书启动前等待 internal/DMA 余量达标并对 `esp_wifi_init` 有界重试（最多 4s+3 次）；独占传书 16 槽大 RX 池仅在内部 RAM ≥128KB 时启用；字体槽元数据 9KB 挪到 PSRAM。S31 真机验证：释放 BLE 后内部 RAM 100KB/ DMA 34KB，WiFi 连接成功并拿到 IP。
+  S31 rc111 WiFi/transfer memory: the BLE controller holds ~40 KB internal RAM; network-only sessions (router connect/time sync/cloud) used to keep BLE alive, leaving only ~61 KB and failing WiFi static RX buffer init (`wifi:malloc buffer fail`), which surfaced as "connection start failed". Sessions now also release BLE when internal RAM is below 100 KB; transfer start waits for internal/DMA headroom and retries `esp_wifi_init` (up to 4 s + 3 attempts); the bulk 16-slot RX pool is only enabled with ≥128 KB internal RAM, and the 9 KB font-slot metadata moved to PSRAM. Verified on S31: after BLE release internal RAM 100 KB / DMA 34 KB and WiFi connected with an IP.
+
 ## 本地测试 / Local test — 2026-11-06
 
 - S31 屏幕修复加强：盲刷黑白从 3 个清屏循环提高到 12 个（4 轮 × 每轮 10 黑 + 13 白 + 3 收尾相），收尾再连做 3 次完整 48 相 GC16 全刷，耗时约 5-7 秒，用于清顽固残影。
