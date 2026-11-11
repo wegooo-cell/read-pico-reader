@@ -48,6 +48,7 @@ static bool current(unsigned generation) {
 }
 static void prepare(cover_job_slot_t *job,unsigned generation) {
     book_cover_job_t *q=&job->request;unsigned sw=BOOK_COVER_W,sh=BOOK_COVER_H;
+    job->result.generated=false;
     const bool compact=q->list&&!q->natural&&q->width&&q->height&&q->width<=BOOK_COVER_W&&q->height<=BOOK_COVER_H;
     struct stat st;if(!current(generation)||stat(q->path,&st)||!S_ISREG(st.st_mode))return;
     if(job->automatic&&(job->result.size!=st.st_size||job->result.modified!=st.st_mtime))return;
@@ -66,6 +67,9 @@ static void prepare(cover_job_slot_t *job,unsigned generation) {
         }free(bits);
     }
     bool from_auto=job->automatic!=NULL;
+    // 默认封面只在本帧显示，不进入整页缓存；下次重新尝试解码真封面。
+    // Generated defaults are shown for this frame only and never captured into the page cache.
+    job->result.generated=from_auto;
     uint8_t *gray=job->automatic;job->automatic=NULL;
     if(gray&&compact){
         uint8_t *small=heap_caps_malloc((size_t)q->width*q->height,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
@@ -74,7 +78,9 @@ static void prepare(cover_job_slot_t *job,unsigned generation) {
         for(unsigned y=0;y<q->height;++y)for(unsigned x=0;x<q->width;++x)
             small[(size_t)y*q->width+x]=gray[(crop.y+(uint64_t)y*crop.height/q->height)*BOOK_COVER_W+crop.x+(uint64_t)x*crop.width/q->width];
         free(gray);gray=small;sw=q->width;sh=q->height;
-        if(job->auto_cache)book_cover_store_sized(q->path,q->title,q->author,gray,sw,sh,st.st_size,st.st_mtime);
+        // 生成封面只用于本帧绘制，不写回精简列表缓存（否则失败会被当成真封面固化）。
+        // Generated art is painted for this frame only and never persisted into the sized list
+        // cache, which would otherwise freeze a decode failure as a real cover.
     }else if(gray&&job->auto_cache){book_cover_store_generated(q->path,q->title,q->author,gray,q->list,st.st_size,st.st_mtime);}
     if(!gray) {
         const size_t need=compact?(size_t)q->width*q->height:BOOK_COVER_W*BOOK_COVER_H;

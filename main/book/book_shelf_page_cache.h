@@ -10,7 +10,10 @@
 #define BOOK_SHELF_PAGE_COVERS 9
 // 改变封面/家具像素规则或内建字库时递增；普通重编译不作废成品。
 // Bump when artwork/furniture rules or built-in glyph assets change, not for ordinary rebuilds.
-#define BOOK_SHELF_ARTWORK_VERSION 3u
+// 用户2026-11-11：4 作废旧版把“默认封面”整页固化的缓存，之后只有全真封面页才写入。
+// User2026-11-11: 4 discards pages that froze generated default covers; only all-real pages are
+// captured from now on.
+#define BOOK_SHELF_ARTWORK_VERSION 4u
 typedef struct { uint64_t v[2]; } book_shelf_page_key_t;
 typedef struct {
     EpdRect area, covers[BOOK_SHELF_PAGE_COVERS];

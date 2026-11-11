@@ -1052,12 +1052,12 @@ static bool book_cover_load_gray_impl(const char *path, const char *title, const
     if (auto_used) ESP_LOGW("cover", "auto cover %s", path);
 #endif
 #if KIIKO_BOARD_METALIO47
-    // 默认封面只在内存复用，不写入真封面缓存；下次仍会先试真封面。
-    // Default covers stay in RAM only so the next attempt still tries the real cover first.
+    // 默认封面只在本帧绘制（UI 的 AUTO 路径），不进入 RAM 成品缓存：否则下一次读取会把
+    // 生成封面当成真封面返回，整页缓存就会把它当成“已完成”固化下来。
+    // Generated defaults are painted by the UI AUTO path only and never enter the RAM raster
+    // cache; otherwise a later read returns them as a real cover and the page cache freezes it.
     if (good && cache_result && !auto_used) {
         cover_cache_write(cache_path, &key, out);
-        metalio_cover_cache_put(&ram,out,BOOK_COVER_W*BOOK_COVER_H,meta);
-    } else if (good) {
         metalio_cover_cache_put(&ram,out,BOOK_COVER_W*BOOK_COVER_H,meta);
     }
 #else
