@@ -49,6 +49,9 @@ static bool take_line(size_t off,int available,int origin,size_t *next,bool *end
  (void)available;(void)origin;assert(off==4);strcpy(s_line,"tail");*next=8;*end=true;*px=10;*heading=false;*width=40;*indent=0;*align=0;*before=*after=0;return true;
 }
 static int line_height_for(int px){return px;}
+static int line_fit_height(int px,int pitch){(void)px;return pitch;}
+static int line_page_height(int px,int pitch,size_t off,int64_t top){(void)off;(void)top;return line_fit_height(px,pitch);}
+int book_layout_page_top_padding(size_t page){(void)page;return 0;}
 static int gap_for(int height,bool heading){(void)height;(void)heading;return 0;}
 static int ttf_ascender_px(int px){return px;}
 int test_guide_segments,test_guide_first_x,test_guide_first_y,test_guide_second_y,test_guide_last_y,test_guide_height;

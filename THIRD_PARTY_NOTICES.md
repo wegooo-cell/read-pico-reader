@@ -33,7 +33,7 @@ remain in the source. This project is not an official MindReset release.
 | [pypinyin](https://github.com/mozillazg/python-pinyin) dictionary data used by offline book search | MIT | [pypinyin notice](components/read_pico_search/LICENSE.pypinyin) |
 | [CrossMux](https://github.com/0x1abin/crossmux) BLE report mapping and text-turn adaptations | MIT | [CrossMux notice](licenses/CrossMux-MIT.txt) |
 | FreeInk SDK text-turn waveform assembly, commit `96de1be6ce08eb732909e6e8149af8f892b9a2c5` | MIT | [FreeInk SDK notice](licenses/FreeInk-SDK-MIT.txt) |
-| [Metalio E-Ink4-Plus](https://github.com/CloudZao/Metalio-E-INK4-Plus) sample firmware — ESP32-S31 LCD/IOMUX output path, TPS65185 and 9555 board reference, C equivalents of the Xtensa SIMD pixel paths, the `s31_sleep` SDK compatibility module (source ad8edf4150a688737c0d7c00cae4413079b262ef), and the CX25601N charge policy/initialization re-expressed as C in `components/metalio_hw/metalio_charger.c` (source e703fd35269324cd163f1deae0a2fb5f7cf5f710) | MIT | [Metalio notice](licenses/Metalio-MIT.txt) |
+| [Metalio E-Ink4-Plus](https://github.com/CloudZao/Metalio-E-INK4-Plus) sample firmware — ESP32-S31 LCD/IOMUX output path, TPS65185 and 9555 board reference, C equivalents of the Xtensa SIMD pixel paths, the `s31_sleep` SDK compatibility module (source ad8edf4150a688737c0d7c00cae4413079b262ef), the BQ27220 voltage/SOC display policy re-expressed as C in `components/read_pico_pmu/metalio_soc_filter.c` (v2.0.77 source `874538eb54f7f7eb593cd40cd1ba6dc8497226e7`), and the CX25601N charge policy/initialization re-expressed as C in `components/metalio_hw/metalio_charger.c` (source e703fd35269324cd163f1deae0a2fb5f7cf5f710) | MIT | [Metalio notice](licenses/Metalio-MIT.txt) |
 | Embedded Noto Sans SC Medium subsets for Pico/S31, UI Han bitmaps and Pico body Han coverage | SIL OFL-1.1 | [Font license](main/assets/OFL-Noto.txt) |
 | [ESP Web Tools](https://github.com/esphome/esp-web-tools) browser flasher | Apache-2.0 | [Bundled web tool license](flash/vendor/LICENSE) |
 | Espressif TinyUSB component | Apache-2.0 | [Component license](components/espressif__esp_tinyusb/LICENSE) |
@@ -68,3 +68,32 @@ BLE 蓝牙翻页器的报告解析与按键映射参考 CrossMux 的 BleKeyboard
 该头文件按用户提供的原始字节保留，仅显式本地实验构建包含；未将项目许可套用到厂家材料，未据此推定额外的发布许可。
 
 Unicode Unihan kTGH data is used to select ordinary-book characters and validate the first6500 entries of the2013 standardized Han table. Unicode data is distributed under the [Unicode License v3](licenses/Unicode-3.0.txt). Source: https://www.unicode.org/Public/17.0.0/ucd/Unihan.zip
+
+## Five Bluetooth remote decoders (C adaptation)
+
+Source: CloudZao/Metalio-E-INK4-Plus, commit 874538eb54f7f7eb593cd40cd1ba6dc8497226e7,
+main/boards/common/bluetooth/{free2_buttons,free3r_buttons,smart1e_buttons,hbtr_gesture_buttons}.h.
+Adapted to components/ble_page_turner/src/supported_remotes.h; upstream MIT notice retained there.
+
+MIT License
+
+Copyright (c) 2025 Shenzhen Xinzhi Future Technology Co., Ltd.
+Copyright (c) 2025 Project Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

@@ -27,6 +27,12 @@ bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks,
 /// faces span by span; NULL restores single-face layout. It is borrowed like the block table
 /// and must outlive free; slots that never loaded fall back to the system face.
 void book_layout_set_runs(const html_run_t* runs, size_t count);
+/// 阅读器尾行省去多余行后间距，纯文字续页将不足一行余量上下均分；默认关闭。
+/// Reader policy: omit unused tail leading and balance sub-line slack on full text continuations; default off.
+void book_layout_set_vertical_balance(bool enabled);
+/// 本页正文的额外顶部留白；章末/题头/图片页为零，脚注命中随它对齐。
+/// Extra top padding for this page, zero on chapter ends/headings/images; note hit regions follow it.
+int book_layout_page_top_padding(size_t page);
 /// 设置行高百分比与段后距离百分比，重排时生效。/ Set line height and paragraph gap percentages for the next layout.
 void book_layout_set_spacing(unsigned line_percent, unsigned paragraph_percent);
 /// 正文额外字间距为 -15..+15 像素。/ Extra body tracking is -15..+15 pixels.

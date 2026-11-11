@@ -17,6 +17,7 @@
  */
 
 #include "ble_page_turner.h"
+#include "supported_remotes.h"
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -47,6 +48,8 @@
 #include "os/os_mbuf.h"
 #include "store/config/ble_store_config.h"
 
+// Keep Pico inside its existing 4 MiB OTA slots. Size optimization changes no HID,
+// lifecycle, radio or timing policy; S31 retains its normal compiler options.
 static const char *TAG = "ble_pt";
 
 // 网络占用先登记，再串行拆栈，防止主循环同时重建蓝牙。/ Reserve network memory before serial teardown to prevent a concurrent BLE restart.
@@ -95,6 +98,7 @@ static void lifecycle_give(void) { atomic_flag_clear(&s_lifecycle); }
 // procedure later runs against a dangling pointer: the call returns 0 and the callback never
 // arrives.
 #define HID_CHR_CCCD 0x2902
+#define HID_REPORT_REFERENCE 0x2908
 
 // 启动前的内存下限。内部 RAM 才是瓶颈：控制器与协议栈任务只能放这里（硬件路径读不到
 // PSRAM）。阈值取 CrossMux 在同一块板子上验证过的值；本仓库把文件列表、图片列表、壁纸
@@ -234,6 +238,20 @@ static const ble_pt_device_t *device_find(const char *addr);
 // 已发现的可订阅输入报告。/ Subscribable input reports found on the peer.
 static uint16_t s_input_chr_vals[MAX_INPUT_CHRS];
 static uint16_t s_input_chr_cccds[MAX_INPUT_CHRS];
+static uint16_t s_input_chr_ends[MAX_INPUT_CHRS], s_input_chr_refs[MAX_INPUT_CHRS];
+static uint8_t s_input_report_ids[MAX_INPUT_CHRS], s_input_report_types[MAX_INPUT_CHRS];
+static uint8_t s_ref_index;
+static pt_model_t s_remote_model;
+static pt_decoder_t s_remote_decoder;
+static uint16_t s_button_channel;
+static atomic_bool s_standby_pending;
+static void remote_reset(void) {
+    memset(&s_remote_decoder,0,sizeof(s_remote_decoder));
+    s_button_channel=0;
+    atomic_store(&s_standby_pending,false);
+}
+bool ble_pt_take_standby(void) { return atomic_exchange(&s_standby_pending,false); }
+
 static uint8_t s_input_chr_count;
 static uint8_t s_subscribed_count;
 // HID 服务的结束句柄。ble_gatt_chr 只有 def_handle/val_handle，没有 end_handle，
@@ -732,6 +750,37 @@ static const ble_pt_device_t *device_find(const char *addr) {
     return NULL;
 }
 
+#if defined(ESP_PLATFORM) && defined(__GNUC__) && !KIIKO_BOARD_METALIO47
+#pragma GCC push_options
+#pragma GCC optimize ("Os")
+#endif
+// Route verified model reports before generic HID. Keep physical payloads for existing bindings;
+// HBTR trajectories alone use stable direction frames because coordinates vary on every gesture.
+static bool ingest_input_report(uint16_t handle,const uint8_t *data,size_t len) {
+    if(s_remote_model==PT_GENERIC) { ingest_report(data,len);return true; }
+    uint8_t i=0;
+    while(i<s_input_chr_count&&s_input_chr_vals[i]!=handle)++i;
+    if(i==s_input_chr_count||!pt_report_supported(s_remote_model,s_input_report_ids[i],s_input_report_types[i]))return false;
+    if(!pt_hbtr(s_remote_model)&&s_button_channel&&handle!=s_button_channel)return false;
+    uint8_t code=pt_decode(s_remote_model,&s_remote_decoder,s_input_report_ids[i],data,len);
+    if(code==PT_INVALID)return true;
+    if(!s_button_channel)s_button_channel=handle;
+    if(code==PT_STANDBY) { atomic_store(&s_standby_pending,true);return true; }
+    if(code!=PT_PREV&&code!=PT_NEXT)return true;
+    s_last_rx_ms=(uint32_t)(esp_timer_get_time()/1000);
+    const uint8_t canonical=code;
+    const uint8_t *payload=pt_hbtr(s_remote_model)?&canonical:data;
+    size_t size=pt_hbtr(s_remote_model)?1:len;
+    ble_pt_frame_t frame=frame_of(payload,size);
+    raw_push(true,&frame);raw_push(false,&frame);
+    // A click cannot become an idle baseline or generate a synthetic held-key repeat.
+    memset(&s_raw_prev,0,sizeof(s_raw_prev));s_raw_prev.len=(uint8_t)size;
+    s_raw_down=false;
+    emit_usage(code==PT_PREV?0x4b:0x4e,0);
+    s_held_usage=0;
+    return true;
+}
+
 /* ---- 连接与发现 / Connection and discovery ---- */
 
 static void note_peer(const char *addr, const char *name) {
@@ -750,6 +799,8 @@ static void note_peer(const char *addr, const char *name) {
         else if (bond && bond->name[0]) snprintf(s_conn_name, sizeof(s_conn_name), "%s", bond->name);
         else snprintf(s_conn_name, sizeof(s_conn_name), "%s", addr);
     }
+    pt_model_t model=pt_model_from_name(s_conn_name);
+    if(model!=s_remote_model) {s_remote_model=model;remote_reset();}
     bindings_load(s_conn_addr);
 }
 
@@ -839,7 +890,9 @@ static void subscribe_finish(void) {
 // "one press and it restarts".
 static void subscribe_next(void) {
     while (s_sub_index < s_input_chr_count) {
-        const uint16_t cccd = s_input_chr_cccds[s_sub_index++];
+        const uint8_t index=s_sub_index++;
+        if(s_remote_model!=PT_GENERIC&&!pt_report_supported(s_remote_model,s_input_report_ids[index],s_input_report_types[index]))continue;
+        const uint16_t cccd = s_input_chr_cccds[index];
         if (!cccd) continue;
         const uint8_t value[2] = {0x01, 0x00};  // 通知 / notify
         if (ble_gattc_write_flat(s_conn_handle, cccd, value, sizeof(value), cccd_write_cb,
@@ -863,10 +916,13 @@ static void dsc_next(void);
 
 static int dsc_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
                   uint16_t chr_val_handle, const struct ble_gatt_dsc *dsc, void *arg) {
-    (void)conn_handle; (void)chr_val_handle;
     const uint8_t index = (uint8_t)(uintptr_t)arg;
+    if(conn_handle!=s_conn_handle||index>=s_input_chr_count||chr_val_handle!=s_input_chr_vals[index])return 0;
     switch (error->status) {
         case 0: {
+            if(!dsc||dsc->handle<=s_input_chr_vals[index]||dsc->handle>s_input_chr_ends[index])return 0;
+            const ble_uuid16_t reference=BLE_UUID16_INIT(HID_REPORT_REFERENCE);
+            if(ble_uuid_cmp(&dsc->uuid.u,&reference.u)==0)s_input_chr_refs[index]=dsc->handle;
             const ble_uuid16_t cccd = BLE_UUID16_INIT(HID_CHR_CCCD);
             const bool is_cccd = ble_uuid_cmp(&dsc->uuid.u, &cccd.u) == 0;
             if (is_cccd) s_input_chr_cccds[index] = dsc->handle;  // 只记录，不在这里订阅
@@ -889,7 +945,8 @@ static int dsc_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
 // carried the key was pure guesswork -- which is why a press did nothing.
 static int report_map_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
                          struct ble_gatt_attr *attr, void *arg) {
-    (void)conn_handle; (void)arg;
+    (void)arg;
+    if(conn_handle!=s_conn_handle)return 0;
     if (error != NULL && error->status == 0 && attr != NULL && attr->om != NULL) {
         const uint8_t *data = OS_MBUF_DATA(attr->om, const uint8_t *);
         const uint16_t len = (uint16_t)OS_MBUF_PKTLEN(attr->om);
@@ -900,20 +957,34 @@ static int report_map_cb(uint16_t conn_handle, const struct ble_gatt_error *erro
     return 0;
 }
 
+static void report_ref_next(void);
+static int report_ref_cb(uint16_t conn_handle,const struct ble_gatt_error *error,struct ble_gatt_attr *attr,void *arg) {
+    uint8_t index=(uint8_t)(uintptr_t)arg;
+    if(conn_handle!=s_conn_handle||index>=s_input_chr_count)return 0;
+    uint8_t ref[2];
+    if(error&&error->status==0&&attr&&attr->handle==s_input_chr_refs[index]&&attr->om&&
+       OS_MBUF_PKTLEN(attr->om)==2&&os_mbuf_copydata(attr->om,0,2,ref)==0) {
+        s_input_report_ids[index]=ref[0];s_input_report_types[index]=ref[1];
+    }
+    report_ref_next();return 0;
+}
+static void report_ref_next(void) {
+    while(s_remote_model!=PT_GENERIC&&s_ref_index<s_input_chr_count) {
+        uint8_t i=s_ref_index++;
+        if(s_input_chr_refs[i]&&ble_gattc_read(s_conn_handle,s_input_chr_refs[i],report_ref_cb,(void *)(uintptr_t)i)==0)return;
+    }
+    if(s_report_map_handle&&ble_gattc_read(s_conn_handle,s_report_map_handle,report_map_cb,NULL)==0)return;
+    subscribe_ready();
+}
+
 // 一个报告接一个报告地找它的 CCCD。/ Walk the report characteristics one at a time.
 static void dsc_next(void) {
     if (s_dsc_index >= s_input_chr_count) {
-        // 订阅之前先把 Report Map 读出来，CrossMux 的次序就是这样。
-        // The Report Map is read before subscribing, which is CrossMux's order.
-        if (s_report_map_handle) {
-            if (ble_gattc_read(s_conn_handle, s_report_map_handle, report_map_cb, NULL) == 0)
-                return;
-        }
-        subscribe_ready();
+        s_ref_index=0;report_ref_next();
         return;
     }
     const uint8_t i = s_dsc_index++;
-    const int rc = ble_gattc_disc_all_dscs(s_conn_handle, s_input_chr_vals[i], s_hid_svc_end,
+    const int rc = ble_gattc_disc_all_dscs(s_conn_handle, s_input_chr_vals[i], s_input_chr_ends[i],
                                            dsc_cb, (void *)(uintptr_t)i);
     if (rc != 0) {
         // 起不来就跳过这一个，别把整条链卡死。
@@ -927,8 +998,8 @@ static void chr_enum_done(void);
 // 协议模式写完再去找描述符。/ Descriptor passes start once the protocol-mode write is done.
 static int pmode_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
                     struct ble_gatt_attr *attr, void *arg) {
-    (void)conn_handle; (void)attr; (void)arg; (void)error;
-    chr_enum_done();
+    (void)attr; (void)arg; (void)error;
+    if(conn_handle==s_conn_handle)dsc_next();
     return 0;
 }
 
@@ -945,9 +1016,12 @@ static void chr_enum_done(void) {
 
 static int chr_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
                   const struct ble_gatt_chr *chr, void *arg) {
-    (void)conn_handle; (void)arg;
+    (void)arg;
+    if(conn_handle!=s_conn_handle)return 0;
     switch (error->status) {
         case 0: {
+            for(uint8_t i=0;i<s_input_chr_count;++i)
+                if(s_input_chr_ends[i]==s_hid_svc_end&&chr->def_handle>s_input_chr_vals[i])s_input_chr_ends[i]=chr->def_handle-1;
             // Protocol Mode(0x2A4E)：只记下手柄，写操作等特征枚举结束后再做。
             // Protocol Mode (0x2A4E): record the handle only; the write waits until characteristic
             // enumeration has finished.
@@ -980,6 +1054,8 @@ static int chr_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
                 const uint8_t index = s_input_chr_count++;
                 s_input_chr_vals[index] = chr->val_handle;
                 s_input_chr_cccds[index] = 0;
+                s_input_chr_ends[index]=s_hid_svc_end;
+                s_input_chr_refs[index]=0;s_input_report_ids[index]=s_input_report_types[index]=0;
             }
             return 0;
         }
@@ -1227,6 +1303,7 @@ static int gap_cb(struct ble_gap_event *event, void *arg) {
                 snprintf(s_failure, sizeof(s_failure), "连接失败 (%d)", event->connect.status);
                 return 0;
             }
+            remote_reset();
             s_conn_handle = event->connect.conn_handle;
             s_link_up = true;
             s_connecting = false;  // 链路已建立，"连接中"到此为止 / the link exists, so stop saying "connecting"
@@ -1278,6 +1355,7 @@ static int gap_cb(struct ble_gap_event *event, void *arg) {
             s_held_usage = 0;
             s_rest_known = false;
             raw_reset();
+            remote_reset();
             s_subscribed_count = 0;
             s_input_chr_count = 0;
             s_discovery_started = false;
@@ -1332,31 +1410,11 @@ static int gap_cb(struct ble_gap_event *event, void *arg) {
 
         case BLE_GAP_EVENT_NOTIFY_RX: {
             ble_pt_crumb(BLE_PT_CRUMB_RX);
-#if KIIKO_BOARD_METALIO47
-            // S31/NimBLE传输适配：完整拷贝链式mbuf，作者的整帧学习和HID解析保持原样。
-            // S31/NimBLE transport: linearize the chained mbuf; retain author whole-frame learning/HID parsing.
-            uint8_t body[BLE_ATT_MTU_MAX];
-#else
-            const uint8_t *body = OS_MBUF_DATA(event->notify_rx.om, const uint8_t *);
-#endif
-            const uint16_t len = (uint16_t)OS_MBUF_PKTLEN(event->notify_rx.om);
-#if KIIKO_BOARD_METALIO47
-            if (!len || len > sizeof(body) || os_mbuf_copydata(event->notify_rx.om,0,len,body) != 0) return 0;
-#else
-#endif
-            // 收到数据就上屏：按键没反应时，第一步要分清"对端根本没发"还是"发了没解出来"。
-            // A received report goes on screen: when a press does nothing, the first question is
-            // whether the peer sent anything at all or sent something undecodable.
-            if (len > 0)
-            // 每一条通知都记下原始字节：遥控器到底发了什么、是不是空报告，一眼可见。
-            // Every notification records its raw bytes, so what the remote actually sent -- and
-            // whether it sent an empty report -- is right there.
-            {
-                char hex[3 * 24 + 1] = {0};
-                const uint16_t shown = len < 24 ? len : 24;
-                for (uint16_t i = 0; i < shown; ++i)
-                    snprintf(hex + i * 3, 4, "%02x ", body[i]);
-            }
+            if(event->notify_rx.conn_handle!=s_conn_handle||!event->notify_rx.om)return 0;
+            const uint16_t len=(uint16_t)OS_MBUF_PKTLEN(event->notify_rx.om);
+            uint8_t body[FRAME_MAX];
+            if(!len||len>sizeof(body)||os_mbuf_copydata(event->notify_rx.om,0,len,body)!=0)return 0;
+            if(!ingest_input_report(event->notify_rx.attr_handle,body,len))return 0;
             // 收到报告本身就是"链路可用"最可靠的证据：CCCD 订阅可能因为链路未加密而写失败，
             // 但已配对设备的订阅状态由对端保留，翻页器照样会发。之前拿"订阅写成功"当判据，
             // 于是能翻页却一直显示「连接中」，「学习」也因此说你没连。
@@ -1372,7 +1430,6 @@ static int gap_cb(struct ble_gap_event *event, void *arg) {
             // A bonded peer keeps the subscription on its side, so a report can arrive before our
             // own subscribe; this path proves the link just as well.
             remember_live_peer();
-            ingest_report(body, len);
             return 0;
         }
 
@@ -1381,6 +1438,9 @@ static int gap_cb(struct ble_gap_event *event, void *arg) {
     }
 }
 
+#if defined(ESP_PLATFORM) && defined(__GNUC__) && !KIIKO_BOARD_METALIO47
+#pragma GCC pop_options
+#endif
 // 按给定地址类型发起连接；成功返回 0，失败返回 NimBLE 的错误码。
 // Start a connection with the given peer address type; 0 on success, else NimBLE's error code.
 static int start_connect(const char *addr, uint8_t type) {
@@ -1402,6 +1462,7 @@ static int start_connect(const char *addr, uint8_t type) {
     s_connecting = true;
     s_rest_known = false;
     raw_reset();
+    remote_reset();
     s_has_keyboard_page = s_has_consumer_page = false;
     s_preferred_byte = 0xFF;
     s_held_usage = 0;
@@ -1628,6 +1689,7 @@ static esp_err_t start_locked(void) {
 
 static esp_err_t stop_locked(void) {
     if (!s_running) return ESP_OK;
+    remote_reset();
     ble_pt_scan_stop();
     ble_pt_disconnect();
     // 让断开走完再拆 host；bond 留在 NVS，下次 start() 重新载入。
@@ -1843,6 +1905,7 @@ void ble_pt_sync(bool wanted) {
         why_store(NULL);
     }
 }
+
 
 bool ble_pt_take_start_failure(char *out, size_t cap) {
     if (!s_start_failure[0]) return false;
@@ -2144,6 +2207,10 @@ ble_pt_action_t ble_pt_action_for_frame(const ble_pt_frame_t *frame) {
     // Manual bindings win: they are more specific and let the user override the built-in map.
     if (frame_same(frame, &s_bindings.frames[0])) return BLE_PT_ACTION_PREV;
     if (frame_same(frame, &s_bindings.frames[1])) return BLE_PT_ACTION_NEXT;
+    if(s_remote_model!=PT_GENERIC) {
+        uint8_t code=pt_button_code(s_remote_model,frame->bytes,frame->len);
+        return code==PT_PREV?BLE_PT_ACTION_PREV:code==PT_NEXT?BLE_PT_ACTION_NEXT:BLE_PT_ACTION_NONE;
+    }
     // 阅星瞳协议：裸的一字节报告，报告号和字节下标都为 0，所以整帧就是 0x01 / 0x02。
     // 声明了键盘页的外设上，byte 0 是修饰键字节，那里的 0x01 是左 Ctrl；9 字节帧的 byte 0 是
     // 报告号。两者都不是键码，不能当成翻页。

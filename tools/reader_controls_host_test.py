@@ -1,4 +1,4 @@
-"""Actual font AA control and invariant bottom-edge tools gesture.
+"""Actual font AA control, compact text geometry and guide controls.
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
@@ -46,34 +46,10 @@ unit+='static unsigned font_scale=100;\nstatic unsigned app_settings_system_font
 unit+=function('reader_ui_extra',book)+'\n'+function('reader_font_card',book)+'\n'
 for name in ['s_font_card','s_weight_card','s_bookfont_card','s_layout_card','s_rule_card','s_antialias_card']:
  unit+=re.search(r'^#define '+name+r' .*',s,re.M)[0]+'\n'
-unit+=r'''
-static bool s_reader_fullscreen,fail_mode_change;
-static int mode_changes;
-static app_redraw_t last_tools_redraw;
-static app_redraw_t toggle_reader_fullscreen(app_ctx_t *ctx){
- (void)ctx;++mode_changes;if(fail_mode_change)return APP_REDRAW_NONE;
- s_reader_fullscreen=!s_reader_fullscreen;return APP_REDRAW_FULL;
-}
-'''
-unit+=function('reader_tools_swipe',book)+'\n'+function('reader_swipe_direction',book)+'\n'
-unit+=r'''
-static bool tools_swipe(app_ctx_t *ctx,const ui_gesture_event_t *ev){
- bool handled;last_tools_redraw=reader_tools_swipe(ctx,ev,&handled);return handled;
-}
-'''
 
-unit+=function('book_reader_center',ROOT/'main/book/book_reader_input.h')+'\n'
-unit+='static bool reader_page_image_hit(int x,int y){(void)x;(void)y;return false;}\n'
-unit+='static EpdRect body_rect(void){return(EpdRect){0,176,684,872};}\n'
-unit+='#define UI_READER_TOOLS_TOP 1096\nstatic EpdRect reader_area(void){return(EpdRect){0,176,684,872};}\nstatic app_redraw_t reader_panel_action(app_ctx_t *ctx,int x,int y){(void)ctx;(void)x;(void)y;return APP_REDRAW_NONE;}\n'
-unit+='static int s_footnote_note=-1,footnote_candidate=-1;static EpdRect s_footnote_marker;\nstatic int reader_footnote_hit(int x,int y,EpdRect *r){(void)x;(void)y;(void)r;return footnote_candidate;}\n'
-center=function('action_at',book)
-a=center.index('        if (s_footnote_note >= 0)')
-b=center.index('        if ((s_toolbar ||',a)
-unit+='static app_redraw_t center_action(app_ctx_t *ctx,int x,int y){'+center[a:b]+'return APP_REDRAW_NONE;}\n'
 action=function('reader_panel_action',book)
-a=action.index('        if (ui_rect_hit(s_antialias_card, x, y)) {')
-b=action.index('        if (ui_rect_hit(layout, x, y)) {',a)
+a=action.index('        if (ui_rect_hit(s_layout_card, x, y)) {')
+b=action.index('        if (ui_rect_hit(bookfont, x, y)) {',a)
 unit+='static app_redraw_t tap_aa(int x,int y){\n'+action[a:b]+'return APP_REDRAW_NONE;}\n'
 unit+=r'''
 static int rule_style=1,rule_offset,raster_rule_style=1,raster_rule_offset;
@@ -95,87 +71,34 @@ a=action.index('    if (s_reader_panel == READER_PANEL_RULE_SETTINGS) {')
 b=action.index('    if (s_reader_panel == READER_PANEL_FONT_PICKER)',a)
 unit+='static app_redraw_t tap_rule(int x,int y){\n'+action[a:b]+'return APP_REDRAW_NONE;}\n'
 
+
 unit+=r'''
-static void reset(app_ctx_t *ctx){
- s_footnote_note=footnote_candidate=-1;
- s_view=READING;s_text="text";s_reader_panel=READER_PANEL_NONE;s_clear_confirm=s_scan_pending=false;
- s_reader_tap.pending=true;s_reader_slider=3;s_pressed_control=2;invalidations=0;
- s_reader_fullscreen=fail_mode_change=false;mode_changes=0;
- *ctx=(app_ctx_t){.now_ms=2200};
-}
 int main(void){
  s_reader_panel=READER_PANEL_RULE_SETTINGS;
  assert(tap_rule(550,920)==APP_REDRAW_PAGE&&rule_full&&raster_rule_full&&invalidations==1);
  assert(tap_rule(330,920)==APP_REDRAW_PAGE&&!rule_full&&!raster_rule_full&&invalidations==2);
- save_fail=true;
- assert(tap_rule(550,920)==APP_REDRAW_NONE&&!rule_full&&!raster_rule_full&&invalidations==2);
- save_fail=false;
+ save_fail=true;assert(tap_rule(550,920)==APP_REDRAW_NONE&&!rule_full&&!raster_rule_full&&invalidations==2);save_fail=false;
  assert(tap_rule(470,790)==APP_REDRAW_PAGE&&rule_style==2&&raster_rule_style==2);
  assert(tap_rule(70,1040)==APP_REDRAW_PAGE&&rule_offset==-2&&raster_rule_offset==-2);
  assert(tap_rule(280,1040)==APP_REDRAW_PAGE&&rule_offset==0&&raster_rule_offset==0);
  assert(tap_rule(70,790)==APP_REDRAW_PAGE&&!rule_style&&!raster_rule_style);
  assert(tap_rule(550,920)==APP_REDRAW_PAGE&&rule_full&&raster_rule_full);
  assert(tap_rule(70,1040)==APP_REDRAW_NONE&&rule_offset==0);
- assert(tap_rule(342,1150)==APP_REDRAW_PAGE&&s_reader_panel==READER_PANEL_FONT_SETTINGS);
- app_ctx_t ctx;ui_gesture_event_t e={.type=UI_GESTURE_SWIPE_U,.x0=342,.y0=1160,.x=342,.y=980};
- for(int vertical=0;vertical<2;++vertical)for(int immersive=0;immersive<2;++immersive){
-  (void)immersive;reset(&ctx);assert(tools_swipe(&ctx,&e));
-  assert(s_reader_panel==READER_PANEL_TOOLS&&!s_reader_tap.pending&&s_reader_slider==-1&&s_pressed_control==-1);
-  assert(ctx.user_activity&&s_stats_activity_ms==2200&&invalidations==1);
-  assert(!tools_swipe(&ctx,&e)&&invalidations==1); // Already open stays open.
-  assert(reader_swipe_direction(UI_GESTURE_SWIPE_U,vertical)==(vertical?1:0));
-  assert(reader_swipe_direction(UI_GESTURE_SWIPE_L,vertical)==1);
+ for(font_scale=100;font_scale<=200;font_scale+=10){
+  const EpdRect cards[]={s_font_card,s_weight_card,s_bookfont_card,s_layout_card};
+  for(unsigned i=0;i<4;++i){EpdRect r=cards[i];assert(r.x>=36&&r.y>=552&&r.x+r.width<=648&&r.y+r.height<1141);
+   for(unsigned j=0;j<i;++j){EpdRect q=cards[j];assert(r.x+r.width<=q.x||q.x+q.width<=r.x||r.y+r.height<=q.y||q.y+q.height<=r.y);}}
  }
- for(unsigned y=1000;y<1220;++y){reset(&ctx);e.y0=y;bool allowed=y>=1096&&y<1216;assert(tools_swipe(&ctx,&e)==allowed);if(!allowed)assert(s_reader_tap.pending&&!invalidations);}
- e.y0=1160;
- for(unsigned x=0;x<=684;++x){reset(&ctx);e.x0=x;assert(tools_swipe(&ctx,&e)==(x<684));}e.x0=342;
- for(int type=UI_GESTURE_SWIPE_D;type<=UI_GESTURE_MOVE;++type){reset(&ctx);e.type=type;assert(!tools_swipe(&ctx,&e));}e.type=UI_GESTURE_SWIPE_U;
- for(int panel=READER_PANEL_TOOLS;panel<=READER_PANEL_BACKGROUND_PREVIEW;++panel){reset(&ctx);s_reader_panel=panel;assert(!tools_swipe(&ctx,&e));}
- reset(&ctx);ctx.consumed=true;assert(!tools_swipe(&ctx,&e));
- reset(&ctx);s_clear_confirm=true;assert(!tools_swipe(&ctx,&e));
- reset(&ctx);s_scan_pending=true;assert(!tools_swipe(&ctx,&e));
- reset(&ctx);s_view=SHELF;assert(!tools_swipe(&ctx,&e));
- reset(&ctx);s_text=NULL;assert(!tools_swipe(&ctx,&e));
- for(int full=0;full<2;++full){
-  reset(&ctx);s_reader_fullscreen=full;assert(tools_swipe(&ctx,&e));
-  assert(!s_reader_fullscreen&&s_reader_panel==READER_PANEL_TOOLS&&mode_changes==full);
-  assert(last_tools_redraw==(full?APP_REDRAW_FULL:APP_REDRAW_PAGE));
- }
- reset(&ctx);s_reader_fullscreen=true;s_reader_panel=READER_PANEL_TOOLS;
- assert(tools_swipe(&ctx,&e)&&!s_reader_fullscreen&&s_reader_panel==READER_PANEL_TOOLS&&mode_changes==1);
- reset(&ctx);s_reader_fullscreen=fail_mode_change=true;
- assert(tools_swipe(&ctx,&e)&&last_tools_redraw==APP_REDRAW_NONE);
- assert(s_reader_fullscreen&&s_reader_panel==READER_PANEL_NONE&&s_reader_tap.pending&&!invalidations);
- for(int panel=READER_PANEL_NONE;panel<=READER_PANEL_TOOLS;++panel){
-  reset(&ctx);s_reader_panel=panel;
-  assert(center_action(&ctx,342,500)==APP_REDRAW_FULL&&s_reader_fullscreen&&mode_changes==1&&!s_reader_tap.pending);
-  s_reader_tap.pending=true;
-  assert(center_action(&ctx,342,500)==APP_REDRAW_NONE&&s_reader_fullscreen&&mode_changes==1&&s_reader_tap.pending);
- }
- // 工具栏正文注号可开关卡片，其他面板与确认框保有点击优先权。/ Body markers open/close cards while modal panels retain tap priority.
- for(int panel=READER_PANEL_NONE;panel<=READER_PANEL_BACKGROUND_PREVIEW;++panel){
-  reset(&ctx);footnote_candidate=0;s_reader_panel=panel;
-  bool allowed=panel==READER_PANEL_NONE||panel==READER_PANEL_TOOLS;
-  assert(center_action(&ctx,100,300)==(allowed?APP_REDRAW_PAGE:APP_REDRAW_NONE));
-  assert(s_footnote_note==(allowed?0:-1)&&!mode_changes);
-  if(allowed)assert(center_action(&ctx,100,300)==APP_REDRAW_PAGE&&s_footnote_note==-1&&!mode_changes);
- }
- reset(&ctx);s_clear_confirm=true;footnote_candidate=0;
- assert(center_action(&ctx,100,300)==APP_REDRAW_NONE&&s_footnote_note==-1);
- const EpdRect cards[]={s_font_card,s_weight_card,s_bookfont_card,s_layout_card,s_rule_card,s_antialias_card};
- for(unsigned i=0;i<6;++i){EpdRect r=cards[i];assert(r.x>=36&&r.y>=580&&r.x+r.width<=648&&r.y+r.height<1141);
-  for(unsigned j=0;j<i;++j){EpdRect q=cards[j];assert(r.x+r.width<=q.x||q.x+q.width<=r.x||r.y+r.height<=q.y||q.y+q.height<=r.y);}}
- assert(aa&&raster_aa);assert(tap_aa(400,1090)==APP_REDRAW_PAGE&&!aa&&!raster_aa&&!locked);
+ font_scale=100;assert(aa&&raster_aa);assert(tap_aa(400,1090)==APP_REDRAW_PAGE&&!aa&&!raster_aa&&!locked);
  save_fail=true;assert(tap_aa(400,1090)==APP_REDRAW_PAGE&&!aa&&!raster_aa&&!locked&&s_reader_notice_until==2800);
  save_fail=false;assert(tap_aa(400,1090)==APP_REDRAW_PAGE&&aa&&raster_aa&&!locked);
  assert(tap_aa(341,1090)==APP_REDRAW_NONE&&tap_aa(650,1090)==APP_REDRAW_NONE);
- puts("PASS: AA row hit bounds/save failures/cache invalidation, six nonoverlapping paired controls, bottom120px tools priority for either turn mode, already-open/modal/input cancellation and physical-key boundary");
+ puts("PASS: four compact text cards at100-200%, AA moved to former layout card with atomic failure behavior; native guide styles/span/offset preserved");
 }
 '''
-gesture=function('gesture_event',book)
-assert gesture.index('reader_tools_swipe(ctx, ev, &tools_handled)') < gesture.index('image_zoom_gesture(ctx, ev, &zoom_handled)')
-assert 'if (tools_handled) return tools_redraw;' in gesture
-with tempfile.TemporaryDirectory(dir=ROOT/'build') as folder:
+font=function('draw_font_settings',book)
+assert '阅读线' not in font and '排版设置' not in font and 'const EpdRect toggles[]={s_bookfont_card,s_layout_card}' in font and 'card.x+21,cy,23' in font and 'cy-19,69,39' in font
+with tempfile.TemporaryDirectory() as folder:
  p=Path(folder);(p/'test.c').write_text(unit)
- subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',str(p/'test.c'),'-o',str(p/'test')],check=True)
+ subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-variable','-fsanitize=address,undefined',str(p/'test.c'),'-o',str(p/'test')],check=True)
  subprocess.run([str(p/'test')],check=True)

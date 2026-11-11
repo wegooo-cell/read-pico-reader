@@ -29,7 +29,8 @@ static void bulk_draw_footer(uint8_t *fb){
 }
 static void draw_bulk(uint8_t *fb,int leaf){
     ui_clear_page(fb);ui_nav_status(fb);
-    ui_text_box(fb,(EpdRect){36,80,500,76},52,"书架管理",EPD_DRAW_ALIGN_LEFT,false);
+    ui_text_box(fb,(EpdRect){36,80,480,76},52,"书架管理",EPD_DRAW_ALIGN_LEFT,false);
+    ui_draw_icon(fb,552,112,36,UI_ICON_PALETTE,0x30);
     ui_draw_icon(fb,616,112,36,s_bulk_grid?UI_ICON_LIST:UI_ICON_LAYOUT_GRID,0x30);
     EpdRect search=bulk_filter_rect(2);
     ui_fill_round_rect(fb,search,18,0xf0);ui_draw_control_frame(fb,search,18,0xc0);
@@ -41,13 +42,8 @@ static void draw_bulk(uint8_t *fb,int leaf){
     if(s_bulk_selecting)snprintf(count,sizeof(count),"共 %u 本 · 已选 %u 本",(unsigned)s_visible_count,(unsigned)selected_count());
     else snprintf(count,sizeof(count),"共 %u 本",(unsigned)s_visible_count);
     ui_text_box(fb,(EpdRect){36,244,204,46},21,count,EPD_DRAW_ALIGN_LEFT,false);
-    const char *order=shelf_order_mode()==0?"名称":shelf_order_mode()==1?"最近阅读":"添加时间";
-    char label[80];snprintf(label,sizeof(label),"书架排序：%s",order);
-    EpdRect sort=bulk_filter_rect(1);
-    if(s_pressed_control==111)ui_draw_pressed_round_rect(fb,sort,UI_BTN_RADIUS);
-    else ui_draw_choice_round_rect(fb,sort,UI_BTN_RADIUS,false);
-    ui_text_box(fb,(EpdRect){264,248,246,38},24,label,EPD_DRAW_ALIGN_CENTER,false);
-    ui_draw_icon(fb,526,267,23,shelf_order_desc()?UI_ICON_CHEVRON_DOWN:UI_ICON_CHEVRON_UP,UI_GRAY_BLACK);
+    draw_shelf_order_button(fb,bulk_filter_rect(1),111);
+    draw_control(fb,ui_book_manage_import(),"+ 导入",115);
     draw_control(fb,ui_book_manage_select(),s_bulk_selecting?"取消":"选择",113);
     ui_hairline(fb,310,36,612,0xdc);
     for(int row=0;row<shelf_rows();++row){

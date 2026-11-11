@@ -273,7 +273,16 @@ typedef struct {
     bool f_used;           ///< 槽位已被占用 / the slot is in use
 } ttf_slot_t;
 
-static ttf_slot_t s_slots[TTF_FONT_SLOTS];
+// 用户2026-11-11：字体槽元数据（约9KB）挪到外置PSRAM，把稀缺的内部RAM留给WiFi/BLE射频
+// 路径；同时保持固件内所有既有槽位、缓存与线程游标语义不变。
+// User2026-11-11: move the font-slot metadata (~9 KB) to external PSRAM so the scarce internal
+// RAM stays available for the WiFi/BLE radio paths; slot/cursor/cache semantics are unchanged.
+#if defined(ESP_PLATFORM)
+#define TTF_SLOTS_ATTR __attribute__((section(".ext_ram.bss")))
+#else
+#define TTF_SLOTS_ATTR
+#endif
+static ttf_slot_t s_slots[TTF_FONT_SLOTS] TTF_SLOTS_ATTR;
 #if KIIKO_BOARD_METALIO47
 // 只有独立装载游标按线程保存；现有渲染游标和绘制锁契约不变。
 // Only the detached loader cursor is thread-local; retain the existing render cursor/lock contract.

@@ -158,7 +158,7 @@ int main(void){
 with tempfile.TemporaryDirectory(dir=ROOT / 'build') as folder:
     source, exe = Path(folder) / 'dots.c', Path(folder) / 'dots'
     source.write_text(unit)
-    subprocess.run(['cc', '-std=gnu11', '-O1', '-Wall', '-Wextra', '-Werror',
+    subprocess.run(['cc','-Dshelf_display_style=app_settings_shelf_style', '-std=gnu11', '-O1', '-Wall', '-Wextra', '-Werror',
                     '-fsanitize=address,undefined', '-I'+str(ROOT/'main/ui'),
                     str(source), str(ROOT/'main/ui/ui_image_dither.c'), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

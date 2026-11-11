@@ -50,10 +50,9 @@ static bool white_tail_build(white_tail_t *slot,const EpdWaveform *source,int mo
     slot->source=source;
     return true;
 }
-static const EpdWaveform* main_quality_waveform(
+static const EpdWaveform* main_quality_waveform_impl(
     const EpdWaveform* source,enum EpdDrawMode draw_mode,unsigned white_phases,bool equal_white
 ) {
-#if KIIKO_S31_MAIN_CLEAN
     enum { SLOTS=24 };
     static white_tail_t slots[SLOTS];
     const int mode=draw_mode&0x3f;
@@ -71,9 +70,20 @@ static const EpdWaveform* main_quality_waveform(
     while(index<SLOTS && slots[index].source)++index;
     if(index==SLOTS || !white_tail_build(&slots[index],source,mode,white_phases,equal_white))return source;
     return &slots[index].wave;
+}
+static const EpdWaveform* main_quality_waveform(const EpdWaveform* source,
+        enum EpdDrawMode draw_mode,unsigned white_phases,bool equal_white) {
+#if KIIKO_S31_MAIN_CLEAN
+    return main_quality_waveform_impl(source,draw_mode,white_phases,equal_white);
 #else
     (void)draw_mode;(void)white_phases;(void)equal_white;return source;
 #endif
+}
+// 用户2026-11-10反馈快刷跨主页背景残影：独立启用同向补白，不依赖旧实验开关。
+// User2026-11-10 requests fast root background cleanup independently of the legacy experiment.
+const EpdWaveform* display_main_fast_background_waveform_with_phases(
+        const EpdWaveform* source,enum EpdDrawMode mode,unsigned white_phases) {
+    return main_quality_waveform_impl(source,mode,white_phases,true);
 }
 const EpdWaveform* display_main_clean_waveform_with_phases(
     const EpdWaveform* source,enum EpdDrawMode mode,unsigned white_phases

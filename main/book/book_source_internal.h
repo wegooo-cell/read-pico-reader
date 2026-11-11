@@ -55,3 +55,7 @@ esp_err_t book_txt_title(book_txt_t *book, size_t i, bool navigation, char *buf,
 esp_err_t book_txt_load_target(book_txt_t *book, size_t i, size_t source_offset,
                                size_t *text_offset, char **utf8, size_t *len);
 size_t book_txt_nav_position(const book_txt_t *book,size_t chapter,size_t text_offset);
+
+/// 只读与文件身份匹配的已有索引；未知/过期/损坏返回0，不打开或解析书籍。
+/// Read an identity-matching existing index only; unknown/stale/corrupt returns zero without parsing a book.
+uint16_t book_txt_cached_chapter_count(const char *path,uint32_t size,int64_t modified);

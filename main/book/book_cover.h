@@ -103,3 +103,10 @@ bool book_png_file_layer(const char *path,unsigned width,unsigned height,uint8_t
 /// 流式透明层：仅保留源行窗口和一条输出行。/ Stream premultiplied gray/alpha through bounded row buffers.
 bool book_png_file_layer_rows(const char *path, unsigned width, unsigned height,
     bool (*sink)(void *, unsigned, unsigned, const uint8_t *, const uint8_t *), void *context);
+
+/// 列表专用最终尺寸缓存；与完整原比例封面隔离，IO阶段不调用字库。
+/// List-only final-size caches, isolated from uncropped covers; IO never calls fonts.
+int book_cover_load_sized_io(const char *path,const char *title,const char *author,uint8_t *out,
+                            unsigned width,unsigned height,bool *auto_cache);
+void book_cover_store_sized(const char *path,const char *title,const char *author,const uint8_t *pixels,
+                            unsigned width,unsigned height,int64_t size,int64_t modified);

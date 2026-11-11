@@ -11,6 +11,7 @@ u=r'''
 #include "ui/ui_reader_layout.h"
 int main(void){
  original_layout_test();
+ book_layout_set_vertical_balance(true);
  char text[12000];memset(text,'a',sizeof(text));for(int i=9;i<11999;i+=10)text[i]=' ';text[11999]=0;
  book_layout_set_vertical(false);book_layout_set_typography(0);book_layout_set_first_line_indent(0);
  book_layout_set_spacing(130,0);book_layout_set_chapter_lead(0,0);test_cjk_advance=0;
@@ -20,16 +21,24 @@ int main(void){
  assert(book_layout_build(text,11999,now,48));captured_count=0;drawn[0]=0;book_layout_draw_page(fb,0,now,48);
  assert(UI_READER_HEADER_TEXT_PX==25&&UI_READER_FOOTER_TEXT_PX==21);
  assert(ui_reader_progress().y==1194&&ui_reader_progress().height==6&&UI_READER_FOOTER_TEXT_Y==1180);
- assert(captured_count==before&&now.y==80);assert(now.y+now.height==ui_reader_footer().y);
+ assert(captured_count<=before&&now.y==84);assert(now.y+now.height==ui_reader_footer().y-16);
  assert(UI_READER_FOOTER_TEXT_Y-UI_READER_FOOTER_TEXT_PX/2>=ui_reader_footer().y);
  assert(UI_READER_FOOTER_TEXT_Y+UI_READER_FOOTER_TEXT_PX/2<ui_reader_progress().y);
- printf("PASS: real layout at48px/130%% reserves80px status row with%u/%u lines; body, metadata and progress remain disjoint\n",before,captured_count);
+ printf("PASS: real layout at48px/130%% reserves84px text top with%u/%u lines; body, metadata and progress remain disjoint\n",before,captured_count);
+ // 对照8863相同字体和正文：保留尾部边界，首行基线至少上移6px，不能裁入状态栏。
+ // Compare8863 with identical text/font: preserve the bottom edge, move the first baseline up at least6px and stay below chrome.
+ EpdRect prior={24,96,636,1056};
+ assert(book_layout_build(text,11999,prior,48));captured_count=0;drawn[0]=0;book_layout_draw_page(fb,0,prior,48);
+ int prior_first=captured_y[0];unsigned prior_lines=captured_count;
+ assert(book_layout_build(text,11999,now,48));captured_count=0;drawn[0]=0;book_layout_draw_page(fb,0,now,48);
+ assert(captured_count>=prior_lines&&captured_y[0]<=prior_first-6&&captured_y[0]>=now.y);
+ assert(now.y>=ui_reader_header().y+ui_reader_header().height);
  EpdRect full=ui_reader_body(true,true,24,false);
- assert(full.y==24&&full.y+full.height==1202);
+ assert(full.y==16&&full.y+full.height==1188);
  assert(book_layout_build(text,11999,full,48));captured_count=0;drawn[0]=0;book_layout_draw_page(fb,0,full,48);
  assert(captured_count>before+1);
  assert(ui_reader_fullscreen_progress().y==1207&&ui_reader_fullscreen_progress().height==3);
- puts("PASS: full immersion recovers release body24..1202 and thin1207/3px progress, adding more real text lines");
+ puts("PASS: full immersion recovers symmetric body16..1188 and thin1207/3px progress, adding more real text lines");
  // Both chrome states feed identical geometry to the real paginator, including vertical text.
  for(int style=0;style<2;++style)for(int vertical=0;vertical<2;++vertical){
   book_layout_set_vertical(vertical);

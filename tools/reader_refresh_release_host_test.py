@@ -11,6 +11,8 @@ root=Path(__file__).resolve().parents[1]
 unit=r'''
 #include <assert.h>
 #include <stdbool.h>
+static void book_shelf_page_release(void){}
+static bool s_shelf_page_key_valid,s_shelf_page_loading,s_shelf_page_cached;
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -32,6 +34,9 @@ enum {MODE_DU,MODE_GL16,MODE_GC16,APP_PAGE_REFRESH_MODE=MODE_GL16};
 #define UI_BAR_TOP (UI_LOCK_HEIGHT-24-UI_BAR_H)
 #define READER_FULLSCREEN_PROGRESS_TOP (UI_LOCK_HEIGHT-12)
 static int E0470_WAVEFORM,E0470_FULL_WAVEFORM,E0470_FOLLOW_WAVEFORM;
+#ifndef display_main_normal_waveform
+#define display_main_normal_waveform() (&E0470_WAVEFORM)
+#endif
 static int reader_waveform,soft_turn_waveform;
 static const int *display_main_gray_waveform(void){return &reader_waveform;}
 static const int *display_reader_soft_turn_waveform(void){return &soft_turn_waveform;}
@@ -44,6 +49,8 @@ static unsigned s_cover_dirty_mask,s_cover_present_mask;
 static unsigned s_turns;
 static int64_t s_reader_clock_minute,s_reader_clock_painted_minute,s_du_ms;
 static const char *s_text="text";
+static bool reader_rails_held;
+void display_reader_keep_rails(bool active){reader_rails_held=active;}
 static EpdRect s_area,s_du_area;
 static void reader_prefetch_end(bool started){assert(!started);}
 static int calls,selected,fail,rendered,prepares,images,tick;
@@ -98,6 +105,7 @@ static enum EpdDrawError update_display_text_turn(void *hl,EpdRect area,int dir)
 }
 #define update_display_fast_page(...) push(19)
 '''
+unit+='enum {READER_PANEL_TOUCH_SETTINGS=90,READER_PANEL_TOUCH_MORE=91};\nstatic bool s_rc_full_was_visible,s_rc_double_pending;\nstatic bool rc_custom_modal(void){return false;}\nstatic void rc_pause_auto(void){}\nstatic void rc_stop_auto(void){}\nstatic void rc_cancel_side(void){}\n'
 unit+='static bool s_shelf_key_paint_pending;\n'
 unit+='static bool reader_indent_present(app_ctx_t *ctx,app_redraw_t redraw){(void)ctx;(void)redraw;return false;}\n'
 for name in ('clip_refresh_rect','ui_rect_union'):
@@ -107,6 +115,26 @@ for name in ('reader_area','reader_fullscreen_progress_area','progress_rect'):
  unit+=function(name,root/'main/apps/app_book.c')+'\n'
 unit+='static enum EpdDrawError reader_present_crop(void *hl,const int *wave,int mode,EpdRect area,bool full){return full?update_display_area_full_with(hl,wave,mode,area):update_display_area_diff_with(hl,wave,mode,area); }\n'
 unit+=function('present',root/'main/apps/app_book.c')
+
+unit+=r"""
+static bool s_shelf_key_mode,s_category_menu;
+static int s_shelf_key_delta,s_shelf_key_pressed;
+static struct {bool pending;} s_reader_tap;
+static char s_path[16]="book";
+static int64_t s_stats_last_ms;
+static int lock_saves,lock_flushes;
+static void reader_indent_hold_cancel(void){assert(!reader_rails_held);}
+static void shelf_category_remember(app_ctx_t *ctx){(void)ctx;assert(!reader_rails_held);}
+static void track_ticket_stats(app_ctx_t *ctx){(void)ctx;}
+static void save_progress(void){assert(!reader_rails_held);++lock_saves;}
+static void lock_draw(void){assert(!reader_rails_held);}
+static void invalidate_prep(void){}
+static void unlock_draw(void){}
+static void book_progress_set_last_path(const char *path){assert(!strcmp(path,s_path));}
+static void flush_ticket_stats(void){++lock_flushes;}
+"""
+unit+=function('before_lock',root/'main/apps/app_book.c')
+
 unit+=r'''
 static void reset(void){
  calls=selected=rendered=prepares=fail=images=tick=0;background=immersive=false;s_view=s_presented_view=READING;
@@ -119,6 +147,8 @@ static void reset(void){
 static void same_area(EpdRect a,EpdRect b){if(a.x!=b.x||a.y!=b.y||a.width!=b.width||a.height!=b.height)fprintf(stderr,"area mismatch tag%d: %d,%d %dx%d expected %d,%d %dx%d\n",selected,a.x,a.y,a.width,a.height,b.x,b.y,b.width,b.height);assert(a.x==b.x&&a.y==b.y&&a.width==b.width&&a.height==b.height);}
 int main(void){
  app_ctx_t ctx={0};
+ reader_rails_held=true;before_lock(&ctx);
+ assert(!reader_rails_held&&lock_saves==1&&lock_flushes==1&&!calls);
  // 首页/书架/目录/唤醒进入正文：纯文字、背景或图片都只完整GC16一次，成功后重置清理计数。
  // Home/shelf/TOC/wake entry: text, wallpaper and images each get one complete GC16, resetting the cleanup count on success.
  const int origins[]={-1,SHELF,TOC};

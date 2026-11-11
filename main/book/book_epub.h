@@ -76,3 +76,7 @@ esp_err_t book_epub_resume_io(book_epub_t *book);
 int book_epub_prefetch_step(book_epub_t *book,size_t chapter);
 #else
 #endif
+
+/// 只读与文件身份匹配的已有索引；未知/过期/损坏返回0，不打开或解析书籍。
+/// Read an identity-matching existing index only; unknown/stale/corrupt returns zero without parsing a book.
+uint16_t book_epub_cached_chapter_count(const char *path,uint32_t size,int64_t modified);

@@ -5,6 +5,12 @@
 - S31 书架封面：修复“逐本揭示”时先到达的封面被整页门控按占位标题推屏、脏标记随即清掉而不再补画的问题，改为每格按自身就绪状态绘制；封面任务失败不再永久跳过，按行退避重试（3 次后留占位并每 5 秒再试），TF 挂载交接期间保留请求不丢格；进入书架/换页时先同步读取卡上成品封面缓存，首帧即带封面，只有缓存缺失才进后台解码。继承上轮默认封面不落盘、封面缓存 schema 作废旧“假封面”及 S31 JPEGDEC 小平面兜底。S31 本地测试，版本号保持 rc110，未发布官网/OTA。
   S31 shelf covers: per-cell reveal no longer pushes early covers as title placeholders whose dirty bits are then cleared; failed cover jobs retry with per-row backoff (three attempts, then a placeholder retried every five seconds) and survive card mount handoffs; entering or paging the shelf preloads finished rasters from the card so the first frame carries covers and only cache misses reach the background decoder. Inherit the previous round's no-default-cover persistence, cache-schema invalidation of poisoned covers and S31 JPEGDEC plane fallback. Local S31 test only; version stays rc110 and nothing is published.
 
+- S31 rc111 整页书架缓存：含“默认/生成封面”的页面不再写入整页缓存（封面任务结果新增 generated 标记），整页缓存 artwork 版本 3→4 作废旧缓存；生成封面也不再进入 RAM/精简列表缓存，避免一次解码失败被当成真封面固化。全部为真封面的页面保留原缓存加速，失败的书每次进入都会重新尝试解码。S31 本地测试（rc111 同步源码），未发布官网/OTA。
+  S31 rc111 whole-page shelf cache: pages containing a generated default cover are no longer captured (the cover result now carries a generated flag), and the page-cache artwork version is bumped 3→4 to discard old entries; generated covers also stop entering the RAM/sized-list caches so a single decode failure cannot masquerade as a real cover. Pages made only of real covers keep the cache acceleration and failed books retry decoding on every entry. Local S31 test on the rc111 sync source; nothing is published.
+
+- S31 rc111 WiFi/传书内存：BLE 控制器约占 40KB 内部 RAM；“仅联网”会话（连接路由器/对时/云端同步）原设计不释放 BLE，rc111 下开始前内部 RAM 只剩约 61KB，WiFi 静态 RX 缓冲初始化失败（`wifi:malloc buffer fail`）并在界面提示“连接启动失败”。现在内部 RAM <100KB 时会话开始前也释放 BLE；传书启动前等待 internal/DMA 余量达标并对 `esp_wifi_init` 有界重试（最多 4s+3 次）；独占传书 16 槽大 RX 池仅在内部 RAM ≥128KB 时启用；字体槽元数据 9KB 挪到 PSRAM。S31 真机验证：释放 BLE 后内部 RAM 100KB/ DMA 34KB，WiFi 连接成功并拿到 IP。
+  S31 rc111 WiFi/transfer memory: the BLE controller holds ~40 KB internal RAM; network-only sessions (router connect/time sync/cloud) used to keep BLE alive, leaving only ~61 KB and failing WiFi static RX buffer init (`wifi:malloc buffer fail`), which surfaced as "connection start failed". Sessions now also release BLE when internal RAM is below 100 KB; transfer start waits for internal/DMA headroom and retries `esp_wifi_init` (up to 4 s + 3 attempts); the bulk 16-slot RX pool is only enabled with ≥128 KB internal RAM, and the 9 KB font-slot metadata moved to PSRAM. Verified on S31: after BLE release internal RAM 100 KB / DMA 34 KB and WiFi connected with an IP.
+
 ## 本地测试 / Local test — 2026-11-06
 
 - S31 屏幕修复加强：盲刷黑白从 3 个清屏循环提高到 12 个（4 轮 × 每轮 10 黑 + 13 白 + 3 收尾相），收尾再连做 3 次完整 48 相 GC16 全刷，耗时约 5-7 秒，用于清顽固残影。
@@ -23,6 +29,14 @@
 
 - 跨文件脚注：正文里的 `文件#片段` 链接现在会到目标 XHTML 的 id 元素取注释文本，弹窗显示；注释页里指回正文的 key/back/noteref 回跳链接自动跳过。文字注号（如“注１”）也按排版位置可点，热区按字号放大；图标注号保持原行为。
   Cross-file footnotes: body links of the form `file#fragment` now pull the note text from the target XHTML's id element and show it in the pop-up; key/back/noteref back-links inside note pages are skipped. Text markers (e.g. "注１") are tappable from their typeset position with a padded hotspot; icon markers keep their old behaviour.
+
+## Pico 0.3.3-rc106 / Metalio S31 0.3.3-rc111
+
+- 阅读设置按排版、翻页与手势分组。自动翻页间隔为 1–10 秒，切换全屏时保持开启。
+- 支持自定义触摸动作，左右横滑固定翻页，底部三个上滑区域可分别设置。
+- 书架补充进度和已读标记，可按阅读进度排序。
+- Pico 在阅读正文及工具面板空闲时保留已上电的 EPD 高压供电，退出阅读恢复 8 秒空闲断电。
+- 两板同步阅星瞳导入、蓝牙翻页器适配和书架缓存改动。S31 同步电量显示策略。
 
 ## Pico 0.3.3-rc105 / Metalio S31 0.3.3-rc110 — 2026-11-04
 

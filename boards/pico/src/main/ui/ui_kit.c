@@ -528,6 +528,14 @@ void ui_text_fixed_context_aa_vc(uint8_t *fb,int x,int center_y,int px,const cha
     }
 }
 
+// 与题头绘制使用同一字体选择，供省略号及按钮避让准确量宽。
+// Match header font selection when measuring ellipses and accessory clearance.
+int ui_text_title_width_px(int px,const char *text,const char *font_sample) {
+    const char *sample=font_sample?font_sample:text;
+    bool builtin=!title_uses_active_font(sample)&&ui_font_has_text(sample);
+    return builtin?ui_font_text_width_px(px,text):ttf_text_width_px(px,text);
+}
+
 int ui_text_title_fit(char *text, int preferred_px, int width, const char *font_sample) {
     const char *sample = font_sample ? font_sample : text;
     bool builtin = !title_uses_active_font(sample) && ui_font_has_text(sample);

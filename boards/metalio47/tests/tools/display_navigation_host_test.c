@@ -34,6 +34,8 @@ static unsigned clean_wave_calls;
 static unsigned background_wave_calls;
 static unsigned last_clean_strength;
 const EpdWaveform* display_main_clean_waveform_with_phases(const EpdWaveform* source,enum EpdDrawMode mode,unsigned white){assert(source&&(mode==MODE_DU||mode==MODE_GL16));assert(white==0||white==6||white==8);if(white){++clean_wave_calls;last_clean_strength=white;}return source;}
+static unsigned fast_background_wave_calls;
+const EpdWaveform* display_main_fast_background_waveform_with_phases(const EpdWaveform* wave,enum EpdDrawMode mode,unsigned white){assert(white==6||white==8);++fast_background_wave_calls;return display_main_clean_waveform_with_phases(wave,mode,white);}
 const EpdWaveform* display_main_background_waveform_with_phases(const EpdWaveform* wave,enum EpdDrawMode mode,unsigned white){++background_wave_calls;return display_main_clean_waveform_with_phases(wave,mode,white);}
 const EpdWaveform* display_main_switch_waveform(const EpdWaveform* source,enum EpdDrawMode mode){
     assert(source&&(mode==MODE_DU||mode==MODE_GL16));++switch_wave_calls;return source;
@@ -1002,6 +1004,18 @@ int main(void) {
     display_main_switch_erase_set(true);display_main_transition_arm(&owner_a,false,true);
     assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS);assert_final();
     assert(water_calls==1&&calls==1&&full_calls==1&&!gc_calls&&!clears&&last_area.height==UI_NAV_MARKER_SCAN_END);display_main_switch_erase_set(false);
+    // The approved fast permission reaches both the root and binary Settings/Files outlet.
+    reset();main_mode=APP_MAIN_REFRESH_FAST;target(14);display_main_quality_set(6);display_main_switch_erase_set(true);
+    assert(!display_main_fast_background_set(true));unsigned fast_before=fast_background_wave_calls;
+    display_main_transition_arm(&owner_a,false,true);
+    assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS);assert_final();
+    assert(fast_background_wave_calls>fast_before&&calls==1&&full_calls==1&&!gc_calls&&!clears&&last_area.height==UI_NAV_MARKER_SCAN_END);
+    display_main_fast_background_set(false);display_main_switch_erase_set(false);
+    reset();main_mode=APP_MAIN_REFRESH_FAST;target(15);display_system_navigation_set(true);
+    bool prior_binary=display_system_binary_set(true);display_main_quality_set(8);display_main_switch_erase_set(true);display_main_fast_background_set(true);fast_before=fast_background_wave_calls;
+    assert(update_display_area_diff_with(&hl,&main_bw,MODE_DU,(EpdRect){0,0,H,W})==EPD_DRAW_SUCCESS);assert_final();
+    assert(fast_background_wave_calls>fast_before&&calls==1&&full_calls==1&&!gc_calls&&!clears&&last_area.height==UI_NAV_MARKER_SCAN_END);
+    display_system_binary_set(prior_binary);display_system_navigation_set(false);display_main_fast_background_set(false);display_main_switch_erase_set(false);
     puts("PASS: fast/ripple root background scope,whole blank masks,marker/nav boundary,identical-target skip and single-output OOM/phase fallback");
     puts("main navigation: root-only whitening retained; shelf37 art/chrome switch together on root/same-page output, no extra pass or clears; OOM/full/failure fallback and generic gray scopes retained");
     return 0;

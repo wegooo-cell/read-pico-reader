@@ -11,6 +11,7 @@
 #include "ui_nav_layout.h"
 
 #define UI_NAV_BACK_BORDER_GRAY 0x58
+#define UI_NAV_BACKGROUND_GRAY 0xe0
 
 void ui_nav_draw(uint8_t *fb, int active);
 void ui_nav_status(uint8_t *fb);

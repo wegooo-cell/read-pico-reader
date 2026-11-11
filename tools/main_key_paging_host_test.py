@@ -24,7 +24,7 @@ typedef enum{APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL}app
 struct app_desc_s;
 typedef struct{int leaf;int64_t now_ms;bool consumed;const struct app_desc_s *request_app;uint8_t *fb;}app_ctx_t;
 typedef struct app_desc_s{int tab;bool(*on_main_key)(app_ctx_t*,int,app_redraw_t*);}app_desc_t;
-static bool s_shelf_key_mode,s_shelf_key_paint_pending,s_category_menu,s_clear_confirm,s_batch_confirm;
+static bool s_shelf_key_mode,s_shelf_key_paint_pending,s_category_menu,s_sort_menu,s_clear_confirm,s_batch_confirm;
 static int s_shelf_key_pressed,s_shelf_key_delta,s_view=SHELF,s_visible_count=20;
 static int64_t s_shelf_key_until;
 static EpdRect s_area;
@@ -34,11 +34,21 @@ static int leaves(void){return 5;}
 static EpdRect ui_pager_area(void){return(EpdRect){36,1006,612,50};}
 static void ui_fill_rect_fast(EpdRect a,int c,uint8_t*f){(void)c;(void)f;assert(a.x==36&&a.y==1006&&a.width==612&&a.height==50);}
 static void ui_pager_draw(uint8_t *fb,const char *label,int page,int pages,bool key_mode,int pressed){
- (void)fb;assert(page>=0&&page<pages&&pages==5&&strstr(label,"20本书"));if(key_mode)++outlines;if(pressed>=0){assert(pressed==UI_PAGER_PREVIOUS||pressed==UI_PAGER_NEXT);++presses;}
+ (void)fb;assert(page>=0&&page<pages&&pages==5&&!label[0]);if(key_mode)++outlines;if(pressed>=0){assert(pressed==UI_PAGER_PREVIOUS||pressed==UI_PAGER_NEXT);++presses;}
 }
 static app_redraw_t shelf_turn_page(app_ctx_t *ctx,int d){if(ctx->leaf+d<0||ctx->leaf+d>=leaves())return APP_REDRAW_NONE;ctx->leaf+=d;++turns;return APP_REDRAW_PAGE;}
 static int app_index_of(const app_desc_t *p){return p->tab;}
 static void ui_nav_request(app_ctx_t*c,int tab){(void)c;requests=tab;}
+'''
+
+u+=r'''
+#define EPD_DRAW_ALIGN_CENTER 1
+static EpdRect shelf_page_label_rect(int page,int pages){(void)page;(void)pages;return(EpdRect){280,1006,60,50};}
+static void ui_text_fixed_vc(uint8_t*f,int x,int y,int px,const char*label,int align,bool inverse){(void)f;(void)align;(void)inverse;assert(x>204&&x<480&&y==1031&&px<=32&&strchr(label,'/'));}
+static void draw_shelf_search_button(uint8_t*f,int page,int pages){(void)f;(void)page;(void)pages;}
+static EpdRect shelf_pager_group_rect(int page,int pages){(void)page;(void)pages;return(EpdRect){240,1004,204,54};}
+static int ui_text_fixed_width_px(int px,const char*text){(void)text;return px*2;}
+static void epd_fill_circle(int x,int y,int radius,int color,uint8_t*fb){(void)x;(void)fb;assert(y==1031&&radius==2&&color==0x80);}
 '''
 for n in ('draw_shelf_pager','shelf_key_paint','shelf_main_key','shelf_key_tick'):u+=function(n,b)+'\n'
 u+=function('main_key_action',r/'main/app/app_loop.c')+'\n'

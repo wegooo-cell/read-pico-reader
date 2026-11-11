@@ -277,3 +277,7 @@ ble_pt_action_t ble_pt_action_for_frame(const ble_pt_frame_t *frame);
 /// Resolve a HID usage to an action via the built-in map only; separate because a usage has
 /// no raw code. The built-in map covers the YueXingTong protocol: 0x01 previous, 0x02 next.
 ble_pt_action_t ble_pt_action_for_usage(uint8_t usage, uint8_t mods);
+
+/// Consume a recognized remote standby request. The UI applies its normal lock guards;
+/// this intent never wakes/unlocks the device and is excluded from page-key learning.
+bool ble_pt_take_standby(void);

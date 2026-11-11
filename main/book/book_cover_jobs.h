@@ -11,6 +11,7 @@ typedef struct {
     bool list,fast,natural;
     // Reader idle preparation must never render placeholder glyphs with the reading face.
     bool artwork_only;
+    bool metadata_only,with_chapters; ///< 当前页元数据/相邻页预热 / Visible metadata or neighbor warming
     unsigned width,height,stride,contrast,phase;
     int x,y;
 } book_cover_job_t;
@@ -18,6 +19,10 @@ typedef struct {
     uint8_t *pixels;
     unsigned width,height;
     bool fast,white_edge;
+    /// 由标题生成的默认封面；不得进入整页书架缓存，否则失败会被固化。
+    /// Generated default cover; never enters the whole-page shelf cache or a failure freezes.
+    bool generated;
+    bool metadata;uint16_t chapters; ///< 来源校验后的章节数 / Source-validated chapter total
     off_t size;
     int64_t modified;
 } book_cover_result_t;
@@ -30,3 +35,6 @@ int book_cover_jobs_take(unsigned generation,unsigned slot,book_cover_result_t *
 void book_cover_jobs_cancel(unsigned generation);
 /// 仅卸载/睡眠前收齐文件句柄，导航不等待。/ Join handles only before unmount/sleep; navigation never waits.
 bool book_cover_jobs_quiesce(unsigned timeout_ms);
+
+/// 仅在没有待接收/运行作业时让后台预热借用队列。/ Background warming may borrow only an empty/quiescent queue.
+bool book_cover_jobs_idle(void);

@@ -7,21 +7,49 @@
  */
 
 #include "e0470_epaper_waveform.h"
+#include "epdiy.h"
 
 #include <assert.h>
+#include <stdbool.h>
 #include <string.h>
 
 #include "e0470_waveform_trim.h"
 #include "my_waveform_du.h"
 #include "my_waveform_gc.h"
 #include "my_waveform_gl.h"
-#if KIIKO_S31_DU14
+#if KIIKO_S31_DU14 || KIIKO_S31_SETTINGS_SHORT_MOTION
 #include "my_waveform_du14.h"
 #endif
 
 const EpdWaveform* e0470_du14_waveform(void) {
 #if KIIKO_S31_DU14
     return &MY_WAVEFORM_DU14;
+#else
+    return NULL;
+#endif
+}
+
+// 仅设置列表临时黑白帧；保留原14相迁移及扫描时长，同色全部保持，不把补黑扩展至静止字。
+// Temporary settings BW frames only: retain14-phase transitions/timing and hold all equal pairs without re-driving stationary glyphs.
+const EpdWaveform* e0470_settings_motion_waveform(void) {
+#if KIIKO_S31_SETTINGS_SHORT_MOTION
+    enum { PHASES=14 };
+    static uint8_t data[PHASES][16][4];
+    static const EpdWaveformPhases phases={PHASES,(const uint8_t*)data,NULL};
+    static const EpdWaveformPhases *ranges[]={&phases};
+    static const EpdWaveformMode mode={MODE_DU,1,ranges};
+    static const EpdWaveformMode *modes[]={&mode};
+    static const EpdWaveform wave={1,1,modes,my_du14_intervals};
+    static bool ready;
+    if(!ready) {
+        const EpdWaveformPhases *raw=e0470_waveform_phases(&MY_WAVEFORM_DU14,MODE_DU);
+        if(!raw||raw->phases!=PHASES||!raw->luts||raw->phase_times)return NULL;
+        memcpy(data,raw->luts,sizeof(data));
+        for(int f=0;f<PHASES;++f)for(int gray=0;gray<16;++gray)
+            data[f][gray][gray/4]&=(uint8_t)~(3u<<(6-2*(gray%4)));
+        ready=true;
+    }
+    return &wave;
 #else
     return NULL;
 #endif

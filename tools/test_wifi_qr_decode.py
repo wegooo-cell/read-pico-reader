@@ -6,6 +6,7 @@ from PIL import Image
 import zxingcpp
 
 samples = {
+    "cloud": "x" * 900,
     "url-ap": "http://192.168.4.1",
     "url-sta": "http://192.168.123.234",
     "normal": "WIFI:T:WPA;S:ReadPico-5945;P:readpico;;",

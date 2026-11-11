@@ -5,6 +5,7 @@
 #include "book_cover_jobs.h"
 #include "book_cover_auto.h"
 #include "book_title.h"
+#include "book_source.h"
 #include "ui_image_dither.h"
 #include "read_pico_sd.h"
 #if KIIKO_BOARD_METALIO47
@@ -47,9 +48,15 @@ static bool current(unsigned generation) {
 }
 static void prepare(cover_job_slot_t *job,unsigned generation) {
     book_cover_job_t *q=&job->request;unsigned sw=BOOK_COVER_W,sh=BOOK_COVER_H;
+    job->result.generated=false;
+    const bool compact=q->list&&!q->natural&&q->width&&q->height&&q->width<=BOOK_COVER_W&&q->height<=BOOK_COVER_H;
     struct stat st;if(!current(generation)||stat(q->path,&st)||!S_ISREG(st.st_mode))return;
     if(job->automatic&&(job->result.size!=st.st_size||job->result.modified!=st.st_mtime))return;
     job->result.size=st.st_size;job->result.modified=st.st_mtime;
+    if((q->metadata_only||q->with_chapters)&&!job->result.metadata){
+        job->result.chapters=st.st_size>=0&&(uint64_t)st.st_size<=UINT32_MAX?book_cached_chapter_count(q->path,(uint32_t)st.st_size,(int64_t)st.st_mtime):0;
+        job->result.metadata=true;if(q->metadata_only)goto ready;
+    }
     if(!job->automatic&&q->fast&&(!q->natural||book_cover_list_cache_dimensions(q->path,q->title,q->author,&sw,&sh))){
         if(q->natural){q->width=sw;q->height=sh;q->stride=(sw+7)/8;}
         size_t bytes=(size_t)q->stride*q->height;
@@ -60,13 +67,28 @@ static void prepare(cover_job_slot_t *job,unsigned generation) {
         }free(bits);
     }
     bool from_auto=job->automatic!=NULL;
+    // 默认封面只在本帧显示，不进入整页缓存；下次重新尝试解码真封面。
+    // Generated defaults are shown for this frame only and never captured into the page cache.
+    job->result.generated=from_auto;
     uint8_t *gray=job->automatic;job->automatic=NULL;
-    if(gray&&job->auto_cache){book_cover_store_generated(q->path,q->title,q->author,gray,q->list,st.st_size,st.st_mtime);}
+    if(gray&&compact){
+        uint8_t *small=heap_caps_malloc((size_t)q->width*q->height,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+        if(!small){free(gray);return;}
+        book_crop_t crop=book_cover_crop(BOOK_COVER_W,BOOK_COVER_H,q->width,q->height);
+        for(unsigned y=0;y<q->height;++y)for(unsigned x=0;x<q->width;++x)
+            small[(size_t)y*q->width+x]=gray[(crop.y+(uint64_t)y*crop.height/q->height)*BOOK_COVER_W+crop.x+(uint64_t)x*crop.width/q->width];
+        free(gray);gray=small;sw=q->width;sh=q->height;
+        // 生成封面只用于本帧绘制，不写回精简列表缓存（否则失败会被当成真封面固化）。
+        // Generated art is painted for this frame only and never persisted into the sized list
+        // cache, which would otherwise freeze a decode failure as a real cover.
+    }else if(gray&&job->auto_cache){book_cover_store_generated(q->path,q->title,q->author,gray,q->list,st.st_size,st.st_mtime);}
     if(!gray) {
-        const size_t need=BOOK_COVER_W*BOOK_COVER_H;
+        const size_t need=compact?(size_t)q->width*q->height:BOOK_COVER_W*BOOK_COVER_H;
         if(heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)<need+1536u*1024u)return;
         gray=heap_caps_malloc(need,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);if(!gray)return;
-        int result=book_cover_load_io(q->path,q->title,q->author,gray,q->list,&sw,&sh,&job->auto_cache);
+        int result;
+        if(compact){sw=q->width;sh=q->height;result=book_cover_load_sized_io(q->path,q->title,q->author,gray,sw,sh,&job->auto_cache);}
+        else result=book_cover_load_io(q->path,q->title,q->author,gray,q->list,&sw,&sh,&job->auto_cache);
         if(result<0){free(gray);return;}
         if(!current(generation)){free(gray);return;}
         if(!result){
@@ -74,6 +96,7 @@ static void prepare(cover_job_slot_t *job,unsigned generation) {
             ESP_LOGW("cover", "auto pending %s", q->path);
 #endif
             if(q->artwork_only){free(gray);return;}
+            if(compact){free(gray);gray=heap_caps_malloc(BOOK_COVER_W*BOOK_COVER_H,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);if(!gray)return;}
             job->result.pixels=gray;job->state=AUTO;return;
         }
     }
@@ -102,7 +125,7 @@ static void prepare(cover_job_slot_t *job,unsigned generation) {
 ready:
     job->result.width=q->width;job->result.height=q->height;
     struct stat after;
-    if(stat(q->path,&after)||after.st_size!=st.st_size||after.st_mtime!=st.st_mtime){free(job->result.pixels);job->result.pixels=NULL;}
+    if(stat(q->path,&after)||after.st_size!=st.st_size||after.st_mtime!=st.st_mtime){free(job->result.pixels);job->result.pixels=NULL;job->result.metadata=false;}
 }
 static void worker(void *unused) {
     (void)unused;
@@ -116,7 +139,7 @@ static void worker(void *unused) {
         prepare(&job,generation);
         portENTER_CRITICAL(&s_lock);
         if(!s_paused&&generation==s_generation){
-            s_jobs[slot].auto_cache=job.auto_cache;s_jobs[slot].result=job.result;s_jobs[slot].state=job.result.pixels?(job.state==AUTO?AUTO:READY):FAILED;
+            s_jobs[slot].auto_cache=job.auto_cache;s_jobs[slot].result=job.result;s_jobs[slot].state=job.result.pixels?(job.state==AUTO?AUTO:READY):job.result.metadata?READY:FAILED;
             job.result.pixels=NULL;
         }
         portEXIT_CRITICAL(&s_lock);
@@ -155,7 +178,7 @@ unsigned book_cover_jobs_begin(void) {
 }
 static bool same_request(const book_cover_job_t *a,const book_cover_job_t *b) {
     return !strcmp(a->path,b->path)&&!strcmp(a->title,b->title)&&!strcmp(a->author,b->author)&&
-        a->list==b->list&&a->fast==b->fast&&a->natural==b->natural&&a->artwork_only==b->artwork_only&&a->width==b->width&&a->height==b->height&&
+        a->metadata_only==b->metadata_only&&a->with_chapters==b->with_chapters&&a->list==b->list&&a->fast==b->fast&&a->natural==b->natural&&a->artwork_only==b->artwork_only&&a->width==b->width&&a->height==b->height&&
         a->stride==b->stride&&a->contrast==b->contrast&&a->phase==b->phase&&a->x==b->x&&a->y==b->y;
 }
 bool book_cover_jobs_submit(unsigned generation,unsigned slot,const book_cover_job_t *request) {
@@ -219,4 +242,11 @@ bool book_cover_jobs_quiesce(unsigned timeout_ms) {
         if(!active)return true;
         if(esp_timer_get_time()>=deadline)return false;
         vTaskDelay(pdMS_TO_TICKS(10));}
+}
+
+bool book_cover_jobs_idle(void) {
+    portENTER_CRITICAL(&s_lock);bool idle=!s_running;
+    if(s_jobs)for(unsigned i=0;idle&&i<BOOK_COVER_JOB_SLOTS;++i)
+        if(s_jobs[i].state!=EMPTY&&s_jobs[i].state!=TAKEN&&s_jobs[i].state!=FAILED)idle=false;
+    portEXIT_CRITICAL(&s_lock);return idle;
 }

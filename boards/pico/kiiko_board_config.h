@@ -71,8 +71,8 @@
 /// 面板修复用盲刷多轮（Pico 独有）；Metalio 用 epd_clear_checked 一次白底基线。
 /// Panel repair by blind repeated pushes (Pico only); Metalio uses one epd_clear_checked baseline.
 #define KIIKO_BOARD_HAS_PANEL_BLIND_REPAIR 1
-/// 屏轨空闲多久自动断电：Pico 8s；Metalio 每次输出后立即断电（0 表示不做空闲延时）。
-/// Rail idle timeout: 8 s here; Metalio powers down right after every output (0 disables it).
+/// 正文阅读期间保留已上电的轨，离书后恢复8s；Metalio每次输出后立即断电。
+/// Retain powered rails while reading, restoring 8 s on exit; Metalio powers off after each output.
 #define KIIKO_BOARD_RAILS_IDLE_TIMEOUT_MS 8000
 /// 是否使用裁剪过的 GL48 波形表（Pico 的柔和调序）；Metalio 用厂家 2.0.76 完整波形。
 /// Whether to trim the GL48 table (the Pico soft ordering); Metalio ships the vendor's full

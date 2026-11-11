@@ -15,14 +15,18 @@ unit = r'''
 #include <stdio.h>
 #include <string.h>
 #include "ui_reader_layout.h"
-enum {READING,SHELF,READER_PANEL_NONE,READER_PANEL_OTHER,MODE_DU,EPD_DRAW_ALIGN_LEFT,EPD_DRAW_ALIGN_RIGHT,EPD_DRAW_ALIGN_CENTER,UI_ICON_ANIMATE_BOOKMARK_PLUS,UI_ICON_BOOKMARK};
+enum {READING,SHELF,READER_PANEL_NONE,READER_PANEL_OTHER,MODE_DU,EPD_DRAW_ALIGN_LEFT,EPD_DRAW_ALIGN_RIGHT,EPD_DRAW_ALIGN_CENTER,UI_ICON_BOOK_BOOKMARK,UI_ICON_BOOK,UI_ICON_EXPAND};
 enum EpdDrawError {EPD_DRAW_SUCCESS,EPD_DRAW_OTHER_ERROR};
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_DONE} app_redraw_t;
 typedef struct {bool touched;} touch_t;
 typedef struct {void *hl;int64_t now_ms;bool consumed,request_app,request_return,request_menu;touch_t *touch;} app_ctx_t;
 #define UI_LOCK_WIDTH 684
 #define UI_GRAY_LIGHT 192
+#define READER_TOOL_ICON_PX 40
+#define UI_CLICK_BACK_SMALL 77
+#define UI_ICON_ANIMATE_CIRCLE_CHEVRON_LEFT 78
 #define UI_GRAY_WHITE 255
+#define UI_NAV_BACKGROUND_GRAY 0xe0
 #define UI_GRAY_BLACK 0
 static int s_view=READING,s_reader_panel=READER_PANEL_NONE,E0470_FOLLOW_WAVEFORM;
 static bool immersive;
@@ -36,11 +40,11 @@ static void ui_nav_status(uint8_t *fb){(void)fb;++status_calls;}
 static char s_book_title[128]="Book title",s_title[128]="Fallback";
 static bool s_reader_favorite;
 static unsigned title_calls,back_calls,favorite_calls;
-static void copy_text(char *out,size_t cap,const char *text){snprintf(out,cap,"%s",text);}
-static void ui_nav_back(uint8_t *fb,int x,int y){(void)fb;assert(x==36&&y==79&&!s_reader_fullscreen);++back_calls;}
-static int ui_text_title_fit(char *s,int px,int width,const char *sample){assert(px==32&&width==450&&!strcmp(s,sample));return px;}
+static void ui_click_feedback_register(uint8_t *fb,EpdRect r,int kind,int icon){(void)fb;assert(r.x==26&&r.y==82&&r.width==64&&r.height==64&&kind==UI_CLICK_BACK_SMALL&&icon==UI_ICON_ANIMATE_CIRCLE_CHEVRON_LEFT&&!s_reader_fullscreen);++back_calls;}
+static int ui_text_title_fit(char *s,int px,int width,const char *sample){assert(px==32&&width==340&&!strcmp(s,sample));return px;}
+static int ui_text_title_width_px(int px,const char*t,const char*s){(void)px;(void)t;(void)s;return 24;}
 static void ui_text_title_vc(uint8_t *fb,int x,int y,int px,const char *text,const char *sample,int align){(void)fb;assert(x==342&&y==114&&px==32&&align==EPD_DRAW_ALIGN_CENTER&&!strcmp(text,sample)&&!s_reader_fullscreen);++title_calls;}
-static void ui_draw_icon(uint8_t *fb,int x,int y,int px,int icon,int gray){(void)fb;assert(x==620&&y==114&&px==48&&gray==0x38&&icon==(s_reader_favorite?UI_ICON_ANIMATE_BOOKMARK_PLUS:UI_ICON_BOOKMARK)&&!s_reader_fullscreen);++favorite_calls;}
+static void ui_draw_icon(uint8_t *fb,int x,int y,int px,int icon,int gray){(void)fb;if(icon==UI_ICON_ANIMATE_CIRCLE_CHEVRON_LEFT){assert(x==58&&y==114&&px==40&&gray==0x30);return;}if(icon==UI_ICON_EXPAND){assert(x==620&&y==114&&px==40&&!s_reader_fullscreen);return;}assert(x==552&&y==114&&px==40&&gray==0x38&&icon==(s_reader_favorite?UI_ICON_BOOK_BOOKMARK:UI_ICON_BOOK)&&!s_reader_fullscreen);++favorite_calls;}
 static void ui_hairline(uint8_t *fb,int y,int x,int width,int gray){(void)fb;assert(y==151&&x==36&&width==612&&gray==UI_GRAY_LIGHT);}
 
 
@@ -51,7 +55,7 @@ static size_t book_chapter_count(void){return total_chapters;}
 static void fit_fixed_text(char *text,int px,int width){assert(px>0&&width>0);(void)text;}
 static int ui_text_fixed_width_px(int px,const char *text){return (int)strlen(text)*px/2;}
 static void reader_footer_chapter_name(char *text,size_t cap){snprintf(text,cap,"%s",expected_chapter);}
-static void ui_fill_rect_fast(EpdRect r,int color,uint8_t *fb){(void)fb;assert(color==255);if(s_reader_fullscreen&&immersive)assert(r.y==1204&&r.height==12);else if(r.y==0)assert(r.height==(s_reader_fullscreen?80:176));else assert(r.y==(s_reader_fullscreen?1168:1048));++fill_calls;}
+static void ui_fill_rect_fast(EpdRect r,int color,uint8_t *fb){(void)fb;assert(color==255||color==UI_NAV_BACKGROUND_GRAY);if(s_reader_fullscreen&&immersive)assert(r.y==1204&&r.height==12);else if(r.y==0)assert(r.height==(s_reader_fullscreen?80:152));else if(!s_reader_fullscreen&&r.y==152)assert(r.height==24&&r.width==684&&color==UI_GRAY_WHITE);else assert(r.y==(s_reader_fullscreen?1168:1048));++fill_calls;}
 static void ui_reader_background_paint(uint8_t *fb,EpdRect r,bool overlay){(void)fb;(void)r;assert(overlay);}
 static void ui_text_fixed_vc(uint8_t *fb,int x,int y,int px,const char *text,int align,bool inverted){
  (void)fb;assert(y==(s_reader_fullscreen?1180:1060)&&px==21&&!inverted);
@@ -82,8 +86,8 @@ int main(void){
  for(int style=0;style<2;++style){
   immersive=style;s_reader_favorite=style;text_calls=bar_calls=fill_calls=status_calls=0;title_calls=back_calls=favorite_calls=0;
   draw_reader_header(&none);draw_reader_metadata(&none,74);
-  assert(status_calls==1&&text_calls==2&&bar_calls==2&&fill_calls==2&&reader_status_visible());
-  assert(title_calls==1&&back_calls==1&&favorite_calls==1&&ui_reader_body(false,style,24,false).y==(style?24:80));
+  assert(status_calls==1&&text_calls==2&&bar_calls==2&&fill_calls==3&&reader_status_visible());
+  assert(title_calls==1&&back_calls==1&&favorite_calls==1&&ui_reader_body(false,style,24,false).y==(style?16:84));
   app_ctx_t ctx={.now_ms=1000};s_reader_footer_pending=true;s_reader_footer_due_ms=900;
   assert(reader_metadata_tick(&ctx)==APP_REDRAW_DONE&&!s_reader_footer_pending);
  }
@@ -91,7 +95,7 @@ int main(void){
  s_reader_fullscreen=true;immersive=full;s_reader_footer_pending=false;s_view=READING;calls=guards=text_calls=bar_calls=fill_calls=0;
  assert(reader_status_visible()==!full);status_calls=0;title_calls=back_calls=favorite_calls=0;
  uint8_t fb=0;draw_reader_metadata(&fb,74);assert(text_calls==(full?0:2)&&bar_calls==2&&fill_calls==(full?1:2)&&status_calls==(full?0:1));
- assert(ui_reader_body(true,false,24,false).y==80&&ui_reader_header().height==80&&!title_calls&&!back_calls&&!favorite_calls);
+ assert(ui_reader_body(true,false,24,false).y==84&&ui_reader_header().height==80&&!title_calls&&!back_calls&&!favorite_calls);
  touch_t touch={0};app_ctx_t ctx={.now_ms=100,.touch=&touch};
  assert(reader_metadata_tick(&ctx)==APP_REDRAW_NONE&&!calls);
  s_reader_footer_pending=true;s_reader_footer_due_ms=900;
