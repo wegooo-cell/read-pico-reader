@@ -41,7 +41,7 @@ set(main_requires
     esp_driver_usb_serial_jtag
     esp_app_format
     app_update
-    esp_http_client
+    esp_http_client esp-tls
     mbedtls
     espressif__cjson
 )
@@ -102,8 +102,10 @@ kiiko_board_sources(kiiko_selected_sources "${CMAKE_CURRENT_LIST_DIR}" "app_main
         "apps/app_device_settings.c"
         "apps/app_image.c"
         "apps/app_transfer.c"
+        "apps/app_cloud_sync.c"
         "apps/usb_storage.c"
         "book/book_store.c"
+        "book/book_xteink_sync.c"
         "book/book_progress.c"
         "book/book_history_backup.c"
         "book/book_title.c"
@@ -119,6 +121,7 @@ kiiko_board_sources(kiiko_selected_sources "${CMAKE_CURRENT_LIST_DIR}" "app_main
         "book/book_cover.c"
         "book/metalio_jpeg.c"
         "book/book_cover_jobs.c"
+        "book/book_shelf_page_cache.c"
         "book/metalio_cover_cache.c"
         "book/reader_page_cache.c"
         "book/book_image_header.c"
@@ -232,7 +235,7 @@ set(main_requires
     esp_driver_usb_serial_jtag
     esp_app_format
     app_update
-    esp_http_client
+    esp_http_client esp-tls
     mbedtls
     espressif__cjson
 )
@@ -289,8 +292,10 @@ kiiko_board_sources(kiiko_selected_sources "${CMAKE_CURRENT_LIST_DIR}" "app_main
         "apps/app_device_settings.c"
         "apps/app_image.c"
         "apps/app_transfer.c"
+        "apps/app_cloud_sync.c"
         "apps/usb_storage.c"
         "book/book_store.c"
+        "book/book_xteink_sync.c"
         "book/book_progress.c"
         "book/book_history_backup.c"
         "book/book_title.c"
@@ -305,6 +310,7 @@ kiiko_board_sources(kiiko_selected_sources "${CMAKE_CURRENT_LIST_DIR}" "app_main
         "book/book_epub.c"
         "book/book_cover.c"
         "book/book_cover_jobs.c"
+        "book/book_shelf_page_cache.c"
         "book/book_image_header.c"
         "book/book_cover_auto.c"
         "book/zip_reader.c"

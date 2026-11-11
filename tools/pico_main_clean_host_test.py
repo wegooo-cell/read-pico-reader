@@ -186,6 +186,9 @@ int main(void){
     static app_ctx_t ctx;
     static int app_index_of(const app_desc_t *app){return app->index;}
     static bool visible(app_ctx_t *ctx){(void)ctx;return drawing->visible;}
+    enum{APP_MAIN_REFRESH_FAST=1};
+    static __attribute__((unused)) int app_settings_main_refresh_mode(void){return 0;}
+    static __attribute__((unused)) bool display_main_fast_background_set(bool active){(void)active;return false;}
     static unsigned display_main_quality_set(unsigned phases){unsigned prior=quality;quality=phases;return prior;}
     static void display_main_transition_disarm(void){}
     '''

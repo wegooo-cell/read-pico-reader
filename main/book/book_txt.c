@@ -697,6 +697,32 @@ static bool txt_cache_load(const char *source,book_txt_t *b) {
 #endif
     return true;
 }
+
+// 只读已存在的索引并校验完整载荷，不扫描TXT、不分配目录、不改当前书源。
+// Validate an existing index payload without scanning TXT, allocating a TOC or changing the open source.
+uint16_t book_txt_cached_chapter_count(const char *source,uint32_t size,int64_t modified) {
+    char path[112];book_index_cache_header_t key;
+    if(!book_index_cache_prepare_file(source,"txt",TXT_CACHE_VERSION,size,modified,path,sizeof(path),&key))return 0;
+    FILE *cache=book_index_cache_open_read(path,&key);if(!cache)return 0;
+    txt_cache_payload_t p={0};
+    bool ok=fread(&p,1,sizeof(p),cache)==sizeof(p)&&p.total==size&&p.bom<=3&&p.bom<=size&&
+        p.count&&p.count<=BOOK_CHAPTER_MAX&&p.nav_count<=TXT_NAV_MAX&&p.gbk<=1;
+    unsigned volumes=p.reserved[1]|((unsigned)p.reserved[2]<<8);
+    ok=ok&&volumes<=TXT_VOLUME_MAX&&(!volumes||p.nav_count);
+#if KIIKO_BOARD_METALIO47
+    ok=ok&&p.reserved[0]<=2&&(!p.reserved[0]||(!p.gbk&&(p.bom==0||p.bom==2)));
+#else
+    ok=ok&&!p.reserved[0];
+#endif
+    uint32_t expected=p.checksum;p.checksum=0;
+    uint32_t hash=index_hash(UINT32_C(2166136261),&p,sizeof(p));
+    size_t remaining=ok?p.count*sizeof(book_entry_t)+p.nav_count*sizeof(txt_nav_t)+volumes*sizeof(book_txt_volume_t):0;
+    unsigned char bytes[256];
+    while(ok&&remaining){size_t n=remaining<sizeof(bytes)?remaining:sizeof(bytes);ok=fread(bytes,1,n,cache)==n;if(ok){hash=index_hash(hash,bytes,n);remaining-=n;}}
+    ok=ok&&hash==expected&&fgetc(cache)==EOF&&!ferror(cache);
+    fclose(cache);return ok?(uint16_t)p.count:0;
+}
+
 static void txt_cache_save(const char *source,const book_txt_t *b) {
     if(b->nav_incomplete||b->volumes_incomplete)return;
     char path[112],temp[120];book_index_cache_header_t key;

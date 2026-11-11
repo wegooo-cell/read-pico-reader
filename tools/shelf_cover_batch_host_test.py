@@ -18,6 +18,7 @@ typedef struct{int x,y,width,height;}EpdRect;
 enum{SHELF,MANAGE,BULK};
 typedef struct{bool touched;}touch_t;
 typedef struct{int leaf;bool request_app,request_return,request_menu;int64_t now_ms;touch_t *touch;}app_ctx_t;
+#define BOOK_ROWS 9
 #define UI_LOCK_WIDTH 684
 #define SHELF_FAST_COVER_STRIDE 21
 static int s_view=SHELF,s_visible_count=9,rows=9,nav_stop=-1;
@@ -47,6 +48,14 @@ bool book_cover_jobs_submit(unsigned generation,unsigned slot,const book_cover_j
 int book_cover_jobs_take(unsigned generation,unsigned slot,book_cover_result_t *result){assert(generation==1);
  if(failed_mask&(1u<<slot))return -1;if(!(ready_mask&(1u<<slot)))return 0;
  *result=(book_cover_result_t){.pixels=malloc(1),.width=164,.height=214,.fast=fast};assert(result->pixels);return 1;}
+'''
+unit+=r'''
+enum{BOOK_SHELF_PAGE_MISS,BOOK_SHELF_PAGE_WAIT,BOOK_SHELF_PAGE_HIT};
+typedef int book_shelf_page_state_t;
+static bool s_shelf_page_loading,s_shelf_page_cached;
+static book_shelf_page_state_t book_shelf_page_poll(void){return BOOK_SHELF_PAGE_MISS;}
+static unsigned shelf_page_mask(app_ctx_t *ctx){(void)ctx;return 511;}
+static void prepare_covers(app_ctx_t *ctx){(void)ctx;assert(false);}
 '''
 for name in ['prepare_cover_batch','shelf_cover_frame_ready','shelf_cover_reveal_mask','warm_shelf_lock_cover','gather_cover_entry']:
  unit+=function(name,book)+'\n'
@@ -84,5 +93,5 @@ assert 'const bool artwork = shelf_cover_frame_ready();' in function('draw_shelf
 assert 's_cover_batch_present_pending = true;' in function('on_tick',book)
 with tempfile.TemporaryDirectory(dir='/private/tmp') as d:
  c=Path(d)/'test.c';exe=Path(d)/'test';c.write_text(unit)
- subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(ROOT/'main/book'),str(c),'-o',str(exe)],check=True)
+ subprocess.run(['cc','-Dshelf_display_style=app_settings_shelf_style','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(ROOT/'main/book'),str(c),'-o',str(exe)],check=True)
  subprocess.run([str(exe)],check=True)

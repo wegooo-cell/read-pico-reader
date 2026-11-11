@@ -65,7 +65,7 @@ int main(void){
  for(int full=0;full<2;++full)for(int im=0;im<2;++im)for(int v=0;v<2;++v){
   s_reader_fullscreen=full;immersive=im;vertical=v;
   for(int i=0;i<9;++i){s_margin=i*6;EpdRect a=body_rect_for_tracking(2);
-   if(v){assert(a.y==(im?24:80)+s_margin);assert(a.height==(im?1202:1168)-(im?24:80)-2*s_margin);}
+   if(v){assert(a.y==(im?16:84)+s_margin);assert(a.height==(im?1188:1152)-(im?16:84)-2*s_margin);}
    else assert(a.x==s_margin&&a.width==684-2*s_margin);
   }
  }

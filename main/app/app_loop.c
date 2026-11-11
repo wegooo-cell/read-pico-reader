@@ -158,6 +158,7 @@ static void main_lock_boundary(void) {
     metalio_frontlight_commit();
 #else
 #endif
+    (void)ble_pt_take_standby();
     ui_click_feedback_reset();
     quick_reset();
     s_presented_main = NULL;
@@ -552,6 +553,8 @@ void app_present(app_ctx_t* ctx,const app_desc_t* app,app_redraw_t redraw) {
     const bool shelf_switch=root_switch &&
         (app_index_of(s_presented_root)==1 || app_index_of(app)==1);
     unsigned prior_quality=display_main_quality_set(white_switch?(shelf_switch?8u:6u):0u);
+    bool prior_fast_background=display_main_fast_background_set(root_switch &&
+        app_settings_main_refresh_mode()==APP_MAIN_REFRESH_FAST);
 #if KIIKO_BOARD_METALIO47
     bool prior_erase=display_main_switch_erase_set(white_switch);
     bool prior_home_erase=display_main_shelf_home_erase_set(root_switch &&
@@ -566,6 +569,7 @@ void app_present(app_ctx_t* ctx,const app_desc_t* app,app_redraw_t redraw) {
     display_main_switch_erase_set(prior_erase);
     display_main_shelf_home_erase_set(prior_home_erase);
 #endif
+    display_main_fast_background_set(prior_fast_background);
     display_main_quality_set(prior_quality);
 }
 
@@ -1193,10 +1197,12 @@ void app_loop_run(const app_loop_config_t* config) {
             if(s_ai.open&&!ai_allowed){ai_dismiss(&ctx,current,true);ai_owned=true;}
             if(ai_event && ai_allowed && !touch.touched && !ui_click_feedback_active() && !ui_click_feedback_nav_pending()){
                 held_key=-1;cancel_gesture(&ctx,current,&gesture);last_input_ms=ctx.now_ms;ai_owned=true;
+                app_book_pause_auto();
                 if(s_ai.open)ai_dismiss(&ctx,current,true);
                 else if(ai_event==METALIO_AI_LONG){
                     int64_t at=esp_timer_get_time();(void)at;
                     if(ui_ai_menu_begin(&s_ai,ctx.fb,app_settings_ai_short(),current==&app_book&&app_book_reader_body_visible())){
+                        app_book_pause_auto();
                         ESP_LOGI(TAG,"AI menu compose=%lldms",(long long)((esp_timer_get_time()-at)/1000));
                         (void)metalio_haptic_click();ai_push(&ctx,current,s_ai.rect);
                     }
@@ -1274,8 +1280,10 @@ void app_loop_run(const app_loop_config_t* config) {
                     ctx.consumed = true;
                 }
 #if KIIKO_BOARD_METALIO47
+                if (action == UI_QUICK_OPEN) app_book_pause_auto();
                 if (action == UI_QUICK_OPEN || action == UI_QUICK_CLOSE) { metalio_frontlight_commit(); quick_present(&ctx, current, false); }
 #else
+                if (action == UI_QUICK_OPEN) app_book_pause_auto();
                 if (action == UI_QUICK_OPEN || action == UI_QUICK_CLOSE) quick_present(&ctx, current, false);
 #endif
                 else if (action == UI_QUICK_WIFI) {
@@ -1361,6 +1369,7 @@ void app_loop_run(const app_loop_config_t* config) {
                         main_lock_boundary();
                         enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp,
                                              current == &app_book && app_book_reader_body_visible());
+                        (void)ble_pt_take_standby();
                         display_request_full_refresh();
                         ctx.now_ms = esp_timer_get_time() / 1000;
                         last_input_ms = ctx.now_ms;
@@ -1566,6 +1575,7 @@ void app_loop_run(const app_loop_config_t* config) {
                         prepare_lock(&ctx, current, true);
                         main_lock_boundary();
                         enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp, true);
+                        (void)ble_pt_take_standby();
                         display_request_full_refresh();
                         ctx.now_ms = esp_timer_get_time() / 1000;
                         last_input_ms = ctx.now_ms;
@@ -1609,6 +1619,7 @@ void app_loop_run(const app_loop_config_t* config) {
                         main_lock_boundary();
                         enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp,
                                              !menu_open && current == &app_book && app_book_reader_body_visible());
+                        (void)ble_pt_take_standby();
                         display_request_full_refresh();
                         ctx.now_ms = esp_timer_get_time() / 1000;
                         last_input_ms = ctx.now_ms;
@@ -1701,6 +1712,7 @@ void app_loop_run(const app_loop_config_t* config) {
         ble_pt_sync(app_settings_ble_turner() && !wifi_busy);
 #endif
         ble_pt_poll();
+        bool remote_standby=ble_pt_take_standby();
         if (s_quick.open || ai_overlay_open() || quick_input_owned) {
             // 覆盖层期间丢弃页内蓝牙输入，关闭后不重放翻页或学习事件。
             // Discard page BLE input while covered, without replaying turns or learning edges after closing.
@@ -1724,7 +1736,7 @@ void app_loop_run(const app_loop_config_t* config) {
         if (!power_dialog_open && !s_quick.open && !quick_input_owned && !menu_open &&
             !current->holds_pmu && !usb_storage_active() && !touch.touched &&
             !ui_click_feedback_active() && !ctx.request_app && !ctx.request_menu && !ctx.request_return &&
-            ui_nav_refresh_power(ctx.fb)) {
+            (current!=&app_book||app_book_status_bar_visible())&&ui_nav_refresh_power(ctx.fb)) {
 #if KIIKO_BOARD_METALIO47
             bool previous=display_system_binary_set(app_binary_ui(&ctx,current));
             bool previous_nav=display_system_navigation_set(navigation_page_ready(&ctx,current));
@@ -1753,8 +1765,12 @@ void app_loop_run(const app_loop_config_t* config) {
             ctx.request_app || ctx.request_menu || ctx.request_return;
         if (idle_blocked || requested_idle != idle_minutes) last_input_ms = ctx.now_ms;
         idle_minutes = requested_idle;
+        // Recognized standby uses the existing lock/resume path, with normal lock safety gates.
+        extern const app_desc_t app_book;
+        bool remote_lock=remote_standby && !menu_open && !s_quick.open && !quick_input_owned && !ai_overlay_open() &&
+            current==&app_book && app_book_reader_body_visible();
         if (!idle_blocked && ctx.now_ms >= s_lock_ignore_until_ms &&
-            auto_lock_due(ctx.now_ms, last_input_ms, idle_minutes)) {
+            (remote_lock || auto_lock_due(ctx.now_ms, last_input_ms, idle_minutes))) {
 #if KIIKO_BOARD_METALIO47
             // 不因配置层常亮阻止自动锁屏；透明锁屏须先恢复真实底页，避免缓存玻璃面板。
             // A chooser never disables idle lock; restore the physical underlay before transparent lock artwork can cache it.
@@ -1764,11 +1780,12 @@ void app_loop_run(const app_loop_config_t* config) {
             cancel_gesture(&ctx, current, &gesture);
             if (menu_pressed >= 0) menu_feedback(&ctx, current, menu_leaf, menu_pressed, false, &feedback);
             menu_pressed = UI_MENU_HIT_NONE;
-            prepare_lock(&ctx, current, false);
+            prepare_lock(&ctx, current, remote_lock);
             extern const app_desc_t app_book;
             main_lock_boundary();
             enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp,
                                  !menu_open && current == &app_book && app_book_reader_body_visible());
+            (void)ble_pt_take_standby();
             display_request_full_refresh();
             ctx.now_ms = esp_timer_get_time() / 1000;
             last_input_ms = ctx.now_ms;

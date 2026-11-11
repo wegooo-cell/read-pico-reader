@@ -120,7 +120,10 @@ EpdRect ui_nav_status_area(void) { return (EpdRect){0,12,UI_LOCK_WIDTH,56}; }
 
 bool ui_nav_refresh_power(uint8_t *fb) {
     if (!ui_status_visible(fb) || s_power_signature==power_signature()) return false;
-    epd_fill_rect(ui_nav_status_area(),UI_GRAY_WHITE,fb);
+    // 非全屏阅读已画浅灰底；电量更新沿用它，其他状态栏保留原白底。
+    // Retain an already-drawn gray reader header on power changes; other headers keep white.
+    uint8_t background=ui_read_pixel(fb,0,0)==(UI_NAV_BACKGROUND_GRAY>>4)?UI_NAV_BACKGROUND_GRAY:UI_GRAY_WHITE;
+    epd_fill_rect(ui_nav_status_area(),background,fb);
     ui_nav_status(fb);
     return true;
 }
@@ -150,7 +153,7 @@ static void icon(uint8_t *fb, int tab, int cx, int y) {
 }
 
 void ui_nav_draw(uint8_t *fb, int active) {
-    ui_fill_rect_fast((EpdRect){0, UI_NAV_TOP, UI_LOCK_WIDTH, UI_LOCK_HEIGHT - UI_NAV_TOP}, 0xe0, fb);
+    ui_fill_rect_fast((EpdRect){0, UI_NAV_TOP, UI_LOCK_WIDTH, UI_LOCK_HEIGHT - UI_NAV_TOP}, UI_NAV_BACKGROUND_GRAY, fb);
     ui_hairline(fb, UI_NAV_TOP, 0, UI_LOCK_WIDTH, UI_GRAY_LIGHT);
     ui_fill_rect_fast((EpdRect){0, UI_NAV_REFRESH_END, UI_LOCK_WIDTH, UI_NAV_TOP - UI_NAV_REFRESH_END}, 0xf0, fb);
     if (app_settings_main_refresh_mode() != APP_MAIN_REFRESH_NORMAL) {

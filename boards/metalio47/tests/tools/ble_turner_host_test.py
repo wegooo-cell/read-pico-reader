@@ -41,6 +41,11 @@ unit = r'''
 #include <string.h>
 #include <stdint.h>
 #include "ble_page_turner.h"
+#include "supported_remotes.h"
+static pt_model_t s_remote_model;
+static pt_decoder_t s_remote_decoder;
+static uint16_t s_button_channel;
+static atomic_bool s_standby_pending;
 #define ESP_LOGI(...) ((void)0)
 #define ESP_LOGW(...) ((void)0)
 #define ESP_LOGE(...) ((void)0)
@@ -142,7 +147,7 @@ static esp_err_t nvs_commit(nvs_handle_t h){assert(h==1);return binding_error==3
 static void nvs_close(nvs_handle_t h){assert(h==1);binding_handles--;}
 
 '''
-for name in ('lifecycle_take','lifecycle_give','ble_pt_input_serial','key_push','raw_push','frame_of','frame_same',
+for name in ('remote_reset','lifecycle_take','lifecycle_give','ble_pt_input_serial','key_push','raw_push','frame_of','frame_same',
              'frame_idle','raw_release','raw_frame','extract_primary_code',
              'usage_to_special','emit_usage','ingest_report','ble_pt_pop_key','ble_pt_pop_raw',
              'ble_pt_learn_begin','ble_pt_bind','ble_pt_binding','network_resume_peer','start_locked','stop_locked','ble_pt_start','ble_pt_stop',
@@ -346,5 +351,5 @@ with tempfile.TemporaryDirectory(prefix='pico-ble-test-') as directory:
     (work/'esp_err.h').write_text('#pragma once\ntypedef int esp_err_t;\nenum {ESP_OK,ESP_FAIL,ESP_ERR_NO_MEM,ESP_ERR_TIMEOUT,ESP_ERR_INVALID_STATE,ESP_ERR_INVALID_ARG};\n')
     (work/'test.c').write_text(unit)
     subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-misleading-indentation','-fsanitize=address,undefined',
-                    '-I'+str(work),'-I'+str(ROOT/'components/ble_page_turner/include'),str(work/'test.c'),'-o',str(work/'test')],check=True)
+                    '-I'+str(work),'-I'+str(ROOT/'components/ble_page_turner/include'),'-I'+str(ROOT/'components/ble_page_turner/src'),str(work/'test.c'),'-o',str(work/'test')],check=True)
     subprocess.run([str(work/'test')],check=True)

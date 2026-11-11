@@ -9,6 +9,7 @@
  */
 
 #pragma once
+#include "reader_controls.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -150,6 +151,10 @@ void app_settings_set_reader_power_turn(bool on);
 bool app_settings_reader_default_fullscreen(void);
 /// 保存成功后才更新偏好。/ Apply the preference only after a successful save.
 bool app_settings_set_reader_default_fullscreen(bool on);
+/// 当前阅读状态的正文四边使用同一边距；默认关闭。/ Equal body insets for the current reader state; off by default.
+bool app_settings_reader_equal_margins(void);
+/// 仅成功提交后更新偏好。/ Apply only after a successful commit.
+bool app_settings_set_reader_equal_margins(bool on);
 /// 沉浸全屏时隐藏阅读状态栏。/ Hide the reader status bar in immersive full screen.
 bool app_settings_reader_immersive(void);
 void app_settings_set_reader_immersive(bool on);
@@ -197,6 +202,8 @@ void app_settings_set_reader_vertical_turn(bool on);
 /// 顺序编码保留旧0/1；2名称降、3最近升、4添加升、5添加降。/ Legacy0/1, then name-desc/recent-asc/added-asc/added-desc.
 uint8_t app_settings_shelf_order(void);
 void app_settings_set_shelf_order(uint8_t order);
+/// 完整八种排序原子保存，失败保留旧值。/ Atomically save eight sort orders, retaining the old value on failure.
+bool app_settings_try_shelf_order(uint8_t order);
 bool app_settings_shelf_recent_sort(void);
 void app_settings_set_shelf_recent_sort(bool on);
 /// 蓝牙翻页器：启用 BLE HID 主机，好让蓝牙翻页器连上并翻页；默认关闭。
@@ -244,6 +251,9 @@ uint8_t app_settings_book_paragraph_spacing(void);
 void app_settings_set_book_paragraph_spacing(uint8_t percent);
 /// 书架样式：1 深色书轨、2 亚克力、5 列表、6 液态玻璃；旧3/4安全回退2。/ Shelf styles: rail (1), acrylic (2), list (5), liquid glass (6); retired IDs 3/4 fall back to 2.
 uint8_t app_settings_shelf_style(void);
+/// 三种封面书架的进度角标，不影响列表进度。/ Progress badges on cover shelves, independent of list metadata.
+bool app_settings_shelf_progress_badges(void);
+bool app_settings_set_shelf_progress_badges(bool on);
 void app_settings_set_shelf_style(uint8_t style);
 /// 固定 TF 根目录：/sdcard/books 与 /sdcard/fonts；旧配置/备份不能修改。/ Fixed TF roots, unaffected by legacy settings/backups.
 const char* app_settings_books_dir(void);

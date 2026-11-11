@@ -32,7 +32,7 @@ static void hl_record_timing(uint32_t a,uint32_t b,uint32_t c){(void)a;(void)b;(
 static uint8_t front[B],back[B],difference[W*H],columns[W/2],old_back[B],old_front[B];
 static bool lines[H];
 static enum EpdRotation rotation;
-static EpdWaveform E0470_WAVEFORM={1},native_du={2},normal={3},E0470_FOLLOW_WAVEFORM={4};
+static EpdWaveform E0470_WAVEFORM={1},native_du={2},normal={3},E0470_FOLLOW_WAVEFORM={4},PICO_SETTINGS_MOTION_WAVEFORM={5};
 static bool s_bulk_io;
 static int effect=2,depth,latency,scans,recoveries,regular,fulls,prefill,scan_type;
 static bool full_requested,intercept,available=true;

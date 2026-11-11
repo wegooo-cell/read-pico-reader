@@ -55,6 +55,7 @@ static app_redraw_t turn_page(app_ctx_t *ctx,int direction){(void)ctx;(void)dire
 static app_redraw_t reader_manual_refresh(app_ctx_t *ctx){(void)ctx;return APP_REDRAW_FULL;}
 
 '''
+unit+='static bool s_rc_font_root;\n'
 for name in ('tool_rect', 'reader_tools_visible', 'reader_header_action', 'reader_key_action'):
     unit += function(name, BOOK) + '\n'
 panel = function('reader_panel_action', BOOK)
@@ -68,18 +69,28 @@ int main(void){
  strcpy(s_shelf[0].path,s_path);strcpy(s_shelf[1].path,"/sdcard/other.epub");
  for(int panel=READER_PANEL_NONE;panel<=READER_PANEL_TOOLS;++panel){
   s_reader_panel=panel;s_reader_tap.pending=true;
-  assert(reader_header_action(&ctx,620,114,&handled)==APP_REDRAW_AREA&&handled&&!s_reader_tap.pending);
+  assert(reader_header_action(&ctx,552,114,&handled)==APP_REDRAW_AREA&&handled&&!s_reader_tap.pending);
   assert(s_reader_favorite==s_shelf[0].favorite&&!s_shelf[1].favorite);
-  assert(s_area.x==584&&s_area.y==80&&s_area.width==64&&s_area.height==70&&s_mode==MODE_GL16);
+  assert(s_area.x==520&&s_area.y==80&&s_area.width==64&&s_area.height==70&&s_mode==MODE_GL16);
  }
  assert(saves==2&&sorts==2&&paints==2&&!s_reader_favorite);
- save_fail=true;assert(reader_header_action(&ctx,620,114,&handled)==APP_REDRAW_PAGE&&handled);
+ EpdRect favorite=ui_reader_favorite_control(),full=ui_reader_fullscreen_control();
+ assert(favorite.x+favorite.width<full.x&&favorite.x==520&&full.x==588);
+ for(int panel=READER_PANEL_NONE;panel<=READER_PANEL_TOOLS;++panel){
+  s_reader_panel=panel;s_reader_fullscreen=false;s_reader_tap.pending=true;
+  assert(reader_header_action(&ctx,620,114,&handled)==APP_REDRAW_FULL&&handled&&s_reader_fullscreen&&!s_reader_tap.pending&&saves==2&&sorts==2&&paints==2);
+ }
+ s_reader_fullscreen=false;mode_fail=true;s_reader_tap.pending=true;
+ assert(reader_header_action(&ctx,620,114,&handled)==APP_REDRAW_NONE&&handled&&!s_reader_fullscreen&&!s_reader_tap.pending&&saves==2);mode_fail=false;
+ for(int x=584;x<588;++x)assert(reader_header_action(&ctx,x,114,&handled)==APP_REDRAW_NONE&&!handled);
+
+ save_fail=true;assert(reader_header_action(&ctx,552,114,&handled)==APP_REDRAW_PAGE&&handled);
  assert(!s_reader_favorite&&!s_shelf[0].favorite&&sorts==2&&paints==2&&s_reader_notice_until==2800&&s_reader_notice[0]);save_fail=false;
  assert(reader_header_action(&ctx,58,114,&handled)==APP_REDRAW_PAGE&&handled&&returns==1);
  assert(reader_header_action(&ctx,342,114,&handled)==APP_REDRAW_NONE&&!handled);
  for(int y=0;y<176;++y)if(y<80||y>=150)assert(reader_header_action(&ctx,620,y,&handled)==APP_REDRAW_NONE&&!handled);
  s_reader_fullscreen=true;assert(reader_header_action(&ctx,620,114,&handled)==APP_REDRAW_NONE&&!handled);s_reader_fullscreen=false;
- s_reader_panel=READER_PANEL_FONT_SETTINGS;assert(reader_header_action(&ctx,58,114,&handled)==APP_REDRAW_NONE&&!handled);
+ s_reader_panel=READER_PANEL_FONT_SETTINGS;assert(reader_header_action(&ctx,58,114,&handled)==APP_REDRAW_NONE&&!handled);assert(reader_header_action(&ctx,620,114,&handled)==APP_REDRAW_NONE&&!handled);
  s_reader_panel=READER_PANEL_NONE;s_clear_confirm=true;assert(reader_header_action(&ctx,620,114,&handled)==APP_REDRAW_NONE&&!handled);s_clear_confirm=false;
  s_footnote_note=0;assert(reader_header_action(&ctx,58,114,&handled)==APP_REDRAW_NONE&&!handled);s_footnote_note=-1;
  // 目录返回后为NONE，工具栏仍可点击；设置完成后也能再次打开其他入口。
@@ -98,7 +109,7 @@ int main(void){
  assert(reader_key_action(&ctx,APP_READER_KEY_TOOLS)==APP_REDRAW_FULL&&!s_reader_fullscreen&&reader_tools_visible());
  assert(reader_key_action(&ctx,APP_READER_KEY_FULLSCREEN)==APP_REDRAW_FULL&&s_reader_fullscreen&&!reader_tools_visible());
  mode_fail=true;assert(reader_key_action(&ctx,APP_READER_KEY_TOOLS)==APP_REDRAW_NONE&&s_reader_fullscreen&&!reader_tools_visible());
- puts("PASS: Back/Favorite bounds, persistence failure, modal guards, precise favorite crop, TOC-return bookmark and settings-to-font toolbar actions");
+ puts("PASS: Back/Favorite/Fullscreen disjoint bounds, full entry uses existing toggle without a favorite write, mode-failure consumption, modal guards, persistence failure, modal guards, precise favorite crop, TOC-return bookmark and settings-to-font toolbar actions");
 }
 '''
 action = function('action_at', BOOK)

@@ -39,6 +39,12 @@ Material used from this project:
   the ESP32-S31 LCD blocks: dedicated LCD_DATA IOMUX, cache-coherent bounce buffers
   and the pixel-clock gate the HAL leaves shut
 
+- `main/boards/common/power/bq27220_gauge.{h,cc}` - the voltage curves,
+ 60-sample filter, startup/wake delay, directional display steps and full-charge
+ confirmation, re-expressed in C as `components/read_pico_pmu/metalio_soc_filter.c`.
+ Source: v2.0.77 (`874538eb54f7f7eb593cd40cd1ba6dc8497226e7`), with the
+ gauge algorithm unchanged since `690a023c66862af103a3187464373ee7c5efcd14`.
+
 Portions of this project are Apache-2.0 (see the top-level LICENSE) and portions
 under `components/epdiy/` are LGPL-3.0-or-later; this MIT notice covers the
 material listed above wherever it appears, and the other licenses are not

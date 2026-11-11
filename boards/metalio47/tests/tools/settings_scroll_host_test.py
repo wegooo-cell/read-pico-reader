@@ -53,11 +53,7 @@ unit = r'''
 #include "ui_gesture.h"
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL} app_redraw_t;
 enum {SETTINGS_MAIN,SETTINGS_BLUETOOTH,SETTINGS_BLE_SCAN,SETTINGS_UPGRADE,SETTINGS_SHELF_STYLE,
-      SETTINGS_SYSTEM_FONT,SETTINGS_WALLPAPER,SETTINGS_AVATAR,SETTINGS_TEXT_EDIT,SETTINGS_PIN_ENTRY,SETTINGS_ONLINE_FONTS};
-static int s_online_fonts;
-static bool ui_online_fonts_present(int *font,app_ctx_t *ctx,app_redraw_t redraw){
- (void)font;(void)ctx;(void)redraw;assert(false);return false;
-}
+      SETTINGS_SYSTEM_FONT,SETTINGS_WALLPAPER,SETTINGS_AVATAR,SETTINGS_TEXT_EDIT,SETTINGS_PIN_ENTRY};
 enum EpdDrawMode {MODE_GC16,MODE_GL16,MODE_DU};
 #define UI_NAV_TOP 1096
 #define UI_NAV_REFRESH_END 1088
@@ -79,6 +75,15 @@ static int s_page,s_main_scroll,s_ble_scroll,s_style_scroll,selected_mode,paint_
 static const EpdWaveform *display_main_normal_waveform(void){return &settings_soft;}
 static int app_settings_main_refresh_mode(void){return selected_mode;}
 static bool s_scroll_drag_consumed,s_scroll_present_pending,s_input_layout,s_input_settle;
+// 原离散单元隔离新手势钩子；下方另运行实际缓存/手势/推屏集成测试。
+// Isolate legacy discrete units; the actual cache/gesture/presenter integration runs below.
+static struct {bool tracking;int origin_offset,origin_y;} s_list_drag;
+static void settings_drag_reset(void) {s_list_drag.tracking=false;}
+static bool settings_drag_present(app_ctx_t *ctx){(void)ctx;return false;}
+static void settings_drag_quick(app_ctx_t *ctx){(void)ctx;}
+static bool settings_drag_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev,int *offset,int limit,app_redraw_t *redraw){
+ (void)ctx;(void)ev;(void)offset;(void)limit;(void)redraw;return false;
+}
 static EpdRect s_input_area;
 static int paints,pushes,row_taps,water_pushes,cancels;
 static EpdRect pushed;
@@ -173,6 +178,9 @@ with tempfile.TemporaryDirectory(prefix='kiikoread-settings-rollback-') as direc
     subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',
                     '-I'+str(root/'tools/ui_gesture_stubs'),'-I'+str(root/'main/ui'),str(path),str(root/'main/ui/ui_gesture.c'),'-o',str(binary)],check=True)
     subprocess.run([str(binary)],check=True)
+
+subprocess.run(['python3',str(root/'tools/settings_hold_host_test.py')],check=True)
+subprocess.run(['python3',str(root/'tools/settings_motion_waveform_host_test.py')],check=True)
 
 # 真实绘制函数验证装饰与字缘分离，不能用整帧二值化掩盖灰色框线。
 # Exercise real drawing helpers: binary decoration must not threshold glyph/avatar pixels.

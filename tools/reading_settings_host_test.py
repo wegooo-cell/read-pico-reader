@@ -1,82 +1,92 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-# 中文：验证已确认的阅读设置共用矩形、点按周期、二级页与间隙不穿透。
-# English: Validate approved reading-sheet geometry, cycles, secondary destinations and inert gaps.
+"""中文：实际三栏设置与四个排版入口，验证命中、目的地、竖排与计时入口。
+English: Test the actual three-tab settings, four layout entries, display options and timer controls.
+"""
 from pathlib import Path
-import json
-import subprocess
-import tempfile
+import subprocess,tempfile
 from home_cover_cache_host_test import function
-
-ROOT = Path(__file__).resolve().parents[1]
-unit = r'''
+R=Path(__file__).resolve().parents[1];ui=R/'main/apps/book_reader_controls_ui.inc';runtime=R/'main/apps/book_reader_controls_runtime.inc'
+u=r'''
 #include <assert.h>
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
-typedef struct {int x,y,width,height;} EpdRect;
-typedef struct {int unused;} app_ctx_t;
-typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE} app_redraw_t;
-enum {READER_PANEL_NONE,READER_PANEL_REFRESH_SETTINGS,READER_PANEL_TURN_SETTINGS,READER_PANEL_KEY_SETTINGS};
-static int s_reader_panel, s_turns, invalidates, toggles[4], full_pages = 10, effect;
-static bool ui_rect_hit(EpdRect r,unsigned x,unsigned y){return x>=(unsigned)r.x&&x<(unsigned)(r.x+r.width)&&y>=(unsigned)r.y&&y<(unsigned)(r.y+r.height);}
-static unsigned app_settings_reader_full_pages(void){return full_pages;}
-static void app_settings_set_reader_full_pages(unsigned n){full_pages=n;}
+#include "reader_controls.h"
+typedef struct{int x,y,width,height;}EpdRect;
+typedef struct{int now_ms;}app_ctx_t;
+typedef enum{APP_REDRAW_NONE,APP_REDRAW_PAGE}app_redraw_t;
+typedef enum{READER_PANEL_NONE,READER_PANEL_REFRESH_SETTINGS,READER_PANEL_FONT_SETTINGS,READER_PANEL_LAYOUT_SETTINGS,READER_PANEL_READING_DISPLAY,READER_PANEL_RULE_SETTINGS,READER_PANEL_TOUCH_SETTINGS,READER_PANEL_TURN_SETTINGS,READER_PANEL_KEY_SETTINGS}reader_panel_t;
+static int s_reader_panel=READER_PANEL_REFRESH_SETTINGS,s_rc_menu_slot=-1,s_turns,effect,full_pages=10,last_action,options[4],notices;
+static unsigned s_rc_tab;static bool s_rc_font_root,default_full,save_fail;
+static reader_controls_config_t config;
+const reader_controls_config_t*app_settings_reader_controls(void){return &config;}
+bool app_settings_set_reader_auto_seconds(unsigned n){if(save_fail)return false;assert(n>=1&&n<=10);config.seconds_le[0]=n;config.seconds_le[1]=n>>8;return true;}
+static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}
+static void rc_pause_auto(void){}
+static void rc_invalidate(void){}
+static void rc_notice(app_ctx_t*c,const char*t){(void)c;(void)t;++notices;}
+static app_redraw_t rc_open(app_ctx_t*c,reader_panel_t p){(void)c;s_reader_panel=p;return APP_REDRAW_PAGE;}
+static app_redraw_t rc_to_root(app_ctx_t*c,unsigned tab){s_rc_tab=tab;return rc_open(c,READER_PANEL_REFRESH_SETTINGS);}
+static app_redraw_t rc_execute(app_ctx_t*c,unsigned a){(void)c;last_action=a;return APP_REDRAW_PAGE;}
 static unsigned app_settings_reader_turn_effect(void){return effect;}
-static void app_settings_set_reader_turn_effect(unsigned n){effect=n;}
-static app_redraw_t apply_reader_option(app_ctx_t *ctx,int i){(void)ctx;assert(i>=0&&i<4);++toggles[i];return APP_REDRAW_PAGE;}
-static bool default_fullscreen,save_fails;
-static bool app_settings_reader_default_fullscreen(void){return default_fullscreen;}
-static bool app_settings_set_reader_default_fullscreen(bool on){if(save_fails)return false;default_fullscreen=on;return true;}
-static void invalidate_prep(void){++invalidates;}
+static void app_settings_set_reader_turn_effect(unsigned a){effect=a;}
+static unsigned app_settings_reader_full_pages(void){return full_pages;}
+static void app_settings_set_reader_full_pages(unsigned a){full_pages=a;}
+static bool app_settings_reader_default_fullscreen(void){return default_full;}
+static bool app_settings_set_reader_default_fullscreen(bool on){if(save_fail)return false;default_full=on;return true;}
+static app_redraw_t apply_reader_option(app_ctx_t*c,int kind){(void)c;assert(kind>=1&&kind<=3);++options[kind];return APP_REDRAW_PAGE;}
 '''
-source = ROOT/'main/apps/app_book.c'
-unit+='static unsigned app_settings_system_font_size(void){return 100;}\n'
-for name in ('reader_ui_extra', 'reading_settings_top', 'reading_setting_rect', 'reading_toggle_rect', 'reading_settings_action'):
-    unit += function(name, source)+'\n'
-unit += r'''
+for n in ['rc_root_top','rc_done_rect','rc_tab_rect','rc_grid_rect','rc_display_rect','rc_effect_rect','rc_refresh_rect','rc_auto_card','rc_interval_rect']:u+=function(n,ui)+'\n'
+action=function('rc_panel_action',runtime)
+a=action.index('    if(s_reader_panel==READER_PANEL_READING_DISPLAY){');b=action.index('    if(s_reader_panel==READER_PANEL_FONT_SETTINGS',a)
+display=action[a:b]
+a=action.index('    if(s_reader_panel!=READER_PANEL_REFRESH_SETTINGS)');root=action[a:]
+u+='static app_redraw_t panel(app_ctx_t*ctx,int x,int y,bool*handled){*handled=false;\n'+display+root+'\n'
+u+=r'''
+static app_redraw_t tap(app_ctx_t*c,EpdRect r){bool handled=false;app_redraw_t out=panel(c,r.x+r.width/2,r.y+r.height/2,&handled);assert(handled);return out;}
 int main(void){
-    app_ctx_t ctx={0};
-    // 9个控件不重叠；默认全屏与沉浸并排，按键控制占末行。
-    // Nine controls stay disjoint; fullscreen entry sits beside immersion and keys span the final row.
-    for(int i=0;i<9;++i){
-        EpdRect a=reading_setting_rect(i);assert(a.x>=36&&a.x+a.width<=648&&a.y>=590&&a.y+a.height<=1122);
-        for(int j=i+1;j<9;++j){EpdRect b=reading_setting_rect(j);assert(a.x+a.width<=b.x||b.x+b.width<=a.x||a.y+a.height<=b.y||b.y+b.height<=a.y);}
-    }
-    EpdRect mode=reading_setting_rect(2),keys=reading_setting_rect(8);
-    assert(keys.x==mode.x&&keys.y>mode.y&&keys.y==1006&&keys.width==612);
-#if KIIKO_BOARD_METALIO47
-    const unsigned expected[]={15,20,30,0,5,10};
-#else
-    const unsigned expected[]={15,30,0,5,10};
-#endif
-    for(unsigned i=0;i<sizeof(expected)/sizeof(expected[0]);++i){s_turns=100;assert(reading_settings_action(&ctx,120,639)==APP_REDRAW_PAGE);assert(full_pages==(int)expected[i]&&!s_turns);}
-    full_pages=77;reading_settings_action(&ctx,120,639);assert(full_pages==(KIIKO_BOARD_METALIO47?0:5));
-    for(unsigned i=0;i<6;++i){s_turns=4;reading_settings_action(&ctx,450,639);assert(effect==(int)((i+1)%3)&&s_turns==0);}
-    s_reader_panel=READER_PANEL_REFRESH_SETTINGS;
-    reading_settings_action(&ctx,120,743);assert(s_reader_panel==READER_PANEL_TURN_SETTINGS);
-    s_reader_panel=READER_PANEL_REFRESH_SETTINGS;
-    reading_settings_action(&ctx,120,1055);assert(s_reader_panel==READER_PANEL_KEY_SETTINGS);
-    for(int i=0;i<4;++i){EpdRect a=reading_toggle_rect(i);assert(reading_settings_action(&ctx,a.x+a.width-5,a.y+a.height-5)==APP_REDRAW_PAGE&&toggles[i]==1);}
-    EpdRect df=reading_toggle_rect(4);
-    assert(reading_settings_action(&ctx,df.x+30,df.y+30)==APP_REDRAW_PAGE&&default_fullscreen);
-    save_fails=true;assert(reading_settings_action(&ctx,df.x+30,df.y+30)==APP_REDRAW_NONE&&default_fullscreen);save_fails=false;
-    s_reader_panel=READER_PANEL_REFRESH_SETTINGS;int before=invalidates;
-    assert(reading_settings_action(&ctx,342,640)==APP_REDRAW_NONE);
-    assert(reading_settings_action(&ctx,120,691)==APP_REDRAW_NONE);
-    assert(reading_settings_action(&ctx,120,1130)==APP_REDRAW_NONE);
-    assert(s_reader_panel==READER_PANEL_REFRESH_SETTINGS&&invalidates==before);
-    reading_settings_action(&ctx,342,1170);assert(s_reader_panel==READER_PANEL_NONE);
-    s_reader_panel=READER_PANEL_REFRESH_SETTINGS;
-    reading_settings_action(&ctx,342,479);assert(s_reader_panel==READER_PANEL_NONE);
-    puts("PASS: approved half-sheet bounds, nonoverlapping shared hit areas, key controls below turn mode, full-refresh/effect cycles, toggles, secondary pages, Done and inert gaps");
+ config=reader_controls_defaults(false);app_ctx_t c={0};
+ const int expected[]={READER_PANEL_FONT_SETTINGS,READER_PANEL_LAYOUT_SETTINGS,READER_PANEL_READING_DISPLAY,READER_PANEL_RULE_SETTINGS};
+ for(int i=0;i<4;++i){s_rc_tab=0;s_reader_panel=READER_PANEL_REFRESH_SETTINGS;EpdRect a=rc_grid_rect(i);assert(a.y>=rc_root_top()+150&&a.y+a.height<rc_done_rect().y);assert(tap(&c,a)==APP_REDRAW_PAGE&&s_reader_panel==expected[i]);
+  for(int j=0;j<i;++j){EpdRect b=rc_grid_rect(j);assert(a.x+a.width<=b.x||b.x+b.width<=a.x||a.y+a.height<=b.y||b.y+b.height<=a.y);}}
+ s_reader_panel=READER_PANEL_REFRESH_SETTINGS;bool h;
+ assert(panel(&c,342,900,&h)==APP_REDRAW_NONE&&h&&s_reader_panel==READER_PANEL_REFRESH_SETTINGS);
+ s_rc_tab=2;
+ const int gesture_top=rc_root_top(), gesture_tabs_y=rc_tab_rect(2).y;
+ assert(gesture_top==576);
+ for(int tab=0;tab<3;++tab){s_reader_panel=READER_PANEL_REFRESH_SETTINGS;
+  assert(tap(&c,rc_tab_rect(tab))==APP_REDRAW_PAGE&&s_rc_tab==(unsigned)tab);
+  assert(rc_root_top()==gesture_top&&rc_tab_rect(tab).y==gesture_tabs_y);}
+ EpdRect effect=rc_effect_rect(0),refresh=rc_refresh_rect(),auto_card=rc_auto_card(0);
+ assert(effect.y>rc_tab_rect(1).y+rc_tab_rect(1).height);
+ assert(effect.y+effect.height<refresh.y&&refresh.y+refresh.height<auto_card.y);
+ assert(auto_card.y+auto_card.height<rc_done_rect().y);
+ EpdRect interval=rc_auto_card(1);
+ for(unsigned plus=0;plus<2;++plus){EpdRect step=rc_interval_rect(plus);
+  assert(step.x>=interval.x&&step.x+step.width<=interval.x+interval.width);
+  assert(step.y>=interval.y&&step.y+step.height<=interval.y+interval.height);}
+ s_rc_tab=1;s_reader_panel=READER_PANEL_REFRESH_SETTINGS;
+ for(int i=0;i<3;++i){s_turns=99;assert(tap(&c,rc_effect_rect(i))==APP_REDRAW_PAGE&&app_settings_reader_turn_effect()==(unsigned)i&&!s_turns);}
+ assert(tap(&c,rc_auto_card(0))==APP_REDRAW_PAGE&&last_action==RC_AUTOTURN);
+ for(unsigned n=10;n>1;--n){assert(tap(&c,rc_interval_rect(false))==APP_REDRAW_PAGE&&reader_controls_seconds(&config)==n-1);}
+ assert(tap(&c,rc_interval_rect(false))==APP_REDRAW_NONE&&reader_controls_seconds(&config)==1);
+ for(unsigned n=1;n<10;++n){assert(tap(&c,rc_interval_rect(true))==APP_REDRAW_PAGE&&reader_controls_seconds(&config)==n+1);}
+ assert(tap(&c,rc_interval_rect(true))==APP_REDRAW_NONE&&reader_controls_seconds(&config)==10);
+ save_fail=true;assert(tap(&c,rc_interval_rect(false))==APP_REDRAW_PAGE&&reader_controls_seconds(&config)==10&&notices==1);save_fail=false;notices=0;
+ s_rc_tab=2;
+ const int links[]={READER_PANEL_TOUCH_SETTINGS,READER_PANEL_TURN_SETTINGS,READER_PANEL_KEY_SETTINGS};
+ for(int i=0;i<3;++i){s_reader_panel=READER_PANEL_REFRESH_SETTINGS;assert(panel(&c,200,800+i*132,&h)==APP_REDRAW_PAGE&&s_reader_panel==links[i]);}
+ s_reader_panel=READER_PANEL_READING_DISPLAY;
+ assert(tap(&c,rc_display_rect(0))==APP_REDRAW_PAGE&&default_full);save_fail=true;
+ assert(tap(&c,rc_display_rect(0))==APP_REDRAW_PAGE&&default_full&&notices==1);save_fail=false;
+ for(int i=1;i<4;++i)assert(tap(&c,rc_display_rect(i))==APP_REDRAW_PAGE&&options[i]==1);
+ assert(tap(&c,rc_done_rect())==APP_REDRAW_PAGE&&s_reader_panel==READER_PANEL_REFRESH_SETTINGS&&s_rc_tab==0);
+ assert(tap(&c,rc_done_rect())==APP_REDRAW_PAGE&&s_reader_panel==READER_PANEL_NONE);
+ puts("PASS: actual four-entry geometry/navigation, three tabs, inert gutters, three effects, auto interval/action, collapsed key entry and display/vertical controls");
 }
 '''
-with tempfile.TemporaryDirectory(dir=ROOT/'build') as folder:
-    c,exe=Path(folder)/'test.c',Path(folder)/'test'
-    c.write_text(unit)
-    view=ROOT/".kiiko-source-view.json"
-    boards=(int(json.loads(view.read_text())["board"]=="metalio47"),) if view.exists() else (0,1)
-    for board in boards:
-        subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',f'-DKIIKO_BOARD_METALIO47={board}',str(c),'-o',str(exe)],check=True)
-        subprocess.run([str(exe)],check=True)
+with tempfile.TemporaryDirectory() as d:
+ p=Path(d);(p/'test.c').write_text(u)
+ subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined','-I'+str(R/'main'),str(p/'test.c'),'-o',str(p/'test')],check=True)
+ subprocess.run([str(p/'test')],check=True)

@@ -29,6 +29,12 @@ enum {MODE_DU,MODE_GL16,MODE_GC16,APP_PAGE_REFRESH_MODE=MODE_GL16};
 #define portMAX_DELAY 0
 #define E0470_TURN_FAST_TICK_US 11090
 static int E0470_WAVEFORM,E0470_FULL_WAVEFORM,E0470_FOLLOW_WAVEFORM;
+#ifndef display_main_gray_waveform
+#define display_main_gray_waveform() (&E0470_WAVEFORM)
+#endif
+#ifndef display_main_normal_waveform
+#define display_main_normal_waveform() (&E0470_WAVEFORM)
+#endif
 typedef int EpdWaveform;
 static int soft_waveform;
 static const int *display_reader_soft_turn_waveform(void){return &soft_waveform;}
@@ -105,6 +111,7 @@ static void assert_text_area(void){
 static EpdRect reader_fast_panel_rect(void){return(EpdRect){0};}
 static bool reader_slider_feedback_present(app_ctx_t *ctx,app_redraw_t redraw){(void)ctx;(void)redraw;return false;}
 '''
+unit+='enum {READER_PANEL_TOUCH_SETTINGS=90,READER_PANEL_TOUCH_MORE=91};\nstatic bool s_rc_full_was_visible,s_rc_double_pending;\nstatic bool rc_custom_modal(void){return false;}\nstatic void rc_pause_auto(void){}\nstatic void rc_stop_auto(void){}\nstatic void rc_cancel_side(void){}\n'
 unit+='static bool reader_panel_short_ready(app_redraw_t r){return test_panel_short&&r==APP_REDRAW_PAGE;}\nstatic bool reader_panel_fast_present(app_ctx_t *ctx,app_redraw_t redraw){(void)ctx;(void)redraw;return false;}\nstatic void reader_panel_record(enum EpdDrawError err){(void)err;}\nstatic bool display_page_prepare_begin(void){return false;}\nstatic void display_page_prepare_end(bool held){(void)held;}\n'
 unit+='\n'.join(line for line in (root/'main/ui/ui_reader_layout.h').read_text().splitlines() if not line.startswith(('#include','#pragma'))) + '\n'
 for name in ('reader_area','reader_fullscreen_progress_area','progress_rect'):
@@ -211,5 +218,5 @@ with tempfile.TemporaryDirectory(prefix='kiikoread-reader-release-') as folder:
  c=Path(folder)/'test.c';c.write_text(unit)
  for enabled in (0,1):
   binary=Path(folder)/f'test-{enabled}'
-  subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-variable','-g','-fsanitize=address,undefined',f'-DKIIKO_S31_TEXT_RIPPLE={enabled}',str(c),'-o',str(binary)],check=True)
+  subprocess.run(['cc','-DKIIKO_BOARD_METALIO47=1','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-variable','-g','-fsanitize=address,undefined',f'-DKIIKO_S31_TEXT_RIPPLE={enabled}',str(c),'-o',str(binary)],check=True)
   subprocess.run([str(binary)],check=True)

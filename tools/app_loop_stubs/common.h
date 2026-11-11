@@ -52,6 +52,7 @@ int app_settings_main_refresh_mode(void);
 void display_main_transition_disarm(void);
 void display_main_transition_cancel(void);
 void rails_idle_check(int64_t);
+void display_reader_keep_rails(bool);
 bool read_pico_pmu_ready(void);
 typedef enum { READ_PICO_PMU_KEY_NONE, READ_PICO_PMU_KEY_SHORT, READ_PICO_PMU_KEY_LONG } read_pico_pmu_key_action_t;
 read_pico_pmu_key_action_t read_pico_pmu_take_key_action(void);
@@ -82,3 +83,5 @@ int read_pico_sd_start_recovery(void);
 int epd_rotated_display_width(void);
 int epd_rotated_display_height(void);
 void epd_fill_triangle(int,int,int,int,int,int,uint8_t,uint8_t*);
+
+void read_pico_transfer_resume_after_sleep(void);

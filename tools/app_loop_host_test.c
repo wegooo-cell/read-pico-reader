@@ -24,6 +24,10 @@ bool app_book_resume_context(char *p,size_t c,bool *f) { (void)p;(void)c;(void)f
 #include <string.h>
 
 const app_desc_t app_book = {.title="book"};
+bool test_reader_open;
+static bool reader_rails_held;
+bool display_main_fast_background_set(bool active){(void)active;return false;}
+void display_reader_keep_rails(bool active) {reader_rails_held=active;}
 const app_desc_t app_transfer = {.title="transfer"};
 static int power_open_draws, power_controls_draws, power_final_draws;
 static int power_trigger_step = -1, shutdowns, restarts;
@@ -46,6 +50,10 @@ static int long_keys;
 static uint8_t idle_minutes;
 static int idle_locks, before_locks, lock_feedback_calls, lock_badges, wake_clean_requests;
 static bool feedback_enabled;
+static int wake_present_before, network_resumes;
+static bool resume_test, fresh_key_sent, resume_drain_blocked;
+static int64_t resume_delay_us, fresh_key_at_us;
+static int resume_queued_action, queued_action, resume_drains;
 static bool online_busy;
 static bool ble_enabled, saved_wifi, upload_busy, click_enabled, click_active;
 static read_pico_transfer_status_t transfer_status;
@@ -54,7 +62,7 @@ static int quick_draws, quick_gl, quick_du, wifi_starts, wifi_stops, ble_resets,
 static app_redraw_t long_key(app_ctx_t* c, int k) { assert(k==UI_KEY_2); ++long_keys; c->request_menu=true; return APP_REDRAW_NONE; }
 static app_redraw_t response;
 static bool request_on_touch, request_on_tick, menu_on_tick, menu_on_touch, cancel_clobber;
-static bool home_on_touch, home_on_tick, home_on_key, start_second;
+static bool home_on_touch, home_on_tick, home_on_key, start_second, start_reader;
 static int home_enters, home_renders, last_menu_leaf, rendered_leaf;
 static const app_desc_t* menu_background;
 static app_desc_t first, second;
@@ -178,9 +186,23 @@ void display_main_transition_cancel(void) {nav_armed=NULL;}
 void display_main_transition_arm(const void* owner, bool shelf_exit, bool changing_page) {(void)changing_page;display_main_transition_cancel();nav_armed=owner;++nav_arms;shelf_exit_arms+=shelf_exit;}
 void display_main_transition_disarm(void) {nav_armed=NULL;}
 void rails_idle_check(int64_t n) {(void)n;}
-bool read_pico_pmu_ready(void) {return lock_due||step==power_trigger_step;}
-read_pico_pmu_key_action_t read_pico_pmu_take_key_action(void) {return step==power_trigger_step?READ_PICO_PMU_KEY_LONG:READ_PICO_PMU_KEY_SHORT;}
-void enter_lock_and_sleep(EpdiyHighlevelState*h,int64_t*t,void*a,void*tp,bool reader) {(void)tp;(void)h;(void)t;(void)a;(void)reader;assert(!nav_armed);if(check_clean_action)assert(frame[0]==0x11&&panel_marker==0x11);++idle_locks;lock_due=false;time_offset+=1000000;}
+bool read_pico_pmu_ready(void) {
+ if(resume_test&&network_resumes&&fresh_key_at_us&&!fresh_key_sent&&esp_timer_get_time()>=fresh_key_at_us){fresh_key_sent=true;lock_due=true;queued_action=READ_PICO_PMU_KEY_SHORT;}
+ return lock_due||step==power_trigger_step;
+}
+read_pico_pmu_key_action_t read_pico_pmu_take_key_action(void) {
+ if(resume_test&&idle_locks){lock_due=false;int action=queued_action;queued_action=0;return action;}
+ return step==power_trigger_step?READ_PICO_PMU_KEY_LONG:READ_PICO_PMU_KEY_SHORT;
+}
+void read_pico_pmu_drain_events(void) {if(resume_test){++resume_drains;if(!resume_drain_blocked){queued_action=0;lock_due=false;}}}
+void enter_lock_and_sleep(EpdiyHighlevelState*h,int64_t*t,void*a,void*tp,bool reader) {(void)tp;(void)h;(void)t;(void)a;(void)reader;assert(!nav_armed);if(check_clean_action)assert(frame[0]==0x11&&panel_marker==0x11);++idle_locks;wake_present_before=fulls+mode+du_areas+gl_areas;lock_due=false;time_offset+=1000000;
+ if(resume_test){int64_t now=esp_timer_get_time();time_step=100000;time_offset=now-(step+1)*time_step;*t=now/1000+APP_LOCK_IGNORE_BOOT_MS;}
+}
+void read_pico_transfer_resume_after_sleep(void) {assert(wake_clean_requests>network_resumes);assert(fulls+mode+du_areas+gl_areas>wake_present_before);++network_resumes;
+ if(resume_test&&network_resumes==1){time_offset+=resume_delay_us;queued_action=resume_queued_action;lock_due=queued_action!=0;
+  if(fresh_key_at_us)fresh_key_at_us=esp_timer_get_time()+(APP_LOCK_IGNORE_BOOT_MS+300)*1000;}
+}
+
 void app_lock_feedback(EpdiyHighlevelState*h) {(void)h;++lock_feedback_calls;if(feedback_enabled){assert(!before_locks&&!idle_locks);++lock_badges;}}
 void app_lock_wait_key_idle(int ms) {(void)ms;}
 esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {assert(mode==APP_SLEEP_OFF);++shutdowns;longjmp(done,1);}
@@ -244,6 +266,8 @@ static app_redraw_t tick(app_ctx_t*c) {
 }
 static app_redraw_t consume_power(app_ctx_t*c) {(void)c;lock_due=false;return APP_REDRAW_DONE;}
 static void reset(void) {
+    test_reader_open=reader_rails_held=start_reader=false;
+    wake_present_before=network_resumes=0;resume_test=fresh_key_sent=resume_drain_blocked=false;resume_delay_us=fresh_key_at_us=0;resume_queued_action=queued_action=resume_drains=0;
     edge_enabled=edge_blocked=power_reported=false;edge_returns=back_ripples=power_header_draws=0;power_change_step=-1;
     memset(frame,0,sizeof(frame));panel_marker=0;check_clean_action=false;clean_action_fulls=0;
     pulse_tab=-1;pulse_requests=pulse_draws=0;
@@ -270,7 +294,7 @@ static void reset(void) {
     second=(app_desc_t){.title="second",.render=render,.on_enter=enter};
 }
 static void add(int x,int y,int count,int error) {samples[sample_count++]=(sample_t){x,y,count,error};}
-static void run(void) {app_loop_config_t cfg={.fb=frame,.first_app=start_second?&second:&first};if(!setjmp(done))app_loop_run(&cfg);}
+static void run(void) {app_loop_config_t cfg={.fb=frame,.first_app=start_reader?&app_book:start_second?&second:&first};if(!setjmp(done))app_loop_run(&cfg);}
 static app_redraw_t consumed_return_tick(app_ctx_t*c) { if(step==0){c->leaf=7;c->request_app=&second;}else c->request_return=true;return APP_REDRAW_NONE; }
 static app_redraw_t return_tick(app_ctx_t*c) { c->request_return=true; return APP_REDRAW_NONE; }
 static app_redraw_t origin_tick(app_ctx_t*c) { c->leaf=7; if(step==0 && request_on_tick)c->request_app=&second; return APP_REDRAW_NONE; }
@@ -300,6 +324,12 @@ static bool child_view;
 static bool child_root(app_ctx_t *ctx){(void)ctx;return !child_view;}
 static app_redraw_t child_cycle(app_ctx_t *ctx){(void)ctx;child_view=!child_view;return APP_REDRAW_PAGE;}
 int main(void) {
+    for(int open=0;open<2;++open){
+        reset();start_reader=true;test_reader_open=open;
+        add(0,0,0,0);add(0,0,0,0);run();assert(reader_rails_held==!!open);
+    }
+    reset();test_reader_open=true;add(0,0,0,0);add(0,0,0,0);run();assert(!reader_rails_held);
+    puts("PASS: real Pico loop retains rails only for the current open reader, including idle/no-redraw iterations");
     for(int white=0;white<2;++white)for(int binary=0;binary<2;++binary){
         reset();child_view=false;first.enter_full=true;first.persistent_navigation=true;
         first.white_child_transition=white;first.binary_ui=binary;first.main_page_visible=child_root;first.on_tick=child_cycle;
@@ -632,6 +662,20 @@ int main(void) {
         assert(quick_press_draws==1&&quick_du==2&&quick_gl==1&&!wifi_starts&&!touch_calls);
     }
     puts("quick layer/click scheduler: modal ownership, local BW/gray, immediate local presses without underlay re-render/glass regeneration, one saved-network connect/disconnect, upload/no-credential guards, BLE on/recent request and off before connection, full/lock and release/multitouch/read-error restoration passed");
+#if KIIKO_BOARD_METALIO47
+#else
+    // Network restoration must not consume wake protection or the user's idle budget.
+    const int64_t resume_delays[]={0,500000,5000000,30000000,90000000};
+    for(unsigned delay=0;delay<sizeof(resume_delays)/sizeof(resume_delays[0]);++delay)
+    for(int action=0;action<3;++action)for(int fresh=0;fresh<2;++fresh)for(int blocked=0;blocked<2;++blocked){
+        reset();resume_test=true;resume_drain_blocked=blocked;resume_delay_us=resume_delays[delay];resume_queued_action=action==1?READ_PICO_PMU_KEY_SHORT:action==2?READ_PICO_PMU_KEY_LONG:0;
+        fresh_key_at_us=fresh?1:0;lock_due=true;time_step=3000000;idle_minutes=1;
+        for(int sample=0;sample<30;++sample)add(0,0,0,0);
+        run();if(idle_locks!=1+fresh||network_resumes!=1+fresh||resume_drains!=1+fresh)fprintf(stderr,"resume delay=%lld action=%d fresh=%d: locks=%d network=%d drains=%d fresh_sent=%d\n",(long long)resume_delays[delay],action,fresh,idle_locks,network_resumes,resume_drains,fresh_key_sent);assert(idle_locks==1+fresh&&network_resumes==1+fresh&&resume_drains==1+fresh);
+        assert(!power_open_draws&&fresh_key_sent==(fresh!=0));
+    }
+    puts("PASS: zero/0.5/5/30/90s resume handles queued short/long keys and failed drains, resets wake/idle time and admits the next real press");
+#endif
     // 反馈必须早于页面保存/后台收尾；下一页与自动休眠不显示主动锁屏徽标。
     // Acknowledgement precedes saves/joins; consumed page turns and idle sleep omit it.
     for(int policy=0;policy<3;++policy){

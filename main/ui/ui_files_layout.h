@@ -18,3 +18,5 @@ static inline EpdRect ui_files_batch_rect(int i) {
 }
 _Static_assert(UI_FILES_LIST_END < 1006, "directory ends before its pager");
 _Static_assert(1006+60 <= UI_FILES_FOOTER_TOP-8, "pager leaves footer guard");
+
+_Static_assert(662+4*102 <= UI_FILES_FOOTER_TOP-8, "Four transfer entries leave footer guard");

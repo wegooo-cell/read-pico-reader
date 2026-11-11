@@ -6,8 +6,8 @@
  *
  * 中文：TF 卡文件入口、目录浏览及 USB/Wi-Fi 传输入口。
  * English: SD file entry, directory browser and USB/Wi-Fi transfer routes.
- * 用户修订：文件管理直接显示 WiFi、热点、USB 三个入口，不再包含在线书籍下载。
- * User revision: show direct WiFi, hotspot and USB routes, with no online book downloads.
+ * 用户修订：文件管理传输区提供 WiFi、热点、USB 和阅星瞳APP导入四个入口。
+ * User revision: show direct WiFi, hotspot, USB and Xteink app import routes.
  * 用户授权新输入法：文件改名使用共用九宫格/全键盘及常亮光标；离页释放候选。
  * Authorized keyboard revision: rename uses shared T9/QWERTY and a steady caret; exit frees candidates.
  * 用户修订：输入只刷新变化区域，布局切换局部灰阶，避免打字累计整屏清残影。
@@ -931,9 +931,9 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
             ui_text_box(fb,(EpdRect){r.x+10,r.y+81,r.width-20,40},28,labels[i],EPD_DRAW_ALIGN_CENTER,false);
             char count[32];file_count_label(folders[i],count,sizeof(count));ui_text_box(fb,(EpdRect){r.x+10,r.y+125,r.width-20,28},18,count,EPD_DRAW_ALIGN_CENTER,false);}
         ui_text_box(fb,(EpdRect){36,606,612,38},26,"传输",EPD_DRAW_ALIGN_LEFT,false);
-        EpdRect transfer={36,662,612,306};ui_fill_round_rect(fb,transfer,24,UI_GRAY_WHITE);file_card_border(fb,transfer,24);
-        const char *methods[]={"Wi-Fi 传输","热点传输","U 盘模式"};const char *details[]={"同一网络，手机或电脑传入","连接阅读器热点，无需路由器","用 USB 数据线连接电脑"};const ui_icon_t method_icons[]={UI_ICON_WIFI,UI_ICON_RADIO_TOWER,UI_ICON_USB};
-        for(int i=0;i<3;++i){EpdRect r=home_transfer_rect(i);ui_fill_round_rect(fb,(EpdRect){60,r.y+24,54,54},15,0xf0);ui_draw_icon(fb,87,r.y+51,33,method_icons[i],0x20);
+        EpdRect transfer={36,662,612,408};ui_fill_round_rect(fb,transfer,24,UI_GRAY_WHITE);file_card_border(fb,transfer,24);
+        const char *methods[]={"Wi-Fi 传输","热点传输","U 盘模式","阅星瞳APP导入"};const char *details[]={"同一网络，手机或电脑传入","连接阅读器热点，无需路由器","用 USB 数据线连接电脑","扫码绑定，下载书籍、字体与壁纸"};const ui_icon_t method_icons[]={UI_ICON_WIFI,UI_ICON_RADIO_TOWER,UI_ICON_USB,UI_ICON_DOWNLOAD};
+        for(int i=0;i<4;++i){EpdRect r=home_transfer_rect(i);ui_fill_round_rect(fb,(EpdRect){60,r.y+24,54,54},15,0xf0);ui_draw_icon(fb,87,r.y+51,33,method_icons[i],0x20);
             ui_text_box(fb,(EpdRect){134,r.y+14,450,43},27,methods[i],EPD_DRAW_ALIGN_LEFT,false);ui_text_box(fb,(EpdRect){134,r.y+58,450,28},18,details[i],EPD_DRAW_ALIGN_LEFT,false);ui_draw_icon(fb,612,r.y+51,24,UI_ICON_CHEVRON_RIGHT,0x30);if(i)ui_draw_separator(fb,r.y,60,564,0x90);}
     }
     if(s_view==FILE_VIEW_LIST&&s_folder>=0){
@@ -1403,7 +1403,11 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         s_sd_format_confirm = false;
         s_sd_notice[0] = 0;
     }
-    for (int i = 0; !long_press && i < 3; ++i) if (ui_rect_hit(home_transfer_rect(i), ev->x0, ev->y0)) {
+    for (int i = 0; !long_press && i < 4; ++i) if (ui_rect_hit(home_transfer_rect(i), ev->x0, ev->y0)) {
+        if(i==3){
+            extern const app_desc_t app_cloud_sync;
+            ctx->request_app=&app_cloud_sync;return APP_REDRAW_NONE;
+        }
         extern const app_desc_t app_transfer;
         if (i == 0) app_transfer_request_wifi_upload();
         else if (i == 1) app_transfer_request_hotspot_start();

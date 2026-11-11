@@ -5,6 +5,14 @@
 - 跨文件脚注：正文里的 `文件#片段` 链接现在会到目标 XHTML 的 id 元素取注释文本，弹窗显示；注释页里指回正文的 key/back/noteref 回跳链接自动跳过。文字注号（如“注１”）也按排版位置可点，热区按字号放大；图标注号保持原行为。
   Cross-file footnotes: body links of the form `file#fragment` now pull the note text from the target XHTML's id element and show it in the pop-up; key/back/noteref back-links inside note pages are skipped. Text markers (e.g. "注１") are tappable from their typeset position with a padded hotspot; icon markers keep their old behaviour.
 
+## Pico 0.3.3-rc106 / Metalio S31 0.3.3-rc111
+
+- 阅读设置按排版、翻页与手势分组。自动翻页间隔为 1–10 秒，切换全屏时保持开启。
+- 支持自定义触摸动作，左右横滑固定翻页，底部三个上滑区域可分别设置。
+- 书架补充进度和已读标记，可按阅读进度排序。
+- Pico 在阅读正文及工具面板空闲时保留已上电的 EPD 高压供电，退出阅读恢复 8 秒空闲断电。
+- 两板同步阅星瞳导入、蓝牙翻页器适配和书架缓存改动。S31 同步电量显示策略。
+
 ## Pico 0.3.3-rc105 / Metalio S31 0.3.3-rc110 — 2026-11-04
 
 - 两板内建覆盖7668字符，正文缺字回退、16级灰阶补字、缩放边缘及逐字墨量校正；保留系统字形与导入字体。支持默认全屏、紧凑阅读线按钮和稳定的上下操作栏/分页，修复书架分页箭头。

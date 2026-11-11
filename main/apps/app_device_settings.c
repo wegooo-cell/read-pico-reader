@@ -1,4 +1,7 @@
 /*
+ * 用户2026-11-11追加：补齐加载提示、贴顶小收藏、封面进度开关、调色板同页入口及进度/升降排序；保留已完成首页与阅读功能。
+ * 阅读修订取代旧自动暂停约束：0–10秒±1秒，切换全屏/操作不关闭开关，安全菜单暂缓计时；离书/锁屏/书末保留安全停止。两板原按键页、状态栏避让、控件对齐及黑框提示一并修复。
+ * User2026-11-11: complete the remaining shelf previews and retain existing Home/reader work. Auto turns use0–10s steps, keep enabled across fullscreen/manual input, defer in menus and stop at lifecycle/end boundaries. Restore native board-specific key pages, aligned controls, protected touch headers and black notice outlines.
  * SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -26,6 +29,10 @@
  * User rollback: all main modes return to one discrete list step per gesture with differential updates, without inertia, light motion ink or idle restoration.
  * 用户2026-10-21修订：设置列表滚动保留文字抗锯齿和灰阶头像，撤掉书架额外四相补白，列表仍一次输出且不影响固定底栏。
  * User revision2026-10-21: keep AA text and gray avatars during list scrolls, omit the shelf's four added white phases, and retain one output with fixed navigation.
+ * S31用户2026-11-07修订：快滑保留分段步长、持续拖动主/蓝牙列表移动黑白缓存；跨手势复用预览，停止操作800ms后统一恢复灰阶/区域清理，无惯性。
+ * S31 revision2026-11-07: retain discrete quick steps and cached held root/Bluetooth drags; reuse BW previews across contacts and restore/clean grays once after800ms idle, without inertia.
+ * S31追加修订：短快滑松手从按下位置固定推进约半个可见列表；按住仍立即跟随，不累加已预览的位移。
+ * Additional S31 revision: release short flicks to half the visible list height from the press anchor; held movement still follows immediately without adding preview displacement twice.
  */
 #if KIIKO_BOARD_METALIO47
 #ifdef ESP_PLATFORM
@@ -72,8 +79,6 @@
 #endif
 #include "app_font_context.h"
 #if KIIKO_BOARD_METALIO47
-#include "ui_online_fonts.h"
-static ui_online_fonts_t s_online_fonts;
 #endif
 #include "ui_gesture.h"
 #include "ui_kit.h"
@@ -114,7 +119,6 @@ static char s_notice[96];
 typedef enum { SETTINGS_MAIN, SETTINGS_WIFI, SETTINGS_TIME,
                SETTINGS_TIME_EDIT, SETTINGS_SHELF_STYLE, SETTINGS_SYSTEM_FONT,
 #if KIIKO_BOARD_METALIO47
-               SETTINGS_ONLINE_FONTS,
                SETTINGS_SD_RECOVERY,
 #endif
                SETTINGS_SYSTEM_SIZE, SETTINGS_SYSTEM_CONTRAST, SETTINGS_MAIN_REFRESH, SETTINGS_LOCK_STYLE,
@@ -132,6 +136,15 @@ typedef enum { SETTINGS_MAIN, SETTINGS_WIFI, SETTINGS_TIME,
                SETTINGS_LOCK_PIN, SETTINGS_PIN_ENTRY, SETTINGS_TEXT_EDIT, SETTINGS_LANGUAGE } settings_page_t;
 #endif
 static settings_page_t s_page;
+static bool s_shelf_style_requested,s_shelf_style_from_manage;
+void app_device_settings_request_shelf_style(void){s_shelf_style_requested=true;}
+static app_redraw_t shelf_style_finish(app_ctx_t*ctx){
+    if(s_shelf_style_from_manage){
+        s_shelf_style_from_manage=false;app_book_return_from_shelf_style();ctx->request_return=true;return APP_REDRAW_NONE;
+    }
+    s_page=SETTINGS_MAIN;return APP_REDRAW_PAGE;
+}
+
 #if KIIKO_BOARD_METALIO47
 static char s_sd_notice[96];
 static EpdRect sd_recovery_button(void) { return (EpdRect){54,850,576,78}; }
@@ -144,7 +157,6 @@ static int settings_viewport_end(void) {
 }
 static void settings_navigation(uint8_t *fb) {
 #if KIIKO_BOARD_METALIO47
-    if(s_page==SETTINGS_ONLINE_FONTS)return;
 #endif
     ui_nav_draw(fb,3);
 }
@@ -211,6 +223,27 @@ static const uint8_t s_shelf_style_ids[] = {1, 2, 6, 5};
 #define SHELF_STYLE_CHOICES 4
 static bool s_collage_prepare_pending;
 static bool s_scroll_drag_consumed, s_scroll_present_pending;
+#if KIIKO_BOARD_METALIO47
+typedef struct {
+    bool tracking, active, following, disabled, frame_pending, settle_pending;
+    settings_page_t page;
+    int *offset, limit, origin_offset, origin_y, press_x, press_y, shown_offset;
+    int width, height, travel_x, travel_y;
+    enum EpdRotation rotation;
+    int64_t frame_ms, settle_ms, press_ms, sample_ms, blocked_ms;
+    EpdRect area;
+    uint8_t *bits;
+} settings_drag_t;
+static settings_drag_t s_list_drag;
+#define SETTINGS_DRAG_SLOP_PX 6
+#define SETTINGS_QUICK_MIN_PX 36
+#define SETTINGS_QUICK_MAX_PX SETTINGS_QUICK_STEP_PX
+#define SETTINGS_QUICK_MS 300
+#define SETTINGS_QUICK_STEP_PX ((settings_content_end()-(s_page==SETTINGS_MAIN?160:190))/2)
+#define SETTINGS_HOLD_FRAME_MS 60
+#define SETTINGS_HOLD_IDLE_MS 800
+#define SETTINGS_HOLD_CACHE_MAX (512u * 1024u)
+#endif
 // 蓝牙翻页器子页：滚动位置、正在学习哪个动作（0 未学，1 上一页，2 下一页）、提示行。
 // Bluetooth sub-page: scroll offset, which action is being learned (0 idle, 1 prev, 2 next),
 // and a notice line.
@@ -416,9 +449,9 @@ static int settings_main_row_height(void) {
 #if KIIKO_BOARD_METALIO47
 // S31 个性化功能多一行「快充」，其余板型保持四项。
 // S31 keeps one extra Fast charge row in Personalization; other boards keep four.
-#define SETTINGS_PERSONAL_ROWS 5
+#define SETTINGS_PERSONAL_ROWS 6
 #else
-#define SETTINGS_PERSONAL_ROWS 4
+#define SETTINGS_PERSONAL_ROWS 5
 #endif
 #if KIIKO_BOARD_METALIO47
 #define SETTINGS_MAINTENANCE_ROWS 6
@@ -897,6 +930,7 @@ static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
         UI_ICON_ROTATE_CW,         // 17 屏幕修复 / panel repair
         UI_ICON_LOCK,              // 18 双击解锁 / double-press unlock
         UI_ICON_ZAP,               // 19 快充 / fast charge
+        [20] = UI_ICON_CHART_COLUMN, // 20 书籍百分比 / cover progress
     };
     if (index < 0 || index >= (int)(sizeof(icons) / sizeof(icons[0]))) return;
     ui_draw_icon(fb, cx, cy, SETTINGS_ICON_PX, icons[index], SETTINGS_ICON_INK);
@@ -942,6 +976,10 @@ static void setting_group(uint8_t *fb, int title_y, const char *title,
         if (y + row_height <= 160 || y >= settings_viewport_end()) continue;
         if (i) settings_divider(fb, y, 88, 544);
         setting_icon(fb, icons[i], 67, y + row_height / 2);
+        if(icons[i]==20){
+            ui_text_vc(fb,100,y+row_height/2,25,labels[i],EPD_DRAW_ALIGN_LEFT,false);
+            settings_switch(fb,y+row_height/2,app_settings_shelf_progress_badges());continue;
+        }
         if (icons[i] == SETTINGS_UNLOCK_ICON) {
             ui_text_vc(fb, 100, y + row_height / 2, 25, labels[i], EPD_DRAW_ALIGN_LEFT, false);
             settings_switch(fb, y + row_height / 2, app_settings_wake_presses() == 2);
@@ -1011,7 +1049,6 @@ static char s_main_wifi[33];
 static bool s_main_wifi_saved;
 static void render_content(app_ctx_t *ctx, uint8_t *fb) {
 #if KIIKO_BOARD_METALIO47
-    if(s_page==SETTINGS_ONLINE_FONTS){ui_online_fonts_draw(&s_online_fonts,fb);return;}
     if(s_page==SETTINGS_FRONTLIGHT) {
         epd_fill_rect((EpdRect){0,0,684,1216},UI_GRAY_WHITE,fb); back_header(fb,"前光与振动");
         char value[48]; snprintf(value,sizeof(value),"%u%%",metalio_brightness());
@@ -1208,7 +1245,6 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
     if (s_page == SETTINGS_SYSTEM_FONT) {
         back_header(fb, "系统字体");
 #if KIIKO_BOARD_METALIO47
-        ui_online_fonts_draw_entry(fb,79);
 #endif
         system_font_layout_t l = system_font_layout();
         settings_card(fb,l.size,22,UI_GRAY_WHITE,0x70);
@@ -1753,18 +1789,18 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
 #if KIIKO_BOARD_METALIO47
     // 快充是独立一行：点按即切换，值显示实际生效档位。
     // Fast charge is its own row: a tap toggles it and the value shows the effective current.
-    const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名","快充"};
-    const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==6?"液态玻璃书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架",
+    const char *personal_labels[]={"书架样式","书籍百分比显示","锁屏样式","锁屏密码","状态栏签名","快充"};
+    const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==6?"液态玻璃书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架","",
         app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
         lock_pin_enabled()?"已开启":"已关闭",signature,
         app_settings_fast_charge()?"开启":"关闭"};
-    const int personal_icons[]={4,5,16,10,19};
+    const int personal_icons[]={4,20,5,16,10,19};
 #else
-    const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名"};
-    const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==6?"液态玻璃书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架",
+    const char *personal_labels[]={"书架样式","书籍百分比显示","锁屏样式","锁屏密码","状态栏签名"};
+    const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==6?"液态玻璃书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架","",
         app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
         lock_pin_enabled()?"已开启":"已关闭",signature};
-    const int personal_icons[]={4,5,16,10};
+    const int personal_icons[]={4,20,5,16,10};
 #endif
     setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
                   personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
@@ -1831,6 +1867,335 @@ static void render(app_ctx_t *ctx,uint8_t *fb) {
     settings_navigation(fb);
 }
 
+#if KIIKO_BOARD_METALIO47
+static void settings_drag_reset(void) {
+    free(s_list_drag.bits);
+    memset(&s_list_drag,0,sizeof(s_list_drag));
+}
+
+// UI坐标与4bpp物理内存分开，旋转后仍只读写列表，不触碰题头/导航。
+// Keep logical UI coordinates separate from physical4bpp memory, including rotated list-only copies.
+static size_t settings_drag_pixel(int x,int y,int *shift) {
+    const int width=s_list_drag.width,height=s_list_drag.height;
+    int px=x,py=y;
+    switch(s_list_drag.rotation) {
+        case EPD_ROT_PORTRAIT:px=width-1-y;py=x;break;
+        case EPD_ROT_INVERTED_LANDSCAPE:px=width-1-x;py=height-1-y;break;
+        case EPD_ROT_INVERTED_PORTRAIT:px=y;py=height-1-x;break;
+        default:break;
+    }
+    *shift=(px&1)*4;
+    return (size_t)py*(width/2)+px/2;
+}
+
+static bool settings_drag_cache(app_ctx_t *ctx) {
+    settings_drag_t *drag=&s_list_drag;
+    const int width=epd_width(),height=epd_height();
+    const enum EpdRotation rotation=epd_get_rotation();
+    if(drag->bits) {
+        if(drag->width==width&&drag->height==height&&drag->rotation==rotation)return true;
+        free(drag->bits);drag->bits=NULL;
+    }
+    const bool portrait=rotation==EPD_ROT_PORTRAIT||rotation==EPD_ROT_INVERTED_PORTRAIT;
+    const int logical_width=portrait?height:width,logical_height=portrait?width:height;
+    if(!ctx->hl||!ctx->fb||!ctx->hl->back_fb||ctx->fb==ctx->hl->back_fb||
+       width<=0||height<=0||(width&1)||logical_width!=UI_LOCK_WIDTH||
+       logical_height!=UI_LOCK_HEIGHT||drag->limit<0||drag->limit>4096)return false;
+    const size_t rows=(size_t)drag->area.height+(size_t)drag->limit;
+    // 按逻辑列打包，竖向滚动对应S31物理内存中连续的4bpp字节。
+    // Pack logical columns: vertical scrolling then writes contiguous S31 physical4bpp bytes.
+    const size_t stride=(rows+7u)/8u;
+    const size_t bytes=UI_LOCK_WIDTH*stride;
+    if(bytes>SETTINGS_HOLD_CACHE_MAX||
+       heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)<bytes+128u*1024u)return false;
+    uint8_t *bits=heap_caps_calloc(1,bytes,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!bits)return false;
+    drag->width=width;drag->height=height;drag->rotation=rotation;
+    const int saved=*drag->offset;
+    // 一次捕获整个有界列表；此后每帧只搬运1bpp，不测字、不生成字形、不缩放头像。
+    // Capture the bounded list once; later frames only move1bpp without shaping glyphs or resizing avatars.
+    static const uint8_t threshold[16]={0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5};
+    for(int row=0;row<(int)rows;) {
+        const int offset=row<drag->limit?row:drag->limit;
+        const int skip=row-offset;
+        int count=drag->area.height-skip;
+        if(count>(int)rows-row)count=(int)rows-row;
+        *drag->offset=offset;
+        render(ctx,ctx->fb);
+        for(int x=0;x<UI_LOCK_WIDTH;++x)for(int y=0;y<count;++y) {
+            int shift;
+            size_t pixel=settings_drag_pixel(x,drag->area.y+skip+y,&shift);
+            unsigned gray=(ctx->fb[pixel]>>shift)&15u;
+            if(gray==0||(gray<15&&gray<=threshold[((row+y)&3)*4+(x&3)]))
+                bits[(size_t)x*stride+(row+y)/8]|=(uint8_t)(0x80u>>((row+y)&7));
+        }
+        row+=count;
+    }
+    *drag->offset=saved;
+    // 捕获借用front，恢复真实已显示back；顶部/底栏逐字节保持原样。
+    // Restore the actually displayed back after borrowing front, preserving chrome byte-for-byte.
+    memcpy(ctx->fb,ctx->hl->back_fb,(size_t)width*height/2);
+    drag->bits=bits;
+    return true;
+}
+
+// 页面空闲时准备缓存，不推屏；已有触摸、未提交目标或头像仍在加载时不抢第一帧。
+// Warm the cache without output only while idle, yielding to touch, uncommitted targets and pending avatars.
+static void settings_drag_warm(app_ctx_t *ctx,int *offset,int limit) {
+    settings_drag_t *drag=&s_list_drag;
+    if(drag->bits||drag->active||drag->tracking||drag->disabled||
+       !settings_plain_list()||limit<=0||ctx->consumed||ctx->request_app||s_scroll_present_pending||
+       (ctx->touch&&ctx->touch->touched)||(s_page==SETTINGS_MAIN&&s_avatar_pending))return;
+    const int width=epd_width(),height=epd_height();
+    if(!ctx->hl||!ctx->fb||!ctx->hl->back_fb||width<=0||height<=0||
+       (size_t)width*height!=(size_t)UI_LOCK_WIDTH*UI_LOCK_HEIGHT||
+       memcmp(ctx->fb,ctx->hl->back_fb,(size_t)width*height/2))return;
+    const int top=s_page==SETTINGS_MAIN?160:190;
+    drag->page=s_page;drag->offset=offset;drag->limit=limit;
+    drag->area=(EpdRect){0,top,UI_LOCK_WIDTH,settings_content_end()-top};
+    if(!settings_drag_cache(ctx))drag->disabled=true;
+}
+
+// 八个黑白位展开为四个4bpp字节；设备与主机测试均为小端。
+// Expand eight BW bits to four4bpp bytes on the device/host's little-endian layout.
+static uint32_t settings_drag_expand(uint8_t bits) {
+    static const uint16_t four[16]={
+        0xffff,0x0fff,0xf0ff,0x00ff,0xff0f,0x0f0f,0xf00f,0x000f,
+        0xfff0,0x0ff0,0xf0f0,0x00f0,0xff00,0x0f00,0xf000,0x0000};
+    return four[bits>>4]|((uint32_t)four[bits&15]<<16);
+}
+
+static void settings_drag_blit(app_ctx_t *ctx) {
+    const settings_drag_t *drag=&s_list_drag;
+    const size_t stride=((size_t)drag->area.height+drag->limit+7u)/8u;
+    const bool portrait=drag->rotation==EPD_ROT_PORTRAIT;
+    const bool inverted=drag->rotation==EPD_ROT_INVERTED_PORTRAIT;
+    if((portrait||inverted)&&!(drag->area.y&1)&&!(drag->area.height&1)) {
+        // 每轮输出按物理行连续写入；避免60万次旋转/半字节读改写及跨行PSRAM访问。
+        // Write contiguous physical rows, avoiding600k rotations/nibble read-modifies and strided PSRAM writes.
+        static const uint8_t pair[4]={0xff,0x0f,0xf0,0};
+        // 已提交的黑白帧可直接平移，只展开新露出的边缘；奇数像素/首帧走原完整路径。
+        // Shift committed BW pixels and expand only exposed edges; odd shifts/first frames retain the full path.
+        int first=0,end=drag->area.height;
+        const int delta=*drag->offset-drag->shown_offset;
+        const bool reuse=drag->active&&drag->shown_offset>=0&&ctx->hl&&ctx->hl->back_fb&&
+            ctx->fb!=ctx->hl->back_fb&&delta&&!(delta%2)&&abs(delta)<drag->area.height;
+        const int copy_y=delta>0?0:-delta,copy_count=drag->area.height-abs(delta);
+        if(reuse) {
+            first=delta>0?copy_count:0;
+            end=delta>0?drag->area.height:-delta;
+        }
+        for(int x=0;x<UI_LOCK_WIDTH;++x) {
+            const uint8_t *column=drag->bits+(size_t)x*stride;
+            const int row=inverted?drag->height-1-x:x;
+            uint8_t *target=ctx->fb+(size_t)row*(drag->width/2);
+            if(reuse) {
+                const int column_byte=inverted?(drag->area.y+copy_y)/2:
+                    (drag->width-drag->area.y-copy_y-copy_count)/2;
+                const int source_byte=column_byte+(inverted?delta/2:-delta/2);
+                const uint8_t *shown=ctx->hl->back_fb+(size_t)row*(drag->width/2);
+                memcpy(target+column_byte,shown+source_byte,(size_t)copy_count/2);
+            }
+            int y=first;
+            for(;y+8<=end;y+=8) {
+                const size_t bit=(size_t)*drag->offset+y,index=bit/8;
+                const unsigned shift=bit&7;
+                uint8_t bits=column[index];
+                if(shift)bits=(uint8_t)((bits<<shift)|(column[index+1]>>(8-shift)));
+                if(portrait) {
+                    bits=(uint8_t)(((bits&0x55u)<<1)|((bits>>1)&0x55u));
+                    bits=(uint8_t)(((bits&0x33u)<<2)|((bits>>2)&0x33u));
+                    bits=(uint8_t)((bits<<4)|(bits>>4));
+                }
+                const uint32_t pixels=settings_drag_expand(bits);
+                const int column_byte=inverted?(drag->area.y+y)/2:
+                    (drag->width-drag->area.y-y-8)/2;
+                memcpy(target+column_byte,&pixels,sizeof(pixels));
+            }
+            for(;y<end;y+=2) {
+                const size_t bit=(size_t)*drag->offset+y,index=bit/8;
+                const unsigned shift=bit&7;
+                uint8_t bits=column[index];
+                if(shift)bits=(uint8_t)((bits<<shift)|
+                    (index+1<stride?column[index+1]>>(8-shift):0));
+                uint8_t pixels=pair[bits>>6];
+                if(portrait)pixels=(uint8_t)((pixels<<4)|(pixels>>4));
+                target[inverted?(drag->area.y+y)/2:(drag->width-drag->area.y-y)/2-1]=pixels;
+            }
+        }
+        return;
+    }
+    for(int y=0;y<drag->area.height;++y)for(int x=0;x<UI_LOCK_WIDTH;++x) {
+        const size_t bit=(size_t)*drag->offset+y;
+        const unsigned gray=(drag->bits[(size_t)x*stride+bit/8]&(0x80u>>(bit&7)))?0u:15u;
+        int shift;
+        size_t pixel=settings_drag_pixel(x,drag->area.y+y,&shift);
+        ctx->fb[pixel]=(uint8_t)((ctx->fb[pixel]&~(15u<<shift))|(gray<<shift));
+    }
+}
+
+static app_redraw_t settings_drag_sample(app_ctx_t *ctx,int x,int y) {
+    settings_drag_t *drag=&s_list_drag;
+    if(!drag->tracking)return APP_REDRAW_NONE;
+    if(ctx->now_ms<drag->sample_ms)return APP_REDRAW_NONE;
+    drag->sample_ms=ctx->now_ms;
+    int ax=abs(x-drag->press_x),ay=abs(y-drag->press_y);
+    if(ax>drag->travel_x)drag->travel_x=ax;
+    if(ay>drag->travel_y)drag->travel_y=ay;
+    if(drag->disabled)return APP_REDRAW_NONE;
+    int next=drag->origin_offset+drag->origin_y-y;
+    if(next<0)next=0;
+    if(next>drag->limit)next=drag->limit;
+    if(!drag->following) {
+        int dy=y-drag->press_y;
+        if(abs(dy)<SETTINGS_DRAG_SLOP_PX||abs(dy)<=abs(x-drag->press_x)||
+           next==*drag->offset)return APP_REDRAW_NONE;
+        if(!drag->active) {
+            if(!settings_drag_cache(ctx)){drag->disabled=true;return APP_REDRAW_NONE;}
+            drag->active=true;drag->shown_offset=-1;
+        }
+        drag->following=true;
+    }
+    *drag->offset=next;
+    if(next==drag->shown_offset||
+       (drag->shown_offset>=0&&ctx->now_ms-drag->frame_ms<SETTINGS_HOLD_FRAME_MS))return APP_REDRAW_NONE;
+    drag->frame_pending=true;
+    return APP_REDRAW_AREA;
+}
+
+static app_redraw_t settings_drag_finish(app_ctx_t *ctx) {
+    s_list_drag.tracking=false;
+    if(!s_list_drag.active){s_list_drag.following=false;return APP_REDRAW_NONE;}
+    s_list_drag.following=false;
+    s_list_drag.frame_pending=*s_list_drag.offset!=s_list_drag.shown_offset;
+    s_list_drag.settle_pending=true;
+    s_list_drag.settle_ms=ctx->now_ms+SETTINGS_HOLD_IDLE_MS;
+    return s_list_drag.frame_pending?APP_REDRAW_AREA:APP_REDRAW_NONE;
+}
+
+static bool settings_drag_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev,
+    int *offset,int limit,app_redraw_t *redraw) {
+    *redraw=APP_REDRAW_NONE;
+    if(ev->type==UI_GESTURE_PRESS) {
+        const int top=s_page==SETTINGS_MAIN?160:190;
+        if(settings_plain_list()&&limit>0&&ev->y0>=top&&ev->y0<settings_content_end()) {
+            if(!s_list_drag.bits||s_list_drag.page!=s_page||s_list_drag.offset!=offset||s_list_drag.limit!=limit)
+                settings_drag_reset();
+            s_list_drag.tracking=true;s_list_drag.following=false;s_list_drag.settle_pending=false;
+            s_list_drag.page=s_page;s_list_drag.offset=offset;s_list_drag.limit=limit;
+            s_list_drag.origin_offset=*offset;s_list_drag.origin_y=ev->y0;
+            s_list_drag.press_x=ev->x0;s_list_drag.press_y=ev->y0;
+            s_list_drag.press_ms=ctx->now_ms;s_list_drag.blocked_ms=0;s_list_drag.travel_x=s_list_drag.travel_y=0;
+            s_list_drag.sample_ms=ctx->now_ms;
+            s_list_drag.area=(EpdRect){0,top,UI_LOCK_WIDTH,settings_content_end()-top};
+        } else if(s_list_drag.active) {
+            // 标题轻触也打断空闲计时；离页由生命周期释放，不能在新接触下补刷。
+            // Chrome contact also defers settling; lifecycle owns exits, never repaint beneath new input.
+            s_list_drag.settle_ms=ctx->now_ms+SETTINGS_HOLD_IDLE_MS;
+        } else {
+            settings_drag_reset();
+        }
+        return false;
+    }
+    if(!s_list_drag.tracking&&!s_list_drag.active)return false;
+    if(s_list_drag.page!=s_page){settings_drag_reset();return false;}
+    if(ev->type!=UI_GESTURE_MOVE&&ev->type!=UI_GESTURE_LONG_PRESS) {
+        bool owned=s_list_drag.following;
+        const bool lift=s_list_drag.tracking&&ctx->released&&ctx->touch&&
+            !ctx->touch->touched&&!ctx->touch->count&&!ctx->consumed&&
+            ctx->now_ms>=s_list_drag.sample_ms;
+        if(owned&&lift)
+            (void)settings_drag_sample(ctx,ev->x,ev->y);
+        const int dy=(int)ev->y-s_list_drag.press_y,dx=(int)ev->x-s_list_drag.press_x;
+        // 快滑只在有效松手时补足固定段，以按下位置为锚；取消/长拖和轻微抖动不加速。
+        // Complete a short flick only on a valid lift, anchored at press; invalid cancellation, long drags and jitter never accelerate.
+        if(lift&&!s_list_drag.disabled&&ctx->now_ms-s_list_drag.press_ms-s_list_drag.blocked_ms<=SETTINGS_QUICK_MS&&
+           abs(dy)>=SETTINGS_QUICK_MIN_PX&&abs(dy)<=SETTINGS_QUICK_MAX_PX&&abs(dy)>abs(dx)&&
+           s_list_drag.travel_y<=SETTINGS_QUICK_MAX_PX&&s_list_drag.travel_x<abs(dy)) {
+            int next=s_list_drag.origin_offset+(dy<0?SETTINGS_QUICK_STEP_PX:-SETTINGS_QUICK_STEP_PX);
+            if(next<0)next=0;
+            if(next>s_list_drag.limit)next=s_list_drag.limit;
+            if(next==*offset||s_list_drag.active||settings_drag_cache(ctx)) {
+                if(next!=*offset&&!s_list_drag.active) {
+                    s_list_drag.active=true;s_list_drag.shown_offset=-1;
+                }
+                *offset=next;owned=true;
+            } else s_list_drag.disabled=true;
+        }
+        *redraw=settings_drag_finish(ctx);
+        return owned;
+    }
+    if(ev->type==UI_GESTURE_MOVE)*redraw=settings_drag_sample(ctx,ev->x,ev->y);
+    return s_list_drag.following;
+}
+
+// 原识别器在静止长按后不再发MOVE；读本轮有效单指快照仍允许长按再拖。
+// The recognizer stops MOVE after a stationary long press; valid raw snapshots still allow hold-then-drag.
+static app_redraw_t settings_drag_tick(app_ctx_t *ctx) {
+    if(s_list_drag.page!=s_page||ctx->request_app){settings_drag_reset();return APP_REDRAW_NONE;}
+    if(!s_list_drag.tracking) {
+        if(s_list_drag.active&&s_list_drag.settle_pending&&
+           !(ctx->touch&&ctx->touch->touched)&&!ctx->consumed&&ctx->now_ms>=s_list_drag.settle_ms)
+            return APP_REDRAW_AREA;
+        return APP_REDRAW_NONE;
+    }
+    if(ctx->consumed)return APP_REDRAW_NONE;
+    if(!ctx->touch||!ctx->touch->touched||ctx->touch->count!=1)return settings_drag_finish(ctx);
+    return settings_drag_sample(ctx,ctx->touch->x,ctx->touch->y);
+}
+
+static bool settings_drag_present(app_ctx_t *ctx) {
+    settings_drag_t *drag=&s_list_drag;
+    const bool settle=drag->settle_pending&&!drag->tracking&&ctx->now_ms>=drag->settle_ms&&
+        !(ctx->touch&&ctx->touch->touched);
+    if(!drag->frame_pending&&!settle)return false;
+    if(ctx->request_app||drag->page!=s_page){settings_drag_reset();return true;}
+    const bool binary=display_system_binary_set(false);
+    display_main_transition_cancel();s_scroll_present_pending=false;
+    if(settle) {
+        render(ctx,ctx->fb);
+        // 复用原设置列表柔和擦白及完整灰阶，不先把整片背景压黑；仍仅空闲800ms后执行。
+        // Reuse the original settings white-erase/full-gray profile without a reverse-black background, only after800ms idle.
+        guard_draw_result(ctx->hl,update_display_area_full_with(ctx->hl,
+            display_settings_scroll_waveform(),MODE_GL16,drag->area));
+        settings_drag_reset();s_scroll_drag_consumed=false;
+    } else {
+        const int64_t started_us=esp_timer_get_time();
+        settings_drag_blit(ctx);
+        const EpdWaveform *motion=e0470_settings_motion_waveform();
+        guard_draw_result(ctx->hl,update_display_area_diff_with(ctx->hl,
+            motion?motion:display_main_bw_waveform(),MODE_DU,drag->area));
+        // 推屏期间无法采样触摸；识别快滑时扣除这段时间，最多补偿300ms。
+        // Display output blocks touch sampling; exclude up to300ms from this contact's flick duration.
+        if(drag->tracking) {
+            int64_t elapsed_us=esp_timer_get_time()-started_us;
+            if(elapsed_us>0) {
+                drag->blocked_ms+=elapsed_us/1000;
+                if(drag->blocked_ms>SETTINGS_QUICK_MS)drag->blocked_ms=SETTINGS_QUICK_MS;
+            }
+        }
+        drag->frame_pending=false;drag->shown_offset=*drag->offset;drag->frame_ms=ctx->now_ms;
+    }
+    display_system_binary_set(binary);
+    return true;
+}
+
+// 快滑仍按原步长推进，但复用同一黑白缓存，取消每次松手和周期计数造成的补刷。
+// Retain discrete quick-step distances, reusing one BW cache without per-release or counted cleanup.
+static void settings_drag_quick(app_ctx_t *ctx) {
+    settings_drag_t *drag=&s_list_drag;
+    if(!settings_plain_list()||!drag->offset||drag->disabled)return;
+    if(!drag->active) {
+        if(!settings_drag_cache(ctx)){drag->disabled=true;return;}
+        drag->active=true;drag->shown_offset=-1;
+    }
+    drag->frame_pending=true;
+    if(!drag->tracking) {
+        drag->settle_pending=true;drag->settle_ms=ctx->now_ms+SETTINGS_HOLD_IDLE_MS;
+    }
+}
+#endif
+
 static void settings_prepare_profile(void) {
     const char *path=app_settings_avatar_path();
     if(pico_boot_recovery()||!path[0]){ui_avatar_request("",60);s_avatar_ready=s_avatar_pending=false;s_avatar_path[0]=0;return;}
@@ -1841,11 +2206,16 @@ static void settings_prepare_profile(void) {
     s_avatar_ready=state==UI_AVATAR_READY;s_avatar_pending=state==UI_AVATAR_PENDING;
 }
 static void on_enter(app_ctx_t *ctx) {
+#if KIIKO_BOARD_METALIO47
+    settings_drag_reset();
+#endif
     (void)ctx;
     pin_setup_close();
     s_notice[0] = 0;
     s_ble_feedback[0] = 0;
     s_page = SETTINGS_MAIN;
+    s_shelf_style_from_manage=s_shelf_style_requested;s_shelf_style_requested=false;
+    if(s_shelf_style_from_manage)s_page=SETTINGS_SHELF_STYLE;
     s_style_scroll = s_main_scroll = s_font_page = s_wallpaper_page = 0;
     s_collage_prepare_pending = false;
     s_scroll_drag_consumed = s_scroll_present_pending = false;
@@ -1861,7 +2231,7 @@ static void on_enter(app_ctx_t *ctx) {
     (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved);
     settings_prepare_profile();
 #if KIIKO_BOARD_METALIO47
-    if(settings_take_lock_style_return())s_page=SETTINGS_LOCK_STYLE;
+    if(settings_take_lock_style_return()&&!s_shelf_style_from_manage)s_page=SETTINGS_LOCK_STYLE;
 #endif
 }
 
@@ -1917,12 +2287,15 @@ static app_redraw_t reset_tick(void) {
 
 static app_redraw_t on_tick(app_ctx_t *ctx) {
 #if KIIKO_BOARD_METALIO47
+    if(s_list_drag.tracking||s_list_drag.active) {
+        app_redraw_t redraw=settings_drag_tick(ctx);
+        if(redraw!=APP_REDRAW_NONE||s_list_drag.active)return redraw;
+    }
     if(s_page==SETTINGS_SD_RECOVERY) {
         if(!app_sd_recovery_tick(ctx->now_ms))return APP_REDRAW_NONE;
         if(!app_sd_recovery_busy())settings_prepare_profile();
         return APP_REDRAW_PAGE;
     }
-    if(s_page==SETTINGS_ONLINE_FONTS)return ui_online_fonts_tick(&s_online_fonts,ctx->now_ms);
 #endif
     // 屏幕修复：先画最终结果，再在 tick 中整屏恢复；成功后不重复推页。
     // Paint the final notice before the tick's full restoration; do not push the page twice on success.
@@ -1944,6 +2317,9 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
         s_avatar_pending=state==UI_AVATAR_PENDING;
         s_avatar_ready=state==UI_AVATAR_READY;
         if (s_avatar_ready && s_main_scroll < 180+settings_profile_height()-160) {
+#if KIIKO_BOARD_METALIO47
+            settings_drag_reset();
+#endif
             render(ctx,ctx->fb);
             EpdRect area={57,180-s_main_scroll+(settings_profile_height()-82)/2,82,82};
             if (area.y<160) { area.height-=160-area.y; area.y=160; }
@@ -2066,7 +2442,18 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
         if (redraw == APP_REDRAW_AREA) draw_upgrade_progress_delta(ctx->fb);
         return redraw;
     }
-    if (!s_sync_pending) return APP_REDRAW_NONE;
+    if (!s_sync_pending) {
+#if KIIKO_BOARD_METALIO47
+        if(settings_plain_list()) {
+            int *offset=s_page==SETTINGS_MAIN?&s_main_scroll:&s_ble_scroll;
+            int limit=s_page==SETTINGS_MAIN?SETTINGS_SCROLL_MAX:
+                (s_page==SETTINGS_BLUETOOTH?ble_layout().content_bottom+s_ble_scroll:
+                    ble_scan_layout().content_bottom)-settings_content_end()+12;
+            settings_drag_warm(ctx,offset,limit);
+        }
+#endif
+        return APP_REDRAW_NONE;
+    }
     s_sync_pending = false;
     uint32_t utc = 0;
     read_pico_transfer_status_t network = {0};
@@ -2214,15 +2601,6 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
 #if KIIKO_BOARD_METALIO47
     if(app_sd_recovery_busy())return APP_REDRAW_NONE;
     if(s_page==SETTINGS_SD_RECOVERY)return sd_recovery_gesture(ctx,ev);
-    if(s_page==SETTINGS_ONLINE_FONTS){
-        app_redraw_t redraw=ui_online_fonts_gesture(&s_online_fonts,ev);
-        if(s_online_fonts.closed){online_font_cancel_join();ttf_font_scan();s_font_page=0;s_page=SETTINGS_SYSTEM_FONT;}
-        return redraw;
-    }
-    if(s_page==SETTINGS_SYSTEM_FONT&&!s_font_sync_confirm&&ev->type==UI_GESTURE_TAP&&
-       ui_rect_hit(ui_online_fonts_entry_rect(79),ev->x0,ev->y0)){
-        ui_online_fonts_open(&s_online_fonts,false);s_page=SETTINGS_ONLINE_FONTS;return APP_REDRAW_PAGE;
-    }
 #endif
     if (s_page==SETTINGS_SYSTEM_FONT && s_font_sync_confirm) {
         if (ev->type!=UI_GESTURE_TAP) return APP_REDRAW_NONE;
@@ -2349,7 +2727,16 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             offset = &s_ble_scroll;
         }
         bool handled;
+#if KIIKO_BOARD_METALIO47
+        app_redraw_t motion;
+        if(settings_drag_gesture(ctx,ev,offset,limit,&motion))return motion;
+#endif
         app_redraw_t redraw = scroll_gesture(ev, offset, limit, &handled);
+#if KIIKO_BOARD_METALIO47
+        if(redraw==APP_REDRAW_AREA&&s_list_drag.tracking) {
+            s_list_drag.origin_offset=*offset;s_list_drag.origin_y=ev->y;
+        }
+#endif
         if (handled) return redraw;
     }
 
@@ -2438,7 +2825,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
 #else
 #endif
     if (s_page == SETTINGS_PROFILE) {
-        if (y < 190) { s_page = SETTINGS_MAIN; (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
+        if(y<190)return shelf_style_finish(ctx);
         if (y >= 266 && y < 350) { profile_editor_open(false); return APP_REDRAW_PAGE; }
         if (y >= 366 && y < 450) { s_bookmark_picker=false;wallpaper_scan(); s_page = SETTINGS_AVATAR; return APP_REDRAW_PAGE; }
         return APP_REDRAW_NONE;
@@ -2469,12 +2856,12 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         return APP_REDRAW_PAGE;
     }
     if (s_page == SETTINGS_SHELF_STYLE) {
-        if (y < 190) { s_page = SETTINGS_MAIN; (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
+        if(y<190)return shelf_style_finish(ctx);
         for (int i = 0; i < SHELF_STYLE_CHOICES; ++i) {
             if (y >= 242 && y >= 263 + i * 253 - s_style_scroll && y < 493 + i * 253 - s_style_scroll && y < settings_viewport_end() && ev->x0 >= 36 && ev->x0 < 648) {
                 app_settings_set_shelf_style(s_shelf_style_ids[i]);
-                s_page = SETTINGS_MAIN;
-                return APP_REDRAW_PAGE;
+                if(app_settings_shelf_style()!=s_shelf_style_ids[i]){snprintf(s_notice,sizeof(s_notice),"保存失败，请重试");return APP_REDRAW_PAGE;}
+                return shelf_style_finish(ctx);
             }
         }
         return APP_REDRAW_NONE;
@@ -2840,12 +3227,13 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if(y>=SETTINGS_PERSONAL_Y && y<SETTINGS_PERSONAL_Y+SETTINGS_PERSONAL_ROWS*SETTINGS_ROW_H) {
         row=(y-SETTINGS_PERSONAL_Y)/SETTINGS_ROW_H;
         if(row==0) {s_page=SETTINGS_SHELF_STYLE;s_style_scroll=0;}
-        else if(row==1)s_page=SETTINGS_LOCK_STYLE;
-        else if(row==2){s_page=SETTINGS_LOCK_PIN;s_notice[0]=0;}
+        else if(row==1){if(!app_settings_set_shelf_progress_badges(!app_settings_shelf_progress_badges()))snprintf(s_notice,sizeof(s_notice),"保存失败，请重试");} 
+        else if(row==2)s_page=SETTINGS_LOCK_STYLE;
+        else if(row==3){s_page=SETTINGS_LOCK_PIN;s_notice[0]=0;}
 #if KIIKO_BOARD_METALIO47
         // 先保存设置再改充电电流；写 NVS 失败时按实际生效的旧值应用并重绘，避免行与硬件不一致。
         // Persist before reprogramming; on a failed save apply the value that actually took effect.
-        else if(row==4) {
+        else if(row==5) {
             bool next=!app_settings_fast_charge();
             app_settings_set_fast_charge(next);
             (void)metalio_charger_set_fast_charge(app_settings_fast_charge());
@@ -2885,11 +3273,10 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
 
 static app_redraw_t on_key(app_ctx_t *ctx, int key) {
 #if KIIKO_BOARD_METALIO47
+    settings_drag_reset();
+#endif
+#if KIIKO_BOARD_METALIO47
     if(app_sd_recovery_busy())return APP_REDRAW_NONE;
-    if(s_page==SETTINGS_ONLINE_FONTS){
-        ui_online_fonts_close(&s_online_fonts);ttf_font_scan();s_font_page=0;s_page=SETTINGS_SYSTEM_FONT;
-        return APP_REDRAW_PAGE;
-    }
 #endif
     s_reset_confirm=s_reset_pending=false;
 #if KIIKO_BOARD_METALIO47
@@ -2911,6 +3298,7 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
         if (key != 1) { s_page = SETTINGS_BLUETOOTH; s_ble_scroll = 0; return APP_REDRAW_PAGE; }
     }
     if (key == 1) { ui_nav_request(ctx, 0); return APP_REDRAW_NONE; }
+    if(s_page==SETTINGS_SHELF_STYLE&&s_shelf_style_from_manage)return shelf_style_finish(ctx);
     if (s_page == SETTINGS_WALLPAPER_PREVIEW) {
         if (s_wallpaper_confirm) s_wallpaper_confirm = false;
         else { bookmark_preview_release(); s_page = SETTINGS_WALLPAPER; }
@@ -2926,8 +3314,9 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
     return APP_REDRAW_NONE;
 }
 static void settings_exit(app_ctx_t *ctx) {
+    s_shelf_style_from_manage=false;s_shelf_style_requested=false;
 #if KIIKO_BOARD_METALIO47
-    if(s_page==SETTINGS_ONLINE_FONTS)ui_online_fonts_close(&s_online_fonts);
+    settings_drag_reset();
 #endif
     s_reset_confirm=s_reset_pending=false;
 #if KIIKO_BOARD_METALIO47
@@ -2943,7 +3332,7 @@ static void settings_exit(app_ctx_t *ctx) {
 }
 static void on_before_lock(app_ctx_t *ctx) {
 #if KIIKO_BOARD_METALIO47
-    if(s_page==SETTINGS_ONLINE_FONTS){ui_online_fonts_close(&s_online_fonts);ttf_font_scan();s_font_page=0;s_page=SETTINGS_SYSTEM_FONT;}
+    settings_drag_reset();
 #endif
     s_reset_confirm=s_reset_pending=false;
 #if KIIKO_BOARD_METALIO47
@@ -2959,12 +3348,17 @@ static void on_before_lock(app_ctx_t *ctx) {
 static bool no_menu_handle(app_ctx_t *ctx) { (void)ctx; return false; }
 static void settings_media_lost(app_ctx_t *ctx) {
 #if KIIKO_BOARD_METALIO47
-    if(s_page==SETTINGS_ONLINE_FONTS){ui_online_fonts_close(&s_online_fonts);s_page=SETTINGS_SYSTEM_FONT;s_font_page=0;}
+    settings_drag_reset();
 #endif
     bookmark_preview_release();
     (void)ctx; s_avatar_ready=s_avatar_pending=false; s_avatar_path[0]=0;
 }
-static void settings_media_ready(app_ctx_t *ctx) { (void)ctx; settings_prepare_profile(); }
+static void settings_media_ready(app_ctx_t *ctx) {
+#if KIIKO_BOARD_METALIO47
+    settings_drag_reset();
+#endif
+    (void)ctx;settings_prepare_profile();
+}
 static bool settings_edge_back(app_ctx_t *ctx) {
     (void)ctx;
 #if KIIKO_BOARD_METALIO47
@@ -2982,7 +3376,6 @@ static bool settings_navigation_enabled(app_ctx_t *ctx) {
     (void)ctx;
 #if KIIKO_BOARD_METALIO47
     if(app_sd_recovery_busy())return false;
-    if(s_page==SETTINGS_ONLINE_FONTS)return false;
 #endif
     return !s_reset_pending && !s_local_pending && !s_upgrade_restart && !s_pin_pending && !s_boot_pending;
 }
@@ -2993,6 +3386,11 @@ static bool settings_grayscale_ui(app_ctx_t *ctx) {
 #endif
 static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
 #if KIIKO_BOARD_METALIO47
+    if(redraw==APP_REDRAW_FULL||redraw==APP_REDRAW_PAGE)settings_drag_reset();
+    if(redraw==APP_REDRAW_AREA) {
+        if(s_scroll_present_pending)settings_drag_quick(ctx);
+        if(settings_drag_present(ctx))return true;
+    }
     if(settings_plain_list()&&(redraw==APP_REDRAW_PAGE||redraw==APP_REDRAW_FULL)) {
         // 进页与滚动保留相同字缘灰阶；根页切换由外层六/八相许可负责，不叠加列表尾段。
         // Entry and scroll retain the same glyph grays; root scope owns six/eight drives without stacking the list tail.
@@ -3007,7 +3405,6 @@ static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
         display_system_binary_set(binary);
         return true;
     }
-    if(s_page==SETTINGS_ONLINE_FONTS)return ui_online_fonts_present(&s_online_fonts,ctx,redraw);
     if(settings_gray_preview()&&(redraw==APP_REDRAW_PAGE||redraw==APP_REDRAW_FULL||redraw==APP_REDRAW_AREA)){
         if(ctx->request_app)return true;
         // 壁纸/透明书封及书架样式预览不继承系统二值化；同轮输出完整灰阶，退出后恢复原策略。
