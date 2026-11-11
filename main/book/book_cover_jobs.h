@@ -19,6 +19,9 @@ typedef struct {
     uint8_t *pixels;
     unsigned width,height;
     bool fast,white_edge;
+    /// 由标题生成的默认封面；不得进入整页书架缓存，否则失败会被固化。
+    /// Generated default cover; never enters the whole-page shelf cache or a failure freezes.
+    bool generated;
     bool metadata;uint16_t chapters; ///< 来源校验后的章节数 / Source-validated chapter total
     off_t size;
     int64_t modified;

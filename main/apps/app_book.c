@@ -349,6 +349,10 @@ static struct {
     unsigned width, height;
     uint8_t fast_contrast, fast_phase;
     bool fast_white_edge;
+    // 用户2026-11-11：该格当前是“默认/生成封面”；含它的整页不得写入整页缓存。
+    // User2026-11-11: this cell shows a generated default cover; pages containing it must not
+    // be captured into the whole-page shelf cache.
+    bool generated;
 } s_covers[BOOK_ROWS];
 static unsigned s_cover_pending_mask, s_cover_decode_mask, s_cover_warm_mask;
 static unsigned s_cover_dirty_mask, s_cover_present_mask;
@@ -1144,6 +1148,7 @@ static unsigned prepare_cover_batch(app_ctx_t *ctx,bool cache_only) {
         s_covers[row].fast_bits=result.fast?result.pixels:NULL;
         s_covers[row].width=result.width;s_covers[row].height=result.height;
         s_covers[row].fast_white_edge=result.white_edge;
+        s_covers[row].generated=result.generated;
         s_covers[row].fast_contrast=request.contrast;s_covers[row].fast_phase=request.phase;
         changed|=bit;s_cover_dirty_mask|=bit;
     }
@@ -1691,7 +1696,8 @@ static void draw_shelf_page_artwork(app_ctx_t *ctx,uint8_t *fb) {
             EpdRect r=row_rect(row);char name[128];copy_text(name,sizeof(name),s_shelf[i].name);
             if(s_pressed_control==row)r.y-=shelf_display_style()==5?SHELF_LIST_BOUNCE_PX:SHELF_BOOK_LIFT_PX;
             draw_shelf_cover(fb,r,row,name,false);
-            complete=complete&&!s_shelf[i].removed&&(s_covers[row].gray||s_covers[row].fast_bits);
+            complete=complete&&!s_shelf[i].removed&&(s_covers[row].gray||s_covers[row].fast_bits)&&
+                !s_covers[row].generated;
             if(shelf_cover_white_edge(row,shelf_cover_image(row)))edges|=1u<<row;
         }
         const bool staged=complete&&!s_shelf_page_cached&&book_shelf_page_stage_covers(fb);
