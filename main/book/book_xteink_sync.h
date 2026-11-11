@@ -17,12 +17,20 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "../kiiko_board_config.h"
 
 #define XTEINK_SYNC_STATE_DIR "/.readpico/cloud"
 #define XTEINK_SYNC_FIRMWARE_NAME "kiikoread"
-// 用户2026-11-11：S31暂沿用pico云端映射，不改变硬件身份、MAC或已存令牌。
-// User2026-11-11: S31 temporarily shares the pico cloud mapping; retain hardware identity, MACs and saved tokens.
+// 用户2026-11-11：S31 在星曈 App 里应显示 Metalio PLUS，不能沿用 Pico 的云端型号；参考固件
+// 的云端型号表里 S31 对应 metalio47。只改型号标识，不改变硬件身份、MAC 或已存令牌。
+// User2026-11-11: S31 must show as Metalio PLUS in the Xteink app instead of the Pico cloud
+// model; the reference firmware's cloud model table maps this board to metalio47. Only the model
+// identifier changes; hardware identity, MACs and saved tokens are untouched.
+#if KIIKO_BOARD_METALIO47
+#define XTEINK_SYNC_DEVICE_TYPE "metalio47"
+#else
 #define XTEINK_SYNC_DEVICE_TYPE "pico"
+#endif
 #define XTEINK_SYNC_TASK_MAX 24
 #define XTEINK_SYNC_URL_MAX 2048
 
