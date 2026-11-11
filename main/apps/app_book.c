@@ -814,6 +814,12 @@ static EpdRect shelf_cover_image(int row) {
     return (EpdRect){71, card.y + (197-156)/2, 120, 156};
 }
 static unsigned s_cover_generation;
+// 用户2026-11-11：单次取封面失败不能永久放弃该格；按行记录尝试次数与退避时间，
+// 瞬时的TF交接/内存紧张/解码失败在退避后重试有限次，真正坏书才保留占位。
+// User2026-11-11: a single cover failure must not permanently abandon that cell; per-row
+// attempt counters and backoff retry transient SD/heap/decode failures a bounded number of times.
+static uint8_t s_cover_retry_count[BOOK_ROWS];
+static int64_t s_cover_retry_ms[BOOK_ROWS];
 #if KIIKO_BOARD_METALIO47
 static bool s_ticket_cover_started,s_ticket_cover_done;
 #endif
@@ -930,11 +936,11 @@ static bool load_shelf_cover_fast(int row, int index) {
     book_fast_cover_key_t key = {(unsigned)image.width, (unsigned)image.height, SHELF_FAST_COVER_STRIDE,
         app_settings_system_contrast(), (image.x&3)|((image.y&3)<<2)};
     bool edge;
-#if KIIKO_BOARD_METALIO47
-    if (!book_cover_fast_cache_peek(s_shelf[index].path, s_shelf[index].name, s_shelf[index].author,
-#else
+    // 用户2026-11-11：重启后RAM缓存必然为空，只查RAM会让首帧永远没有封面；直接读TF上的
+    // 成品点阵（S31路径内含RAM命中），首屏就能带封面，不必等后台逐本揭示与多次局刷。
+    // User2026-11-11: the RAM cache is always empty after a reboot, so RAM-only lookup leaves the
+    // first frame bare. Read the finished raster from the card (RAM hit first on S31) instead.
     if (!book_cover_fast_cache_read(s_shelf[index].path, s_shelf[index].name, s_shelf[index].author,
-#endif
                                    key, bits, &edge)) { free(bits); return false; }
     s_covers[row].fast_bits = bits; s_covers[row].fast_white_edge = edge;
     s_covers[row].fast_contrast = key.contrast; s_covers[row].fast_phase = key.phase;
@@ -954,6 +960,9 @@ static unsigned prepare_cover_batch(app_ctx_t *ctx,bool cache_only) {
     unsigned changed=0;
     for(int row=0;row<shelf_rows();++row){
         unsigned bit=1u<<row;if(!(s_cover_pending_mask&bit))continue;
+        // 失败退避窗口内不再入队，避免每帧重复解码同一本坏书。
+        // Do not re-arm a failed cell inside its backoff window; avoids re-decoding it every frame.
+        if(s_cover_retry_ms[row] > ctx->now_ms) continue;
         if(s_view==SHELF&&app_poll_main_navigation(ctx))return changed;
         int index=ctx->leaf*shelf_rows()+row;
         if(index<0||index>=s_visible_count||s_covers[row].index!=index||s_shelf[index].removed){s_cover_pending_mask&=~bit;continue;}
@@ -966,14 +975,42 @@ static unsigned prepare_cover_batch(app_ctx_t *ctx,bool cache_only) {
         copy_text(request.title,sizeof(request.title),s_shelf[index].name);
         copy_text(request.author,sizeof(request.author),s_shelf[index].author);
         if(!s_cover_generation)s_cover_generation=book_cover_jobs_begin();
+        // 用户2026-11-11：挂载交接/SD未就绪时保留该格稍后重试，不再静默丢弃。
+        // User2026-11-11: keep the cell for a later retry instead of dropping it silently when the
+        // card is in a mount handoff.
+        if(strncmp(request.path,"/sdcard/",8)==0 && !read_pico_sd_io_ready()){
+            s_cover_retry_ms[row]=ctx->now_ms+500;
+            continue;
+        }
         if(!book_cover_jobs_submit(s_cover_generation,row,&request)){
+            // 槽位仍被上一页请求占用时换一代重试；仍失败则退避，绝不丢格。
+            // A generation bump clears stale slot ownership; on failure back off without dropping.
             s_cover_generation=book_cover_jobs_begin();
-            if(!book_cover_jobs_submit(s_cover_generation,row,&request)){s_cover_pending_mask&=~bit;continue;}
+            if(!book_cover_jobs_submit(s_cover_generation,row,&request)){
+                s_cover_retry_ms[row]=ctx->now_ms+800;
+                ESP_LOGW(TAG,"cover submit wait %s",request.path);
+                continue;
+            }
         }
         book_cover_result_t result={0};int state=book_cover_jobs_take(s_cover_generation,row,&result);
         if(!state)continue;
+        if(state<0){
+            // 单次失败不永久放弃：退避后有限重试；仍失败则留占位并在5秒后再试。
+            // A single failure never abandons the cell: retry with backoff, then leave a
+            // placeholder and try again after5 s.
+            s_cover_decode_mask&=~bit;
+            if(++s_cover_retry_count[row] < 3){
+                s_cover_retry_ms[row]=ctx->now_ms+1200;
+                ESP_LOGW(TAG,"cover retry %u %s",(unsigned)s_cover_retry_count[row],request.path);
+            } else {
+                s_cover_pending_mask&=~bit;
+                s_cover_retry_ms[row]=ctx->now_ms+5000;
+                ESP_LOGW(TAG,"cover failed %s",request.path);
+            }
+            continue;
+        }
         s_cover_pending_mask&=~bit;s_cover_decode_mask&=~bit;
-        if(state<0){ESP_LOGW(TAG,"cover row=%d failed",row);continue;}
+        s_cover_retry_count[row]=0;s_cover_retry_ms[row]=0;
         free(s_covers[row].gray);free(s_covers[row].fast_bits);
         s_covers[row].gray=result.fast?NULL:result.pixels;
         s_covers[row].fast_bits=result.fast?result.pixels:NULL;
@@ -1009,6 +1046,10 @@ static void prepare_covers(app_ctx_t* ctx) {
         book_cover_jobs_cancel(s_cover_generation);s_cover_generation=book_cover_jobs_begin();
         s_cover_pending_mask = s_cover_decode_mask = s_cover_warm_mask = 0;
         s_cover_dirty_mask = s_cover_present_mask = 0;
+        // 换页重试计数归零；新页上的同一本书仍会重新尝试一次。
+        // Reset per-row retry state on a page change; the new page starts fresh attempts.
+        memset(s_cover_retry_count, 0, sizeof(s_cover_retry_count));
+        memset(s_cover_retry_ms, 0, sizeof(s_cover_retry_ms));
     }
     for (int row = 0; row < rows; ++row) {
         int index = ctx->leaf * rows + row;
@@ -1016,28 +1057,41 @@ static void prepare_covers(app_ctx_t* ctx) {
         bool packed = s_view == SHELF && app_settings_main_fast_refresh();
         if (s_covers[row].index == index &&
             (packed ? fast_cover_matches(row, image) : s_covers[row].gray != NULL)) continue;
-        if (s_covers[row].index == index && !s_covers[row].gray && !s_covers[row].fast_bits) continue;
+        // 仍待后台解码（或失败退避中）的格子保留原请求，不因首帧渲染重复入队。
+        // A cell still queued (or in failure backoff) keeps its request; a bare failed cell is
+        // retried the next time this page is prepared.
+        if (s_covers[row].index == index && !s_covers[row].gray && !s_covers[row].fast_bits &&
+            ((s_cover_pending_mask & (1u << row)) || s_cover_retry_ms[row] > ctx->now_ms)) continue;
+        const bool index_changed = s_covers[row].index != index;
         free(s_covers[row].gray); free(s_covers[row].fast_bits);
         s_covers[row].gray = s_covers[row].fast_bits = NULL;
         s_covers[row].index = index;
+        // 换页/换书才重置重试计数；同一格的重试沿用已累计次数，避免反复解码。
+        // Reset attempt counters only for a different page/book; retries keep their counts.
+        if (index_changed) { s_cover_retry_count[row] = 0; s_cover_retry_ms[row] = 0; }
         s_cover_dirty_mask &= ~(1u<<row);
         if (index >= s_visible_count || index < 0 || s_shelf[index].removed) continue;
-#if KIIKO_BOARD_METALIO47
-        // 暖缓存直接整页复制；冷数据仍交给有界 worker，不让前台等待 TF 解码。
-        // Copy a warm RAM page immediately; cold IO/decoding remains in the bounded worker.
-        bool ready=packed&&load_shelf_cover_fast(row,index);
-        if(!packed) {
-            uint8_t *gray=heap_caps_malloc(BOOK_COVER_W*BOOK_COVER_H,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-            unsigned w=0,h=0;
-            if(gray&&book_cover_peek_gray(s_shelf[index].path,s_shelf[index].name,s_shelf[index].author,
-                                         s_view==SHELF&&app_settings_shelf_style()==5,gray,&w,&h)) {
-                s_covers[row].gray=gray;s_covers[row].width=w;s_covers[row].height=h;ready=true;
-            } else free(gray);
+        // 用户2026-11-11：成品缓存先同步读卡，首帧就带封面；只有缓存缺失才进后台解码。
+        // User2026-11-11: preload finished rasters from the card so the first frame carries covers;
+        // only cache misses go to the bounded background decoder.
+        bool ready = false;
+        if (packed) {
+            ready = load_shelf_cover_fast(row, index);
+        } else {
+            bool cache_pending = false;
+            uint8_t *gray = load_shelf_cover_gray(row, s_shelf[index].path, s_shelf[index].name,
+                                                  s_shelf[index].author, false, &cache_pending);
+            (void)cache_pending;
+            if (gray) {
+                s_covers[row].gray = gray;
+                if (!(s_view == SHELF && app_settings_shelf_style() == 5)) {
+                    s_covers[row].width = BOOK_COVER_W;
+                    s_covers[row].height = BOOK_COVER_H;
+                }
+                ready = true;
+            }
         }
         if(ready){s_cover_pending_mask&=~(1u<<row);s_cover_decode_mask&=~(1u<<row);s_cover_dirty_mask|=1u<<row;continue;}
-#else
-        // Queue each slot, then gather cheap disk-cache hits before painting; decode misses later.
-#endif
         s_cover_pending_mask |= 1u << row;
         s_cover_warm_mask |= 1u << row;
         s_cover_warm_after_ms = ctx->now_ms + 1500;
@@ -1177,7 +1231,11 @@ static bool cover_favorite_needs_white_edge(const uint8_t *gray, EpdRect image, 
 static void draw_shelf_cover(uint8_t* fb, EpdRect card, int row, const char* name, bool favorite) {
     EpdRect image = shelf_cover_image(row);
     image.y += card.y - row_rect(row).y;
-    const bool artwork = shelf_cover_frame_ready();
+    // 用户2026-11-11：逐本揭示必须按行判断成品是否就绪。旧的全局门控会把先到的封面画成
+    // 占位标题、随即清掉脏标记，之后不再补画，表现为“有的封面一直加载不出来”。
+    // User2026-11-11: per-row readiness. The old global gate painted early covers as title
+    // placeholders and cleared their dirty bits, so they never appeared until a full redraw.
+    const bool artwork = s_view != SHELF || !(s_cover_pending_mask & (1u << row));
     ui_root_shadow(fb,image,2);
     if (s_view == SHELF && app_settings_shelf_style() == 6) {
         // 阴影在不透明封面外；合成只影响下方挡条，不让封面主体透底。

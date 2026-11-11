@@ -147,9 +147,10 @@ int main(int argc,char **argv){
  epd_draw_hline(0,1096,684,0x90,fb);epd_fill_rect((EpdRect){224,1097,54,4},0,fb);
  const char *nav[]={"首页","书架","文件管理","设置"};for(int i=0;i<4;++i){ui_draw_round_rect(fb,(EpdRect){65+i*171,1132,35,34},3,0);ui_text_fixed_vc(fb,85+i*171,1190,17,nav[i],EPD_DRAW_ALIGN_CENTER,false);}
  save(argv[3],fb);
- // 同一占位帧不因某张封面先解码而变化，点按回弹也不提前露出单张封面。
+ // 用户2026-11-11：逐本揭示按行判断——本格仍待装时保持占位，本格就绪后立即出图。
+ // Per-row reveal: a pending cell keeps its placeholder; a ready cell shows at once.
  uint8_t *placeholder=malloc(684*1216/2);assert(placeholder);
- memset(fb,255,684*1216/2);s_cover_pending_mask=8;
+ memset(fb,255,684*1216/2);s_cover_pending_mask=1;
  s_covers[0].gray=NULL;draw_shelf_cover(fb,row_rect(0),0,items[0].name,items[0].favorite);
  memcpy(placeholder,fb,684*1216/2);
  s_covers[0].width=176;s_covers[0].height=240;s_covers[0].gray=calloc(176*240,1);assert(s_covers[0].gray);

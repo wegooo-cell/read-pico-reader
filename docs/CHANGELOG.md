@@ -1,5 +1,10 @@
 # 版本变更 / Changelog
 
+## 本地测试 / Local test — 2026-11-11
+
+- S31 书架封面：修复“逐本揭示”时先到达的封面被整页门控按占位标题推屏、脏标记随即清掉而不再补画的问题，改为每格按自身就绪状态绘制；封面任务失败不再永久跳过，按行退避重试（3 次后留占位并每 5 秒再试），TF 挂载交接期间保留请求不丢格；进入书架/换页时先同步读取卡上成品封面缓存，首帧即带封面，只有缓存缺失才进后台解码。继承上轮默认封面不落盘、封面缓存 schema 作废旧“假封面”及 S31 JPEGDEC 小平面兜底。S31 本地测试，版本号保持 rc110，未发布官网/OTA。
+  S31 shelf covers: per-cell reveal no longer pushes early covers as title placeholders whose dirty bits are then cleared; failed cover jobs retry with per-row backoff (three attempts, then a placeholder retried every five seconds) and survive card mount handoffs; entering or paging the shelf preloads finished rasters from the card so the first frame carries covers and only cache misses reach the background decoder. Inherit the previous round's no-default-cover persistence, cache-schema invalidation of poisoned covers and S31 JPEGDEC plane fallback. Local S31 test only; version stays rc110 and nothing is published.
+
 ## 本地测试 / Local test — 2026-11-06
 
 - S31 屏幕修复加强：盲刷黑白从 3 个清屏循环提高到 12 个（4 轮 × 每轮 10 黑 + 13 白 + 3 收尾相），收尾再连做 3 次完整 48 相 GC16 全刷，耗时约 5-7 秒，用于清顽固残影。
