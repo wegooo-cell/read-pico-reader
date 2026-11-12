@@ -33,6 +33,8 @@
  * S31 revision2026-11-07: retain discrete quick steps and cached held root/Bluetooth drags; reuse BW previews across contacts and restore/clean grays once after800ms idle, without inertia.
  * S31追加修订：短快滑松手从按下位置固定推进约半个可见列表；按住仍立即跟随，不累加已预览的位移。
  * Additional S31 revision: release short flicks to half the visible list height from the press anchor; held movement still follows immediately without adding preview displacement twice.
+ * 用户修订：S31 与 Pico 一样识别极短快滑，松手直接用 S31 灰阶波形清理列表。
+ * User revision: recognize very short flicks on S31 as on Pico and clean the list on lift using S31 gray.
  */
 #if KIIKO_BOARD_METALIO47
 #ifdef ESP_PLATFORM
@@ -227,21 +229,25 @@ static bool s_scroll_drag_consumed, s_scroll_present_pending;
 typedef struct {
     bool tracking, active, following, disabled, frame_pending, settle_pending;
     settings_page_t page;
-    int *offset, limit, origin_offset, origin_y, press_x, press_y, shown_offset;
+    int *offset, limit, origin_offset, origin_y, press_offset, press_x, press_y, shown_offset;
     int width, height, travel_x, travel_y;
+    int quick_direction;
     enum EpdRotation rotation;
-    int64_t frame_ms, settle_ms, press_ms, sample_ms, blocked_ms;
+    int64_t frame_ms, press_ms, sample_ms;
+    int64_t quick_release_ms;
     EpdRect area;
     uint8_t *bits;
 } settings_drag_t;
 static settings_drag_t s_list_drag;
 #define SETTINGS_DRAG_SLOP_PX 6
-#define SETTINGS_QUICK_MIN_PX 36
+#define SETTINGS_QUICK_MIN_PX 6
 #define SETTINGS_QUICK_MAX_PX SETTINGS_QUICK_STEP_PX
 #define SETTINGS_QUICK_MS 300
+#define SETTINGS_SHORT_QUICK_MS 150
+#define SETTINGS_SHORT_QUICK_PX 12
+#define SETTINGS_QUICK_REPEAT_MS 650
 #define SETTINGS_QUICK_STEP_PX ((settings_content_end()-(s_page==SETTINGS_MAIN?160:190))/2)
 #define SETTINGS_HOLD_FRAME_MS 60
-#define SETTINGS_HOLD_IDLE_MS 800
 #define SETTINGS_HOLD_CACHE_MAX (512u * 1024u)
 #endif
 // 蓝牙翻页器子页：滚动位置、正在学习哪个动作（0 未学，1 上一页，2 下一页）、提示行。
@@ -2034,29 +2040,38 @@ static void settings_drag_blit(app_ctx_t *ctx) {
     }
 }
 
-static app_redraw_t settings_drag_sample(app_ctx_t *ctx,int x,int y) {
+static bool settings_drag_repeated(const settings_drag_t *drag,int dy) {
+    return dy && drag->quick_direction == (dy < 0 ? 1 : -1) &&
+        drag->press_ms >= drag->quick_release_ms &&
+        drag->press_ms-drag->quick_release_ms <= SETTINGS_QUICK_REPEAT_MS;
+}
+
+static app_redraw_t settings_drag_sample(app_ctx_t *ctx,int x,int y,bool lifting) {
     settings_drag_t *drag=&s_list_drag;
     if(!drag->tracking)return APP_REDRAW_NONE;
     if(ctx->now_ms<drag->sample_ms)return APP_REDRAW_NONE;
     drag->sample_ms=ctx->now_ms;
-    int ax=abs(x-drag->press_x),ay=abs(y-drag->press_y);
+    int dy=y-drag->press_y;
+    int ax=abs(x-drag->press_x),ay=abs(dy);
     if(ax>drag->travel_x)drag->travel_x=ax;
     if(ay>drag->travel_y)drag->travel_y=ay;
-    if(drag->disabled)return APP_REDRAW_NONE;
+    // 快滑判定期间只记录坐标，松手前不推中间帧。
+    // Record motion without painting while the contact can still be a quick flick.
+    if(drag->disabled||ctx->now_ms-drag->press_ms<=SETTINGS_QUICK_MS)return APP_REDRAW_NONE;
     int next=drag->origin_offset+drag->origin_y-y;
     if(next<0)next=0;
     if(next>drag->limit)next=drag->limit;
     if(!drag->following) {
-        int dy=y-drag->press_y;
         if(abs(dy)<SETTINGS_DRAG_SLOP_PX||abs(dy)<=abs(x-drag->press_x)||
            next==*drag->offset)return APP_REDRAW_NONE;
-        if(!drag->active) {
+        if(!lifting&&!drag->active) {
             if(!settings_drag_cache(ctx)){drag->disabled=true;return APP_REDRAW_NONE;}
             drag->active=true;drag->shown_offset=-1;
         }
         drag->following=true;
     }
     *drag->offset=next;
+    if(lifting)return APP_REDRAW_NONE;
     if(next==drag->shown_offset||
        (drag->shown_offset>=0&&ctx->now_ms-drag->frame_ms<SETTINGS_HOLD_FRAME_MS))return APP_REDRAW_NONE;
     drag->frame_pending=true;
@@ -2064,13 +2079,14 @@ static app_redraw_t settings_drag_sample(app_ctx_t *ctx,int x,int y) {
 }
 
 static app_redraw_t settings_drag_finish(app_ctx_t *ctx) {
-    s_list_drag.tracking=false;
-    if(!s_list_drag.active){s_list_drag.following=false;return APP_REDRAW_NONE;}
-    s_list_drag.following=false;
-    s_list_drag.frame_pending=*s_list_drag.offset!=s_list_drag.shown_offset;
-    s_list_drag.settle_pending=true;
-    s_list_drag.settle_ms=ctx->now_ms+SETTINGS_HOLD_IDLE_MS;
-    return s_list_drag.frame_pending?APP_REDRAW_AREA:APP_REDRAW_NONE;
+    settings_drag_t *drag=&s_list_drag;
+    if(drag->tracking&&(drag->active||*drag->offset!=drag->press_offset))
+        drag->settle_pending=true;
+    drag->tracking=false;
+    drag->following=false;
+    drag->frame_pending=false;
+    return drag->settle_pending&&!(ctx->touch&&ctx->touch->touched)&&!ctx->consumed
+        ?APP_REDRAW_AREA:APP_REDRAW_NONE;
 }
 
 static bool settings_drag_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev,
@@ -2079,53 +2095,62 @@ static bool settings_drag_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev,
     if(ev->type==UI_GESTURE_PRESS) {
         const int top=s_page==SETTINGS_MAIN?160:190;
         if(settings_plain_list()&&limit>0&&ev->y0>=top&&ev->y0<settings_content_end()) {
-            if(!s_list_drag.bits||s_list_drag.page!=s_page||s_list_drag.offset!=offset||s_list_drag.limit!=limit)
+            if(s_list_drag.page!=s_page||s_list_drag.offset!=offset||s_list_drag.limit!=limit)
                 settings_drag_reset();
-            s_list_drag.tracking=true;s_list_drag.following=false;s_list_drag.settle_pending=false;
+            if(!s_list_drag.bits)s_list_drag.disabled=false;
+            s_list_drag.tracking=true;s_list_drag.following=false;
             s_list_drag.page=s_page;s_list_drag.offset=offset;s_list_drag.limit=limit;
-            s_list_drag.origin_offset=*offset;s_list_drag.origin_y=ev->y0;
+            s_list_drag.press_offset=s_list_drag.origin_offset=*offset;s_list_drag.origin_y=ev->y0;
             s_list_drag.press_x=ev->x0;s_list_drag.press_y=ev->y0;
-            s_list_drag.press_ms=ctx->now_ms;s_list_drag.blocked_ms=0;s_list_drag.travel_x=s_list_drag.travel_y=0;
+            s_list_drag.press_ms=ctx->now_ms;s_list_drag.travel_x=s_list_drag.travel_y=0;
             s_list_drag.sample_ms=ctx->now_ms;
             s_list_drag.area=(EpdRect){0,top,UI_LOCK_WIDTH,settings_content_end()-top};
-        } else if(s_list_drag.active) {
-            // 标题轻触也打断空闲计时；离页由生命周期释放，不能在新接触下补刷。
-            // Chrome contact also defers settling; lifecycle owns exits, never repaint beneath new input.
-            s_list_drag.settle_ms=ctx->now_ms+SETTINGS_HOLD_IDLE_MS;
+        } else if(s_list_drag.settle_pending) {
+            s_list_drag.quick_direction=0;
         } else {
             settings_drag_reset();
         }
         return false;
     }
-    if(!s_list_drag.tracking&&!s_list_drag.active)return false;
+    if(!s_list_drag.tracking)return false;
     if(s_list_drag.page!=s_page){settings_drag_reset();return false;}
     if(ev->type!=UI_GESTURE_MOVE&&ev->type!=UI_GESTURE_LONG_PRESS) {
-        bool owned=s_list_drag.following;
         const bool lift=s_list_drag.tracking&&ctx->released&&ctx->touch&&
             !ctx->touch->touched&&!ctx->touch->count&&!ctx->consumed&&
             ctx->now_ms>=s_list_drag.sample_ms;
-        if(owned&&lift)
-            (void)settings_drag_sample(ctx,ev->x,ev->y);
-        const int dy=(int)ev->y-s_list_drag.press_y,dx=(int)ev->x-s_list_drag.press_x;
-        // 快滑只在有效松手时补足固定段，以按下位置为锚；取消/长拖和轻微抖动不加速。
-        // Complete a short flick only on a valid lift, anchored at press; invalid cancellation, long drags and jitter never accelerate.
-        if(lift&&!s_list_drag.disabled&&ctx->now_ms-s_list_drag.press_ms-s_list_drag.blocked_ms<=SETTINGS_QUICK_MS&&
-           abs(dy)>=SETTINGS_QUICK_MIN_PX&&abs(dy)<=SETTINGS_QUICK_MAX_PX&&abs(dy)>abs(dx)&&
-           s_list_drag.travel_y<=SETTINGS_QUICK_MAX_PX&&s_list_drag.travel_x<abs(dy)) {
-            int next=s_list_drag.origin_offset+(dy<0?SETTINGS_QUICK_STEP_PX:-SETTINGS_QUICK_STEP_PX);
+        if(lift)
+            (void)settings_drag_sample(ctx,ev->x,ev->y,true);
+        bool owned=s_list_drag.following;
+        const int dy=(int)ev->y-s_list_drag.press_y,dx=abs((int)ev->x-s_list_drag.press_x);
+        const int distance=abs(dy);
+        const int horizontal=dx>s_list_drag.travel_x?dx:s_list_drag.travel_x;
+        const int64_t elapsed=ctx->now_ms-s_list_drag.press_ms;
+        const bool repeated=settings_drag_repeated(&s_list_drag,dy);
+        // 未达到跟手门槛的快滑也能翻半屏，但要求更短的接触和明确的纵向位移。
+        // Flicks below the drag threshold still step half a viewport on lift if brief and clearly vertical.
+        const bool short_flick=elapsed<=SETTINGS_SHORT_QUICK_MS&&distance>2*horizontal;
+        s_list_drag.quick_direction=0;
+        if(lift&&elapsed<=SETTINGS_QUICK_MS&&distance>=SETTINGS_QUICK_MIN_PX&&distance>horizontal&&
+           (distance>=SETTINGS_SHORT_QUICK_PX||short_flick)&&
+           (repeated||(distance<=SETTINGS_QUICK_MAX_PX&&s_list_drag.travel_y<=SETTINGS_QUICK_MAX_PX))) {
+            int next=s_list_drag.press_offset+(dy<0?SETTINGS_QUICK_STEP_PX:-SETTINGS_QUICK_STEP_PX);
             if(next<0)next=0;
             if(next>s_list_drag.limit)next=s_list_drag.limit;
-            if(next==*offset||s_list_drag.active||settings_drag_cache(ctx)) {
-                if(next!=*offset&&!s_list_drag.active) {
-                    s_list_drag.active=true;s_list_drag.shown_offset=-1;
-                }
-                *offset=next;owned=true;
-            } else s_list_drag.disabled=true;
+            *offset=next;
+            s_list_drag.quick_direction=dy<0?1:-1;
+            s_list_drag.quick_release_ms=ctx->now_ms;
+            s_scroll_drag_consumed=false;
+            owned=true;
         }
         *redraw=settings_drag_finish(ctx);
-        return owned;
+        return owned||*redraw!=APP_REDRAW_NONE;
     }
-    if(ev->type==UI_GESTURE_MOVE)*redraw=settings_drag_sample(ctx,ev->x,ev->y);
+    if(ev->type==UI_GESTURE_MOVE) {
+        *redraw=settings_drag_sample(ctx,ev->x,ev->y,false);
+        // 快滑期间也接管 MOVE，避免离散滚动兜底提前移动列表。
+        // Own MOVE during flick detection so the discrete fallback cannot move the list early.
+        return s_list_drag.following||ctx->now_ms-s_list_drag.press_ms<=SETTINGS_QUICK_MS;
+    }
     return s_list_drag.following;
 }
 
@@ -2134,19 +2159,18 @@ static bool settings_drag_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev,
 static app_redraw_t settings_drag_tick(app_ctx_t *ctx) {
     if(s_list_drag.page!=s_page||ctx->request_app){settings_drag_reset();return APP_REDRAW_NONE;}
     if(!s_list_drag.tracking) {
-        if(s_list_drag.active&&s_list_drag.settle_pending&&
-           !(ctx->touch&&ctx->touch->touched)&&!ctx->consumed&&ctx->now_ms>=s_list_drag.settle_ms)
+        if(s_list_drag.settle_pending&&!(ctx->touch&&ctx->touch->touched)&&!ctx->consumed)
             return APP_REDRAW_AREA;
         return APP_REDRAW_NONE;
     }
     if(ctx->consumed)return APP_REDRAW_NONE;
     if(!ctx->touch||!ctx->touch->touched||ctx->touch->count!=1)return settings_drag_finish(ctx);
-    return settings_drag_sample(ctx,ctx->touch->x,ctx->touch->y);
+    return settings_drag_sample(ctx,ctx->touch->x,ctx->touch->y,false);
 }
 
 static bool settings_drag_present(app_ctx_t *ctx) {
     settings_drag_t *drag=&s_list_drag;
-    const bool settle=drag->settle_pending&&!drag->tracking&&ctx->now_ms>=drag->settle_ms&&
+    const bool settle=drag->settle_pending&&!drag->tracking&&
         !(ctx->touch&&ctx->touch->touched);
     if(!drag->frame_pending&&!settle)return false;
     if(ctx->request_app||drag->page!=s_page){settings_drag_reset();return true;}
@@ -2154,45 +2178,35 @@ static bool settings_drag_present(app_ctx_t *ctx) {
     display_main_transition_cancel();s_scroll_present_pending=false;
     if(settle) {
         render(ctx,ctx->fb);
-        // 复用原设置列表柔和擦白及完整灰阶，不先把整片背景压黑；仍仅空闲800ms后执行。
-        // Reuse the original settings white-erase/full-gray profile without a reverse-black background, only after800ms idle.
+        // 复用 S31 列表的灰阶擦白波形。
+        // Reuse the S31 list grayscale waveform for cleanup.
+        // 松手直接绘制最终灰阶，省掉最后一帧黑白；保留缓存供下次跟手。
+        // Draw final grays on lift instead of a final BW frame; keep the cache for the next drag.
         guard_draw_result(ctx->hl,update_display_area_full_with(ctx->hl,
             display_settings_scroll_waveform(),MODE_GL16,drag->area));
-        settings_drag_reset();s_scroll_drag_consumed=false;
+        drag->active=false;
+        drag->settle_pending=false;
+        drag->shown_offset=-1;
+        s_scroll_drag_consumed=false;
     } else {
-        const int64_t started_us=esp_timer_get_time();
         settings_drag_blit(ctx);
         const EpdWaveform *motion=e0470_settings_motion_waveform();
+        // 仅变化像素加强擦除，未变白底和静止字均保持，避免按住拖动时整片白闪。
+        // Strengthen changed-pixel erasure while holding unchanged backgrounds/glyphs, avoiding whole-background flashes during held dragging.
         guard_draw_result(ctx->hl,update_display_area_diff_with(ctx->hl,
             motion?motion:display_main_bw_waveform(),MODE_DU,drag->area));
-        // 推屏期间无法采样触摸；识别快滑时扣除这段时间，最多补偿300ms。
-        // Display output blocks touch sampling; exclude up to300ms from this contact's flick duration.
-        if(drag->tracking) {
-            int64_t elapsed_us=esp_timer_get_time()-started_us;
-            if(elapsed_us>0) {
-                drag->blocked_ms+=elapsed_us/1000;
-                if(drag->blocked_ms>SETTINGS_QUICK_MS)drag->blocked_ms=SETTINGS_QUICK_MS;
-            }
-        }
         drag->frame_pending=false;drag->shown_offset=*drag->offset;drag->frame_ms=ctx->now_ms;
     }
     display_system_binary_set(binary);
     return true;
 }
 
-// 快滑仍按原步长推进，但复用同一黑白缓存，取消每次松手和周期计数造成的补刷。
-// Retain discrete quick-step distances, reusing one BW cache without per-release or counted cleanup.
+// 离散回退若在松手才移动，也走同一灰阶定稿出口。
+// The discrete fallback also settles in gray when it first moves on lift.
 static void settings_drag_quick(app_ctx_t *ctx) {
     settings_drag_t *drag=&s_list_drag;
-    if(!settings_plain_list()||!drag->offset||drag->disabled)return;
-    if(!drag->active) {
-        if(!settings_drag_cache(ctx)){drag->disabled=true;return;}
-        drag->active=true;drag->shown_offset=-1;
-    }
-    drag->frame_pending=true;
-    if(!drag->tracking) {
-        drag->settle_pending=true;drag->settle_ms=ctx->now_ms+SETTINGS_HOLD_IDLE_MS;
-    }
+    if(settings_plain_list()&&drag->offset&&ctx->released&&!drag->tracking)
+        drag->settle_pending=true;
 }
 #endif
 
@@ -2287,9 +2301,9 @@ static app_redraw_t reset_tick(void) {
 
 static app_redraw_t on_tick(app_ctx_t *ctx) {
 #if KIIKO_BOARD_METALIO47
-    if(s_list_drag.tracking||s_list_drag.active) {
+    if(s_list_drag.tracking||s_list_drag.settle_pending) {
         app_redraw_t redraw=settings_drag_tick(ctx);
-        if(redraw!=APP_REDRAW_NONE||s_list_drag.active)return redraw;
+        if(redraw!=APP_REDRAW_NONE||s_list_drag.settle_pending)return redraw;
     }
     if(s_page==SETTINGS_SD_RECOVERY) {
         if(!app_sd_recovery_tick(ctx->now_ms))return APP_REDRAW_NONE;

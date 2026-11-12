@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "version": "0.3.3-rc106",
+  "version": "0.3.3-rc107",
   "project": "Read_Pico",
   "board": "RDP-G01-W",
   "layout": "pico-dual-4m-v1",
   "minimum_base_version": "0.3.3-rc72",
-  "url": "https://wegooo-cell.github.io/read-pico-reader/Pico-update-0.3.3-rc106.bin",
-  "size": 4131856,
-  "sha256": "8b47b1f2c69bc75090533da3434c0491493d0e50a8a38bd8d4ef43f85a97a82c",
-  "notes": "阅读设置重新分组，排版、翻页和手势三页等高。\n自动翻页支持1–10秒，每次增减1秒，切换全屏后继续。\n触摸手势支持自定义，左右横滑固定翻页。\n补齐书架阅读进度、已读标记和进度排序。"
+  "url": "https://wegooo-cell.github.io/read-pico-reader/Pico-update-0.3.3-rc107.bin",
+  "size": 4133056,
+  "sha256": "4d74d7b5687e621a6b7483834083eea50d7c9f26bd04f54ca39644a209f2b8de",
+  "notes": "设置列表快滑松手直接滚动约半屏，松手后立即清理残影。\n阅读缓存迁入 .kiikoread 目录。\n阅读和主页切换恢复 RC104 刷新方式。\n锁屏浅睡前确认屏幕断电，未通过时重试。"
 }

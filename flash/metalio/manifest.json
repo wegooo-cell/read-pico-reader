@@ -1,6 +1,6 @@
 {
-  "name": "kiikoread · Metalio EINK 4 Plus",
-  "version": "0.3.3-rc111",
+  "name": "Metalio 4.7 V1.5",
+  "version": "0.3.3-rc112",
   "board": "metalio47",
   "experimental_pie_pixels": true,
   "experimental_text_ripple": true,
@@ -8,6 +8,7 @@
   "experimental_shelf37": false,
   "experimental_fast_reader_panels": false,
   "experimental_du14": false,
+  "experimental_settings_short_motion": true,
   "experimental_trimmed_waveform": false,
   "experimental_main_clean": false,
   "experimental_network_probe": false,
@@ -35,8 +36,8 @@
         {
           "path": "firmware.bin",
           "offset": 65536,
-          "size": 5128816,
-          "sha256": "a78ad067798190856272b9f3565996130ecfed1918048e87cf94affb2b849bce"
+          "size": 5134384,
+          "sha256": "f99c7f67d9a64b919dc457fdd9a69e7e8eaba7dcfa1567b51546b515b790d354"
         },
         {
           "path": "ota_data_initial.bin",
@@ -47,16 +48,15 @@
       ]
     }
   ],
-  "updated_at": "2026-11-11T12:34:29+08:00",
+  "updated_at": "2026-11-12T12:44:52+08:00",
   "pico_ota": {
     "layout": "metalio-s31-dual-5m-v1",
-    "base_version": "0.3.3-rc111",
+    "base_version": "0.3.3-rc112",
     "minimum_base_version": "0.3.3-rc98",
     "online_ota_base_version": "0.3.3-rc98",
     "rollback": true
   },
-  "experimental_settings_short_motion": true,
-  "previous_version": "0.3.3-rc110",
-  "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/metalio-s31-v0.3.3-rc111/kiikoread-metalio47-0.3.3-rc111-USB.zip",
-  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/metalio-s31-v0.3.3-rc111/kiikoread-metalio47-0.3.3-rc111-TF.zip"
+  "previous_version": "0.3.3-rc111",
+  "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/metalio-s31-v0.3.3-rc112/kiikoread-metalio47-0.3.3-rc112-USB.zip",
+  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/metalio-s31-v0.3.3-rc112/kiikoread-metalio47-0.3.3-rc112-TF.zip"
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
-"""Exercise real Pico interlacing and highlevel masks/commits against exact pixel bounds."""
+"""Exercise real Pico interlacing and highlevel masks/commits against RC104 32-column physical bounds."""
 from pathlib import Path
 import subprocess
 import tempfile
@@ -60,9 +60,14 @@ static void check(EpdRect logical){
  default:expected=(EpdRect){logical.y,H-logical.x-logical.width,logical.height,logical.width};break;
  }
  memset(back,0x99,B);memset(front,0x99,B);
- // Pending changes inside and outside the crop must not be committed together.
+ // RC104 scans and commits complete physical columns in groups of 32.
+ int dirty_x=expected.x;
+ int right=(expected.x+expected.width+31)/32*32;
+ expected.x=expected.x/32*32;
+ expected.width=(right<W?right:W)-expected.x;
+ // Pending changes outside the aligned physical crop must not be committed.
  if(!same)for(int y=0;y<H;++y)for(int x=0;x<W;x+=7)front[y*W/2+x/2]^=(uint8_t)(15u<<(4*(x&1)));
- if(!same)front[expected.y*W/2+expected.x/2]^=(uint8_t)(7u<<(4*(expected.x&1)));
+ if(!same)front[expected.y*W/2+dirty_x/2]^=(uint8_t)(7u<<(4*(dirty_x&1)));
  memcpy(old,back,B);scans=0;
  EpdiyHighlevelState h={front,back,diff,rows,cols,NULL};
  assert(hl_update_area(&h,MODE_GL16,25,logical,full)==(fail?EPD_DRAW_EMPTY_LINE_QUEUE:EPD_DRAW_SUCCESS));
@@ -76,9 +81,9 @@ int main(void){
  for(rotation=0;rotation<4;++rotation)for(int f=0;f<2;++f)for(int failure=0;failure<2;++failure){
   full=f;fail=failure;
   if(rotation&1){
-   check((EpdRect){0,0,H,1204}); // Immersive body: gray progress at1207 must stay untouched.
+   check((EpdRect){0,0,H,1204}); // Immersive body, including padding in its final physical column group.
    check((EpdRect){0,80,H,1088});check((EpdRect){0,176,H,872});
-   check((EpdRect){0,1204,H,12}); // Subsequent idle footer owns the deferred pixels.
+   check((EpdRect){0,1204,H,12}); // Footer lies in the same aligned group as the body edge.
   }
   check((EpdRect){11,13,61,35});check((EpdRect){32,32,64,64});
   for(int x=0;x<4;++x)for(int n=1;n<=3;++n)check((EpdRect){x,9,n,3});
@@ -91,7 +96,7 @@ int main(void){
  assert(hl_update_area(&h,MODE_GL16,25,(EpdRect){0,0,W,H},false)==EPD_DRAW_SUCCESS);
  assert(hl_update_area(&h,MODE_GL16,25,(EpdRect){0,0,0,3},true)==EPD_DRAW_SUCCESS);
  assert(!scans&&!memcmp(front,back,B));
- puts("PASS: real Pico diff/highlevel exact scan masks and success-only commits; immersive/footer/standard crops,4 rotations,odd nibbles,narrow/aligned areas and failures");
+ puts("PASS: real Pico diff/highlevel 32-column scan masks and success-only commits; immersive/footer/standard crops,4 rotations,odd nibbles,narrow/aligned areas and failures");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='pico-reader-crop-') as temp:

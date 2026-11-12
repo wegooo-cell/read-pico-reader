@@ -34,8 +34,6 @@ const EpdWaveform* display_main_shelf_waveform(enum EpdDrawMode mode) {assert(mo
 const EpdWaveform* display_main_bw_waveform(void) {return &main_bw;}
 static unsigned quality_calls;
 static unsigned quality_strength;
-static unsigned fast_background_wave_calls;
-const EpdWaveform* display_main_fast_background_waveform_with_phases(const EpdWaveform* wave,enum EpdDrawMode mode,unsigned white){assert(white==6||white==8);++fast_background_wave_calls;(void)mode;return wave;}
 const EpdWaveform* display_main_clean_waveform_with_phases(const EpdWaveform* source,enum EpdDrawMode mode,unsigned phases){
     assert(source&&(mode==MODE_DU||mode==MODE_GL16));assert(phases==6||phases==8);
     ++quality_calls;quality_strength=phases;return source;
@@ -769,12 +767,6 @@ int main(void) {
         assert(display_main_quality_set(0)==scope);
     }
     puts("main navigation: 200 complete BW transitions; calibrated gray bands, empty shelf slots, identical-target skips, allocation failure and three output-failure recoveries; moving markers, nibble/32-column boundaries and default outputs passed");
-    reset();main_mode=APP_MAIN_REFRESH_FAST;target(14);display_main_quality_set(6);
-    assert(!display_main_fast_background_set(true));unsigned fast_before=fast_background_wave_calls;
-    display_main_transition_arm(&owner_a,false,true);
-    assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS);assert_final();
-    assert(fast_background_wave_calls>fast_before&&full_calls>=1&&!gc_calls&&!clears&&last_area.height<=UI_NAV_MARKER_SCAN_END);
-    display_main_fast_background_set(false);
     return 0;
 }
 

@@ -536,6 +536,22 @@ static void board_poweroff(epd_ctrl_state_t* state) {
     rails_on = false;
 }
 
+esp_err_t read_pico_epd_verify_poweroff(void) {
+    if (s_ioe == NULL) return ESP_ERR_INVALID_STATE;
+    uint8_t pins;
+    esp_err_t err = fca9555_read_input(s_ioe, 0, &pins);
+    if (err != ESP_OK) return err;
+    // 直接读输入寄存器，不用命令缓存；PGOOD 不包含 VCOM，所以单独检查 VCOM_EN。
+    // Read pin levels rather than command state. PGOOD excludes VCOM, so check VCOM_EN separately.
+    if (pins & (IOE_XOE | IOE_SY_VCOM_EN | IOE_SY_EN | IOE_SY_PGOOD)) {
+        ESP_LOGW(TAG, "EPD still active: XOE=%d VCOM_EN=%d EN=%d PGOOD=%d",
+                 !!(pins & IOE_XOE), !!(pins & IOE_SY_VCOM_EN),
+                 !!(pins & IOE_SY_EN), !!(pins & IOE_SY_PGOOD));
+        return ESP_ERR_INVALID_STATE;
+    }
+    return ESP_OK;
+}
+
 static void board_deinit(void) {
     if (rails_on) {
         board_poweroff(epd_ctrl_state());

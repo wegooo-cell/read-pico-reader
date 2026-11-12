@@ -38,7 +38,7 @@ static int64_t esp_timer_get_time(void){return fake_us;}
 static void vTaskDelay(unsigned ticks){assert(ticks==1);fake_us+=1000;if(ready_after&&fake_us>=(int64_t)ready_after*1000)ready_mask=511;}
 static __attribute__((unused)) bool read_pico_sd_io_ready(void){return true;}
 
-static struct{int index;uint8_t *gray,*fast_bits;unsigned width,height,fast_contrast,fast_phase;bool fast_white_edge;}s_covers[9];
+static struct{int index;uint8_t *gray,*fast_bits;unsigned width,height,fast_contrast,fast_phase;bool fast_white_edge,generated;}s_covers[9];
 static struct{char path[32],name[32],author[32];bool removed;}s_shelf[9];
 static int shelf_rows(void){return rows;}
 static int app_settings_shelf_style(void){return 2;}

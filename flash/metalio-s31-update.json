@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "version": "0.3.3-rc111",
+  "version": "0.3.3-rc112",
   "project": "Kiikoread_Metalio_S31",
   "board": "Metalio-EINK4-Plus-S31",
   "layout": "metalio-s31-dual-5m-v1",
   "minimum_base_version": "0.3.3-rc98",
-  "url": "https://wegooo-cell.github.io/read-pico-reader/Metalio-S31-update-0.3.3-rc111.bin",
-  "size": 5128816,
-  "sha256": "a78ad067798190856272b9f3565996130ecfed1918048e87cf94affb2b849bce",
-  "notes": "阅读设置重新分组，排版、翻页和手势三页等高。\n自动翻页支持1–10秒，每次增减1秒，切换全屏后继续。\n触摸手势支持自定义，左右横滑固定翻页。\n补齐书架阅读进度、已读标记和进度排序。"
+  "url": "https://wegooo-cell.github.io/read-pico-reader/Metalio-S31-update-0.3.3-rc112.bin",
+  "size": 5134384,
+  "sha256": "f99c7f67d9a64b919dc457fdd9a69e7e8eaba7dcfa1567b51546b515b790d354",
+  "notes": "设置列表快滑松手直接滚动约半屏，松手后立即清理残影。\n阅读缓存迁入 .kiikoread 目录。\n书架优先读取成品封面，封面失败会重试。\n改善低内存时的 Wi-Fi 连接和传书。\n修复跨文件脚注，阅读页脚显示本章页码。"
 }

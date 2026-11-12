@@ -381,10 +381,7 @@ void app_present(app_ctx_t* ctx,const app_desc_t* app,app_redraw_t redraw) {
     const bool shelf_switch=root_switch &&
         (app_index_of(s_presented_root)==1 || app_index_of(app)==1);
     unsigned previous=display_main_quality_set(white_switch?(shelf_switch?8u:6u):0u);
-    bool prior_fast_background=display_main_fast_background_set(root_switch &&
-        app_settings_main_refresh_mode()==APP_MAIN_REFRESH_FAST);
     app_present_impl(ctx,app,redraw);
-    display_main_fast_background_set(prior_fast_background);
     display_main_quality_set(previous);
 }
 
@@ -1083,7 +1080,6 @@ void app_loop_run(const app_loop_config_t* config) {
         }
 
         ctx.now_ms = esp_timer_get_time() / 1000;
-        display_reader_keep_rails(current == &app_book && app_book_reader_open() && !ctx.request_app);
         rails_idle_check(ctx.now_ms);
 
         // 电源键短按默认锁屏；阅读正文可选择将它用于下一页。

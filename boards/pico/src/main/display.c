@@ -21,8 +21,6 @@
  * 用户修订：书架顶部文字、框线与封面/亚克力一起使用水波纹，不再拆分顶部差分刷新；底栏仍固定。
  * User revision: shelf headers, frames, covers and acrylic share one ripple instead of a separate header differential; navigation remains fixed.
 
- * 用户2026-11-10修订：快刷仅真实跨主页独立补6/8相目标白，并覆盖未变背景；保留本板原始相序、灰阶恢复、底栏及阅读。
- * User2026-11-10: independently add native6/8 white-target drives on real fast root switches,including unchanged blanks,retaining native actions,gray restoration,navigation and reading.
  * 用户2026-10-28要求根页残影优化：显式Pico实验追加两拍变白、一拍释放；保留本机表、40相上限、底栏和其他场景。
  * User requests root ghosting improvements: explicit Pico experiment adds two changed-white drives/one release within this board's40-phase cap, retaining its tables/navigation and other scenes.
  * 用户修订：普通书架上下文字区和中间书架区同一轮逐相输出，外侧柔和、封面/材质保留校准灰阶，留白仅向白擦除；不串行呈现分区。仅横条可变，底栏图标固定，保留统一故障恢复。
@@ -55,10 +53,6 @@
 
 static const char* TAG = "read_pico";
 static bool s_bulk_io;
-static bool s_main_fast_background;
-bool display_main_fast_background_set(bool active) {
-    bool previous=s_main_fast_background;s_main_fast_background=active;return previous;
-}
 static unsigned s_main_quality;
 unsigned display_main_quality_set(unsigned white_phases){
     unsigned prior=s_main_quality;
@@ -75,28 +69,14 @@ void display_set_bulk_io(bool active) {
     ESP_LOGI(TAG, "bulk I/O scan margin %s", active ? "on" : "off");
 }
 
-// 阅读停留时保轨，其他页面保留8秒；每轮立即释放像素/VCOM驱动，失败仍限时断电。
-// Retain rails while reading and for eight seconds elsewhere; release pixel/VCOM drive after each output and retain fault timeout.
+// 高压轨在连续操作间保留8秒，避免反复500ms放电；像素驱动在每轮结束时立即释放。
+// Keep HV rails for an eight-second burst to avoid repeated 500ms discharge; release pixel drive after every output.
 #define RAILS_IDLE_TIMEOUT_MS 8000
 
 // 0 表示轨道已断电；否则是到期时间（ms），到点后主循环断电。
 // 0 means the rails are off; otherwise a deadline (ms) after which the loop powers them down.
 static int64_t rails_deadline_ms;
 static int64_t drive_release_retry_ms;
-static bool s_reader_keep_rails;
-
-void display_reader_keep_rails(bool active) {
-    if (s_reader_keep_rails == active) return;
-    bool held = pico_online_display_begin();
-    if (s_reader_keep_rails != active) {
-        s_reader_keep_rails = active;
-        // 离开正文从此刻恢复原8秒超时；不主动上电、推屏或改动VCOM。
-        // Restore the eight-second grace on reader exit without powering up, scanning or changing VCOM.
-        if (!active && rails_deadline_ms)
-            rails_deadline_ms = esp_timer_get_time() / 1000 + RAILS_IDLE_TIMEOUT_MS;
-    }
-    pico_online_display_end(held);
-}
 
 void rails_keepalive(void) {
     bool held = pico_online_display_begin();
@@ -110,8 +90,7 @@ void rails_keepalive(void) {
 
 void rails_idle_check(int64_t now_ms) {
     if (!(drive_release_retry_ms && now_ms >= drive_release_retry_ms) &&
-        !(rails_deadline_ms && now_ms >= rails_deadline_ms &&
-          (!s_reader_keep_rails || drive_release_retry_ms))) return;
+        !(rails_deadline_ms && now_ms >= rails_deadline_ms)) return;
     // 和实际推屏共用递归锁，不能在另一轮扫描中途释放驱动。
     // Share the scan's recursive lock; never release drive during another output.
     bool held = pico_online_display_begin();
@@ -119,8 +98,7 @@ void rails_idle_check(int64_t now_ms) {
     // Retry a transient I2C failure at 50ms intervals; stop bus access on success without repainting.
     if (drive_release_retry_ms && now_ms >= drive_release_retry_ms)
         drive_release_retry_ms = read_pico_epd_release_drive() ? 0 : now_ms + 50;
-    if (rails_deadline_ms != 0 && now_ms >= rails_deadline_ms &&
-        (!s_reader_keep_rails || drive_release_retry_ms)) {
+    if (rails_deadline_ms != 0 && now_ms >= rails_deadline_ms) {
         rails_deadline_ms = 0;
         drive_release_retry_ms = 0;
         epd_poweroff();
@@ -303,12 +281,6 @@ static enum EpdDrawError main_recover(EpdiyHighlevelState* hl, enum EpdDrawError
     return result;
 }
 
-// 控制分支按体积编译；扫描、像素搬运和波形时序仍由原函数负责。
-// Size-optimize control flow; existing routines retain scan, pixel-copy and waveform timing.
-#if defined(ESP_PLATFORM) && defined(__GNUC__) && !defined(__clang__)
-#pragma GCC push_options
-#pragma GCC optimize ("Os")
-#endif
 static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
     const void* owner = s_main_armed;
     const bool shelf_exit = s_main_shelf_exit || s_main_shelf_page;
@@ -359,9 +331,7 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
     const bool shelf_regions=normal&&changed&&s_main_band_count&&(changing_page||body_full);
     if(shelf_regions){marker_with_body=true;body_area.height=UI_NAV_MARKER_SCAN_END;}
     const bool clean_switch=s_main_quality&&changed&&changing_page&&!body_full;
-    const bool fast_background=s_main_fast_background&&fast&&clean_switch;
-    if(fast_background)body_wave=display_main_fast_background_waveform_with_phases(body_wave,body_mode,s_main_quality);
-    else if(clean_switch)body_wave=display_main_clean_waveform_with_phases(body_wave,body_mode,s_main_quality);
+    if(clean_switch)body_wave=display_main_clean_waveform_with_phases(body_wave,body_mode,s_main_quality);
     use_scan_for(body_wave, body_mode);
     epd_poweron();
     epd_hl_waveform(hl, body_wave);
@@ -406,7 +376,7 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
         // Release main-animation LUTs instead of competing with networking and reader resources.
         e0470_page_turn_release();
     } else if (!changed) *result = EPD_DRAW_SUCCESS;
-    else *result = (body_full||fast_background) ? epd_hl_update_area_full(hl, body_mode, 25, body_area)
+    else *result = body_full ? epd_hl_update_area_full(hl, body_mode, 25, body_area)
                             : epd_hl_update_area(hl, body_mode, 25, body_area);
     if (cache) {
         main_band_copy(hl, cache, true);
@@ -417,12 +387,10 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
             // 采用原校准迁移，不自行按灰度比例截帧；等灰无需反复推动。
             // Retain calibrated transitions without scaling pulses by gray distance; equal grays need no repeated drive.
             const EpdWaveform *gray_wave=display_main_gray_waveform();
-            if(fast_background)gray_wave=display_main_fast_background_waveform_with_phases(gray_wave,MODE_GL16,s_main_quality);
-            else if(clean_switch)gray_wave=display_main_clean_waveform_with_phases(gray_wave,MODE_GL16,s_main_quality);
+            if(clean_switch)gray_wave=display_main_clean_waveform_with_phases(gray_wave,MODE_GL16,s_main_quality);
             epd_hl_waveform(hl,gray_wave);
             use_scan_for(display_main_gray_waveform(), MODE_GL16);
-            *result = fast_background?epd_hl_update_area_full(hl,MODE_GL16,25,gray):
-                epd_hl_update_area(hl, MODE_GL16, 25, gray);
+            *result = epd_hl_update_area(hl, MODE_GL16, 25, gray);
         }
     }
     s_main_band_count = 0;
@@ -446,9 +414,6 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
 
 // 其他显示出口只取消未用入口；主页面失败时先重建完整目标，绝不回放旧缓存。
 // Other outputs disarm unused entry permission; a main-page failure first rebuilds the full current target, never replaying old cache.
-#if defined(ESP_PLATFORM) && defined(__GNUC__) && !defined(__clang__)
-#pragma GCC pop_options
-#endif
 static bool main_before_update(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
     display_main_transition_cancel();
     if (s_main_fault) { *result = main_recover(hl, EPD_DRAW_SUCCESS); return true; }

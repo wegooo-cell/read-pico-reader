@@ -30,7 +30,6 @@ bool app_book_status_bar_visible(void);
 #if KIIKO_BOARD_METALIO47
 #else
 /// Pico阅读会话，包括正文上的工具面板；只读且不访问文件。/ Pico reader session, including its panels; pure, without file I/O.
-bool app_book_reader_open(void);
 #endif
 #if KIIKO_BOARD_METALIO47
 #include "app/app.h"

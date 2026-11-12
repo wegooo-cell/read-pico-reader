@@ -1,5 +1,13 @@
 # 版本变更 / Changelog
 
+## 正式发布 / Release — 2026-11-12
+
+- **小纸 PICO 0.3.3-rc107、Metalio S31 0.3.3-rc112**：设置列表快速滑动松手后直接滚动约半屏，松手即清理残影。阅读缓存迁入 TF 卡的 `.kiikoread` 目录。
+- **PICO**：阅读及主页切换恢复 RC104 刷新方式，阅读空闲 8 秒后关闭屏幕电源。锁屏浅睡前确认屏幕断电，失败时重试。
+- **S31**：合入 Moku 的书架封面缓存与失败重试、低内存 Wi-Fi 和传书优化、阅读页脚本章页码、跨文件脚注修复与手动屏幕修复。星瞳云同步上报 S31 型号 `metalio47`。
+
+Both boards scroll about half a page after a quick flick and clear list ghosting on release. Reader caches use `.kiikoread`. PICO restores the RC104 reader and home refresh behavior and verifies panel power-off before light sleep. S31 incorporates Moku’s shelf, networking, reader and panel-repair improvements.
+
 ## 本地测试 / Local test — 2026-11-11
 
 - S31 书架封面：修复“逐本揭示”时先到达的封面被整页门控按占位标题推屏、脏标记随即清掉而不再补画的问题，改为每格按自身就绪状态绘制；封面任务失败不再永久跳过，按行退避重试（3 次后留占位并每 5 秒再试），TF 挂载交接期间保留请求不丢格；进入书架/换页时先同步读取卡上成品封面缓存，首帧即带封面，只有缓存缺失才进后台解码。继承上轮默认封面不落盘、封面缓存 schema 作废旧“假封面”及 S31 JPEGDEC 小平面兜底。S31 本地测试，版本号保持 rc110，未发布官网/OTA。

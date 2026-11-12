@@ -12,24 +12,17 @@
 #include <stdbool.h>
 #include <string.h>
 
-// 构表只在首次缓存缺失时运行，按体积优化以保留原4MiB应用槽。
-// Table construction runs only on cache misses; size optimization retains the original4MiB app slots.
-#if defined(ESP_PLATFORM) && defined(__GNUC__) && !defined(__clang__)
-#pragma GCC optimize ("Os")
-#endif
-// 用户2026-11-10：快刷跨根页独立启用本板6/8相全目标白；其他模式仍由旧实验开关决定。
-// Fast roots independently enable native6/8 white-target phases; other modes retain the legacy gate.
 // 用户2026-10-29：涉及书架的根页切换补八相，其余补六相，插在原保持前；等灰保持。
 // Root switches involving the shelf add eight changed-white phases; other roots add six before native settling.
-static const EpdWaveform* main_quality_waveform_impl(
-    const EpdWaveform* source, enum EpdDrawMode draw_mode, unsigned white_phases,bool equal_white
+const EpdWaveform* display_main_clean_waveform_with_phases(
+    const EpdWaveform* source, enum EpdDrawMode draw_mode, unsigned white_phases
 ) {
+#if KIIKO_PICO_MAIN_CLEAN
     enum { SLOTS=12, MAX_SOURCE=37 };
     typedef struct {
         const EpdWaveform *source;
         int mode;
         unsigned white_phases;
-        bool equal_white;
         EpdWaveformPhases phases;
         const EpdWaveformPhases *range;
         EpdWaveformMode profile;
@@ -45,7 +38,7 @@ static const EpdWaveform* main_quality_waveform_impl(
         if(slots[i].source && &slots[i].wave==source && slots[i].mode==mode){source=slots[i].source;break;}
     for(unsigned i=0;i<SLOTS;++i){
         if(slots[i].source==source && slots[i].mode==mode &&
-           slots[i].white_phases==white_phases && slots[i].equal_white==equal_white)return &slots[i].wave;
+           slots[i].white_phases==white_phases)return &slots[i].wave;
     }
     const EpdWaveformPhases *original=e0470_waveform_phases(source,mode);
     if(!original || !original->luts || original->phase_times || original->phases<20 || original->phases>MAX_SOURCE ||
@@ -72,25 +65,16 @@ static const EpdWaveform* main_quality_waveform_impl(
     memset(data+drive,0,(size_t)white*64);
     memcpy(data+drive+white,original->luts+(size_t)drive*64,(size_t)holds*64);
     if(release)memset(data+count-1,0,64);
-    if(!equal_white)for(int f=0;f<count;++f)
+    for(int f=0;f<count;++f)
         for(int gray=0;gray<16;++gray)
             data[f][gray][gray/4]&=(uint8_t)~(3u<<(6-2*(gray%4)));
     for(int f=drive;f<drive+white;++f)
-        for(int from=0;from<(equal_white?16:15);++from)data[f][15][from/4]|=(uint8_t)(2u<<(6-2*(from%4)));
-    slot_t *slot=&slots[index];slot->mode=mode;slot->white_phases=white_phases;slot->equal_white=equal_white;
+        for(int from=0;from<15;++from)data[f][15][from/4]|=(uint8_t)(2u<<(6-2*(from%4)));
+    slot_t *slot=&slots[index];slot->mode=mode;slot->white_phases=white_phases;
     slot->phases=(EpdWaveformPhases){count,(const uint8_t*)data,NULL};slot->range=&slot->phases;
     slot->profile=(EpdWaveformMode){mode,1,&slot->range};slot->profile_ptr=&slot->profile;
     slot->wave=(EpdWaveform){.num_modes=1,.num_temp_ranges=1,.mode_data=&slot->profile_ptr,.temp_intervals=source->temp_intervals};
     slot->source=source;return &slot->wave;
-}
-const EpdWaveform* display_main_fast_background_waveform_with_phases(
-        const EpdWaveform* source,enum EpdDrawMode mode,unsigned white_phases) {
-    return main_quality_waveform_impl(source,mode,white_phases,true);
-}
-const EpdWaveform* display_main_clean_waveform_with_phases(
-        const EpdWaveform* source,enum EpdDrawMode draw_mode,unsigned white_phases) {
-#if KIIKO_PICO_MAIN_CLEAN
-    return main_quality_waveform_impl(source,draw_mode,white_phases,false);
 #else
     (void)draw_mode;(void)white_phases;return source;
 #endif
@@ -317,8 +301,8 @@ const EpdWaveform* display_settings_motion_waveform(void) {
         memcpy(s_settings_motion_data,follow->luts,8u*64u);
         for(int f=8;f<12;++f)for(int from=0;from<15;++from)
             s_settings_motion_data[f][15][from/4]|=(uint8_t)(2u<<(6-2*(from%4)));
-        // 拖动期间白→白也必须保持，避免每帧白底闪动；光学残影留给800ms空闲定稿清理。
-        // Hold white-to-white during motion to avoid background flashes;800ms idle recovery owns residual optical cleanup.
+        // 拖动期间保持白底，松手时由灰阶定稿清残影。
+        // Hold white backgrounds during motion and clean residual ghosts in the final gray update on lift.
         ready=true;
     }
     return &PICO_SETTINGS_MOTION_WAVEFORM;

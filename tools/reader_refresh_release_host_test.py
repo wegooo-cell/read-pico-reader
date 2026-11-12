@@ -49,8 +49,6 @@ static unsigned s_cover_dirty_mask,s_cover_present_mask;
 static unsigned s_turns;
 static int64_t s_reader_clock_minute,s_reader_clock_painted_minute,s_du_ms;
 static const char *s_text="text";
-static bool reader_rails_held;
-void display_reader_keep_rails(bool active){reader_rails_held=active;}
 static EpdRect s_area,s_du_area;
 static void reader_prefetch_end(bool started){assert(!started);}
 static int calls,selected,fail,rendered,prepares,images,tick;
@@ -123,11 +121,11 @@ static struct {bool pending;} s_reader_tap;
 static char s_path[16]="book";
 static int64_t s_stats_last_ms;
 static int lock_saves,lock_flushes;
-static void reader_indent_hold_cancel(void){assert(!reader_rails_held);}
-static void shelf_category_remember(app_ctx_t *ctx){(void)ctx;assert(!reader_rails_held);}
+static void reader_indent_hold_cancel(void){}
+static void shelf_category_remember(app_ctx_t *ctx){(void)ctx;}
 static void track_ticket_stats(app_ctx_t *ctx){(void)ctx;}
-static void save_progress(void){assert(!reader_rails_held);++lock_saves;}
-static void lock_draw(void){assert(!reader_rails_held);}
+static void save_progress(void){++lock_saves;}
+static void lock_draw(void){}
 static void invalidate_prep(void){}
 static void unlock_draw(void){}
 static void book_progress_set_last_path(const char *path){assert(!strcmp(path,s_path));}
@@ -147,8 +145,8 @@ static void reset(void){
 static void same_area(EpdRect a,EpdRect b){if(a.x!=b.x||a.y!=b.y||a.width!=b.width||a.height!=b.height)fprintf(stderr,"area mismatch tag%d: %d,%d %dx%d expected %d,%d %dx%d\n",selected,a.x,a.y,a.width,a.height,b.x,b.y,b.width,b.height);assert(a.x==b.x&&a.y==b.y&&a.width==b.width&&a.height==b.height);}
 int main(void){
  app_ctx_t ctx={0};
- reader_rails_held=true;before_lock(&ctx);
- assert(!reader_rails_held&&lock_saves==1&&lock_flushes==1&&!calls);
+ before_lock(&ctx);
+ assert(lock_saves==1&&lock_flushes==1&&!calls);
  // 首页/书架/目录/唤醒进入正文：纯文字、背景或图片都只完整GC16一次，成功后重置清理计数。
  // Home/shelf/TOC/wake entry: text, wallpaper and images each get one complete GC16, resetting the cleanup count on success.
  const int origins[]={-1,SHELF,TOC};

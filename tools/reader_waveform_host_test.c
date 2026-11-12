@@ -171,28 +171,26 @@ int main(void) {
     puts("PASS: soft ordinary turn keeps vendor sequences and equal-gray refresh, drops only black-on-black erase phases, inserts twelve whole-white phases and four black re-drive phases before the vendor settle holds");
     const EpdWaveform* water_wave=display_reader_water_waveform();
     const EpdWaveformPhases* water=e0470_waveform_phases(water_wave,MODE_GL16);
-    assert(water_wave==display_reader_water_waveform() && water && water->phases==E0470_GL16_FRAMES+16);
+    assert(water_wave==display_reader_water_waveform() && water && water->phases==E0470_GL16_FRAMES+4);
     assert(water_wave->temp_intervals==display_reader_text_waveform()->temp_intervals && !water->phase_times);
     const EpdWaveformPhases* water_src=e0470_waveform_phases(display_reader_text_waveform(),MODE_GL16);
     assert(water_src && water_src->phases==E0470_GL16_FRAMES);
-    // 源表只移出末尾三相保持，之后加12相擦白和4相补黑。
-    // Move only the source three holds after12 white/four black phases.
+    // 源表仅移出末尾三相保持；新增四相擦白不属于源表长度。
+    // Only the three source holds move; the four added white phases are outside its length.
     const int water_drive=E0470_GL16_FRAMES-3;
     for(int from=0;from<16;++from)for(int to=0;to<16;++to){
         for(int f=0;f<water_drive;++f)
             assert(e0470_phase_action(water,f,to,from)==e0470_phase_action(water_src,f,to,from));
-        for(int f=water_drive;f<water_drive+12;++f)
-            assert(e0470_phase_action(water,f,to,from)==(to==15?2:0));
-        for(int f=water_drive+12;f<water_drive+16;++f)
-            assert(e0470_phase_action(water,f,to,from)==(to==0?1:0));
+        for(int f=water_drive;f<water_drive+4;++f)
+            assert(e0470_phase_action(water,f,to,from)==(to==15&&from!=15?2:0));
         for(int f=0;f<3;++f){
-            assert(e0470_phase_action(water,water_drive+16+f,to,from)==
+            assert(e0470_phase_action(water,water_drive+4+f,to,from)==
                    e0470_phase_action(water_src,water_drive+f,to,from));
-            assert(e0470_phase_action(water,water_drive+16+f,to,from)==0);
+            assert(e0470_phase_action(water,water_drive+4+f,to,from)==0);
         }
-        if(from==to && from>0 && from<15)for(int f=0;f<water->phases;++f)assert(e0470_phase_action(water,f,to,from)==0);
+        if(from==to)for(int f=0;f<water->phases;++f)assert(e0470_phase_action(water,f,to,from)==0);
     }
-    puts("PASS: Pico reader ripple retains every original gray transition/three settle holds, twelve whole-white/four black-redrive phases, equal middle grays held,53 phases and cached identity");
+    puts("PASS: Pico reader ripple retains every original gray transition/three settle holds, four changed-white-only drives, all equal pairs held,41 phases and cached identity");
     puts("PASS: all 256 pairs, endpoints, holds, first/final actions, pulse counts, 37-frame timing and original LUT retained; optical validation pending");
     return 0;
 }

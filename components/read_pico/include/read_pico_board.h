@@ -103,6 +103,9 @@ bool read_pico_rails_on(void);
 /// 刷新结束后释放 MODE/XOE/VCOM_EN，保留高压轨与原电压；已经中性时不访问 I2C，失败返回 false 供重试。
 /// Release MODE/XOE/VCOM_EN after output, retaining HV rails and voltage settings; neutral state does no I2C, false requests a retry.
 bool read_pico_epd_release_drive(void);
+/// 浅睡前读回实际引脚，确认 XOE、VCOM_EN、EN 和 PGOOD 均为低。
+/// Read the actual pins before light sleep and confirm XOE, VCOM_EN, EN and PGOOD are low.
+esp_err_t read_pico_epd_verify_poweroff(void);
 #endif
 
 /// 翻转 VCOMCTL：1=外部 VCOM_EN，0=自动时序。

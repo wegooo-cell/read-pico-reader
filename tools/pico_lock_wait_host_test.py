@@ -20,11 +20,13 @@ typedef struct {int ths_mg,duration;}sc7a20h_motion_cfg_t;typedef int sc7a20h_ev
 #define APP_LOCK_STUCK_IRQ_US 3000000
 #define APP_LOCK_KEY_POLL_US 100000
 #define APP_LOCK_SLEEP_ERROR_LIMIT 5
+#define APP_LOCK_EPD_RETRY_US 1000000LL
 #define READ_PICO_IOE_INT_GPIO 7
 #define ESP_SLEEP_WAKEUP_TIMER 1
 #define pdMS_TO_TICKS(x) (x)
 enum {APP_WAKE_NONE,APP_WAKE_KEY,APP_WAKE_PICKUP,APP_WAKE_TIMEOUT};
-static int64_t now,key_at;static int fault,suspended,resumed,last_wake,sleeps;
+static int64_t now,key_at;static int fault,suspended,resumed,last_wake,sleeps,epd_retries,epd_parks;
+static int64_t last_epd_retry;
 static bool book_cover_jobs_quiesce(unsigned ms){assert(ms==2000);return fault!=1;}
 static bool ui_avatar_quiesce(unsigned ms){assert(ms==2000);return fault!=2;}
 static bool app_settings_pickup_wake(void){return false;}
@@ -48,7 +50,16 @@ static void read_pico_clear_ioe_int(void){}
 static int gpio_get_level(int gpio){(void)gpio;return fault==3?0:1;}
 static void vTaskDelay(int ms){now+=(int64_t)ms*1000;assert(now<12000000);}
 static int esp_sleep_enable_timer_wakeup(uint64_t us){(void)us;return fault==4?-1:0;}
-static int esp_light_sleep_start(void){++sleeps;now+=100000;return fault==5?-1:0;}
+static esp_err_t read_pico_epd_verify_poweroff(void){
+ return fault==7||(fault==6&&epd_retries<2)?-1:ESP_OK;
+}
+static void epd_poweroff(void){
+ assert(!epd_retries||now-last_epd_retry>=APP_LOCK_EPD_RETRY_US);
+ last_epd_retry=now;
+ ++epd_retries;
+}
+static esp_err_t read_pico_ioe_sleep(bool off){assert(!off);++epd_parks;return ESP_OK;}
+static int esp_light_sleep_start(void){assert(fault!=7&&(fault!=6||epd_retries==2));++sleeps;now+=100000;return fault==5?-1:0;}
 static void esp_sleep_disable_wakeup_source(int source){(void)source;}
 static void sc7a20h_read_events(void *h,sc7a20h_events_t *e){(void)h;(void)e;}
 static void sc7a20h_power_down(void *h){(void)h;}
@@ -58,13 +69,15 @@ static void app_settings_set_last_wake(uint8_t wake){last_wake=wake;}
 unit+=function('app_light_sleep_wait_timed',ROOT/'boards/pico/src/main/sleep.c')+'\n'
 unit+=r'''
 int main(void){
- for(fault=0;fault<=5;++fault)for(unsigned real=0;real<2;++real){
-  now=0;key_at=real?5000000:0;suspended=resumed=sleeps=0;last_wake=-1;
+ for(fault=0;fault<=7;++fault)for(unsigned real=0;real<2;++real){
+  now=0;key_at=real?5000000:0;suspended=resumed=sleeps=epd_retries=epd_parks=0;last_wake=-1;
   assert(app_light_sleep_wait_timed(NULL,8000)==(real?APP_WAKE_KEY:APP_WAKE_TIMEOUT));
   assert(now>=5000000&&suspended==1&&resumed==1&&last_wake==(real?APP_WAKE_KEY:APP_WAKE_NONE));
-  if(fault==1||fault==2)assert(!sleeps);
+  if(fault==1||fault==2||fault==7)assert(!sleeps);
+  if(fault==6)assert(epd_retries==2&&epd_parks==2&&sleeps>0);
+  if(fault==7)assert(epd_retries>=5&&epd_parks==epd_retries);
  }
- puts("PASS: real lock wait retains lock through busy image/font jobs, stuck IRQ, timer and light-sleep failures; only validated key wakes or actual timeout exits");
+ puts("PASS: real lock wait retains lock through busy image/font jobs, stuck IRQ, timer, panel-off and light-sleep failures; only validated key wakes or actual timeout exits");
 }
 '''
 with tempfile.TemporaryDirectory() as folder:

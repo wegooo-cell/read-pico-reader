@@ -457,7 +457,6 @@ static char* s_text;
 bool app_book_reader_body_visible(void) {
     return s_view == READING && s_text && s_reader_panel == READER_PANEL_NONE && !s_clear_confirm;
 }
-bool app_book_reader_open(void) { return s_view == READING && s_text; }
 static blk_t* s_blocks;
 // 书内字体的 run 表与块表同生共死：都来自同一次 html_text 解析，排版直接借用。
 // The face run table lives and dies with the block table: both come from the same html_text
@@ -7433,7 +7432,6 @@ static void book_on_exit(app_ctx_t* ctx) {
     rc_stop_auto();rc_cancel_side();s_rc_double_pending=false;
     book_shelf_page_pause();
     s_shelf_page_key_valid=s_shelf_page_loading=s_shelf_page_cached=false;
-    display_reader_keep_rails(false);
     reader_indent_hold_cancel();
     // 离开阅读页时丢掉未扫完的连续 DU 相位并还原缩放状态。
     // Leaving the reader drops unfinished continuous-DU phases and the zoom state.
@@ -8423,7 +8421,6 @@ static void before_lock(app_ctx_t* ctx) {
     rc_stop_auto();rc_cancel_side();s_rc_double_pending=false;
     book_shelf_page_release();
     s_shelf_page_key_valid=s_shelf_page_loading=s_shelf_page_cached=false;
-    display_reader_keep_rails(false);
     reader_indent_hold_cancel();
     s_shelf_key_mode=s_shelf_key_paint_pending=false;s_shelf_key_delta=s_shelf_key_pressed=0;
     shelf_category_remember(ctx);

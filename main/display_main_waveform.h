@@ -33,11 +33,11 @@ const EpdWaveform* display_main_clean_waveform_with_phases(
     const EpdWaveform* source, enum EpdDrawMode mode, unsigned white_phases
 );
 
+#if KIIKO_BOARD_METALIO47
 /// 用户批准的快刷跨根页背景维护：独立于实验开关，六/八相全目标白及两相释放。
 /// Approved board-native fast root maintenance: six/eight white-target drives and two holds, independent of experiment flags.
 const EpdWaveform* display_main_fast_background_waveform_with_phases(
     const EpdWaveform* source,enum EpdDrawMode mode,unsigned white_phases);
-#if KIIKO_BOARD_METALIO47
 /// S31快刷/水波纹根页同轮维护所有目标白；六/八相预算不变，等黑/等灰不新增推动。
 /// S31 fast/ripple roots maintain all white targets in the same six/eight-phase budget without new equal-black/gray drives.
 const EpdWaveform* display_main_background_waveform_with_phases(

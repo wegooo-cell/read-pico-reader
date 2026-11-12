@@ -28,6 +28,8 @@
  * User2026-11-04 ghosting report: transparent locks add one white GC16 target before final art; free the temporary white canvas and preserve assets, caching, unlocks and other styles.
  * 用户确认透明书封透字消失，要求其余样式同样处理：四种入锁均先白目标再最终图，素材/缓存/解锁与异常兜底保留。
  * After confirming the cover fix, the user requests the same protection for other styles: all four locks use white then final art, preserving assets, caches, unlocks and failure recovery.
+ * 用户修订：Pico 锁屏浅睡前读回面板关电状态，失败时保持锁屏、继续收按键并重试。
+ * User revision: verify panel power-off before Pico lock light sleep. On failure, retain the lock, keep polling keys and retry.
  */
 #include "ui_avatar.h"
 #include "book_cover_jobs.h"
@@ -83,6 +85,7 @@ static bool s_lock_feedback_visible, s_lock_feedback_failed;
 #define APP_LOCK_KEY_POLL_US (2LL * 1000 * 1000)
 #define APP_LOCK_STUCK_IRQ_US (3LL * 1000 * 1000)
 #define APP_LOCK_SLEEP_ERROR_LIMIT 5
+#define APP_LOCK_EPD_RETRY_US (1000LL * 1000)
 // PMU 确认后仍未掉 EN 时恢复调用方，禁止无限等待。/ Restore the caller if EN stays high after acknowledgement instead of waiting forever.
 #define HOST_EN_DROP_WAIT_MS 5000
 
@@ -413,6 +416,8 @@ app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc, uint32_t time
 
     app_wake_source_t wake = APP_WAKE_NONE;
     int64_t ioe_low_since_us = 0;
+    int64_t epd_check_after_us = 0;
+    bool epd_off_confirmed = false;
     unsigned sleep_errors = 0;
     esp_err_t last_sleep_error = ESP_OK;
     int64_t last_sleep_error_log_ms = 0;
@@ -432,6 +437,29 @@ app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc, uint32_t time
         if (lock_wait_key()) {
             wake = APP_WAKE_KEY;
             break;
+        }
+        // 提示局刷可能再次上电，进入浅睡前重读。持续失败时限制重试频率，保留按键和超时。
+        // Hints can power the panel again. Recheck before light sleep and pace failures while servicing keys and timeout.
+        if (!epd_off_confirmed && now_us < epd_check_after_us) {
+            vTaskDelay(pdMS_TO_TICKS(40));
+            continue;
+        }
+        if (!epd_off_confirmed || !poll_only || now_us >= epd_check_after_us) {
+            esp_err_t off = read_pico_epd_verify_poweroff();
+            if (off != ESP_OK) {
+                ESP_LOGW(TAG, "EPD power-off unconfirmed (%s); retrying", esp_err_to_name(off));
+                epd_off_confirmed = false;
+                epd_poweroff();
+                // 关电序列临时置高 MODE，重试后恢复浅睡引脚状态。
+                // Power-off sets MODE high temporarily; restore the sleep pin state after retrying.
+                esp_err_t parked = read_pico_ioe_sleep(false);
+                if (parked != ESP_OK) ESP_LOGW(TAG, "ioe sleep %s", esp_err_to_name(parked));
+                epd_check_after_us = esp_timer_get_time() + APP_LOCK_EPD_RETRY_US;
+                continue;
+            }
+            if (!epd_off_confirmed) ESP_LOGI(TAG, "EPD power-off confirmed before light sleep");
+            epd_off_confirmed = true;
+            epd_check_after_us = now_us + APP_LOCK_KEY_POLL_US;
         }
         if(poll_only) {vTaskDelay(pdMS_TO_TICKS(40));continue;}
         read_pico_clear_ioe_int();
