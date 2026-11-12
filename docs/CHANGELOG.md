@@ -1,5 +1,10 @@
 # 版本变更 / Changelog
 
+## Metalio S31 0.3.3-rc113 — 2026-11-12
+
+- 修复首次进入书架时只显示底部封面、加载提示停留的问题。书架先显示书名和已就绪的封面，后台完成一批就补画一批，加载结束后自动清除提示。
+- Fix missing covers and a stuck loading message on first shelf entry. Show titles and ready covers while the rest load, then automatically clear the loading hint.
+
 ## 正式发布 / Release — 2026-11-12
 
 - **小纸 PICO 0.3.3-rc107、Metalio S31 0.3.3-rc112**：设置列表快速滑动松手后直接滚动约半屏，松手即清理残影。阅读缓存迁入 TF 卡的 `.kiikoread` 目录。

@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "version": "0.3.3-rc112",
+  "version": "0.3.3-rc113",
   "project": "Kiikoread_Metalio_S31",
   "board": "Metalio-EINK4-Plus-S31",
   "layout": "metalio-s31-dual-5m-v1",
   "minimum_base_version": "0.3.3-rc98",
-  "url": "https://wegooo-cell.github.io/read-pico-reader/Metalio-S31-update-0.3.3-rc112.bin",
-  "size": 5134384,
-  "sha256": "f99c7f67d9a64b919dc457fdd9a69e7e8eaba7dcfa1567b51546b515b790d354",
-  "notes": "设置列表快滑松手直接滚动约半屏，松手后立即清理残影。\n阅读缓存迁入 .kiikoread 目录。\n书架优先读取成品封面，封面失败会重试。\n改善低内存时的 Wi-Fi 连接和传书。\n修复跨文件脚注，阅读页脚显示本章页码。"
+  "url": "https://wegooo-cell.github.io/read-pico-reader/Metalio-S31-update-0.3.3-rc113.bin",
+  "size": 5135136,
+  "sha256": "b4666979c71331da8893ff99aef845de0435f452c4489a4c29fe6139f3849539",
+  "notes": "修复首次进入书架时仅显示底部封面和加载提示停留的问题。\n已就绪的封面随加载逐批显示，完成后自动清除提示。"
 }

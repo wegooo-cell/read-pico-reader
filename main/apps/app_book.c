@@ -881,6 +881,7 @@ static book_shelf_page_key_t s_shelf_page_base;
 static bool s_shelf_page_key_valid,s_shelf_page_loading,s_shelf_page_cached,s_shelf_page_cache_allowed;
 #if KIIKO_BOARD_METALIO47
 static bool s_ticket_cover_started,s_ticket_cover_done;
+static bool s_shelf_cover_hint_dirty;
 #endif
 static void invalidate_covers(void) {
     book_shelf_page_pause();
@@ -1172,6 +1173,22 @@ static void shelf_loading_hint_update(int done, int total) {
     snprintf(s_message, sizeof(s_message), "正在加载书架 %d/%d", done, total);
 }
 
+#if KIIKO_BOARD_METALIO47
+static void update_shelf_cover_hint(app_ctx_t *ctx) {
+    const bool active = shelf_loading_hint_active();
+    if (s_scan_pending || (s_message[0] && !active)) return;
+    const unsigned slots = shelf_page_mask(ctx);
+    const unsigned pending = slots & s_cover_pending_mask;
+    char hint[sizeof(s_message)] = "";
+    if (pending)
+        snprintf(hint, sizeof(hint), "正在加载书架 %d/%d",
+                 __builtin_popcount(slots & ~pending), __builtin_popcount(slots));
+    if (!strcmp(s_message, hint)) return;
+    copy_text(s_message, sizeof(s_message), hint);
+    s_shelf_cover_hint_dirty = true;
+}
+#endif
+
 static void prepare_covers(app_ctx_t* ctx) {
     if(s_view!=SHELF&&s_shelf_page_key_valid)invalidate_covers();
     if(s_view==SHELF&&prepare_shelf_page(ctx))return;
@@ -1457,7 +1474,11 @@ static bool cover_favorite_needs_white_edge(const uint8_t *gray, EpdRect image, 
 }
 static bool shelf_cover_white_edge(int row,EpdRect image) {
     if(s_view==SHELF&&s_shelf_page_cached)return (book_shelf_page_favorite_edges()&(1u<<row))!=0;
-    return shelf_cover_frame_ready()&&((app_settings_main_fast_refresh()&&s_view==SHELF&&fast_cover_matches(row,image))
+    return
+#if !KIIKO_BOARD_METALIO47
+        shelf_cover_frame_ready() &&
+#endif
+        ((app_settings_main_fast_refresh()&&s_view==SHELF&&fast_cover_matches(row,image))
         ?s_covers[row].fast_white_edge:cover_favorite_needs_white_edge(s_covers[row].gray,image,
             shelf_display_style()==5?s_covers[row].width:BOOK_COVER_W,
             shelf_display_style()==5?s_covers[row].height:BOOK_COVER_H));
@@ -1683,7 +1704,14 @@ static EpdRect shelf_search_rect(int page,int pages) {
 // 静态整页与实时信息分层；不在绘图中读写文件。/ Split static artwork and live information; no file IO while painting.
 static void draw_shelf_page_artwork(app_ctx_t *ctx,uint8_t *fb) {
     s_shelf_read_ready=false;
-    if(s_scan_pending||s_shelf_page_loading||(s_visible_count&&!shelf_cover_frame_ready())){
+#if KIIKO_BOARD_METALIO47
+    // Show indexed titles and ready covers while card verification or decoding runs.
+    const bool loading = s_scan_pending && !s_visible_count;
+#else
+    const bool loading = s_scan_pending || s_shelf_page_loading ||
+                         (s_visible_count && !shelf_cover_frame_ready());
+#endif
+    if (loading) {
         ui_text_fixed_vc(fb,342,610,30,"正在加载书架...",EPD_DRAW_ALIGN_CENTER,false);return;
     }
     const bool lifting=s_pressed_control>=0&&s_pressed_control<shelf_rows();
@@ -4706,6 +4734,9 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
     draw_shelf_header_button(fb, shelf_manage_rect(), false);
     draw_shelf_header_button(fb, shelf_sort_rect(), true);
     draw_shelf_page_artwork(ctx,fb);
+#if KIIKO_BOARD_METALIO47
+    update_shelf_cover_hint(ctx);
+#endif
     if(!s_scan_pending&&s_query[0]&&!s_visible_count&&!s_message[0]) {
         ui_text_vc(fb,342,410,28,"未找到匹配的书籍",EPD_DRAW_ALIGN_CENTER,false);
         ui_text_vc(fb,342,460,21,"点击 X 退出搜索",EPD_DRAW_ALIGN_CENTER,false);
@@ -5132,8 +5163,17 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
              (displayed - drawn) / 1000, (esp_timer_get_time() - displayed) / 1000);
     guard_draw_result(ctx->hl, err);
     if ((s_view==SHELF || s_view==MANAGE || s_view==BULK) && err==EPD_DRAW_SUCCESS) {
-        if ((redraw==APP_REDRAW_PAGE || redraw==APP_REDRAW_FULL) && shelf_cover_frame_ready()) s_cover_dirty_mask=0;
+        const bool whole_page = redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL;
+        if (whole_page && (shelf_cover_frame_ready()
+#if KIIKO_BOARD_METALIO47
+                           || (s_view == SHELF && s_visible_count > 0)
+#endif
+                           )) s_cover_dirty_mask = 0;
         else if (s_cover_batch_present_pending) s_cover_dirty_mask &= ~s_cover_present_mask;
+#if KIIKO_BOARD_METALIO47
+        if (s_view == SHELF && (whole_page || s_cover_batch_present_pending))
+            s_shelf_cover_hint_dirty = false;
+#endif
     }
     s_cover_present_mask=0;
     if (err==EPD_DRAW_SUCCESS && reader_status_visible() &&
@@ -9287,6 +9327,47 @@ static app_redraw_t reader_font_recovery_tick(app_ctx_t *ctx) {
     app_restart_host();
     return APP_REDRAW_DONE;
 }
+static app_redraw_t shelf_cover_tick(app_ctx_t *ctx) {
+    if ((s_view != SHELF && s_view != MANAGE && s_view != BULK) ||
+        (ctx->touch && ctx->touch->touched)) return APP_REDRAW_NONE;
+    (void)prepare_cover_batch(ctx, false);
+    if (ctx->request_app) return APP_REDRAW_NONE;
+    unsigned changed = shelf_cover_reveal_mask();
+    bool repaint_hint = changed != 0;
+    const int rows_now = shelf_rows();
+#if KIIKO_BOARD_METALIO47
+    if (s_view == SHELF) {
+        update_shelf_cover_hint(ctx);
+        repaint_hint = s_shelf_cover_hint_dirty;
+    } else
+#endif
+    {
+        int done = 0;
+        for (int row = 0; row < rows_now; ++row)
+            if (!(s_cover_pending_mask & (1u << row))) ++done;
+        if (changed && s_cover_pending_mask) shelf_loading_hint_update(done, rows_now);
+        else if (changed && shelf_loading_hint_active()) s_message[0] = 0;
+    }
+    EpdRect area = {0};
+    for (int row = 0; row < rows_now; ++row) {
+        if (!(changed & (1u << row))) continue;
+        EpdRect r = row_rect(row);
+        area = area.width ? ui_rect_union(area, r) : r;
+    }
+    if (repaint_hint) {
+        EpdRect hint = {0, 960, UI_LOCK_WIDTH, 60};
+        area = area.width ? ui_rect_union(area, hint) : hint;
+    }
+    if (!area.width) return APP_REDRAW_NONE;
+    render(ctx, ctx->fb);
+    s_area = area;
+    s_mode = s_view == SHELF && app_settings_main_fast_refresh() ? MODE_DU : MODE_GL16;
+    s_shelf_feedback_pending = s_view == SHELF;
+    s_cover_batch_present_pending = true;
+    s_cover_present_mask = changed;
+    return APP_REDRAW_AREA;
+}
+
 static app_redraw_t on_tick(app_ctx_t* ctx) {
 #if KIIKO_BOARD_METALIO47
     app_redraw_t font_reload = reader_font_reload_tick(ctx);
@@ -9381,56 +9462,8 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
         (void)open_requested_book(ctx);
         return APP_REDRAW_PAGE;
     }
-    if ((s_view == SHELF || s_view == MANAGE || s_view == BULK) && !(ctx->touch && ctx->touch->touched)) {
-        (void)prepare_cover_batch(ctx, false);
-        // 整页准备好再合并推屏；占位页或失败输出不能消费已加载封面的待刷标记。
-        // Reveal only a complete cover group; placeholders and failed output cannot consume pending artwork.
-        unsigned changed=shelf_cover_reveal_mask();
-        if (ctx->request_app) return APP_REDRAW_NONE;
-        // 用户2026-11-05：逐本揭示时把底部加载提示一起刷新，兼作进度条；整页完成后清掉提示。
-        // User2026-11-05: redraw the loading hint with each partial reveal so it doubles as a
-        // progress line, and clear it once the whole page is ready.
-        const int rows_now = shelf_rows();
-        int done = 0;
-        for (int row = 0; row < rows_now; ++row)
-            if (!(s_cover_pending_mask & (1u << row))) ++done;
-        const bool hint_active = shelf_loading_hint_active();
-        if (changed && s_cover_pending_mask) shelf_loading_hint_update(done, rows_now);
-        else if (changed && hint_active) s_message[0] = 0;
-        EpdRect area = {0};
-        for (int row = 0; row < shelf_rows(); ++row) {
-            if (!(changed & (1u << row))) continue;
-            EpdRect r = row_rect(row);
-            if (!area.width) area = r;
-            else {
-                int right = area.x+area.width > r.x+r.width ? area.x+area.width : r.x+r.width;
-                int bottom = area.y+area.height > r.y+r.height ? area.y+area.height : r.y+r.height;
-                if (r.x < area.x) area.x = r.x;
-                if (r.y < area.y) area.y = r.y;
-                area.width = right-area.x; area.height = bottom-area.y;
-            }
-        }
-        if (area.width) {
-            // 提示行在网格下方，单独并进本次 push 的区域。
-            // The hint lives below the grid, so union its band into this push.
-            if (changed) {
-                EpdRect hint = {0, 960, UI_LOCK_WIDTH, 60};
-                int right = area.x + area.width > hint.x + hint.width ? area.x + area.width : hint.x + hint.width;
-                int bottom = area.y + area.height > hint.y + hint.height ? area.y + area.height : hint.y + hint.height;
-                if (hint.x < area.x) area.x = hint.x;
-                if (hint.y < area.y) area.y = hint.y;
-                area.width = right - area.x;
-                area.height = bottom - area.y;
-            }
-            render(ctx, ctx->fb);
-            s_area = area;
-            s_mode = s_view == SHELF && app_settings_main_fast_refresh() ? MODE_DU : MODE_GL16;
-            s_shelf_feedback_pending = s_view == SHELF;
-            s_cover_batch_present_pending = true;
-            s_cover_present_mask=changed;
-            return APP_REDRAW_AREA;
-        }
-    }
+    app_redraw_t cover_redraw = shelf_cover_tick(ctx);
+    if (cover_redraw != APP_REDRAW_NONE || ctx->request_app) return cover_redraw;
     if(s_view==SHELF&&!ctx->consumed&&!ctx->request_app&&!ctx->request_menu&&!ctx->request_return&&!(ctx->touch&&ctx->touch->touched)){
         if(shelf_chapters_tick(ctx)){
             render(ctx,ctx->fb);s_area=(EpdRect){120,184,528,768};s_mode=MODE_GL16;
