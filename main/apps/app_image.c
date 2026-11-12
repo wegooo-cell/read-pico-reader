@@ -1,4 +1,4 @@
-/*
+﻿/*
  * SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -50,7 +50,7 @@ extern const uint8_t display_test_png_end[] asm("_binary_display_test_png_end");
 #else
 #define IMAGE_PATH_MAX 256
 #endif
-typedef struct { char name[128]; char path[IMAGE_PATH_MAX]; bool png; } image_item_t;
+typedef struct { char name[128]; char path[IMAGE_PATH_MAX]; bool png; bool xth; } image_item_t;
 // 图片列表放 PSRAM，理由同文件列表：内部 RAM 留给只能用内部 RAM 的东西。
 // The image list lives in PSRAM for the same reason as the file list: internal RAM is kept for
 // what can only live there.
@@ -94,15 +94,18 @@ bool app_image_request_lock_picker(const char *path, bool transparent) {
 }
 #endif
 
-static bool image_name(const char *name, bool *png) {
+static bool image_name(const char *name, bool *png, bool *xth) {
     if (!name[0] || name[0] == '.') return false; // 跳过 macOS 辅助文件。/ Skip macOS sidecar files.
     const char *ext = strrchr(name, '.');
     if (!ext) return false;
     *png = !strcasecmp(ext, ".png");
+    // 星瞳云壁纸为 XTH（4 级灰阶），图片页同样支持查看/设为壁纸。
+    // Xteink cloud wallpapers are XTH (4-level gray); the image page views/sets them too.
+    *xth = !strcasecmp(ext, ".xth");
 #if KIIKO_BOARD_METALIO47
     if(s_lock_mode==IMAGE_LOCK_BOOKMARK)return *png;
 #endif
-    return *png || !strcasecmp(ext, ".jpg") || !strcasecmp(ext, ".jpeg") || !strcasecmp(ext, ".webp");
+    return *png || *xth || !strcasecmp(ext, ".jpg") || !strcasecmp(ext, ".jpeg") || !strcasecmp(ext, ".webp");
 }
 
 static void scan_dir(const char *root) {
@@ -111,8 +114,8 @@ static void scan_dir(const char *root) {
     if (!dir) return;
     struct dirent *entry;
     while (s_count < IMAGE_MAX && (entry = readdir(dir))) {
-        bool png;
-        if (!image_name(entry->d_name, &png) || strlen(entry->d_name) >= sizeof(s_items[0].name)) continue;
+        bool png, xth;
+        if (!image_name(entry->d_name, &png, &xth) || strlen(entry->d_name) >= sizeof(s_items[0].name)) continue;
         image_item_t *item = &s_items[s_count];
         if (snprintf(item->path, sizeof(item->path), "%s/%s", root, entry->d_name) >= (int)sizeof(item->path)) continue;
         struct stat st;
@@ -121,6 +124,7 @@ static void scan_dir(const char *root) {
         if (s_count && !strcmp(s_items[0].path, item->path)) continue;
         strcpy(item->name, entry->d_name);
         item->png = png;
+        item->xth = xth;
         ++s_count;
     }
     closedir(dir);
@@ -136,8 +140,8 @@ static void scan_images(void) {
     // Allocate before touching the list; the first Files entry previously dereferenced NULL.
     if (s_requested_path[0]) {
         const char *name = strrchr(s_requested_path, '/');
-        bool png;
-        if (!name || !image_name(name + 1, &png)) {
+        bool png, xth;
+        if (!name || !image_name(name + 1, &png, &xth)) {
             snprintf(s_message,sizeof(s_message),"%s","图片格式不支持");
             return;
         }
@@ -145,6 +149,7 @@ static void scan_images(void) {
         snprintf(s_items[0].path, sizeof(s_items[0].path), "%s", s_requested_path);
         snprintf(s_items[0].name, sizeof(s_items[0].name), "%s", name + 1);
         s_items[0].png = png;
+        s_items[0].xth = xth;
         char root[IMAGE_PATH_MAX];
         size_t length = (size_t)(name - s_requested_path);
         memcpy(root, s_requested_path, length);
@@ -191,8 +196,10 @@ static bool load_image(int index) {
             snprintf(s_message,sizeof(s_message),"%s","图片超过 50 MB 或无法读取"); return false;
         }
     }
-    bool dimensions_ok = from_file ? book_image_file_dimensions(item->path, item->png, &width, &height)
-                                  : book_image_dimensions(data, size, item->png, &width, &height);
+    bool dimensions_ok = from_file
+        ? (item->xth ? book_image_xth_dimensions(item->path, &width, &height)
+                     : book_image_file_dimensions(item->path, item->png, &width, &height))
+        : book_image_dimensions(data, size, item->png, &width, &height);
     if (!dimensions_ok || !width || !height) { snprintf(s_message,sizeof(s_message),"%s","图片格式不支持"); return false; }
     unsigned fit_w = UI_LOCK_WIDTH, fit_h = (uint64_t)height * fit_w / width;
 #if KIIKO_BOARD_METALIO47
@@ -204,8 +211,10 @@ static bool load_image(int index) {
     if (!fit_w) fit_w = 1;
     if (!fit_h) fit_h = 1;
     s_gray = heap_caps_malloc((size_t)fit_w * fit_h, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    bool ok = s_gray && (from_file ? book_image_file_grayscale(item->path, item->png, fit_w, fit_h, s_gray)
-                                  : book_image_grayscale(data, size, item->png, fit_w, fit_h, s_gray));
+    bool ok = s_gray && (from_file
+        ? (item->xth ? book_image_file_xth_grayscale(item->path, fit_w, fit_h, s_gray)
+                     : book_image_file_grayscale(item->path, item->png, fit_w, fit_h, s_gray))
+        : book_image_grayscale(data, size, item->png, fit_w, fit_h, s_gray));
     if (!ok) { free(s_gray); s_gray = NULL; snprintf(s_message,sizeof(s_message),"%s","解码失败或内存不足"); return false; }
     s_width = fit_w; s_height = fit_h; s_selected = index; s_viewing = true;
     s_message[0] = 0;
@@ -247,9 +256,9 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
 #endif
     char caption[64];
 #if KIIKO_BOARD_METALIO47
-    snprintf(caption,sizeof(caption),s_lock_mode==IMAGE_LOCK_BOOKMARK?"%d 张 · 透明 PNG":"%d 张 · JPG / PNG",s_count);
+    snprintf(caption,sizeof(caption),s_lock_mode==IMAGE_LOCK_BOOKMARK?"%d 张 · 透明 PNG":"%d 张 · JPG / PNG / XTH",s_count);
 #else
-    snprintf(caption, sizeof(caption), "%d 张 · JPG / PNG", s_count);
+    snprintf(caption, sizeof(caption), "%d 张 · JPG / PNG / XTH", s_count);
 #endif
     ui_text(fb, 36, 165, 21, caption, EPD_DRAW_ALIGN_LEFT, false);
     ui_hairline(fb, 202, 36, 612, UI_GRAY_LIGHT);
@@ -436,7 +445,7 @@ const app_desc_t app_image = {
 #else
     .binary_ui = true,
 #endif
-    .title = "图片对比 Images", .detail = "灰阶测试图 / TF 卡 JPG PNG", .enter_full = false,
+    .title = "图片对比 Images", .detail = "灰阶测试图 / TF 卡 JPG PNG XTH", .enter_full = false,
     .owns_keys = true, .menu_handle_enabled = menu_handle_enabled, .edge_back_enabled = image_edge_back,
     .on_enter = on_enter, .on_exit = image_on_exit, .on_media_lost = on_media_lost,
     .render = render, .present = present, .on_key = on_key,

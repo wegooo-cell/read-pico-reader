@@ -81,12 +81,16 @@ static bool image_pixels(uint8_t *fb, uint8_t *pixels, const char *path, EpdRect
         area.x + area.width > UI_LOCK_WIDTH || area.y + area.height > UI_LOCK_HEIGHT)
         return false;
     const char *ext = strrchr(path, '.');
-    bool png = ext && !strcasecmp(ext, ".png");
-    if (!ext || (!png && strcasecmp(ext, ".jpg") && strcasecmp(ext, ".jpeg"))) return false;
+    const bool png = ext && !strcasecmp(ext, ".png");
+    // 星瞳云壁纸为 XTH（4 级灰阶）；与 PNG/JPG 一样按原比例裁切铺满。
+    // Xteink cloud wallpapers are XTH (4-level gray); crop-to-fill like PNG/JPG.
+    const bool xth = ext && !strcasecmp(ext, ".xth");
+    if (!ext || (!png && !xth && strcasecmp(ext, ".jpg") && strcasecmp(ext, ".jpeg"))) return false;
     struct stat st;
     if (stat(path, &st) || st.st_size <= 0 || (uint64_t)st.st_size > BOOK_IMAGE_FILE_MAX) return false;
     unsigned source_w = 0, source_h = 0;
-    bool ok = book_image_file_dimensions(path, png, &source_w, &source_h);
+    bool ok = xth ? book_image_xth_dimensions(path, &source_w, &source_h)
+                  : book_image_file_dimensions(path, png, &source_w, &source_h);
     unsigned width = (unsigned)area.width, height = (unsigned)area.height;
     bool source_wider = ok && (uint64_t)source_w * height > (uint64_t)source_h * width;
     if (source_wider) width = (unsigned)(((uint64_t)height * source_w + source_h - 1) / source_h);
@@ -113,7 +117,8 @@ static bool image_pixels(uint8_t *fb, uint8_t *pixels, const char *path, EpdRect
     }
     uint8_t *gray = ok ? heap_caps_malloc((size_t)width * height, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;
     if (!gray) ok = false;
-    if (ok) ok = book_image_file_grayscale(path, png, width, height, gray);
+    if (ok) ok = xth ? book_image_file_xth_grayscale(path, width, height, gray)
+                     : book_image_file_grayscale(path, png, width, height, gray);
     if (!ok) { free(gray); return false; }
     ui_wallpaper_crop_t center = ui_wallpaper_center_crop(width, height,
                                                            (unsigned)area.width, (unsigned)area.height);
@@ -235,7 +240,7 @@ static bool avatar_cache_header(const char *path,int side,wallpaper_cache_t *hea
     struct stat st;
     const char *ext=path?strrchr(path,'.'):NULL;
     if(!path||strncmp(path,"/sdcard/",8)||side<1||side>128||!ext||
-       (strcasecmp(ext,".png")&&strcasecmp(ext,".jpg")&&strcasecmp(ext,".jpeg"))||
+       (strcasecmp(ext,".png")&&strcasecmp(ext,".jpg")&&strcasecmp(ext,".jpeg")&&strcasecmp(ext,".xth"))||
        stat(path,&st)||!S_ISREG(st.st_mode)||st.st_size<=0||(uint64_t)st.st_size>BOOK_IMAGE_FILE_MAX)return false;
     *header=(wallpaper_cache_t){.magic=AVATAR_CACHE_MAGIC,.version=1,.width=side,.height=side,.bytes=(uint32_t)side*side,.key=wallpaper_key(path,&st)};
     snprintf(cache_path,160,UI_WALLPAPER_CACHE_PARENT "/avatars/avatar-%d.bin",side);

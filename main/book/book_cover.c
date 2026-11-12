@@ -1583,6 +1583,96 @@ bool book_image_file_grayscale(const char *path, bool png, unsigned width, unsig
     return ok;
 }
 
+/* ---- XTH 云壁纸 / XTH cloud wallpapers ---------------------------------- */
+// 用户2026-11-12：星瞳云下发的壁纸是 XTH（4 级灰阶），按官方格式解析：
+// 22 字节小端头（"XTH\0"、宽、高、colorMode、compression、dataSize、md5），
+// 数据为两个位平面，列主序、从右到左、每字节 8 个纵向像素（MSB 在上）。
+// User2026-11-12: the Xteink cloud delivers wallpapers as XTH (4-level grayscale):
+// a 22-byte little-endian header followed by two bit-planes, column-major right-to-left,
+// eight vertical pixels per byte (MSB topmost).
+#define XTH_HEADER_BYTES 22u
+#define XTH_MAGIC UINT32_C(0x00485458) // "XTH\0" little-endian
+
+static uint16_t xth_le16(const uint8_t *p) { return (uint16_t)(p[0] | ((uint16_t)p[1] << 8)); }
+static uint32_t xth_le32(const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+// 解析头并校验 payload 大小；只接受列主序双平面（官方编码器输出）。
+// Parse the header and validate the payload size; only column-major dual planes (official encoder).
+static bool xth_parse_header(FILE *file, unsigned *width, unsigned *height, size_t *plane_bytes) {
+    uint8_t header[XTH_HEADER_BYTES];
+    if (!file || fread(header, 1, sizeof(header), file) != sizeof(header)) return false;
+    if (xth_le32(header) != XTH_MAGIC || header[9] != 0) return false;
+    const unsigned w = xth_le16(header + 4), h = xth_le16(header + 6);
+    if (!w || !h || w > 8192 || h > 8192) return false;
+    const uint32_t data_size = xth_le32(header + 10);
+    const size_t col_bytes = ((size_t)h + 7u) / 8u;
+    const size_t plane = (size_t)w * col_bytes;
+    if (data_size != (uint32_t)(plane * 2u)) {
+        ESP_LOGW("xth", "unsupported payload size=%u (expect %u, column-major)",
+                 (unsigned)data_size, (unsigned)(plane * 2u));
+        return false;
+    }
+    *width = w;
+    *height = h;
+    *plane_bytes = plane;
+    return true;
+}
+
+bool book_image_xth_dimensions(const char *path, unsigned *width, unsigned *height) {
+    if (!path || !width || !height) return false;
+    struct stat st;
+    if (stat(path, &st) || !S_ISREG(st.st_mode) || st.st_size <= 0 ||
+        (uint64_t)st.st_size > BOOK_IMAGE_FILE_MAX) return false;
+    FILE *file = fopen(path, "rb");
+    if (!file) return false;
+    size_t plane = 0;
+    const bool ok = xth_parse_header(file, width, height, &plane) &&
+                    (uint64_t)st.st_size >= (uint64_t)XTH_HEADER_BYTES + plane * 2u;
+    fclose(file);
+    return ok;
+}
+
+bool book_image_file_xth_grayscale(const char *path, unsigned width, unsigned height, uint8_t *out) {
+    if (!path || !out || !width || !height || width > 1216 || height > 1216 ||
+        (uint64_t)width * height > 684u * 1216u) return false;
+    struct stat st;
+    if (stat(path, &st) || !S_ISREG(st.st_mode) || st.st_size <= 0 ||
+        (uint64_t)st.st_size > BOOK_IMAGE_FILE_MAX) return false;
+    FILE *file = fopen(path, "rb");
+    if (!file) return false;
+    unsigned source_w = 0, source_h = 0;
+    size_t plane = 0;
+    bool ok = xth_parse_header(file, &source_w, &source_h, &plane);
+    uint8_t *planes = NULL;
+    if (ok) {
+        planes = heap_caps_malloc(plane * 2u, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!planes) ok = false;
+    }
+    if (ok) ok = fread(planes, 1, plane * 2u, file) == plane * 2u;
+    if (ok) {
+        const size_t col_bytes = ((size_t)source_h + 7u) / 8u;
+        const book_crop_t crop = book_cover_crop(source_w, source_h, width, height);
+        for (unsigned y = 0; y < height; ++y) {
+            const unsigned sy = crop.y + (unsigned)((uint64_t)y * crop.height / height);
+            const size_t byte_in_col = sy / 8u;
+            const unsigned bit = 7u - (sy % 8u);
+            for (unsigned x = 0; x < width; ++x) {
+                const unsigned sx = crop.x + (unsigned)((uint64_t)x * crop.width / width);
+                const size_t column = (size_t)(source_w - 1u - sx) * col_bytes + byte_in_col;
+                const unsigned bit1 = (planes[column] >> bit) & 1u;
+                const unsigned bit2 = (planes[plane + column] >> bit) & 1u;
+                const unsigned level = (bit1 << 1) | bit2;
+                out[(size_t)y * width + x] = level == 0 ? 255u : level == 1 ? 96u : level == 2 ? 176u : 0u;
+            }
+        }
+    }
+    free(planes);
+    fclose(file);
+    return ok;
+}
+
 bool book_cover_load_gray(const char *p,const char *t,const char *a,uint8_t out[BOOK_COVER_W * BOOK_COVER_H],bool decode,bool *pending) {
     return book_cover_load_gray_impl(p,t,a,out,decode,pending,true,NULL);
 }

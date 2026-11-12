@@ -37,6 +37,12 @@ bool book_cover_load_gray(const char *path, const char *title, const char *autho
 bool book_image_file_dimensions(const char *path, bool png, unsigned *width, unsigned *height);
 bool book_image_file_grayscale(const char *path, bool png, unsigned width, unsigned height, uint8_t *out);
 
+/// 星瞳云壁纸使用的 XTH：22 字节头 + 双位平面、列主序 4 级灰阶。
+/// Xteink cloud wallpapers use XTH: a 22-byte header plus column-major dual bit-planes,
+/// four gray levels (0 white, 1 dark gray, 2 light gray, 3 black).
+bool book_image_xth_dimensions(const char *path, unsigned *width, unsigned *height);
+bool book_image_file_xth_grayscale(const char *path, unsigned width, unsigned height, uint8_t *out);
+
 bool book_jpeg_frame(const uint8_t *data, size_t size, uint8_t *sof, unsigned *width, unsigned *height);
 
 /// 是否是 WebP（RIFF....WEBP）。/ Whether the bytes are WebP (RIFF....WEBP).
