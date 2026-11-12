@@ -68,7 +68,19 @@ void ttf_font_close_embedded(void);
 /// 灰阶字覆盖率伽马。小于 1 抬中间覆盖率，抗锯齿边缘更深；满墨仍是 0。
 /// Coverage gamma for gray glyphs. Below 1 lifts mid coverage so AA edges are darker; full ink stays 0.
 #ifndef TTF_COVER_GAMMA
+#if KIIKO_BOARD_METALIO47
+// 用户2026-11-12 调试页实机标定：S31 覆盖率 gamma 0.800 最佳；Pico 保持原 0.5。
+// User2026-11-12 hardware tuning via the debug page: S31 wants coverage gamma 0.800; Pico keeps 0.5.
+#define TTF_COVER_GAMMA 0.8f
+#else
 #define TTF_COVER_GAMMA 0.5f
+#endif
+#endif
+#if KIIKO_BOARD_METALIO47
+/// 用户2026-11-12 调试页实机标定：S31 补字灰边偏置 256、目标墨量 122% 为最佳。
+/// User2026-11-12 hardware tuning via the debug page: S31 supplement edge bias 256, ink 122%.
+#define TTF_AA_SUPPLEMENT_EDGE_BIAS 256
+#define TTF_AA_SUPPLEMENT_INK_PERCENT 122
 #endif
 
 esp_err_t ttf_font_init(void);
@@ -215,5 +227,14 @@ void ttf_bench_end(ttf_bench_stats_t* out);
 esp_err_t ttf_font_suspend_io(void);
 bool ttf_font_io_pending(void);
 esp_err_t ttf_font_resume_io(void);
+/// 用户2026-11-12：S31 调试页抗锯齿微调入口；只用于本地微调，选定数值后再固化默认。
+/// User2026-11-12: S31 debug-page AA tuning entry; local tuning only, defaults are baked afterwards.
+void ttf_aa_tune_set_cover_gamma(float gamma);
+float ttf_aa_tune_get_cover_gamma(void);
+void ttf_aa_tune_set_edge_bias(int bias);
+int ttf_aa_tune_get_edge_bias(void);
+void ttf_aa_tune_set_ink_percent(int percent);
+int ttf_aa_tune_get_ink_percent(void);
+void ttf_aa_tune_reset(void);
 #else
 #endif
