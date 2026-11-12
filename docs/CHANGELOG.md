@@ -8,6 +8,11 @@
 
 Both boards scroll about half a page after a quick flick and clear list ghosting on release. Reader caches use `.kiikoread`. PICO restores the RC104 reader and home refresh behavior and verifies panel power-off before light sleep. S31 incorporates Moku’s shelf, networking, reader and panel-repair improvements.
 
+## 本地测试 / Local test — 2026-11-12
+
+- S31 阅读翻页回退：rc111 起产品/CI 构建默认开启的 S31 实验档（`--s31-pie`、`--s31-text-ripple`、`--s31-reader-panel37`）导致实机阅读翻页效果明显变差；现产品/默认构建恢复原生48相阅读翻页与C像素算子，实验改为仅显式本地开关，且只作用于 S31（Pico 不变）。以 rc112 源码的无实验构建（sha256 `6d73dced71a3be1a44fd6916738756f6c55ee20b9579978a9d2048c24313f576`）真机验证翻页效果恢复。本地测试，未发布官网/OTA。
+  S31 reader-turn rollback: the S31 experiments (`--s31-pie`, `--s31-text-ripple`, `--s31-reader-panel37`) that product/CI builds enabled by default from rc111 visibly degraded page turns on hardware. Product/default builds now restore the native 48-phase reader turn and C pixel kernels; the experiments remain explicit local opt-ins and affect S31 only (Pico unchanged). Verified on hardware with an experiment-free build of the rc112 source (sha256 `6d73dced71a3be1a44fd6916738756f6c55ee20b9579978a9d2048c24313f576`). Local test only; nothing is published.
+
 ## 本地测试 / Local test — 2026-11-11
 
 - S31 书架封面：修复“逐本揭示”时先到达的封面被整页门控按占位标题推屏、脏标记随即清掉而不再补画的问题，改为每格按自身就绪状态绘制；封面任务失败不再永久跳过，按行退避重试（3 次后留占位并每 5 秒再试），TF 挂载交接期间保留请求不丢格；进入书架/换页时先同步读取卡上成品封面缓存，首帧即带封面，只有缓存缺失才进后台解码。继承上轮默认封面不落盘、封面缓存 schema 作废旧“假封面”及 S31 JPEGDEC 小平面兜底。S31 本地测试，版本号保持 rc110，未发布官网/OTA。

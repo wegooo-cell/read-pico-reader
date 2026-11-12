@@ -131,11 +131,9 @@ jobs:
         shell: bash
         run: |
           . "$IDF_PATH/export.sh"
-          extra=()
-          if [ "${{ matrix.board }}" = metalio47 ]; then extra=(--s31-pie --s31-text-ripple --s31-reader-panel37); fi
           python tools/build_firmware.py --board "${{ matrix.board }}" \
             --idf-${{ matrix.board }} "$IDF_PATH" --python "$(command -v python)" \
-            --output build/boards "${extra[@]}"
+            --output build/boards
           if [ "${{ matrix.board }}" = pico ]; then
             python tools/lowzag_host_test.py --component build/boards/pico/source/managed_components/defensiblelogic__lowzag
           fi
