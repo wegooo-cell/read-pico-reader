@@ -656,6 +656,7 @@ typedef enum {
     XTEINK_FILE_TEXT,
     XTEINK_FILE_PNG,
     XTEINK_FILE_JPEG,
+    XTEINK_FILE_XTH,
     XTEINK_FILE_OTHER,
 } xteink_file_kind_t;
 
@@ -667,6 +668,9 @@ static xteink_file_kind_t file_kind(const char* name) {
     if (!strcasecmp(dot, ".txt")) return XTEINK_FILE_TEXT;
     if (!strcasecmp(dot, ".png")) return XTEINK_FILE_PNG;
     if (!strcasecmp(dot, ".jpg") || !strcasecmp(dot, ".jpeg")) return XTEINK_FILE_JPEG;
+    // 星瞳云端壁纸为 XTH（4 级灰阶），保存到 Pictures 供壁纸/锁屏直接选用。
+    // Xteink cloud wallpapers arrive as XTH (4-level gray) and land in Pictures for wallpapers/locks.
+    if (!strcasecmp(dot, ".xth")) return XTEINK_FILE_XTH;
     return XTEINK_FILE_OTHER;
 }
 
@@ -742,6 +746,19 @@ static bool verify_image(const char *path, bool png) {
     uint8_t *sample=heap_caps_malloc(32u*32u,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!sample)return false;
     bool ok=book_image_file_grayscale(path,png,32,32,sample);
+    heap_caps_free(sample);return ok;
+}
+
+// 云端 XTH 壁纸：校验头/尺寸并做一次小尺寸解码，原文件不改写。
+// Validate an XTH wallpaper header/dimensions with one small decode; the original file stays untouched.
+static bool verify_xth(const char *path) {
+    struct stat st;
+    if(stat(path,&st)||!S_ISREG(st.st_mode)||st.st_size<=0||(uint64_t)st.st_size>BOOK_IMAGE_FILE_MAX)return false;
+    unsigned width=0,height=0;
+    if(!book_image_xth_dimensions(path,&width,&height)||!width||!height)return false;
+    uint8_t *sample=heap_caps_malloc(32u*32u,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!sample)return false;
+    const bool ok=book_image_file_xth_grayscale(path,32,32,sample);
     heap_caps_free(sample);return ok;
 }
 
@@ -863,7 +880,7 @@ static int download_file(const char* url, const char* save_path, const char* inc
     }
     const xteink_file_kind_t kind=file_kind(name);
     if(kind==XTEINK_FILE_OTHER)return 4;
-    const bool image=kind==XTEINK_FILE_PNG||kind==XTEINK_FILE_JPEG;
+    const bool image=kind==XTEINK_FILE_PNG||kind==XTEINK_FILE_JPEG||kind==XTEINK_FILE_XTH;
     if(image&&!read_pico_sd_io_ready()) {
         snprintf(s_download_error,sizeof(s_download_error),"请先插入并挂载TF卡");return 3;
     }
@@ -929,12 +946,14 @@ static int download_file(const char* url, const char* save_path, const char* inc
     if(s_cancel){unlink(temp);return 1;}
     bool verified = kind == XTEINK_FILE_EPUB   ? verify_epub(temp)
                     : kind == XTEINK_FILE_FONT ? verify_font(temp)
+                    : kind == XTEINK_FILE_XTH  ? verify_xth(temp)
                     : image ? verify_image(temp,kind==XTEINK_FILE_PNG)
                                                : verify_text(temp);
     if (!verified||s_cancel) {
         ESP_LOGE(TAG, "verify failed: %s kind=%d", name, (int)kind);
         unlink(temp);
-        if(image&&!s_cancel)snprintf(s_download_error,sizeof(s_download_error),"图片解码失败，请使用非交错PNG或JPG");
+        if(image&&!s_cancel)snprintf(s_download_error,sizeof(s_download_error),
+            kind==XTEINK_FILE_XTH?"XTH 壁纸格式错误":"图片解码失败，请使用非交错PNG或JPG");
         return 2;
     }
     const char* target_dir = image ? XTEINK_PICTURES_DIR
@@ -1036,7 +1055,7 @@ static void pull_tasks(void) {
             const char *basename=strrchr(item->save_path,'/');
             xteink_file_kind_t kind=file_kind(basename?basename+1:item->save_path);
             item->is_font=kind==XTEINK_FILE_FONT;
-            item->is_image=kind==XTEINK_FILE_PNG||kind==XTEINK_FILE_JPEG;
+            item->is_image=kind==XTEINK_FILE_PNG||kind==XTEINK_FILE_JPEG||kind==XTEINK_FILE_XTH;
             cJSON* size = json_find(task, "size");
             if (cJSON_IsNumber(size)) item->size = (uint32_t)size->valuedouble;
             ++count;

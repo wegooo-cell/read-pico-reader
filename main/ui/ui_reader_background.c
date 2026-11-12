@@ -34,10 +34,14 @@ bool ui_reader_background_prepare(const char *path) {
         s_width == w && s_height == h) return true;
     ui_reader_background_release(); // 仅一个选中背景，不保留两份图片。/ One selected wallpaper, never two image caches.
     const char *ext = strrchr(path, '.');
-    bool png = ext && !strcasecmp(ext, ".png");
+    const bool png = ext && !strcasecmp(ext, ".png");
+    // 星瞳云壁纸为 XTH，和 JPG/PNG 一样可作为阅读背景。
+    // Xteink cloud wallpapers are XTH and work as reader backgrounds like JPG/PNG.
+    const bool xth = ext && !strcasecmp(ext, ".xth");
     unsigned source_w = 0, source_h = 0;
-    if (!ext || (!png && strcasecmp(ext, ".jpg") && strcasecmp(ext, ".jpeg")) ||
-        !book_image_file_dimensions(path, png, &source_w, &source_h) || !source_w || !source_h) return false;
+    if (!ext || (!png && !xth && strcasecmp(ext, ".jpg") && strcasecmp(ext, ".jpeg")) ||
+        !(xth ? book_image_xth_dimensions(path, &source_w, &source_h)
+              : book_image_file_dimensions(path, png, &source_w, &source_h)) || !source_w || !source_h) return false;
     const size_t pixels = (size_t)w * h, packed = (pixels + 1) / 2;
     const unsigned caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
     // 按屏幕尺寸解码一次，再原位压缩为16灰阶，保留细线和原图层次。
@@ -47,7 +51,8 @@ bool ui_reader_background_prepare(const char *path) {
     if (heap_caps_get_free_size(caps) < pixels + 1024u * 1024u ||
         heap_caps_get_largest_free_block(caps) < pixels) return false;
     s_gray = heap_caps_malloc(pixels, caps);
-    if (!s_gray || !book_image_file_grayscale(path, png, w, h, s_gray)) {
+    if (!s_gray || !(xth ? book_image_file_xth_grayscale(path, w, h, s_gray)
+                         : book_image_file_grayscale(path, png, w, h, s_gray))) {
         ui_reader_background_release(); return false;
     }
     for (size_t i = 0; i < pixels; i += 2) {

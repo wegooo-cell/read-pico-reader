@@ -578,7 +578,10 @@ static void wallpaper_scan_dir(const char *root) {
     while (s_wallpaper_count < WALLPAPER_MAX && (entry = readdir(dir))) {
         if (entry->d_name[0] == '.' || !strncmp(entry->d_name, "._", 2)) continue;
         const char *ext = strrchr(entry->d_name, '.');
-        if (!ext || (strcasecmp(ext, ".jpg") && strcasecmp(ext, ".jpeg") && strcasecmp(ext, ".png"))) continue;
+        // 壁纸列表接受 PNG/JPG 与星瞳云下发的 XTH；透明书封仍只认 PNG。
+        // Wallpapers accept PNG/JPG and Xteink cloud XTH; transparent bookmarks stay PNG-only.
+        if (!ext || (strcasecmp(ext, ".jpg") && strcasecmp(ext, ".jpeg") && strcasecmp(ext, ".png") &&
+                     strcasecmp(ext, ".xth"))) continue;
         if(s_bookmark_picker && strcasecmp(ext,".png"))continue;
         wallpaper_item_t *item = &s_wallpapers[s_wallpaper_count];
         if (snprintf(item->path, sizeof(item->path), "%s/%s", root, entry->d_name) >= sizeof(item->path)) continue;
