@@ -4,6 +4,13 @@
  */
 #pragma once
 #include "ui_hanzi.h"
+// 用户2026-11-12：S31 调试页可微调补字灰边与墨量，值只在调试期改变，固化前不写默认。
+// User2026-11-12: the S31 debug page tunes supplement AA edges/ink; values are debug-time only
+// until the chosen numbers are baked into the defaults.
+#if defined(KIIKO_BOARD_METALIO47) && KIIKO_BOARD_METALIO47
+extern int g_hanzi_aa_edge_bias;   ///< 1/256 覆盖率单位的灰边偏置 / edge bias in 1/256 coverage
+extern int g_hanzi_aa_ink_percent; ///< 目标墨量百分比，100 为原值 / target ink percent, 100 = default
+#endif
 static inline int hanzi_floor(int n,int d){return n>=0?n/d:-((-n+d-1)/d);}
 static inline void ui_hanzi_aa_bounds(const uint8_t*r,int px,int*x0,int*y0,int*x1,int*y1){
  *x0=hanzi_floor((int8_t)r[0]*px,24);*y0=hanzi_floor((int8_t)r[1]*px,24);
@@ -63,13 +70,29 @@ static inline void ui_hanzi_aa_raster(const uint8_t*r,int px,int x0,int y0,
  if(edge>=area)total+=(uint64_t)(edge-area)*px*24;
  else total-=(uint64_t)(area-edge)*px*24;
  uint32_t target=(uint32_t)((total+288)/576);
+#if defined(KIIKO_BOARD_METALIO47) && KIIKO_BOARD_METALIO47
+ // 调试页墨量增益：只缩放补字目标墨量，不动源记录与原轮廓。
+ // Debug ink gain: scale only the supplement ink target; source records and outlines stay intact.
+ if(g_hanzi_aa_ink_percent!=100)
+  target=(uint32_t)(((uint64_t)target*(uint32_t)g_hanzi_aa_ink_percent)/100u);
+ if(target>255u*256u)target=255u*256u;
+#endif
  int low=0,high=255*256;
  for(int pass=0;pass<16&&low<high;++pass){
   int center=(low+high)/2;uint32_t ink=0;
   for(unsigned a=1;a<256;++a)if(histogram[a])ink+=(uint32_t)histogram[a]*cover[hanzi_aa_edge(a,px,center)];
   if(ink>target)low=center+1;else high=center;
  }
+#if defined(KIIKO_BOARD_METALIO47) && KIIKO_BOARD_METALIO47
+ // 调试页灰边偏置：在墨量匹配中心上整体加减，正数边缘更浅、负数更重。
+ // Debug edge bias applied to the ink-matched center; positive lightens edges, negative darkens.
+ int center=(low+high)/2+g_hanzi_aa_edge_bias;
+ if(center<0)center=0;
+ if(center>255*256)center=255*256;
+#else
+ int center=(low+high)/2;
+#endif
  uint8_t lut[256];
- for(unsigned a=0;a<256;++a)lut[a]=hanzi_aa_edge(a,px,(low+high)/2);
+ for(unsigned a=0;a<256;++a)lut[a]=hanzi_aa_edge(a,px,center);
  for(int i=0;i<width*height;++i)out[i]=lut[out[i]];
 }

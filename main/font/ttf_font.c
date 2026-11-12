@@ -2060,7 +2060,16 @@ static int reader_missing_advance(uint32_t cp,int px) {
     return -1;
 }
 static uint8_t s_cover[256];
+static float s_cover_gamma = TTF_COVER_GAMMA;
+static bool s_cover_ready;
 static void ttf_cover_lut_init(void);
+static void ttf_cover_lut_rebuild(void);
+#if KIIKO_BOARD_METALIO47
+// 用户2026-11-12：调试页实机标定后的默认值；改动需重新实测并更新这里与调试页读数。
+// User2026-11-12: defaults tuned on hardware via the debug page; re-measure before changing.
+int g_hanzi_aa_edge_bias = TTF_AA_SUPPLEMENT_EDGE_BIAS;
+int g_hanzi_aa_ink_percent = TTF_AA_SUPPLEMENT_INK_PERCENT;
+#endif
 static glyph_entry_t* rasterize_glyph(uint32_t codepoint, int pixel_height) {
     int gid = stbtt_FindGlyphIndex(&font_info, (int)codepoint);
     const stbtt_fontinfo *raster_font=&font_info;
@@ -2384,6 +2393,54 @@ void ttf_font_cache_clear(void) {
     packed_weight = -1;
     io_reset();
 }
+
+#if KIIKO_BOARD_METALIO47
+/* ---- 抗锯齿调试微调 / AA debug tuning ---- */
+
+void ttf_aa_tune_set_cover_gamma(float gamma) {
+    if (gamma < 0.20f) gamma = 0.20f;
+    if (gamma > 1.60f) gamma = 1.60f;
+    s_cover_gamma = gamma;
+    // 覆盖率 LUT 在绘制期应用，字形位图不变，无需清缓存。
+    // The coverage LUT is applied at draw time; glyph bitmaps stay valid, so no cache clear.
+    ttf_cover_lut_rebuild();
+    ESP_LOGI("ttf_aa", "cover_gamma=%.3f", (double)s_cover_gamma);
+}
+
+float ttf_aa_tune_get_cover_gamma(void) { return s_cover_gamma; }
+
+void ttf_aa_tune_set_edge_bias(int bias) {
+    if (bias < -4096) bias = -4096;
+    if (bias > 4096) bias = 4096;
+    g_hanzi_aa_edge_bias = bias;
+    // 补字在栅格化时应用灰边映射，必须重新生成字形位图。
+    // Supplements bake the edge mapping at raster time, so rebuild their bitmaps.
+    ttf_font_cache_clear();
+    ESP_LOGI("ttf_aa", "edge_bias=%d", g_hanzi_aa_edge_bias);
+}
+
+int ttf_aa_tune_get_edge_bias(void) { return g_hanzi_aa_edge_bias; }
+
+void ttf_aa_tune_set_ink_percent(int percent) {
+    if (percent < 60) percent = 60;
+    if (percent > 140) percent = 140;
+    g_hanzi_aa_ink_percent = percent;
+    ttf_font_cache_clear();
+    ESP_LOGI("ttf_aa", "ink_percent=%d", g_hanzi_aa_ink_percent);
+}
+
+int ttf_aa_tune_get_ink_percent(void) { return g_hanzi_aa_ink_percent; }
+
+void ttf_aa_tune_reset(void) {
+    s_cover_gamma = TTF_COVER_GAMMA;
+    g_hanzi_aa_edge_bias = TTF_AA_SUPPLEMENT_EDGE_BIAS;
+    g_hanzi_aa_ink_percent = TTF_AA_SUPPLEMENT_INK_PERCENT;
+    ttf_cover_lut_rebuild();
+    ttf_font_cache_clear();
+    ESP_LOGI("ttf_aa", "reset gamma=%.3f bias=%d ink=%d", (double)s_cover_gamma,
+             g_hanzi_aa_edge_bias, g_hanzi_aa_ink_percent);
+}
+#endif
 
 void ttf_bench_begin(void) {
     memset(&bench, 0, sizeof(bench));
@@ -2980,22 +3037,28 @@ int ttf_text_left_bearing_px(int pixel_height, const char* text) {
 }
 
 // 线性抗锯齿的中间灰在这块屏上偏亮。按 TTF_COVER_GAMMA 抬覆盖率，半透明边缘更深。
+// 用户2026-11-12：gamma 改为运行时可调，调试页实时对比；默认仍是 TTF_COVER_GAMMA。
+// Linear AA mid-grays look bright on this panel, so coverage is raised by TTF_COVER_GAMMA.
+// User2026-11-12: gamma is runtime-tunable for live debug comparison; default stays TTF_COVER_GAMMA.
 static bool s_antialias = true;
 void ttf_set_antialias(bool enabled) { s_antialias = enabled; }
 bool ttf_get_antialias(void) { return s_antialias; }
 
 /* ---- 绘制 / Draw ---- */
-static void ttf_cover_lut_init(void) {
-    static bool ready;
-    if (ready) return;
+static void ttf_cover_lut_rebuild(void) {
     for (int i = 0; i < 256; i++) {
         float t = (float)i / 255.f;
-        int v = (int)(255.f * powf(t, TTF_COVER_GAMMA) + 0.5f);
+        int v = (int)(255.f * powf(t, s_cover_gamma) + 0.5f);
         if (v < 0) v = 0;
         if (v > 255) v = 255;
         s_cover[i] = (uint8_t)v;
     }
-    ready = true;
+    s_cover_ready = true;
+}
+
+static void ttf_cover_lut_init(void) {
+    if (s_cover_ready) return;
+    ttf_cover_lut_rebuild();
 }
 
 static uint8_t mix_ink(uint8_t alpha, uint8_t fg, uint8_t bg) {
