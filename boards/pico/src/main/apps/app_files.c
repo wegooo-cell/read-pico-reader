@@ -554,7 +554,7 @@ static bool supported(int folder, const char *name) {
     const char *ext = strrchr(name, '.');
     if (!ext) return false;
     if (folder == 0) return !strcasecmp(ext, ".epub") || !strcasecmp(ext, ".txt");
-    if (folder == 1) return !strcasecmp(ext, ".jpg") || !strcasecmp(ext, ".jpeg") || !strcasecmp(ext, ".png") || !strcasecmp(ext, ".webp");
+    if (folder == 1) return !strcasecmp(ext, ".jpg") || !strcasecmp(ext, ".jpeg") || !strcasecmp(ext, ".png") || !strcasecmp(ext, ".webp") || !strcasecmp(ext, ".xth");
     return !strcasecmp(ext, ".ttf") || !strcasecmp(ext, ".otf");
 }
 
@@ -698,7 +698,7 @@ static ui_icon_t file_item_icon(const file_item_t *item){
     const char *ext=strrchr(file_item_name(item),'.');if(!ext)return UI_ICON_FILE;
     if(!strcasecmp(ext,".epub")||!strcasecmp(ext,".txt")||!strcasecmp(ext,".pdf")||!strcasecmp(ext,".mobi")||!strcasecmp(ext,".azw3")||!strcasecmp(ext,".fb2"))return UI_ICON_BOOK_OPEN;
     if(!strcasecmp(ext,".ttf")||!strcasecmp(ext,".otf")||!strcasecmp(ext,".ttc")||!strcasecmp(ext,".woff")||!strcasecmp(ext,".woff2"))return UI_ICON_TYPE;
-    if(!strcasecmp(ext,".png")||!strcasecmp(ext,".jpg")||!strcasecmp(ext,".jpeg")||!strcasecmp(ext,".gif")||!strcasecmp(ext,".bmp")||!strcasecmp(ext,".webp")||!strcasecmp(ext,".svg"))return UI_ICON_FILE_IMAGE;
+    if(!strcasecmp(ext,".png")||!strcasecmp(ext,".jpg")||!strcasecmp(ext,".jpeg")||!strcasecmp(ext,".gif")||!strcasecmp(ext,".bmp")||!strcasecmp(ext,".webp")||!strcasecmp(ext,".xth")||!strcasecmp(ext,".svg"))return UI_ICON_FILE_IMAGE;
     return UI_ICON_FILE;
 }
 static void file_icon(uint8_t *fb,int x,int y,const file_item_t *item){ui_draw_icon(fb,x+21,y+21,FILE_ICON_PX,file_item_icon(item),UI_GRAY_BLACK);}
@@ -1033,7 +1033,7 @@ static void open_selected(app_ctx_t *ctx) {
     if (!strcasecmp(ext, ".epub") || !strcasecmp(ext, ".txt")) {
         extern const app_desc_t app_book;
         if (app_book_request_open(s_selected.path)) ctx->request_app = &app_book;
-    } else if (!strcasecmp(ext, ".jpg") || !strcasecmp(ext, ".jpeg") || !strcasecmp(ext, ".png") || !strcasecmp(ext, ".webp")) {
+    } else if (!strcasecmp(ext, ".jpg") || !strcasecmp(ext, ".jpeg") || !strcasecmp(ext, ".png") || !strcasecmp(ext, ".webp") || !strcasecmp(ext, ".xth")) {
         extern const app_desc_t app_image;
         if (app_image_request_open(s_selected.path)) ctx->request_app = &app_image;
     } else if (!strcasecmp(ext, ".ttf") || !strcasecmp(ext, ".otf")) {
