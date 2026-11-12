@@ -377,11 +377,11 @@ English: Explicit local `--pico-main-clean` remains OFF by default and scoped to
 
 ## S31阅读差分更新（2026-10-29） / S31 reader differences
 
-本次S31产品构建显式启用`--s31-reader-panel37`，CI同样覆盖该档。普通文字、图文及离图页原样采用Moku PR6的GL37加六相目标白，共43相、16级灰阶；六相包含原本已白的区域，黑/灰等值不重驱。水波纹继续原独立出口；手动及周期清理保留GC48。GL37关闭或分配失败时，完整GL48保留全部非等值迁移，追加六相目标白和三相保持，共57相，避免回到重驱等黑/灰的原表。
+用户2026-11-12决定：S31 产品/默认构建不再启用`--s31-pie`、`--s31-text-ripple`、`--s31-reader-panel37`，恢复原生48相阅读翻页与C像素算子——rc111 起这些实验默认开启，实机反馈翻页效果明显变差；这些实验改为仅显式本地开关，且只影响 S31，Pico 保持不变。单独显式加`--s31-reader-panel37`时仍按 Moku PR6 的 GL37 加六相目标白，共43相、16级灰阶；六相包含原本已白的区域，黑/灰等值不重驱。水波纹继续原独立出口；手动及周期清理保留GC48。GL37关闭或分配失败时，完整GL48保留全部非等值迁移，追加六相目标白和三相保持，共57相，避免回到重驱等黑/灰的原表。
 
 速读黑白独立量化目标，使用本板所选DU完整相序再加四相目标白；原表有尾部保持时将四相插在其前。默认DU20共24相，带DU14实验的本地构建共18相；不改首页DU14白底维护、原表数据、VCOM、供电或扫描时钟。实际光学速度、白底闪动和残影需实屏比较；相数并非总响应时间。
 
-S31 builds and CI explicitly enable `--s31-reader-panel37`. Ordinary text/image/exits retain Moku PR6's exact GL37 plus six white-target phases:43 phases,16 grays,including equal whites while equal black/grays hold. Ripple keeps its own outlet and manual/periodic cleanup keeps GC48. With GL37 disabled or allocation failure, retain every changed GL48 transition plus six whites and three release holds,57 phases,without re-driving equal black/grays.
+User decision 2026-11-12: S31 product/default builds no longer enable `--s31-pie`, `--s31-text-ripple` or `--s31-reader-panel37`; restore the native48-phase reader turn and C pixel kernels because these experiments defaulted on from rc111 and visibly degraded page turns on hardware. They remain explicit local opt-ins and affect S31 only; Pico is unchanged. Passing `--s31-reader-panel37` explicitly alone still enables Moku PR6's exact GL37 plus six white-target phases:43 phases,16 grays,including equal whites while equal black/grays hold. Ripple keeps its own outlet and manual/periodic cleanup keeps GC48. With GL37 disabled or allocation failure, retain every changed GL48 transition plus six whites and three release holds,57 phases,without re-driving equal black/grays.
 
 FastBW independently quantizes targets and retains the selected native DU sequence plus four white-target phases,inserted before existing trailing holds. NativeDU20 totals24; a local DU14 experiment totals18. Root DU14 maintenance,vendor tables,VCOM,power and clocks stay separate. Optical timing/flash/ghosting still require hardware comparison; phase count is not total latency.
 
