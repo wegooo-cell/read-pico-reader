@@ -852,9 +852,7 @@ static void refresh_excerpt(void) {
     s_excerpt[0]=0;
     if(book->has_progress)book_excerpt_load(book->path,book->progress.chapter,s_excerpt);
 }
-static unsigned s_shelf_warm_next;static int64_t s_shelf_warm_after;
 static void on_enter(app_ctx_t *ctx) {
-    app_book_home_shelf_warm_stop();s_shelf_warm_next=0;s_shelf_warm_after=ctx->now_ms+1200;
     s_cover_generation=book_cover_jobs_begin();
     const uint32_t progress_revision=book_progress_revision();
     s_component_dirty=(EpdRect){0};s_view=HOME_ROOT;
@@ -887,7 +885,6 @@ static void on_enter(app_ctx_t *ctx) {
     rp_boot_mark("excerpt");
 }
 static void on_media_lost(app_ctx_t *ctx) {
-    app_book_home_shelf_warm_stop();
     app_home_release_clock_cache();
     (void)ctx;clear_cover_cache();memset(&s_current,0,sizeof(s_current));memset(s_recent,0,sizeof(s_recent));
     s_books_cache_valid=false;s_excerpt[0]=0;s_avatar_ready=s_avatar_pending=false;
@@ -965,11 +962,6 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
             return APP_REDRAW_AREA;
         }
         s_folder_attempted=true;
-    }
-    if(s_view==HOME_ROOT&&!s_scan_pending&&!s_cover_waiting&&ctx->now_ms>=s_shelf_warm_after&&
-       !ctx->consumed&&!ctx->request_app&&!ctx->request_menu&&!ctx->request_return&&!(ctx->touch&&ctx->touch->touched)&&s_shelf_warm_next<n+1){
-        home_book_t *warm=s_shelf_warm_next?books[s_shelf_warm_next-1]:featured();
-        if(app_book_home_shelf_warm(warm->path,warm->title,warm->author)){++s_shelf_warm_next;s_shelf_warm_after=ctx->now_ms+100;}
     }
     return APP_REDRAW_NONE;
 }
@@ -1070,7 +1062,7 @@ static app_redraw_t on_key(app_ctx_t *ctx,int key) {(void)ctx;(void)key;if(s_vie
 static bool no_menu_handle(app_ctx_t *ctx) {(void)ctx;return false;}
 static bool main_page_visible(app_ctx_t *ctx) {(void)ctx;return s_view==HOME_ROOT;}
 static EpdRect area_hint(app_ctx_t *ctx) {(void)ctx;return s_area;}
-static void home_exit(app_ctx_t *ctx){(void)ctx;app_book_home_shelf_warm_stop();book_cover_jobs_cancel(s_cover_generation);s_cover_generation=0;}
+static void home_exit(app_ctx_t *ctx){(void)ctx;app_book_shelf_prefetch_cancel();book_cover_jobs_cancel(s_cover_generation);s_cover_generation=0;}
 const app_desc_t app_dashboard={
     .title="首页 Home",.detail="继续阅读与月阅读记录",.enter_full=false,.owns_keys=true,.menu_handle_enabled=no_menu_handle,
     .main_page_visible=main_page_visible,.persistent_navigation=true,.on_enter=on_enter,.on_exit=home_exit,.on_media_lost=on_media_lost,.on_media_ready=on_media_ready,

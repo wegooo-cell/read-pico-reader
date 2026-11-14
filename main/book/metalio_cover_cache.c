@@ -52,12 +52,13 @@ static bool evict(void) {
     discard(oldest); return true;
 }
 bool metalio_cover_cache_get(const metalio_cover_key_t *key,void *out,size_t capacity,metalio_cover_meta_t *meta) {
-    if(!key || !out) return false;
+    if(!key || (!out && !meta)) return false;
     lock();
     if(entries) for(unsigned i=0;i<CACHE_SLOTS;i++) {
         cache_entry_t *e=&entries[i];
-        if(e->pixels && !memcmp(&e->key,key,sizeof(*key)) && capacity>=e->bytes) {
-            memcpy(out,e->pixels,e->bytes); if(meta) *meta=e->meta;
+        if(e->pixels && !memcmp(&e->key,key,sizeof(*key)) && (!out || capacity>=e->bytes)) {
+            if(out) memcpy(out,e->pixels,e->bytes);
+            if(meta) *meta=e->meta;
             e->used=++stamp; ++stats.hits; unlock(); return true;
         }
     }

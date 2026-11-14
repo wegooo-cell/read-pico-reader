@@ -48,7 +48,7 @@ static page_slot_t s_slots[2];
 static page_header_t s_wanted;
 static int s_active=-1,s_work=-1;
 static uint32_t s_stamp;
-static bool s_lookup_done;
+static bool s_lookup_done, s_memory_only;
 static portMUX_TYPE s_lock=portMUX_INITIALIZER_UNLOCKED;
 static bool s_running,s_cancel,s_writing;
 void book_shelf_page_key_init(book_shelf_page_key_t *key) {
@@ -237,8 +237,11 @@ static int reserve(void) {
     }
     p->header=s_wanted;p->stamp=++s_stamp;return slot;
 }
-book_shelf_page_state_t book_shelf_page_request(book_shelf_page_key_t key,book_shelf_page_layout_t layout) {
-    join();s_active=-1;s_work=-1;s_lookup_done=true;memset(&s_wanted,0,sizeof(s_wanted));
+static book_shelf_page_state_t request_page(book_shelf_page_key_t key,book_shelf_page_layout_t layout,bool memory_only) {
+    if (memory_only && running()) return BOOK_SHELF_PAGE_MISS;
+    if (!memory_only) join();
+    s_memory_only = memory_only;
+    s_active=-1;s_work=-1;s_lookup_done=true;memset(&s_wanted,0,sizeof(s_wanted));
     if(!layout.width||!layout.height||layout.width>2048||layout.height>2048||(layout.width&1)||
        !layout.count||layout.count>BOOK_SHELF_PAGE_COVERS||!fits(layout.area,layout.width,layout.height))return BOOK_SHELF_PAGE_MISS;
     size_t bytes=plane_bytes(layout.area);
@@ -249,9 +252,16 @@ book_shelf_page_state_t book_shelf_page_request(book_shelf_page_key_t key,book_s
     book_shelf_page_key_add(&key,&layout,sizeof(layout));
     s_wanted=(page_header_t){.magic=PAGE_MAGIC,.version=PAGE_VERSION,.header_bytes=sizeof(page_header_t),.bytes=(uint32_t)bytes,.key=key,.layout=layout};
     for(int i=0;i<2;++i)if(s_slots[i].valid&&!memcmp(&s_slots[i].header.key,&key,sizeof(key))){s_active=i;s_slots[i].stamp=++s_stamp;return BOOK_SHELF_PAGE_HIT;}
-    if(!read_pico_sd_io_ready())return BOOK_SHELF_PAGE_MISS;
+    if(memory_only||!read_pico_sd_io_ready())return BOOK_SHELF_PAGE_MISS;
     int slot=reserve();if(slot<0)return BOOK_SHELF_PAGE_MISS;
     s_lookup_done=!start(slot,false);return s_lookup_done?BOOK_SHELF_PAGE_MISS:BOOK_SHELF_PAGE_WAIT;
+}
+book_shelf_page_state_t book_shelf_page_request(book_shelf_page_key_t key,book_shelf_page_layout_t layout) {
+    return request_page(key,layout,false);
+}
+// 逐本封面任务负责读卡。/ Individual cover jobs own SD I/O.
+book_shelf_page_state_t book_shelf_page_request_memory(book_shelf_page_key_t key,book_shelf_page_layout_t layout) {
+    return request_page(key,layout,true);
 }
 book_shelf_page_state_t book_shelf_page_poll(void) {
     if(s_active>=0)return BOOK_SHELF_PAGE_HIT;
@@ -287,7 +297,7 @@ bool book_shelf_page_stage_covers(const uint8_t *fb) {
 bool book_shelf_page_capture(const uint8_t *fb,unsigned favorite_edges,uint64_t now_ms) {
     if(!fb||s_active>=0||s_work<0||running()||!s_slots[s_work].staged)return false;
     page_slot_t *s=&s_slots[s_work];rows((uint8_t*)fb,s->pixels,s->header.layout.area,s->header.layout.width,false);
-    s->header.edges=favorite_edges&((1u<<s->header.layout.count)-1);s->valid=s->dirty=true;s->staged=false;s->due=now_ms+800;s_active=s_work;return true;
+    s->header.edges=favorite_edges&((1u<<s->header.layout.count)-1);s->valid=true;s->dirty=!s_memory_only;s->staged=false;s->due=now_ms+800;s_active=s_work;return true;
 }
 bool book_shelf_page_copy_cover(uint8_t *fb,unsigned row,EpdRect destination) {
     if(!fb||s_active<0)return false;

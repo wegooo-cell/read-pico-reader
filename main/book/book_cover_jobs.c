@@ -23,7 +23,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-enum { EMPTY,QUEUED,RUNNING,AUTO,READY,FAILED,TAKEN };
+enum { EMPTY,QUEUED,RUNNING,AUTO,READY,FAILED,TAKEN,NO_ARTWORK };
 typedef struct { book_cover_job_t request;book_cover_result_t result;int state;bool auto_cache;uint8_t *automatic; } cover_job_slot_t;
 static cover_job_slot_t *s_jobs;
 static portMUX_TYPE s_lock=portMUX_INITIALIZER_UNLOCKED;
@@ -66,6 +66,7 @@ static void prepare(cover_job_slot_t *job,unsigned generation) {
             job->result.pixels=bits;job->result.fast=true;job->result.white_edge=edge;goto ready;
         }free(bits);
     }
+    if(!current(generation))return;
     bool from_auto=job->automatic!=NULL;
     // 默认封面只在本帧显示，不进入整页缓存；下次重新尝试解码真封面。
     // Generated defaults are shown for this frame only and never captured into the page cache.
@@ -87,15 +88,24 @@ static void prepare(cover_job_slot_t *job,unsigned generation) {
         if(heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)<need+1536u*1024u)return;
         gray=heap_caps_malloc(need,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);if(!gray)return;
         int result;
-        if(compact){sw=q->width;sh=q->height;result=book_cover_load_sized_io(q->path,q->title,q->author,gray,sw,sh,&job->auto_cache);}
+        if (compact) { sw = q->width; sh = q->height; }
+        if(compact)result=book_cover_load_sized_io(q->path,q->title,q->author,gray,sw,sh,&job->auto_cache);
         else result=book_cover_load_io(q->path,q->title,q->author,gray,q->list,&sw,&sh,&job->auto_cache);
         if(result<0){free(gray);return;}
         if(!current(generation)){free(gray);return;}
         if(!result){
+            if(q->artwork_only) {
+                if (job->auto_cache) {
+                    struct stat after;
+                    if (!stat(q->path, &after) && st.st_size == after.st_size && st.st_mtime == after.st_mtime)
+                        job->state = NO_ARTWORK;
+                }
+                free(gray);
+                return;
+            }
 #ifdef ESP_PLATFORM
             ESP_LOGW("cover", "auto pending %s", q->path);
 #endif
-            if(q->artwork_only){free(gray);return;}
             if(compact){free(gray);gray=heap_caps_malloc(BOOK_COVER_W*BOOK_COVER_H,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);if(!gray)return;}
             job->result.pixels=gray;job->state=AUTO;return;
         }
@@ -105,14 +115,28 @@ static void prepare(cover_job_slot_t *job,unsigned generation) {
     uint8_t *bits=heap_caps_calloc(q->height,q->stride,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!bits){free(gray);return;}
     book_crop_t crop=book_cover_crop(sw,sh,q->width,q->height);
+    // Crop and contrast depend only on the source column and gray value.
+    // Compute them once per cover instead of dividing in the inner pixel loop.
+    unsigned source_x[BOOK_COVER_W];
+    uint8_t tones[256];
+    const bool sample_columns = q->width <= BOOK_COVER_W;
+    if (sample_columns)
+        for (unsigned x = 0; x < q->width; ++x)
+            source_x[x] = crop.x + (uint64_t)x * crop.width / q->width;
+    for (unsigned i = 0; i < 256; ++i) {
+        const uint8_t tone = contrast_gray(i, q->contrast);
+        tones[i] = q->natural ? tone : (tone >> 4) * 17u;
+    }
     for(unsigned y=0;y<q->height;++y){
         if(!(y&15)&&!current(generation)){free(bits);free(gray);return;}
         unsigned sy=crop.y+(uint64_t)y*crop.height/q->height;
+        const uint8_t *source_row = gray + (size_t)sy * sw;
+        uint8_t *packed_row = bits + (size_t)y * q->stride;
         for(unsigned x=0;x<q->width;++x){
-            unsigned sx=crop.x+(uint64_t)x*crop.width/q->width;
-            uint8_t tone=contrast_gray(gray[(size_t)sy*sw+sx],q->contrast);
-            bool white=q->natural?ui_image_dither_bw(tone,x,y):ui_image_dither_cover_bw((tone>>4)*17u,q->x+x,q->y+y);
-            if(white)bits[(size_t)y*q->stride+x/8]|=1u<<(x&7);
+            unsigned sx = sample_columns ? source_x[x] : crop.x + (uint64_t)x * crop.width / q->width;
+            const uint8_t tone = tones[source_row[sx]];
+            bool white=q->natural?ui_image_dither_bw(tone,x,y):ui_image_dither_cover_bw(tone,q->x+x,q->y+y);
+            if(white)packed_row[x/8]|=1u<<(x&7);
         }
     }
     job->result.white_edge=q->natural?false:white_edge(gray,sw,sh,q);free(gray);
@@ -125,7 +149,7 @@ static void prepare(cover_job_slot_t *job,unsigned generation) {
 ready:
     job->result.width=q->width;job->result.height=q->height;
     struct stat after;
-    if(stat(q->path,&after)||after.st_size!=st.st_size||after.st_mtime!=st.st_mtime){free(job->result.pixels);job->result.pixels=NULL;job->result.metadata=false;}
+    if(!current(generation)||stat(q->path,&after)||after.st_size!=st.st_size||after.st_mtime!=st.st_mtime){free(job->result.pixels);job->result.pixels=NULL;job->result.metadata=false;}
 }
 static void worker(void *unused) {
     (void)unused;
@@ -139,7 +163,11 @@ static void worker(void *unused) {
         prepare(&job,generation);
         portENTER_CRITICAL(&s_lock);
         if(!s_paused&&generation==s_generation){
-            s_jobs[slot].auto_cache=job.auto_cache;s_jobs[slot].result=job.result;s_jobs[slot].state=job.result.pixels?(job.state==AUTO?AUTO:READY):job.result.metadata?READY:FAILED;
+            s_jobs[slot].auto_cache = job.auto_cache;
+            s_jobs[slot].result = job.result;
+            if (job.result.pixels) s_jobs[slot].state = job.state == AUTO ? AUTO : READY;
+            else if (job.state == NO_ARTWORK) s_jobs[slot].state = NO_ARTWORK;
+            else s_jobs[slot].state = job.result.metadata ? READY : FAILED;
             job.result.pixels=NULL;
         }
         portEXIT_CRITICAL(&s_lock);
@@ -198,7 +226,16 @@ int book_cover_jobs_take(unsigned generation,unsigned slot,book_cover_result_t *
     if(generation!=s_generation||s_paused)status=-1;
     else if(s_jobs[slot].state==READY){*result=s_jobs[slot].result;s_jobs[slot].result.pixels=NULL;s_jobs[slot].state=TAKEN;status=1;}
     else if(s_jobs[slot].state==AUTO){automatic=s_jobs[slot];s_jobs[slot].result.pixels=NULL;s_jobs[slot].state=RUNNING;}
-    else if(s_jobs[slot].state==FAILED||s_jobs[slot].state==TAKEN)status=-1;
+    else if (s_jobs[slot].state == NO_ARTWORK) {
+        *result = s_jobs[slot].result;
+        s_jobs[slot].state = TAKEN;
+        status = BOOK_COVER_JOB_NO_ARTWORK;
+    }
+    else if(s_jobs[slot].state==FAILED||s_jobs[slot].state==TAKEN) {
+        // A consumed failure can be retried after the caller's backoff.
+        if (s_jobs[slot].state == FAILED) s_jobs[slot].state = EMPTY;
+        status = -1;
+    }
     portEXIT_CRITICAL(&s_lock);
     if(automatic.result.pixels){
         char canonical[256];const char *title=automatic.request.title;

@@ -25,6 +25,7 @@ void book_shelf_page_key_add(book_shelf_page_key_t *key,const void *data,size_t 
 /* 准备/轮询/空闲保存可访问TF；render只能调用下方像素函数。
  * Request/poll/idle service may access SD; render uses only the pixel functions below. */
 book_shelf_page_state_t book_shelf_page_request(book_shelf_page_key_t key,book_shelf_page_layout_t layout);
+book_shelf_page_state_t book_shelf_page_request_memory(book_shelf_page_key_t key,book_shelf_page_layout_t layout);
 book_shelf_page_state_t book_shelf_page_poll(void);
 void book_shelf_page_idle(uint64_t now_ms);
 void book_shelf_page_release(void);

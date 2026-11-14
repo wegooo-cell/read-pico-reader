@@ -31,6 +31,8 @@ unsigned book_cover_jobs_begin(void);
 bool book_cover_jobs_submit(unsigned generation,unsigned slot,const book_cover_job_t *request);
 /// 0待处理，1完成并转交像素所有权，-1失败；无封面时仅在UI生成字形。
 /// 0 pending,1 transfers pixels,-1 failed; missing artwork renders its glyphs only on the UI thread.
+/// A readable book has no embedded artwork, so keep its title card.
+enum { BOOK_COVER_JOB_NO_ARTWORK = -2 };
 int book_cover_jobs_take(unsigned generation,unsigned slot,book_cover_result_t *result);
 void book_cover_jobs_cancel(unsigned generation);
 /// 仅卸载/睡眠前收齐文件句柄，导航不等待。/ Join handles only before unmount/sleep; navigation never waits.

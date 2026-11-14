@@ -162,6 +162,8 @@ static uint8_t *s_clock_base_cache;
 static bool s_clock_base_attempted;
 #if KIIKO_BOARD_METALIO47
 static int64_t s_component_warm_after_ms;
+static int64_t s_home_scan_after;
+static bool s_featured_cover_dirty;
 #endif
 void app_home_release_clock_cache(void) {
     ui_home_clock_bind_base_cache(NULL,0);
@@ -287,6 +289,8 @@ static void scan_books(void) {
     }
 }
 
+#if KIIKO_BOARD_METALIO47
+#else
 static void refresh_progress(void) {
     for (int i = 0; i < 7; ++i) {
         home_book_t *item = book_at(i);
@@ -296,6 +300,8 @@ static void refresh_progress(void) {
         item->has_progress = book_progress_load(item->path, (uint32_t)st.st_size, &item->progress);
     }
 }
+
+#endif
 
 static void remember_scan_state(const read_pico_sd_info_t *sd) {
     s_books_cache_valid = true;
@@ -372,6 +378,9 @@ static bool load_cover(home_book_t *item,int slot) {
     s_cover_waiting=false;
     if(!pico_boot_asset_allowed(item->path))return false;
     book_cover_job_t request={.list=true,.natural=true,.fast=app_settings_main_fast_refresh(),
+#if KIIKO_BOARD_METALIO47
+        .artwork_only=true,
+#endif
         .contrast=app_settings_system_contrast(),.phase=17};
     snprintf(request.path,sizeof(request.path),"%s",item->path);
     snprintf(request.title,sizeof(request.title),"%s",item->title);
@@ -877,9 +886,13 @@ static void refresh_excerpt(void) {
     s_excerpt[0]=0;
     if(book->has_progress)book_excerpt_load(book->path,book->progress.chapter,s_excerpt);
 }
+#if !KIIKO_BOARD_METALIO47
 static unsigned s_shelf_warm_next;static int64_t s_shelf_warm_after;
+#endif
 static void on_enter(app_ctx_t *ctx) {
+#if !KIIKO_BOARD_METALIO47
     app_book_home_shelf_warm_stop();s_shelf_warm_next=0;s_shelf_warm_after=ctx->now_ms+1200;
+#endif
     s_component_dirty=(EpdRect){0};
     s_cover_generation=book_cover_jobs_begin();
     const uint32_t progress_revision=book_progress_revision();
@@ -896,6 +909,19 @@ static void on_enter(app_ctx_t *ctx) {
         s_cached_sd_present==sd.present&&s_cached_sd_mounted==sd.mounted&&!strcmp(s_cached_books_dir,app_settings_books_dir());
     char last[BOOK_STORE_PATH_MAX]={0};book_progress_last_path(last,sizeof(last));
     bool changed=strcmp(last,s_cached_last_path);
+#if KIIKO_BOARD_METALIO47
+    s_featured_cover_dirty = false;
+    s_scan_pending = !same || changed || s_cached_progress_revision != progress_revision;
+    s_home_scan_after = ctx->now_ms + 300;
+    if (!same) {
+        clear_cover_cache();
+        memset(&s_current, 0, sizeof(s_current));
+        memset(s_recent, 0, sizeof(s_recent));
+        s_excerpt[0] = 0;
+        read_pico_sd_start_probe();
+    }
+    s_cover_next = 0;
+#else
     if(same&&!changed){if(s_cached_progress_revision!=progress_revision)refresh_progress();s_scan_pending=false;}
     else {
         memset(&s_current,0,sizeof(s_current));memset(s_recent,0,sizeof(s_recent));s_scan_pending=!same;
@@ -911,12 +937,13 @@ static void on_enter(app_ctx_t *ctx) {
         if(key!=s_folder_key){free(s_folder);s_folder=NULL;s_folder_attempted=false;}}
     refresh_excerpt();
     rp_boot_mark("excerpt");
+#endif
 }
 static void on_media_lost(app_ctx_t *ctx) {
-    app_book_home_shelf_warm_stop();
 #if KIIKO_BOARD_METALIO47
     metalio_cover_cache_clear();
 #else
+    app_book_home_shelf_warm_stop();
 #endif
     app_home_release_clock_cache();
     (void)ctx;clear_cover_cache();memset(&s_current,0,sizeof(s_current));memset(s_recent,0,sizeof(s_recent));
@@ -926,17 +953,39 @@ static void on_media_ready(app_ctx_t *ctx) {(void)ctx;s_books_cache_valid=false;
 static app_redraw_t on_tick(app_ctx_t *ctx) {
     clock_base_prepare();
     if(ctx->consumed||(ctx->touch&&ctx->touch->touched))return APP_REDRAW_NONE;
+#if KIIKO_BOARD_METALIO47
+    if (app_touch_input_pending(ctx)) return APP_REDRAW_NONE;
+    if (s_view == HOME_ROOT && s_featured_cover_dirty) {
+        s_featured_cover_dirty = false;
+        s_area = (EpdRect){60,278,176,240};
+        return APP_REDRAW_AREA;
+    }
+#endif
     if(s_view==HOME_COMPONENT&&s_component_pending){s_area=s_component_dirty;return APP_REDRAW_AREA;}
     bool folder_preview=s_view==HOME_COMPONENT&&s_component_browse==APP_HOME_FOLDER;
     if(s_view==HOME_ROOT||folder_preview){
-    if(s_scan_pending) {
+    if(s_scan_pending
+#if KIIKO_BOARD_METALIO47
+       && ctx->now_ms >= s_home_scan_after
+#endif
+    ) {
         read_pico_sd_info_t info={0};if(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FINISHED)return APP_REDRAW_NONE;
         s_scan_pending=false;
-        if(info.mounted) {
+        if(info.mounted
+#if KIIKO_BOARD_METALIO47
+           || book_store_flash_ready()
+#endif
+        ) {
             s_cover_generation=book_cover_jobs_begin();
             memset(&s_current,0,sizeof(s_current));memset(s_recent,0,sizeof(s_recent));s_cover_next=0;
             scan_books();restore_cover_cache();remember_scan_state(&info);refresh_excerpt();avatar_prepare_state();s_folder_attempted=false;
-            free(s_folder);s_folder=NULL;return APP_REDRAW_PAGE;
+            free(s_folder);s_folder=NULL;
+#if KIIKO_BOARD_METALIO47
+            s_cached_progress_revision=book_progress_revision();
+            rp_boot_mark("scan");
+            rp_boot_mark("excerpt");
+#endif
+            return APP_REDRAW_PAGE;
         }remember_scan_state(&info);
     }
     if(s_view==HOME_ROOT&&s_avatar_pending) {
@@ -947,7 +996,12 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
     }
         if(s_view==HOME_ROOT&&s_cover_next==0){
             s_cover_next=1;home_book_t *b=featured();
-            if(b->path[0]&&!b->cover){int slot=b==&s_current?0:(int)(b-s_recent)+1;if(load_cover(b,slot)){s_area=(EpdRect){60,278,176,240};return APP_REDRAW_AREA;}if(s_cover_waiting)s_cover_next=0;}
+            if(b->path[0]&&!b->cover){int slot=b==&s_current?0:(int)(b-s_recent)+1;if(load_cover(b,slot)){
+#if KIIKO_BOARD_METALIO47
+                if (app_touch_input_pending(ctx)) { s_featured_cover_dirty=true; return APP_REDRAW_NONE; }
+#endif
+                s_area=(EpdRect){60,278,176,240};return APP_REDRAW_AREA;
+            }if(s_cover_waiting)s_cover_next=0;}
         }
     }
     if(s_view==HOME_COMPONENT&&s_component_pending){s_area=s_component_dirty;return APP_REDRAW_AREA;}
@@ -984,7 +1038,12 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
         unsigned i=s_cover_next++;home_book_t *b=i?books[i-1]:featured();
         if(b->path[0]&&!b->cover) {
             int slot=b==&s_current?0:(int)(b-s_recent)+1;
-            if(load_cover(b,slot)&&!i&&s_view==HOME_ROOT){s_area=(EpdRect){60,278,176,240};return APP_REDRAW_AREA;}
+            if(load_cover(b,slot)&&!i&&s_view==HOME_ROOT){
+#if KIIKO_BOARD_METALIO47
+                if (app_touch_input_pending(ctx)) { s_featured_cover_dirty=true; return APP_REDRAW_NONE; }
+#endif
+                s_area=(EpdRect){60,278,176,240};return APP_REDRAW_AREA;
+            }
             if(s_cover_waiting)--s_cover_next;
         }
         return APP_REDRAW_NONE;
@@ -998,11 +1057,13 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
         }
         s_folder_attempted=true;
     }
+#if !KIIKO_BOARD_METALIO47
     if(s_view==HOME_ROOT&&!s_scan_pending&&!s_cover_waiting&&ctx->now_ms>=s_shelf_warm_after&&
        !ctx->consumed&&!ctx->request_app&&!ctx->request_menu&&!ctx->request_return&&!(ctx->touch&&ctx->touch->touched)&&s_shelf_warm_next<n+1){
         home_book_t *warm=s_shelf_warm_next?books[s_shelf_warm_next-1]:featured();
         if(app_book_home_shelf_warm(warm->path,warm->title,warm->author)){++s_shelf_warm_next;s_shelf_warm_after=ctx->now_ms+100;}
     }
+#endif
     return APP_REDRAW_NONE;
 }
 static bool hit(EpdRect r,int x,int y) {return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}
@@ -1117,7 +1178,14 @@ static app_redraw_t on_key(app_ctx_t *ctx,int key) {(void)ctx;(void)key;if(s_vie
 static bool no_menu_handle(app_ctx_t *ctx) {(void)ctx;return false;}
 static bool main_page_visible(app_ctx_t *ctx) {(void)ctx;return s_view==HOME_ROOT;}
 static EpdRect area_hint(app_ctx_t *ctx) {(void)ctx;return s_area;}
-static void home_exit(app_ctx_t *ctx){(void)ctx;app_book_home_shelf_warm_stop();book_cover_jobs_cancel(s_cover_generation);s_cover_generation=0;}
+static void home_exit(app_ctx_t *ctx) {
+    (void)ctx;
+#if !KIIKO_BOARD_METALIO47
+    app_book_home_shelf_warm_stop();
+#endif
+    book_cover_jobs_cancel(s_cover_generation);
+    s_cover_generation=0;
+}
 const app_desc_t app_dashboard={
     .title="首页 Home",.detail="继续阅读与月阅读记录",.enter_full=false,.owns_keys=true,.menu_handle_enabled=no_menu_handle,
     .main_page_visible=main_page_visible,.persistent_navigation=true,.on_enter=on_enter,.on_exit=home_exit,.on_media_lost=on_media_lost,.on_media_ready=on_media_ready,

@@ -319,6 +319,10 @@ static app_redraw_t main_late_tick(app_ctx_t* ctx) {(void)ctx;return step == 1 ?
 static bool child_view;
 static bool child_root(app_ctx_t *ctx){(void)ctx;return !child_view;}
 static app_redraw_t child_cycle(app_ctx_t *ctx){(void)ctx;child_view=!child_view;return APP_REDRAW_PAGE;}
+void app_book_shelf_prefetch_cancel(void) {}
+void app_book_shelf_prefetch_reset(void) {}
+void app_book_shelf_prefetch_first(app_ctx_t *ctx) { (void)ctx; }
+
 int main(void) {
     for(int white=0;white<2;++white)for(int binary=0;binary<2;++binary){
         reset();child_view=false;first.enter_full=true;first.persistent_navigation=true;

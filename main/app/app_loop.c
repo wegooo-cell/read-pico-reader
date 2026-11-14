@@ -750,6 +750,9 @@ static void switch_to(
 #endif
     bool main_source = navigation_page_ready(ctx, *current);
     bool shelf_source = main_source && app_index_of(*current) == 1;
+#if KIIKO_BOARD_METALIO47
+    app_book_shelf_prefetch_cancel();
+#endif
     display_main_transition_cancel();
     if ((*current)->on_exit != NULL) (*current)->on_exit(ctx);
 #if defined(KIIKO_LOCAL_LATENCY) || KIIKO_BOARD_METALIO47
@@ -918,7 +921,12 @@ static bool poll_media(app_ctx_t* ctx, const app_desc_t* current,
     *mounted = ready;
     if (ready) *invalidated = false;
     if (ready) { s_media_recovery_attempts = 0; s_media_recovery_after_ms = 0; }
-    if (gained || lost) { ui_avatar_invalidate(); (void)book_cover_jobs_quiesce(0); book_lock_collage_invalidate(); }
+    if (gained || lost) {
+#if KIIKO_BOARD_METALIO47
+        app_book_shelf_prefetch_reset();
+#endif
+        ui_avatar_invalidate(); (void)book_cover_jobs_quiesce(0); book_lock_collage_invalidate();
+    }
     if (gained && current->on_media_ready) current->on_media_ready(ctx);
 #if KIIKO_BOARD_METALIO47
     bool font_restored=gained && app_font_recover_media();
@@ -984,29 +992,44 @@ static void run_power_action(app_ctx_t *ctx, const app_desc_t *current, bool res
     app_present(ctx, current, APP_REDRAW_PAGE);
 }
 
+#if KIIKO_BOARD_METALIO47
+bool app_touch_input_pending(app_ctx_t *ctx) {
+    cst836u_touch_t touch = {0};
+    return ctx->request_app || ctx->request_return || ctx->request_menu ||
+        (ctx->tp && cst836u_peek_touch(ctx->tp, &touch));
+}
+#endif
+
 bool app_poll_main_navigation(app_ctx_t *ctx) {
     if(!ctx||!ctx->tp)return false;
     if(ctx->request_app)return true;
     cst836u_touch_t touch={0};
+#if KIIKO_BOARD_METALIO47
+    if (!cst836u_peek_touch(ctx->tp, &touch) || touch.count != 1) {
+#else
     if(cst836u_read(ctx->tp,&touch)!=ESP_OK||!touch.touched||touch.count!=1) {
+#endif
         s_nav_contact_down=s_nav_polled=false;return false;
     }
     int index=ui_nav_hit(touch.x,touch.y);
     if(index<0)return false;
+#if KIIKO_BOARD_METALIO47
+    if (index == 1) return false;
+#endif
     if(!s_nav_contact_down) {
         s_nav_contact_down=s_nav_polled=true;
 #if KIIKO_BOARD_METALIO47
         (void)metalio_haptic_click();
-        if(index!=1)ui_nav_request(ctx,index);
+        ui_nav_request(ctx, index);
 #else
         if(index!=1)ui_nav_request(ctx,index);
-#endif
-        ctx->user_activity=true;
         if(ctx->fb&&ctx->hl) {
             EpdRect area;ui_click_feedback_nav_request(index);
             if(ui_click_feedback_nav_tick(ctx->fb,esp_timer_get_time()/1000,&area))
                 click_present(ctx,&app_book,area);
         }
+#endif
+        ctx->user_activity=true;
     }
     return ctx->request_app!=NULL;
 }
@@ -1887,6 +1910,12 @@ void app_loop_run(const app_loop_config_t* config) {
         bool fade_blocked=idle_blocked||menu_open||power_dialog_open||s_quick.open||quick_input_owned||
             ui_click_feedback_active()||ui_click_feedback_nav_pending()||touch.touched||touch.count>1||
             ctx.consumed||ctx.request_app||ctx.request_menu||ctx.request_return||ctx.now_ms<s_lock_ignore_until_ms;
+        if (!fade_blocked && !ai_overlay_open() && current != &app_book &&
+            !pico_online_busy() && main_page_ready(&ctx, current) && ctx.now_ms - last_input_ms >= 300) {
+            app_book_shelf_prefetch_first(&ctx);
+        } else {
+            app_book_shelf_prefetch_cancel();
+        }
         if(anti_fade_due(ctx.now_ms,last_input_ms,fade_blocked)){
             display_request_full_refresh();
             app_present(&ctx,current,APP_REDRAW_PAGE);

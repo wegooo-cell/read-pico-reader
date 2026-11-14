@@ -209,3 +209,6 @@ void app_lock_ignore_for(int64_t ms);
 
 /// Yield a long main-page load when another bottom tab is pressed. No display or lifecycle calls.
 bool app_poll_main_navigation(app_ctx_t *ctx);
+
+// Background artwork yields to both a held finger and a complete short tap.
+bool app_touch_input_pending(app_ctx_t *ctx);

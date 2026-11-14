@@ -26,6 +26,9 @@ static int s_view=SHELF,s_pressed_control=-1,s_visible_count=27,rows=9,s_mode;
 static bool s_category_menu,s_sort_menu,s_clear_confirm,s_batch_confirm,s_scan_pending;
 static bool s_shelf_key_mode,s_shelf_key_paint_pending,s_shelf_page_pending;
 static int s_shelf_key_pressed;
+static int64_t s_shelf_input_ms __attribute__((unused));
+static char s_message[64] __attribute__((unused));
+static __attribute__((unused)) bool shelf_loading_hint_active(void){return s_message[0]!=0;}
 static EpdRect s_area;
 static unsigned haptics;
 int metalio_haptic_click(void){++haptics;return 0;}
@@ -56,6 +59,8 @@ static EpdRect shelf_pager_group_rect(int page,int pages){(void)page;(void)pages
 static int ui_text_fixed_width_px(int px,const char*text){(void)text;return px*2;}
 static void epd_fill_circle(int x,int y,int radius,int color,uint8_t*fb){(void)x;(void)fb;assert(y==1031&&radius==2&&color==0x80);}
 '''
+if 'static bool shelf_waiting_for_index(' in book.read_text():
+ u+=function('shelf_waiting_for_index',book)+'\n'
 for name in ['leaves','draw_shelf_pager','shelf_key_paint','shelf_turn_page','shelf_pager_release_hit','shelf_pager_event']:
  u+=function(name,book)+'\n'
 for name in ['ui_gesture_reset','emit','ui_gesture_feed']:
@@ -63,6 +68,8 @@ for name in ['ui_gesture_reset','emit','ui_gesture_feed']:
 # The handler must own shelf pager contacts before generic reader/control routing.
 route=function('gesture_event',book)
 assert route.index('shelf_pager_event(')<route.index('reader_tools_swipe(')
+s31 = 's_shelf_input_ms = ctx->now_ms' in function('shelf_turn_page', book)
+u += '#define S31_PAGER ' + str(int(s31)) + '\n'
 u+=r'''
 static ui_gesture_t gesture;
 static cst836u_touch_t touch;
@@ -76,6 +83,7 @@ static app_redraw_t sample(int x,int y,bool down,bool first,bool release,bool co
  app_redraw_t redraw=APP_REDRAW_NONE;assert(shelf_pager_event(&ctx,&e,&redraw));++dispatches;return redraw;
 }
 static void reset(int page){
+ (void)shelf_key_paint;
  ctx=(app_ctx_t){.leaf=page};ui_gesture_reset(&gesture);s_view=SHELF;
  s_category_menu=s_clear_confirm=s_batch_confirm=s_scan_pending=false;
  s_pressed_control=-1;s_shelf_key_paint_pending=s_shelf_page_pending=false;
@@ -84,8 +92,8 @@ static void reset(int page){
 int main(void){
  for(rows=8;rows<=9;++rows){s_visible_count=rows*3;
   for(int a=0;a<4;++a){EpdRect r=ui_pager_rect(a);int x=r.x+r.width/2,y=r.y+r.height/2;
-   reset(1);assert(sample(x,y,true,true,false,false,1)==APP_REDRAW_AREA);
-   assert(ctx.leaf==1&&!prepares&&s_pressed_control==116+a&&s_shelf_key_paint_pending);
+   reset(1);assert(sample(x,y,true,true,false,false,1)==(S31_PAGER?APP_REDRAW_NONE:APP_REDRAW_AREA));
+   assert(ctx.leaf==1&&!prepares&&s_pressed_control==116+a&&s_shelf_key_paint_pending==!S31_PAGER);
    assert(sample(x,y,false,false,true,false,0)==APP_REDRAW_AREA);
    assert(ctx.leaf==(a<2?0:2)&&remembered==ctx.leaf&&prepares==1&&renders==1);
    assert(!s_shelf_key_paint_pending&&s_shelf_page_pending&&s_area.y==176&&s_area.height==912);
@@ -108,7 +116,7 @@ int main(void){
    reset(a<2?0:2);sample(x,y,true,true,false,false,1);sample(x,y,false,false,true,false,0);
    assert(ctx.leaf==(a<2?0:2)&&!prepares);
    reset(1);s_scan_pending=true;sample(x,y,true,true,false,false,1);sample(x,y,false,false,true,false,0);
-   assert(ctx.leaf==1&&!prepares&&!paints);
+   assert(ctx.leaf==(S31_PAGER?(a<2?0:2):1)&&prepares==S31_PAGER&&!paints);
   }
  }
  reset(1);EpdRect first=ui_pager_rect(UI_PAGER_FIRST),previous=ui_pager_rect(UI_PAGER_PREVIOUS);

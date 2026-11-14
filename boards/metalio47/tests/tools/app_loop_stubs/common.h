@@ -15,6 +15,7 @@ typedef struct { bool active; uint16_t x,y; } cst836u_point_t;
 typedef struct { bool touched; uint8_t count; uint16_t x,y; cst836u_point_t points[2]; uint8_t raw[15]; } cst836u_touch_t;
 typedef struct { int unused; } cst836u_info_t;
 int cst836u_read(void*, cst836u_touch_t*);
+bool cst836u_peek_touch(void*, cst836u_touch_t*);
 int cst836u_get_info(void*, cst836u_info_t*);
 typedef struct { int unused; } EpdiyHighlevelState;
 typedef struct { int x,y,width,height; } EpdRect;

@@ -311,6 +311,7 @@ kiiko_board_sources(kiiko_selected_sources "${CMAKE_CURRENT_LIST_DIR}" "app_main
         "book/book_cover.c"
         "book/book_cover_jobs.c"
         "book/book_shelf_page_cache.c"
+        "book/metalio_cover_cache.c"
         "book/book_image_header.c"
         "book/book_cover_auto.c"
         "book/zip_reader.c"

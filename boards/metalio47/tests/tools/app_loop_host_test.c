@@ -416,6 +416,13 @@ static app_redraw_t main_late_tick(app_ctx_t* ctx) {(void)ctx;return step == 1 ?
 static bool child_view;
 static bool child_root(app_ctx_t *ctx){(void)ctx;return !child_view;}
 static app_redraw_t child_cycle(app_ctx_t *ctx){(void)ctx;child_view=!child_view;return APP_REDRAW_PAGE;}
+void app_book_shelf_prefetch_cancel(void) {}
+void app_book_shelf_prefetch_reset(void) {}
+void app_book_shelf_prefetch_first(app_ctx_t *ctx) { (void)ctx; }
+
+bool ble_pt_take_standby(void) { return false; }
+bool cst836u_peek_touch(void *h, cst836u_touch_t *t) { return cst836u_read(h, t) == 0 && t->touched; }
+
 int main(void) {
     for(int white=0;white<2;++white)for(int binary=0;binary<2;++binary){
         reset();child_view=false;first.enter_full=true;first.persistent_navigation=true;
@@ -465,18 +472,17 @@ int main(void) {
     samples[0]=(sample_t){.x=10,.y=1141,.count=2};assert(!app_poll_main_navigation(&loading));
     samples[0]=(sample_t){.x=10,.y=1141,.count=1,.error=-1};assert(!app_poll_main_navigation(&loading));
 
-    // 冷封面加载的轮询中，点当前书架也能反馈，保持不取消；同一接触不重复。
-    // During cold-cover polling even the current shelf responds without cancelling; one contact never repeats.
+    // A scan can yield to any queued contact without consuming a book tap or drawing feedback.
     uint8_t loading_fb=0;EpdiyHighlevelState loading_hl={0};
     loading.fb=&loading_fb;loading.hl=&loading_hl;loading.request_app=NULL;
     samples[0]=(sample_t){0};assert(!app_poll_main_navigation(&loading));
     int loading_pulses=pulse_draws;
     samples[0]=(sample_t){.x=200,.y=1141,.count=1};
-    assert(!app_poll_main_navigation(&loading)&&pulse_draws==loading_pulses+1);
-    assert(!app_poll_main_navigation(&loading)&&pulse_draws==loading_pulses+1);
-    samples[0]=(sample_t){0};assert(!app_poll_main_navigation(&loading));
-    samples[0]=(sample_t){.x=200,.y=1141,.count=1};
-    assert(!app_poll_main_navigation(&loading)&&pulse_draws==loading_pulses+2);
+    assert(app_touch_input_pending(&loading));
+    assert(!app_poll_main_navigation(&loading)&&pulse_draws==loading_pulses);
+    samples[0]=(sample_t){0};assert(!app_touch_input_pending(&loading));
+    samples[0]=(sample_t){.x=100,.y=400,.count=1};
+    assert(!app_poll_main_navigation(&loading)&&app_touch_input_pending(&loading));
 
     reset();add(100,400,1,0);add(110,400,1,0);add(0,0,0,0);run();
     assert(touch_calls==1&&ticks==3&&!tick_consumed[0]);

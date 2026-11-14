@@ -13,7 +13,7 @@
 #include <string.h>
 struct cst836u_dev_t {
     cst836u_config_t cfg; cst836u_mode_t mode; TaskHandle_t task;
-    portMUX_TYPE lock; cst836u_touch_t sample,press; bool pending_press; esp_err_t error;
+    portMUX_TYPE lock; cst836u_touch_t sample,press; bool pending_press, reported_down; esp_err_t error;
     SemaphoreHandle_t io_lock;
     bool irq_ready;
 };
@@ -109,8 +109,27 @@ fail:
 }
 esp_err_t cst836u_read(cst836u_handle_t h,cst836u_touch_t *out) {
     if (!h || !out) return ESP_ERR_INVALID_ARG;
-    portENTER_CRITICAL(&h->lock); *out=h->pending_press?h->press:h->sample;
-    h->pending_press=false; esp_err_t err=h->error; portEXIT_CRITICAL(&h->lock); return err;
+    portENTER_CRITICAL(&h->lock);
+    esp_err_t err = h->error;
+    if (h->pending_press && h->reported_down) {
+        // A release and another press arrived while the caller was presenting a frame.
+        // Report the release first and keep the latest press for the next read.
+        memset(out, 0, sizeof(*out));
+    } else {
+        *out = h->pending_press ? h->press : h->sample;
+        h->pending_press = false;
+    }
+    h->reported_down = err == ESP_OK && out->touched;
+    portEXIT_CRITICAL(&h->lock);
+    return err;
+}
+bool cst836u_peek_touch(cst836u_handle_t h, cst836u_touch_t *out) {
+    if (!h || !out) return false;
+    portENTER_CRITICAL(&h->lock);
+    *out = h->pending_press ? h->press : h->sample;
+    bool touched = h->error == ESP_OK && out->touched;
+    portEXIT_CRITICAL(&h->lock);
+    return touched;
 }
 esp_err_t cst836u_deinit(cst836u_handle_t h) {
     if (h) {
@@ -132,7 +151,7 @@ esp_err_t cst836u_set_mode(cst836u_handle_t h,cst836u_mode_t mode) {
     esp_err_t err=metalio_write8(0x38,0xa5,mode==CST836U_MODE_DEEPSLEEP?3:0);
     if (err==ESP_OK) {
         portENTER_CRITICAL(&h->lock);
-        h->mode=mode; h->sample=(cst836u_touch_t){0}; h->pending_press=false;
+        h->mode=mode; h->sample=(cst836u_touch_t){0}; h->pending_press=h->reported_down=false;
         portEXIT_CRITICAL(&h->lock);
     }
     xSemaphoreGive(h->io_lock);
@@ -153,7 +172,7 @@ esp_err_t cst836u_wake(cst836u_handle_t h) {
     if (err==ESP_OK) err=metalio_write8(0x38,0xa4,0);
     if (err==ESP_OK) {
         portENTER_CRITICAL(&h->lock);
-        h->mode=CST836U_MODE_NORMAL; h->sample=(cst836u_touch_t){0};h->pending_press=false;
+        h->mode=CST836U_MODE_NORMAL; h->sample=(cst836u_touch_t){0};h->pending_press=h->reported_down=false;
         portEXIT_CRITICAL(&h->lock);
     }
     xSemaphoreGive(h->io_lock);

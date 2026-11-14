@@ -48,7 +48,9 @@ void app_home_cover_mode_changed(void);
 /// 开书前释放可重建的表盘底图，让解析器使用这部分 PSRAM。/ Release rebuildable clock bases before opening a book so parsing can use that PSRAM.
 void app_home_release_clock_cache(void);
 
-/// 首页封面全部就绪后预热最近书的小书架封面；true表示本次书目完成或跳过。
-/// Warm shelf thumbnails only after Home covers are ready; true means the book finished or was skipped.
-bool app_book_home_shelf_warm(const char *path,const char *title,const char *author);
-void app_book_home_shelf_warm_stop(void);
+#include "app.h"
+/// 书架外的主界面空闲时只预热第一页；导航和前台任务可直接取消。
+/// Warm only the first shelf page while another root is idle; navigation and foreground work can cancel.
+void app_book_shelf_prefetch_first(app_ctx_t *ctx);
+void app_book_shelf_prefetch_cancel(void);
+void app_book_shelf_prefetch_reset(void);

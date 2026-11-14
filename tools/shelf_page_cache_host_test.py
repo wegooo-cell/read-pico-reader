@@ -124,6 +124,18 @@ int main(void){
     fail_task=true;assert(book_shelf_page_request(key(1),layout)==BOOK_SHELF_PAGE_MISS);fail_task=false;book_shelf_page_release();
     assert(book_shelf_page_request(key(1),layout)==BOOK_SHELF_PAGE_WAIT);assert(wait_page()==BOOK_SHELF_PAGE_HIT);
     atomic_store(&slow_io,true);book_shelf_page_request(key(200),layout);book_shelf_page_release();join_threads();atomic_store(&slow_io,false);assert(!held&&!running());
+    // A cold S31 lookup does not open the SD file even if a disk copy exists.
+    unsigned reads_before = opens, writes_before = writes;
+    assert(book_shelf_page_request_memory(key(1), layout) == BOOK_SHELF_PAGE_MISS);
+    assert(!book_shelf_page_restore(out) && opens == reads_before);
+    assert(book_shelf_page_stage_covers(before) && book_shelf_page_capture(final, 2, 100));
+    book_shelf_page_idle(5000);
+    assert(opens == reads_before && writes == writes_before && !running());
+    assert(book_shelf_page_request_memory(key(2), layout) == BOOK_SHELF_PAGE_MISS);
+    assert(!book_shelf_page_restore(out));
+    assert(book_shelf_page_request_memory(key(1), layout) == BOOK_SHELF_PAGE_HIT);
+    assert(book_shelf_page_restore(out) && opens == reads_before);
+    book_shelf_page_release();
     // 编解码覆盖白底、随机灰阶与128/130字节边界。
     // Round-trip white backgrounds, random tones and literal/run boundaries.
     for(unsigned pattern=0;pattern<6;++pattern)for(unsigned n=1;n<2048;n+=7){

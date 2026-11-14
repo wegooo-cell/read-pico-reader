@@ -16,14 +16,20 @@ unit=r'''
 #include <string.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include "metalio_cover_cache.h"
+static bool ram_enabled=true;
+void *heap_caps_malloc(size_t n,unsigned caps){assert(caps==3);return ram_enabled?malloc(n):NULL;}
+void *heap_caps_calloc(size_t n,size_t z,unsigned caps){assert(caps==3);return ram_enabled?calloc(n,z):NULL;}
+size_t heap_caps_get_free_size(unsigned caps){assert(caps==3);return 16u*1024u*1024u;}
+size_t heap_caps_get_largest_free_block(unsigned caps){assert(caps==3);return 16u*1024u*1024u;}
 #define BOOK_COVER_W 176
 #define BOOK_COVER_H 240
 #define BOOK_AUTO_COVER_VERSION 1
 static const char *root;
-static bool write_fail;
+static bool write_fail, deny_storage;
 static void map(const char *p,char out[1024]){assert(!strncmp(p,"/sdcard",7));assert(snprintf(out,1024,"%s%s",root,p+7)<1024);}
-static FILE *mapped_open(const char *p,const char *m){char out[1024];map(p,out);return write_fail&&strchr(m,'w')?NULL:fopen(out,m);}
-static int mapped_stat(const char *p,struct stat *s){char out[1024];map(p,out);return stat(out,s);}
+static FILE *mapped_open(const char *p,const char *m){assert(!deny_storage);char out[1024];map(p,out);return write_fail&&strchr(m,'w')?NULL:fopen(out,m);}
+static int mapped_stat(const char *p,struct stat *s){assert(!deny_storage);char out[1024];map(p,out);return stat(out,s);}
 static int mapped_mkdir(const char *p,int mode){char out[1024];map(p,out);return mkdir(out,mode);}
 static int mapped_rename(const char *p,const char *q){char a[1024],b[1024];map(p,a);map(q,b);return rename(a,b);}
 static int mapped_remove(const char *p){char a[1024];map(p,a);return remove(a);}
@@ -36,8 +42,9 @@ static bool book_title_from_path(const char *p,char *out,size_t cap){(void)p;snp
 typedef struct {unsigned width,height,stride,contrast,phase;} book_fast_cover_key_t;
 '''
 unit+=s[s.index('#define COVER_CACHE_MAGIC'):s.index('static uint64_t cover_hash')]
-unit+=s[s.index('#define FAST_COVER_REVISION'):s.index('static uint64_t fast_cover_checksum')]
-for n in ('cover_hash','cover_cache_key','fast_cover_checksum','fast_cover_key','book_cover_fast_cache_read','fast_cache_write','book_cover_fast_cache_write','book_cover_fast_cache_write_checked'):
+revision=s.index('#define FAST_COVER_REVISION')
+unit+=s[revision:s.index('static uint64_t fast_cover_checksum',revision)]
+for n in ('cover_hash','cover_cache_identity','cover_cache_key','ram_key','fast_cover_checksum','fast_cover_key','finished_fast_ram_key','shelf_cover_identity','book_cover_shelf_no_artwork','book_cover_shelf_ram_read','book_cover_fast_cache_read','fast_cache_write','book_cover_fast_cache_write','book_cover_fast_cache_write_checked'):
  unit+=function(n,cover)+'\n'
 unit+=r'''
 #define MALLOC_CAP_SPIRAM 1
@@ -57,10 +64,12 @@ static bool app_settings_main_fast_refresh(void){return fast;}
 static bool pico_boot_asset_allowed(const char *p){(void)p;return allowed;}
 static unsigned app_settings_system_contrast(void){return contrast;}
 static EpdRect shelf_cover_image(int row){return style==5?(EpdRect){71,244+row*220,120,156}:(EpdRect){50+(row%3)*212,224+(row/3)*282,164,214};}
-static size_t heap_caps_get_free_size(unsigned caps){assert(caps==3);return psram;}
-static void *heap_caps_calloc(size_t n,size_t size,unsigned caps){assert(caps==3&&n==1&&size==4494);if(oom)return NULL;void *p=calloc(n,size);if(p)live+=size;return p;}
+static size_t shelf_heap_caps_get_free_size(unsigned caps){assert(caps==3);return psram;}
+static void *shelf_heap_caps_calloc(size_t n,size_t size,unsigned caps){assert(caps==3&&n==1&&size==4494);if(oom)return NULL;void *p=calloc(n,size);if(p)live+=size;return p;}
 static void tracked_free(void *p){if(p){assert(live>=4494);live-=4494;}free(p);}
 #define free tracked_free
+#define heap_caps_get_free_size shelf_heap_caps_get_free_size
+#define heap_caps_calloc shelf_heap_caps_calloc
 '''
 for n in ('load_shelf_cover_fast','save_shelf_cover_fast'):unit+=function(n,book)+'\n'
 unit+=r'''
@@ -84,12 +93,12 @@ int main(int argc,char **argv){
  book_cover_fast_cache_write_checked(path,"name","author",key,stale,false,(int64_t)h.source.file_size+1,h.source.modified);
  assert(book_cover_fast_cache_read(path,"name","author",key,out,&edge)&&!memcmp(out,bits,4494));
  FILE *f=fopen(cache,"r+b");assert(f&&fseek(f,sizeof(h)+8,SEEK_SET)==0);int byte=fgetc(f);fseek(f,-1,SEEK_CUR);assert(fputc(byte^1,f)!=EOF);fclose(f);
- assert(!book_cover_fast_cache_read(path,"name","author",key,out,&edge)&&!load_shelf_cover_fast(0,0)&&!live);
+ metalio_cover_cache_clear();assert(!book_cover_fast_cache_read(path,"name","author",key,out,&edge)&&!load_shelf_cover_fast(0,0)&&!live);
  book_cover_fast_cache_write(path,"name","author",key,bits,true);assert(load_shelf_cover_fast(0,0));
  save_shelf_cover_fast(0,0);free(s_covers[0].fast_bits);s_covers[0].fast_bits=NULL;
- f=fopen(cache,"ab");assert(f&&fputc(1,f)!=EOF);fclose(f);assert(!load_shelf_cover_fast(0,0)&&!live);
+ f=fopen(cache,"ab");assert(f&&fputc(1,f)!=EOF);fclose(f);metalio_cover_cache_clear();assert(!book_cover_fast_cache_read(path,"name","author",key,out,&edge)&&!load_shelf_cover_fast(0,0)&&!live);
  book_cover_fast_cache_write(path,"name","author",key,bits,true);
- f=fopen(path,"ab");assert(f&&fputc(2,f)!=EOF);fclose(f);assert(!load_shelf_cover_fast(0,0)&&!live);
+ f=fopen(path,"ab");assert(f&&fputc(2,f)!=EOF);fclose(f);metalio_cover_cache_clear();assert(!book_cover_fast_cache_read(path,"name","author",key,out,&edge)&&!load_shelf_cover_fast(0,0)&&!live);
  book_cover_fast_cache_write(path,"name","author",key,bits,false);assert(load_shelf_cover_fast(0,0)&&!s_covers[0].fast_white_edge);free(s_covers[0].fast_bits);s_covers[0].fast_bits=NULL;
  oom=true;assert(!load_shelf_cover_fast(0,0)&&!live);oom=false;
  psram=512*1024;assert(!load_shelf_cover_fast(0,0)&&!live);psram=4*1024*1024;
@@ -107,11 +116,31 @@ int main(int argc,char **argv){
  home.height=251;assert(!book_cover_fast_cache_read(path,"name","author",home,home_out,&edge));
  key.width=200;book_cover_fast_cache_write(path,"name","author",key,bits,true);assert(!book_cover_fast_cache_read(path,"name","author",key,out,&edge));
  write_fail=true;key=(book_fast_cover_key_t){164,214,21,100,2};book_cover_fast_cache_write(path,"name","author",key,bits,true);write_fail=false;
- remove(path);assert(!load_shelf_cover_fast(0,0)&&!live);
- puts("PASS: real TF raster reuse (80 reads, no gray/JPEG workspace); grid/list exact pixels and one 4494B resident representation; source/contrast/phase/dimension invalidation; CRC, trailing bytes, reserve/OOM, blocked book, mode isolation, write failure and missing source");
+ metalio_cover_cache_clear();ram_enabled=true;key=(book_fast_cover_key_t){164,214,21,100,2};
+ book_cover_fast_cache_write(path,"name","author",key,bits,true);
+ assert(book_cover_fast_cache_read(path,"name","author",key,out,&edge));
+ assert(metalio_cover_cache_stats().entries==1&&metalio_cover_cache_stats().bytes==4494);
+ assert(fast_cover_key(path,"name","author",key,cache,&h));remove(cache);
+ deny_storage=true;
+ metalio_cover_meta_t meta;
+ assert(book_cover_shelf_ram_read(path,"name","author",h.source.file_size,h.source.modified,false,true,key,NULL,0,&meta));
+ assert(meta.width==164&&meta.height==214&&meta.white_edge);
+ assert(book_cover_shelf_ram_read(path,"name","author",h.source.file_size,h.source.modified,false,true,key,out,sizeof(out),&meta));
+ assert(!memcmp(out,bits,sizeof(bits)));
+ assert(!book_cover_shelf_ram_read(path,"name","author",h.source.file_size,h.source.modified+1,false,true,key,out,sizeof(out),&meta));
+ assert(book_cover_shelf_no_artwork("/sdcard/books/no.epub","none","",42,123,true));
+ assert(book_cover_shelf_no_artwork("/sdcard/books/no.epub","none","",42,123,false));
+ assert(!book_cover_shelf_no_artwork("/sdcard/books/no.epub","none","",42,124,false));
+ deny_storage=false;
+ uint64_t hits=metalio_cover_cache_stats().hits;
+ assert(book_cover_fast_cache_read(path,"name","author",key,out,&edge)&&edge&&!memcmp(out,bits,4494));
+ assert(metalio_cover_cache_stats().hits==hits+1);metalio_cover_cache_clear();
+ assert(!book_cover_fast_cache_read(path,"name","author",key,out,&edge));
+ ram_enabled=false;remove(path);assert(!load_shelf_cover_fast(0,0)&&!live);
+ puts("PASS: real TF-to-RAM raster reuse (80 warm copies, no gray/JPEG workspace); grid/list exact pixels and one 4494B resident representation; source/contrast/phase/dimension invalidation; CRC, trailing bytes, reserve/OOM, blocked book, mode isolation, write failure and missing source");
 }
 '''
 with tempfile.TemporaryDirectory(dir=ROOT/'build') as directory:
  d=Path(directory);(d/'books').mkdir();(d/'books/a.epub').write_bytes(b'book');(d/'test.c').write_text(unit)
- subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',str(d/'test.c'),'-o',str(d/'test')],check=True)
+ subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-pthread','-I'+str(ROOT/'tools/metalio_cache_host_stubs'),'-I'+str(ROOT/'main/book'),str(d/'test.c'),str(ROOT/'main/book/metalio_cover_cache.c'),'-o',str(d/'test')],check=True)
  subprocess.run([str(d/'test'),str(d)],check=True)

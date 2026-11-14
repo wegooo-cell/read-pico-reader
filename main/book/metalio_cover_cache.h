@@ -9,6 +9,7 @@
 typedef struct { uint64_t field[8]; } metalio_cover_key_t;
 typedef struct { unsigned width,height; bool white_edge; } metalio_cover_meta_t;
 typedef struct { size_t bytes,entries; uint64_t hits,misses,evictions; } metalio_cover_stats_t;
+/// out 可为 NULL 以只检查命中并读元数据。/ Pass NULL for out to check residency and read metadata only.
 bool metalio_cover_cache_get(const metalio_cover_key_t *key,void *out,size_t capacity,metalio_cover_meta_t *meta);
 bool metalio_cover_cache_put(const metalio_cover_key_t *key,const void *pixels,size_t bytes,metalio_cover_meta_t meta);
 /// 在同一LRU预算内复制已处理的物理像素行，不借出缓存指针。/ Copy finished physical raster rows within the same LRU budget, without lending pointers.

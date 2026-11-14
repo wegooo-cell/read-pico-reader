@@ -499,6 +499,7 @@ static void switch_to(
 #endif
     bool main_source = navigation_page_ready(ctx, *current);
     bool shelf_source = main_source && app_index_of(*current) == 1;
+    app_book_shelf_prefetch_cancel();
     display_main_transition_cancel();
     if ((*current)->on_exit != NULL) (*current)->on_exit(ctx);
 #if defined(KIIKO_LOCAL_LATENCY) || KIIKO_BOARD_METALIO47
@@ -619,7 +620,10 @@ static bool poll_media(app_ctx_t* ctx, const app_desc_t* current,
     *mounted = ready;
     if (ready) *invalidated = false;
     if (ready) { s_media_recovery_attempts = 0; s_media_recovery_after_ms = 0; }
-    if (gained || lost) { ui_avatar_invalidate(); (void)book_cover_jobs_quiesce(0); book_lock_collage_invalidate(); }
+    if (gained || lost) {
+        app_book_shelf_prefetch_reset();
+        ui_avatar_invalidate(); (void)book_cover_jobs_quiesce(0); book_lock_collage_invalidate();
+    }
     if (gained && current->on_media_ready) current->on_media_ready(ctx);
     if (!lost) {
         if (!ready) recover_media(ctx,&info);
@@ -637,6 +641,7 @@ static bool poll_media(app_ctx_t* ctx, const app_desc_t* current,
 // 锁屏前先由页面保存进度，再持久化一次恢复上下文；不在翻页或点击时写入。
 // Flush page progress before persisting one lock checkpoint; never write it on page turns or taps.
 static void prepare_lock(app_ctx_t *ctx, const app_desc_t *current, bool feedback) {
+    app_book_shelf_prefetch_cancel();
     if (feedback) app_lock_feedback(ctx->hl);
     if (current->on_before_lock) current->on_before_lock(ctx);
     int tab = app_index_of(current);
@@ -660,6 +665,13 @@ static void run_power_action(app_ctx_t *ctx, const app_desc_t *current, bool res
     if (error != ESP_OK) ESP_LOGW(TAG, "power off failed: %s", esp_err_to_name(error));
     // 关机交接失败时回到可操作原页；不关闭书籍后再重新自动开书。/ A failed shutdown returns to the operable current page without closing/reopening the book.
     app_present(ctx, current, APP_REDRAW_PAGE);
+}
+
+bool app_touch_input_pending(app_ctx_t *ctx) {
+    if (ctx->request_app || ctx->request_return || ctx->request_menu ||
+        (ctx->touch && ctx->touch->touched)) return true;
+    cst836u_touch_t touch = {0};
+    return ctx->tp && cst836u_read(ctx->tp, &touch) == ESP_OK && touch.touched;
 }
 
 bool app_poll_main_navigation(app_ctx_t *ctx) {
@@ -1306,6 +1318,14 @@ void app_loop_run(const app_loop_config_t* config) {
             if(probe!=APP_REDRAW_NONE)app_present(&ctx,current,probe);
         }
 #endif
+        if (!idle_blocked && !menu_open && !s_quick.open && !quick_input_owned &&
+            !ui_click_feedback_active() && !ui_click_feedback_nav_pending() && !ctx.consumed &&
+            current != &app_book && main_page_ready(&ctx, current) &&
+            ctx.now_ms - last_input_ms >= 300 && ctx.now_ms >= s_lock_ignore_until_ms) {
+            app_book_shelf_prefetch_first(&ctx);
+        } else {
+            app_book_shelf_prefetch_cancel();
+        }
         // 返回来源优先；普通请求仍按切页优先处理。
         // Return requests win; ordinary requests still prioritize page switches.
         // USB MSC 持有 TF 卡时禁止任何页面切换；必须先安全停止并重新挂载。

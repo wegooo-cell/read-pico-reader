@@ -24,3 +24,7 @@ bool app_book_ai_bookmark(void);
 static inline void app_book_pause_auto(void) {}
 
 static inline bool app_book_status_bar_visible(void){return true;}
+
+void app_book_shelf_prefetch_cancel(void);
+void app_book_shelf_prefetch_reset(void);
+void app_book_shelf_prefetch_first(app_ctx_t *ctx);

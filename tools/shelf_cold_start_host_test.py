@@ -24,8 +24,18 @@ typedef struct {char path[288],name[256],author[128];uint32_t size;uint16_t chap
 static shelf_entry_t s_shelf[25];static int s_visible_count=25,s_view=SHELF;
 static unsigned s_cover_pending_mask,s_chapters_pending,s_cover_generation;
 static bool s_chapters_started,s_chapters_changed,s_prefetch_active,s_clear_confirm,s_batch_confirm;
+static bool s_shelf_page_pending;
+static bool s_category_menu __attribute__((unused)), s_sort_menu __attribute__((unused));
+static bool pico_online_busy(void){return false;}
+static bool shelf_title_card(const char *p){return strstr(p,".txt")!=NULL;}
+static bool shelf_cover_ram_hit(int index,int row,bool load){(void)index;(void)row;assert(!load);return false;}
+static void shelf_record_cover_result(int index,int state,const book_cover_result_t *result){
+ if(state>0&&result->metadata){s_shelf[index].chapters=result->chapters;s_shelf[index].chapters_checked=true;}
+}
+static unsigned s_store_revision;
+static unsigned book_store_revision(void){return s_store_revision;}
 static int s_prefetch_step,s_prefetch_index;static int64_t s_prefetch_after;
-static int style=5,submitted,begins,canceled;static bool idle=true,fail_submit;
+static int style=5,submitted,begins;static bool idle=true,fail_submit;
 static unsigned generation;static bool complete[9],queued[9];static book_cover_job_t requests[9];
 static int app_settings_shelf_style(void){return style;}
 static int shelf_rows(void){return style==5?8:9;}
@@ -37,14 +47,11 @@ static EpdRect shelf_cover_image(int row){return(EpdRect){48,197+row*96,51,70};}
 unsigned book_cover_jobs_begin(void){++begins;memset(queued,0,sizeof(queued));memset(complete,0,sizeof(complete));return ++generation;}
 bool book_cover_jobs_submit(unsigned g,unsigned slot,const book_cover_job_t*q){assert(g==generation&&slot<9);if(fail_submit)return false;assert(!queued[slot]);queued[slot]=true;requests[slot]=*q;++submitted;return true;}
 int book_cover_jobs_take(unsigned g,unsigned slot,book_cover_result_t*r){if(g!=generation||!queued[slot])return -1;if(!complete[slot])return 0;queued[slot]=false;*r=(book_cover_result_t){.metadata=true,.chapters=slot==2?0:37,.size=100};return 1;}
-void book_cover_jobs_cancel(unsigned g){if(g==generation){++canceled;++generation;}}
+void book_cover_jobs_cancel(unsigned g){if(g==generation)++generation;}
 bool book_cover_jobs_idle(void){return idle;}
 """
-for name in ('shelf_chapters_tick','shelf_prefetch_tick'):
-    u+=function(name,source)+'\n'
-u+='static unsigned s_home_shelf_generation;static bool s_home_shelf_pending;\n'
-for name in ('app_book_home_shelf_warm','app_book_home_shelf_warm_stop'):
-    u+=function(name,source)+'\n'
+for name in ('shelf_chapters_tick', 'shelf_record_prefetch_result', 'shelf_prefetch_tick'):
+    u += function(name, source) + '\n'
 u+=r"""
 int main(void){
  for(int i=0;i<25;++i){snprintf(s_shelf[i].path,sizeof(s_shelf[i].path),"book%d",i);s_shelf[i].size=100;}
@@ -56,25 +63,20 @@ int main(void){
  assert(shelf_chapters_tick(&ctx)&&!s_chapters_pending);assert(!s_shelf[2].chapters&&s_shelf[2].chapters_checked);
  assert(!shelf_chapters_tick(&ctx)&&submitted==8);for(int i=8;i<25;++i)assert(!s_shelf[i].chapters_checked);
  // Page-cache hits still reach this path; next page first, one active job, input prevents new work.
- shelf_prefetch_tick(&ctx);assert(!s_prefetch_active);ctx.now_ms=799;shelf_prefetch_tick(&ctx);assert(!s_prefetch_active);
- ctx.now_ms=800;ctx.consumed=true;shelf_prefetch_tick(&ctx);assert(!s_prefetch_active);ctx.consumed=false;
+ shelf_prefetch_tick(&ctx);assert(!s_prefetch_active);ctx.now_ms=299;shelf_prefetch_tick(&ctx);assert(!s_prefetch_active);
+ ctx.now_ms=300;ctx.consumed=true;shelf_prefetch_tick(&ctx);assert(!s_prefetch_active);ctx.consumed=false;
  shelf_prefetch_tick(&ctx);assert(s_prefetch_active&&submitted==9&&!strcmp(requests[0].path,"book8")&&requests[0].width==51&&requests[0].height==70&&requests[0].with_chapters);
  shelf_prefetch_tick(&ctx);assert(submitted==9);complete[0]=true;shelf_prefetch_tick(&ctx);assert(!s_prefetch_active&&s_shelf[8].chapters_checked);
  for(int step=0;step<40;++step){ctx.now_ms+=1000;shelf_prefetch_tick(&ctx);complete[0]=true;shelf_prefetch_tick(&ctx);}
- assert(s_prefetch_step==16&&submitted==16);for(int i=16;i<25;++i)assert(!s_shelf[i].chapters_checked);
+ assert(s_prefetch_step==17&&submitted==25&&s_shelf[24].chapters_checked);
  // Metadata submit failure is marked checked once and never loops through the full library.
  s_chapters_started=false;for(int i=0;i<8;++i)s_shelf[i].chapters_checked=false;fail_submit=true;
  assert(!shelf_chapters_tick(&ctx)&&!s_chapters_pending);assert(!shelf_chapters_tick(&ctx));fail_submit=false;
- // A background Home job cannot take ownership while foreground results are outstanding.
- idle=false;int old_begins=begins;assert(!app_book_home_shelf_warm("recent","title","author")&&begins==old_begins);
- idle=true;assert(!app_book_home_shelf_warm("recent","title","author")&&requests[0].list&&requests[0].with_chapters);
- assert(!app_book_home_shelf_warm("recent","title","author"));complete[0]=true;assert(app_book_home_shelf_warm("recent","title","author"));
- assert(!app_book_home_shelf_warm("recent","title","author"));app_book_home_shelf_warm_stop();assert(canceled==1);
- assert(!app_book_home_shelf_warm("recent","title","author"));book_cover_jobs_begin();app_book_home_shelf_warm_stop();assert(canceled==1);
- puts("PASS: zero library-wide chapter reads; visible8 asynchronous count batch, unknown/failure bounds, input priority, next/previous-page-only warming and Home queue ownership");
+ puts("PASS: visible metadata first, then sequential forward shelf warming with input priority");
 }
 """
 with tempfile.TemporaryDirectory(prefix='kiiko-cold-start-') as d:
-    p=Path(d);(p/'test.c').write_text(u)
+    p=Path(d)
+    (p/'test.c').write_text(u)
     subprocess.run(['cc','-Dshelf_display_style=app_settings_shelf_style','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(R/'main/book'),str(p/'test.c'),'-o',str(p/'test')],check=True)
     subprocess.run([str(p/'test')],check=True)

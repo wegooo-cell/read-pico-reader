@@ -91,6 +91,10 @@ esp_err_t cst836u_init(i2c_master_bus_handle_t bus_handle, const cst836u_config_
 esp_err_t cst836u_deinit(cst836u_handle_t handle);
 
 esp_err_t cst836u_read(cst836u_handle_t h, cst836u_touch_t* touch);
+#if KIIKO_BOARD_METALIO47
+// Inspect cached input without consuming a short press queued by the FT6336U task.
+bool cst836u_peek_touch(cst836u_handle_t h, cst836u_touch_t *touch);
+#endif
 esp_err_t cst836u_get_info(cst836u_handle_t h, cst836u_info_t* info);
 
 esp_err_t cst836u_set_mode(cst836u_handle_t h, cst836u_mode_t mode);

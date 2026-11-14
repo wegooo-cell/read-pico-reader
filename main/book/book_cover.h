@@ -93,6 +93,13 @@ void book_cover_store_generated(const char *path,const char *title,const char *a
 /// Persist asynchronous pixels only under their original source identity, never a replaced book's key.
 void book_cover_fast_cache_write_checked(const char *path,const char *title,const char *author,book_fast_cover_key_t key,const uint8_t *pixels,bool edge,int64_t size,int64_t modified);
 
+#include "metalio_cover_cache.h"
+/// 用书架已知的文件身份读取成品，不访问存储。/ Read finished rasters using the catalog identity, with no storage I/O.
+bool book_cover_shelf_ram_read(const char *path, const char *title, const char *author,
+        uint64_t size, int64_t modified, bool list, bool fast, book_fast_cover_key_t raster,
+        void *out, size_t capacity, metalio_cover_meta_t *meta);
+bool book_cover_shelf_no_artwork(const char *path, const char *title, const char *author,
+        uint64_t size, int64_t modified, bool remember);
 #if KIIKO_BOARD_METALIO47
 /// RAM 专用命中；前台未命中时不打开 TF 缓存文件。/ RAM-only lookup; no TF open on foreground misses.
 bool book_cover_peek_gray(const char *path,const char *title,const char *author,bool list,
