@@ -60,6 +60,7 @@ static bool ttf_font_ready(void){return true;}
 static bool ttf_font_is_builtin(void){return builtin;}
 static void ui_text_set_system_font(bool on){assert(!on);}
 static void ui_avatar_invalidate(void){}
+static void app_book_shelf_prefetch_reset(void){}
 static void book_lock_collage_invalidate(void){}
 static bool read_pico_sd_needs_recovery(void){return !mounted&&!mounting;}
 static int read_pico_sd_invalidate_io(void){assert(!font_live&&!book_live);++invalidates;if(invalidate_busy)return ESP_ERR_NOT_FINISHED;mounted=false;verified=false;return ESP_OK;}

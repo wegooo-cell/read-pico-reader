@@ -50,11 +50,11 @@ static int app_settings_system_contrast(void){return contrast;}
 UI=r'''
 enum{SHELF,BULK};static int s_view=SHELF,s_pressed_control=-1,s_visible_count;
 static bool s_bulk_grid,s_shelf_page_cached,s_shelf_page_loading,s_shelf_page_cache_allowed,s_scan_pending;
-static unsigned s_cover_pending_mask;
+static unsigned s_cover_pending_mask, s_shelf_no_artwork_mask;
 typedef struct{int leaf;int64_t now_ms;uint8_t *fb;} app_ctx_t;
-typedef struct{char name[256],author[128];bool removed,favorite,has_progress;unsigned pct;uint16_t chapter,chapters;}shelf_entry_t;
+typedef struct{char path[288],name[256],author[128];bool removed,favorite,has_progress;unsigned pct;uint16_t chapter,chapters;}shelf_entry_t;
 static shelf_entry_t s_shelf[9];
-static struct{uint8_t *gray,*fast_bits;unsigned width,height;uint8_t fast_phase,fast_contrast;bool fast_white_edge;}s_covers[9];
+static struct{uint8_t *gray,*fast_bits;unsigned width,height;uint8_t fast_phase,fast_contrast;bool fast_white_edge,generated;}s_covers[9];
 static int shelf_rows(void){return style==5?8:9;}
 static int ui_content_width(void){return 612;}
 static void copy_text(char *d,size_t n,const char*s){snprintf(d,n,"%s",s);}
@@ -141,13 +141,20 @@ KEY_UNIT=r"""
 #include "book_shelf_page_cache.h"
 #define UI_LOCK_WIDTH 684
 static int style=1,mode,contrast=100,rotation=1,font_size=100,order,rows=9;
-static int s_visible_count=18,s_category_selected,s_request_count,stats;
-static bool s_shelf_page_key_valid,s_shelf_page_loading,s_shelf_page_cached,s_shelf_page_cache_allowed,missing;
+static int s_visible_count=18,s_category_selected,s_request_count;
+static bool s_shelf_page_key_valid,s_shelf_page_loading,s_shelf_page_cached,s_shelf_page_cache_allowed;
 static book_shelf_page_key_t s_shelf_page_base,requested;
-static int64_t modified=100,book_bytes=200;
+static uint32_t s_shelf_catalog_epoch, store_revision;
+static unsigned s_cover_generation;
+static bool s_prefetch_active;
+static int s_prefetch_index;
+static uint32_t book_store_revision(void){return store_revision;}
+static int shelf_record_prefetch_result(unsigned generation,unsigned slot,int index){
+ (void)generation;(void)slot;(void)index;assert(false);return 0;
+}
 static char s_query[65],font[128];
 typedef struct{int leaf;}app_ctx_t;
-typedef struct{char path[288],name[256],author[128];bool removed,favorite;unsigned pct;}shelf_entry_t;
+typedef struct{char path[288],name[256],author[128];bool removed,favorite;unsigned pct,size;int64_t modified;}shelf_entry_t;
 static shelf_entry_t s_shelf[18];
 static struct{int index;}s_covers[9];
 static unsigned s_cover_pending_mask,s_cover_dirty_mask;
@@ -167,17 +174,15 @@ int epd_height(void){return 684;}
 static EpdRect ui_rotate_rect_to_fb(EpdRect r){return (EpdRect){1216-r.y-r.height,r.x,r.height,r.width};}
 static EpdRect shelf_cover_image(int row){return (EpdRect){36+(row%3)*210,192+(row/3)*282,164,214};}
 static void invalidate_covers(void){s_shelf_page_key_valid=s_shelf_page_loading=s_shelf_page_cached=s_shelf_page_cache_allowed=false;}
-static int test_stat(const char *p,struct stat*st){assert(p[0]);++stats;if(missing)return -1;memset(st,0,sizeof(*st));st->st_mode=S_IFREG;st->st_size=book_bytes;st->st_mtime=modified;return 0;}
-#define stat(path,out) test_stat(path,out)
-book_shelf_page_state_t book_shelf_page_request(book_shelf_page_key_t key,book_shelf_page_layout_t layout){assert(layout.count>0);requested=key;++s_request_count;return BOOK_SHELF_PAGE_MISS;}
+book_shelf_page_state_t book_shelf_page_request_memory(book_shelf_page_key_t key,book_shelf_page_layout_t layout){if(!layout.count)return BOOK_SHELF_PAGE_MISS;requested=key;++s_request_count;return BOOK_SHELF_PAGE_MISS;}
 """
 KEY_MAIN=r"""
 static void changed(app_ctx_t *ctx){book_shelf_page_key_t old=requested;int count=s_request_count;assert(!prepare_shelf_page(ctx));assert(s_request_count==count+1&&memcmp(&old,&requested,sizeof(old)));}
 int main(void){
  app_ctx_t ctx={0};for(int i=0;i<18;++i){snprintf(s_shelf[i].path,288,"/books/%d.epub",i);snprintf(s_shelf[i].name,256,"Book %d",i);strcpy(s_shelf[i].author,"Author");}
- assert(!prepare_shelf_page(&ctx)&&s_request_count==1&&s_shelf_page_cache_allowed);int st=stats;
- for(int i=0;i<20;++i){s_shelf[0].pct=i;s_shelf[0].favorite=i&1;assert(!prepare_shelf_page(&ctx));assert(s_request_count==1&&stats==st);}
- s_shelf_page_cached=true;assert(prepare_shelf_page(&ctx)&&s_request_count==1&&stats==st);s_shelf_page_cached=false;
+ assert(!prepare_shelf_page(&ctx)&&s_request_count==1&&s_shelf_page_cache_allowed);
+ for(int i=0;i<20;++i){s_shelf[0].pct=i;s_shelf[0].favorite=i&1;assert(!prepare_shelf_page(&ctx));assert(s_request_count==1);}
+ s_shelf_page_cached=true;assert(prepare_shelf_page(&ctx)&&s_request_count==1);s_shelf_page_cached=false;
  for(mode=1;mode<3;++mode)changed(&ctx);mode=0;changed(&ctx);
  for(style=2;style<=6;++style)changed(&ctx);
  ++contrast;changed(&ctx);++rotation;changed(&ctx);++font_size;changed(&ctx);++order;changed(&ctx);
@@ -185,11 +190,11 @@ int main(void){
  ctx.leaf=1;changed(&ctx);ctx.leaf=0;changed(&ctx);
  strcpy(s_shelf[0].name,"Edited title");changed(&ctx);strcpy(s_shelf[0].author,"Edited author");changed(&ctx);
  shelf_entry_t temp=s_shelf[0];s_shelf[0]=s_shelf[1];s_shelf[1]=temp;changed(&ctx);
- ++modified;invalidate_covers();changed(&ctx);++book_bytes;invalidate_covers();changed(&ctx);
- rows=8;changed(&ctx);missing=true;invalidate_covers();int count=s_request_count;assert(!prepare_shelf_page(&ctx)&&!s_shelf_page_cache_allowed&&s_request_count==count);
- missing=false;invalidate_covers();assert(!prepare_shelf_page(&ctx)&&s_shelf_page_cache_allowed);
+ ++s_shelf[0].modified;changed(&ctx);++s_shelf[0].size;changed(&ctx);
+ ++s_shelf_catalog_epoch;changed(&ctx);++store_revision;changed(&ctx);
+ rows=8;changed(&ctx);int count=s_request_count;
  s_visible_count=0;invalidate_covers();count=s_request_count;assert(!prepare_shelf_page(&ctx)&&!s_shelf_page_cache_allowed&&s_request_count==count);
- puts("PASS: actual page preparation keys modes/styles/order/page/rotation/contrast/font/category/query/content/file size+mtime; live progress/favorites skip TF revalidation; missing files never cache");
+ puts("PASS: actual page preparation keys modes/styles/order/page/rotation/contrast/font/category/query/content/file size+mtime; live progress/favorites skip rediscovery; media guards invalidate, and an empty page never caches");
 }
 """
 
@@ -209,7 +214,7 @@ def main():
     unit+='typedef struct{unsigned x,y,width,height;}book_crop_t;\n'+function('book_cover_crop',ROOT/'main/book/book_cover.c')+'\n'
     unit+='\n'.join(line for line in (ROOT/'main/ui/ui_book_manage_layout.h').read_text().splitlines() if not line.startswith(('#include','#pragma')))+'\n'+UI
     unit+=(ROOT/'main/apps/book_shelf_badges.inc').read_text()+'\n'
-    for name in ['row_rect','shelf_cover_image','shelf_cover_frame_ready','fast_cover_matches','draw_favorite_icon','draw_shelf_favorite_icon','cover_favorite_needs_white_edge','shelf_cover_white_edge','draw_shelf_cover_favorite','draw_shelf_cover','draw_list_title','draw_list_row','draw_shelf_furniture','draw_shelf_page_artwork']:
+    for name in ['row_rect','shelf_cover_image','shelf_title_card','shelf_cover_frame_ready','fast_cover_matches','draw_favorite_icon','draw_shelf_favorite_icon','cover_favorite_needs_white_edge','shelf_cover_white_edge','draw_shelf_cover_favorite','draw_shelf_cover','draw_list_title','draw_list_row','draw_shelf_furniture','draw_shelf_page_artwork']:
         body=function(name,book)
         if name=='draw_shelf_cover':body=body.replace('{','{++cover_draws;',1)
         unit+=body+'\n'
