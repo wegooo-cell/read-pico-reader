@@ -14,6 +14,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include "esp_heap_caps.h"
 #ifdef ESP_PLATFORM
@@ -24,7 +25,7 @@
 #include "freertos/task.h"
 
 enum { EMPTY,QUEUED,RUNNING,AUTO,READY,FAILED,TAKEN,NO_ARTWORK };
-typedef struct { book_cover_job_t request;book_cover_result_t result;int state;bool auto_cache;uint8_t *automatic; } cover_job_slot_t;
+typedef struct { book_cover_job_t request;book_cover_result_t result;int state;bool auto_cache;uint64_t automatic_font_key;uint8_t *automatic; } cover_job_slot_t;
 static cover_job_slot_t *s_jobs;
 static portMUX_TYPE s_lock=portMUX_INITIALIZER_UNLOCKED;
 static unsigned s_generation;
@@ -51,7 +52,9 @@ static void prepare(cover_job_slot_t *job,unsigned generation) {
     job->result.generated=false;
     const bool compact=q->list&&!q->natural&&q->width&&q->height&&q->width<=BOOK_COVER_W&&q->height<=BOOK_COVER_H;
     struct stat st;if(!current(generation)||stat(q->path,&st)||!S_ISREG(st.st_mode))return;
-    if(job->automatic&&(job->result.size!=st.st_size||job->result.modified!=st.st_mtime))return;
+    if (job->automatic &&
+        (job->result.size != st.st_size || job->result.modified != st.st_mtime ||
+         job->automatic_font_key != book_auto_cover_font_key())) return;
     job->result.size=st.st_size;job->result.modified=st.st_mtime;
     if((q->metadata_only||q->with_chapters)&&!job->result.metadata){
         job->result.chapters=st.st_size>=0&&(uint64_t)st.st_size<=UINT32_MAX?book_cached_chapter_count(q->path,(uint32_t)st.st_size,(int64_t)st.st_mtime):0;
@@ -68,8 +71,7 @@ static void prepare(cover_job_slot_t *job,unsigned generation) {
     }
     if(!current(generation))return;
     bool from_auto=job->automatic!=NULL;
-    // 默认封面只在本帧显示，不进入整页缓存；下次重新尝试解码真封面。
-    // Generated defaults are shown for this frame only and never captured into the page cache.
+    // TXT 模板可按字体复用；其他生成图保留真实封面的重试机会。/ Cache TXT templates by face; leave other generated art eligible for later artwork retries.
     job->result.generated=from_auto;
     uint8_t *gray=job->automatic;job->automatic=NULL;
     if(gray&&compact){
@@ -149,7 +151,19 @@ static void prepare(cover_job_slot_t *job,unsigned generation) {
 ready:
     job->result.width=q->width;job->result.height=q->height;
     struct stat after;
-    if(!current(generation)||stat(q->path,&after)||after.st_size!=st.st_size||after.st_mtime!=st.st_mtime){free(job->result.pixels);job->result.pixels=NULL;job->result.metadata=false;}
+    if (!current(generation) || stat(q->path, &after) || after.st_size != st.st_size ||
+        after.st_mtime != st.st_mtime) {
+        free(job->result.pixels);
+        job->result.pixels = NULL;
+        job->result.metadata = false;
+        return;
+    }
+    const char *ext = strrchr(q->path, '.');
+    if (job->result.pixels && job->result.generated && !q->natural && ext && !strcasecmp(ext, ".txt")) {
+        const book_fast_cover_key_t raster = {q->width, q->height, q->stride, q->contrast, q->phase};
+        book_cover_shelf_ram_store(q->path, q->title, q->author, st.st_size, st.st_mtime,
+                                   job->automatic_font_key, q->list, q->fast, raster, job->result.pixels, job->result.white_edge);
+    }
 }
 static void worker(void *unused) {
     (void)unused;
@@ -219,13 +233,13 @@ bool book_cover_jobs_submit(unsigned generation,unsigned slot,const book_cover_j
     if(ok&&s_jobs[slot].state==EMPTY){s_jobs[slot].request=*request;s_jobs[slot].state=QUEUED;}
     portEXIT_CRITICAL(&s_lock);if(ok)start_worker();return ok;
 }
-int book_cover_jobs_take(unsigned generation,unsigned slot,book_cover_result_t *result) {
+static int take_result(unsigned generation, unsigned slot, book_cover_result_t *result, bool render_auto) {
     if(!s_jobs||slot>=BOOK_COVER_JOB_SLOTS||!result)return -1;
     cover_job_slot_t automatic={0};int status=0;
     portENTER_CRITICAL(&s_lock);
     if(generation!=s_generation||s_paused)status=-1;
     else if(s_jobs[slot].state==READY){*result=s_jobs[slot].result;s_jobs[slot].result.pixels=NULL;s_jobs[slot].state=TAKEN;status=1;}
-    else if(s_jobs[slot].state==AUTO){automatic=s_jobs[slot];s_jobs[slot].result.pixels=NULL;s_jobs[slot].state=RUNNING;}
+    else if(render_auto && s_jobs[slot].state==AUTO){automatic=s_jobs[slot];s_jobs[slot].result.pixels=NULL;s_jobs[slot].state=RUNNING;}
     else if (s_jobs[slot].state == NO_ARTWORK) {
         *result = s_jobs[slot].result;
         s_jobs[slot].state = TAKEN;
@@ -240,16 +254,29 @@ int book_cover_jobs_take(unsigned generation,unsigned slot,book_cover_result_t *
     if(automatic.result.pixels){
         char canonical[256];const char *title=automatic.request.title;
         if(book_title_from_path(automatic.request.path,canonical,sizeof(canonical)))title=canonical;
-        bool ok=book_auto_cover_render(automatic.request.path,title,automatic.request.author,BOOK_COVER_W,BOOK_COVER_H,automatic.result.pixels);
+        const uint64_t font_key = book_auto_cover_font_key();
+        bool ok=book_auto_cover_render(title,automatic.request.author,BOOK_COVER_W,BOOK_COVER_H,automatic.result.pixels);
         portENTER_CRITICAL(&s_lock);
         if(generation==s_generation&&!s_paused){
             s_jobs[slot].state=ok?QUEUED:FAILED;
-            if(ok){s_jobs[slot].automatic=automatic.result.pixels;automatic.result.pixels=NULL;}
+            if(ok){
+                s_jobs[slot].automatic = automatic.result.pixels;
+                s_jobs[slot].automatic_font_key = font_key;
+                automatic.result.pixels = NULL;
+            }
         }
         portEXIT_CRITICAL(&s_lock);free(automatic.result.pixels);start_worker();
     }
     return status;
 }
+int book_cover_jobs_take(unsigned generation, unsigned slot, book_cover_result_t *result) {
+    return take_result(generation, slot, result, true);
+}
+
+int book_cover_jobs_take_ready(unsigned generation, unsigned slot, book_cover_result_t *result) {
+    return take_result(generation, slot, result, false);
+}
+
 void book_cover_jobs_cancel(unsigned generation) {
 #if KIIKO_BOARD_METALIO47
     bool cancel=false;

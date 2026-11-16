@@ -149,6 +149,16 @@ enum EpdDrawError epd_hl_update_area_full(
     EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area
 );
 
+/// 只提交原矩形内的差异。/ Drive and commit differences within the exact requested rectangle.
+enum EpdDrawError epd_hl_update_area_diff_exact(
+    EpdiyHighlevelState *state, enum EpdDrawMode mode, int temperature, EpdRect area
+);
+
+/// 区域全刷，掩码和后缓冲提交都限定在原矩形。/ Force full drive and commit strictly within the original rectangle.
+enum EpdDrawError epd_hl_update_area_full_exact(
+    EpdiyHighlevelState *state, enum EpdDrawMode mode, int temperature, EpdRect area
+);
+
 /**
  * Reset the front framebuffer to a white state.
  *

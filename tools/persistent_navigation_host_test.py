@@ -20,11 +20,11 @@ typedef struct{uint16_t y0;}ui_gesture_event_t;
 typedef struct{int unused;}app_ctx_t;
 static int s_view;
 static struct{int state;}s_status;
-static bool usb;
+static bool usb, s_setup_chrome, s_cover_wifi_only;
 static int tabs,active;
 static bool usb_storage_active(void){return usb;}
 static void ui_nav_draw(uint8_t*fb,int index){(void)fb;++tabs;active=index;}
-'''+ '\n'.join(function(name,source) for name in ['transfer_content_end','transfer_footer_top','transfer_edge_back','transfer_navigation','transfer_back_swipe_area'])+r'''
+'''+ '\n'.join(function(name,source) for name in ['transfer_content_end','transfer_footer_top','transfer_edge_back','transfer_navigation_enabled','transfer_navigation','transfer_back_swipe_area'])+r'''
 int main(void){
  assert(transfer_content_end()==1088&&transfer_footer_top()+76<=1088);
  for(int busy=0;busy<2;++busy)for(int uploading=0;uploading<2;++uploading){
@@ -33,6 +33,9 @@ int main(void){
  }
  uint8_t fb=0;transfer_navigation(&fb,2);assert(tabs==1&&active==2);
  transfer_navigation(&fb,3);assert(tabs==2&&active==3);
+ usb=false;s_status.state=0;s_cover_wifi_only=true;
+ assert(transfer_edge_back(NULL)&&!transfer_navigation_enabled(NULL));
+ transfer_navigation(&fb,3);assert(tabs==2);
  for(s_view=0;s_view<=1;++s_view){
   assert(transfer_back_swipe_area(NULL,&(ui_gesture_event_t){.y0=559}));
   assert(transfer_back_swipe_area(NULL,&(ui_gesture_event_t){.y0=560})==(s_view!=TRANSFER_PASSWORD));

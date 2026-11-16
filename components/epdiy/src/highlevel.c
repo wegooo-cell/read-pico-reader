@@ -186,7 +186,7 @@ EpdRect _inverse_rotated_area(uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
 }
 
 static enum EpdDrawError hl_update_area(
-    EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area, bool force_full
+    EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area, bool force_full, bool exact
 ) {
     assert(state != NULL);
     // Not right to rotate here since this copies part of buffer directly
@@ -210,9 +210,9 @@ static enum EpdDrawError hl_update_area(
         state->dirty_columns
     );
 
+    int x_start, x_stop;
+    epd_difference_column_range(area, &x_start, &x_stop);
     if (force_full) {
-        int x_start, x_stop;
-        epd_difference_column_range(area, &x_start, &x_stop);
         const int fb_h = epd_height();
         const int y0 = area.y < 0 ? 0 : area.y;
         const int y1 = area.y + area.height > fb_h ? fb_h : area.y + area.height;
@@ -224,7 +224,20 @@ static enum EpdDrawError hl_update_area(
         diff_area.height = y1 - y0;
     }
 
-    if (diff_area.height == 0 || diff_area.width == 0) {
+    if (exact && x_stop > x_start) {
+        // 差分读取保持32列对齐；驱动和回写都限定在原区域。
+        // Keep aligned differential reads, but drive and commit only the requested region.
+        const int first = area.x > x_start ? area.x : x_start;
+        const int end = area.x + area.width < x_stop ? area.x + area.width : x_stop;
+        for (int x = x_start; x < first; ++x)
+            state->dirty_columns[x / 2] &= (uint8_t)~(0x0fu << (4 * (x & 1)));
+        for (int x = end; x < x_stop; ++x)
+            state->dirty_columns[x / 2] &= (uint8_t)~(0x0fu << (4 * (x & 1)));
+        x_start = first;
+        x_stop = end;
+    }
+
+    if (diff_area.height <= 0 || diff_area.width <= 0 || x_start >= x_stop) {
         epd_leading_skip_discard();
         return EPD_DRAW_SUCCESS;
     }
@@ -251,8 +264,6 @@ static enum EpdDrawError hl_update_area(
     uint32_t t2 = esp_timer_get_time() / 1000;
 
     // 回写范围和差分实际算过的列段一致：段外的像素没被驱动，back_fb 不能跟着改。
-    int x_start, x_stop;
-    epd_difference_column_range(area, &x_start, &x_stop);
     diff_area.x = x_start;
     diff_area.y = 0;
     diff_area.width = x_stop - x_start;
@@ -300,13 +311,25 @@ static enum EpdDrawError hl_update_area(
 enum EpdDrawError epd_hl_update_area(
     EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area
 ) {
-    return hl_update_area(state, mode, temperature, area, false);
+    return hl_update_area(state, mode, temperature, area, false, false);
 }
 
 enum EpdDrawError epd_hl_update_area_full(
     EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area
 ) {
-    return hl_update_area(state, mode, temperature, area, true);
+    return hl_update_area(state, mode, temperature, area, true, false);
+}
+
+enum EpdDrawError epd_hl_update_area_diff_exact(
+    EpdiyHighlevelState *state, enum EpdDrawMode mode, int temperature, EpdRect area
+) {
+    return hl_update_area(state, mode, temperature, area, false, true);
+}
+
+enum EpdDrawError epd_hl_update_area_full_exact(
+    EpdiyHighlevelState *state, enum EpdDrawMode mode, int temperature, EpdRect area
+) {
+    return hl_update_area(state, mode, temperature, area, true, true);
 }
 
 void epd_hl_set_all_white(EpdiyHighlevelState* state) {

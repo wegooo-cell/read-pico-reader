@@ -7,6 +7,38 @@
 #include <string.h>
 #include <stdlib.h>
 #include "book_title.h"
+#include "nvs.h"
+static const char *saved_path, *saved_title;
+
+bool book_weread_cover_metadata(const char *path, char *title, size_t title_cap,
+                                char *author, size_t author_cap) {
+    (void)path; (void)title; (void)title_cap; (void)author; (void)author_cap;
+    return false;
+}
+
+
+esp_err_t nvs_open(const char *ns, int mode, nvs_handle_t *handle) {
+    assert(mode == NVS_READONLY);
+    assert(!strcmp(ns, "rp_titles") || !strcmp(ns, "mt_titles"));
+    *handle = 1;
+    return ESP_OK;
+}
+
+void nvs_close(nvs_handle_t handle) {
+    assert(handle == 1);
+}
+
+esp_err_t nvs_get_blob(nvs_handle_t handle, const char *key, void *data, size_t *length) {
+    assert(handle == 1 && key[0] == 't');
+    if (!saved_path) return ESP_ERR_NVS_NOT_FOUND;
+    const size_t path_size = strlen(saved_path) + 1, title_size = strlen(saved_title) + 1;
+    assert(*length >= path_size + title_size);
+    memcpy(data, saved_path, path_size);
+    memcpy((char *)data + path_size, saved_title, title_size);
+    *length = path_size + title_size;
+    return ESP_OK;
+}
+
 static void check(const char *input,const char *title,const char *author){
     char t[512],a[512],original[4096];snprintf(original,sizeof(original),"%s",input);
     assert(book_name_from_path(input,t,sizeof(t),a,sizeof(a)));
@@ -30,6 +62,10 @@ int main(void){
     check("沉睡的人 (乔治·佩雷克 Georges Perec) (z-library.sk, 1lib.sk, z-lib.sk)","沉睡的人","乔治·佩雷克");
     check("活山（[英]娜恩·谢泼德）（Z-Library）.EPUB","活山","娜恩·谢泼德");
     check("Reader (Some Name) [Z-Library].txt","Reader","Some Name");
+    check("重生之女将星 (千山茶客) [ZLib].txt","重生之女将星","千山茶客");
+    check("沉睡的人（乔治·佩雷克）【z-lib.sk】.EPUB","沉睡的人","乔治·佩雷克");
+    check("Compression Patterns (zlib.net).epub","Compression Patterns (zlib.net)","");
+    check("The zlib Handbook.txt","The zlib Handbook","");
     check("敦煌七窟 (邱华栋) (z-library.sk, 1lib.sk, z-lib.sk)_副本.epub","敦煌七窟","邱华栋");
     check("县乡生活一场生活方式的巨变 (吕德文,胡晓映) (z-library.sk, 1lib.sk, z-lib.sk).epub","县乡生活一场生活方式的巨变","吕德文,胡晓映");
     check("The Book (2nd edition) (z-library.sk).epub","The Book (2nd edition)","");
@@ -68,5 +104,15 @@ int main(void){
     for(size_t n=1;n<2000;n+=7){memset(long_name,'(',n);snprintf(long_name+n,sizeof(long_name)-n,"x)%s.epub",source);assert(book_name_from_path(long_name,title,sizeof(title),author,sizeof(author)));}
     char out[4]="old";assert(!book_name_from_path(NULL,out,sizeof(out),NULL,0)&&!out[0]);
     assert(book_name_from_path(".epub",out,sizeof(out),NULL,0)&&!strcmp(out,".ep"));
-    puts("PASS: supplied Z-Library names, nested/duplicate author, translator credit, bilingual title, conservative fallbacks and UTF-8 bounds; originals unchanged");
+    const char *ticket_path = "/sdcard/books/沉睡的人（乔治·佩雷克）【ZLib】.epub";
+    assert(book_display_name_from_path(ticket_path, title, sizeof(title), author, sizeof(author)));
+    assert(!strcmp(title, "沉睡的人") && !strcmp(author, "乔治·佩雷克"));
+    saved_path = ticket_path;
+    saved_title = "我的收藏名";
+    assert(book_display_name_from_path(ticket_path, title, sizeof(title), author, sizeof(author)));
+    assert(!strcmp(title, saved_title) && !strcmp(author, "乔治·佩雷克"));
+    saved_path = "/sdcard/books/其他书.epub";
+    assert(book_display_name_from_path(ticket_path, title, sizeof(title), author, sizeof(author)));
+    assert(!strcmp(title, "沉睡的人") && !strcmp(author, "乔治·佩雷克"));
+    puts("PASS: supplied Z-Library names, nested/duplicate author, translator credit, bilingual title, conservative fallbacks, UTF-8 bounds and ticket custom-title precedence; originals unchanged");
 }

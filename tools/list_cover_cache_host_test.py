@@ -22,6 +22,12 @@ unit = r'''
 #define BOOK_COVER_W 176
 #define BOOK_COVER_H 240
 #define BOOK_AUTO_COVER_VERSION 1
+static bool book_weread_cover_read(const char *p, uint8_t *out, unsigned w, unsigned h) {
+    (void)p; (void)out; (void)w; (void)h; return false;
+}
+
+static uint64_t cover_font;
+static uint64_t book_auto_cover_font_key(void){return cover_font;}
 #define COVER_CACHE_MAGIC 1234
 #define COVER_CACHE_SCHEMA 1
 #define ESP_OK 0
@@ -43,7 +49,7 @@ static size_t heap_caps_get_free_size(int flags){assert(flags==3);return availab
 static esp_err_t book_epub_cover_bounded(const char *p,uint8_t **data,size_t *bytes,bool *png,size_t budget){(void)p;assert(budget<=4u*1024u*1024u&&budget+1536u*1024u<=available);++requests;if(error)return error;*data=malloc(1);assert(*data);**data=1;*bytes=1;*png=false;return ESP_OK;}
 static bool book_image_dimensions(const uint8_t *data,size_t bytes,bool png,unsigned *w,unsigned *h){(void)png;assert(data&&bytes==1);*w=source_w;*h=source_h;return true;}
 static bool book_image_grayscale(const uint8_t *data,size_t bytes,bool png,unsigned w,unsigned h,uint8_t *out){(void)png;assert(data&&bytes==1&&w&&h&&w<=176&&h<=240);++decoded;if(decode_fail)return false;memset(out,61,w*h);return true;}
-static bool book_auto_cover_render(const char *p,const char *t,const char *a,unsigned w,unsigned h,uint8_t *out){(void)p;(void)t;(void)a;assert(w==176&&h==240);memset(out,191,w*h);return true;}
+static bool book_auto_cover_render(const char *t,const char *a,unsigned w,unsigned h,uint8_t *out){(void)t;(void)a;assert(w==176&&h==240);memset(out,191,w*h);return true;}
 '''
 unit+=r'''
 typedef struct {uint64_t field[8];} metalio_cover_key_t;

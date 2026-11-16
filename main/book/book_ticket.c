@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * 中文：锁屏票根从持久进度与真实阅读计数生成；没有可靠时钟时不编造今日数据。
- * 票面上下以裁纸缺口绘制，最近阅读的 EPUB 封面作为灰阶背景。
+ * 票面上下以裁纸缺口绘制，最近阅读的封面作为灰阶背景。
  * English: Build the ticket from persisted progress and measured reading data; omit daily data without a valid clock.
- * Scalloped paper edges sit over a grayscale wallpaper made from the latest EPUB cover.
+ * Scalloped paper edges sit over a grayscale wallpaper made from the latest book cover.
  * 用户修订：锁屏入口统一系统字体，截短测量须与实际界面字体及字号一致。
  * User revision: lock entry selects the system face; truncation must measure the actual UI face and size.
  */
@@ -15,8 +15,10 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <time.h>
 #include "book_cover.h"
+#include "book_cover_auto.h"
 #include "book_epub.h"
 #include "book_progress.h"
 #include "book_title.h"
@@ -27,140 +29,8 @@
 #include "ttf_font.h"
 #include "ui_kit.h"
 
-#define TICKET_MAGIC UINT32_C(0x52505431)
-typedef struct {
-    uint32_t magic, day;
-    uint64_t total_seconds, today_seconds;
-    uint32_t total_turns, today_turns;
-} ticket_stats_t;
-#define TICKET_HEAT_MAGIC UINT32_C(0x52504831)
-typedef struct {
-    uint32_t magic;
-    uint32_t day[30];
-    uint32_t seconds[30];
-} ticket_heat_t;
-#define TICKET_MONTH_MAGIC UINT32_C(0x52504832)
-typedef struct { uint32_t magic, day[32], seconds[32]; } ticket_month_t;
-static void month_load(nvs_handle_t h, ticket_month_t *out) {
-    size_t len = sizeof(*out);
-    if (nvs_get_blob(h, "heat32", out, &len) == ESP_OK && len == sizeof(*out) && out->magic == TICKET_MONTH_MAGIC) return;
-    memset(out, 0, sizeof(*out)); out->magic = TICKET_MONTH_MAGIC;
-    ticket_heat_t old = {0}; len = sizeof(old);
-    if (nvs_get_blob(h, "heatmap", &old, &len) != ESP_OK || len != sizeof(old) || old.magic != TICKET_HEAT_MAGIC) return;
-    for (unsigned i = 0; i < 30; ++i) if (old.day[i] && old.day[i] % 30 == i) {
-        unsigned slot = old.day[i] % 32;
-        if (out->day[slot] < old.day[i]) { out->day[slot] = old.day[i]; out->seconds[slot] = old.seconds[i]; }
-    }
-}
-static uint32_t local_day(void) {
-    time_t now = time(NULL);
-    if (now < 1704067200) {
-        const pmu_snapshot_t *pmu = read_pico_pmu_get();
-        if (pmu && pmu->time_synced && pmu->unix_sec >= 1704067200) now = pmu->unix_sec;
-    }
-    if (now < 1704067200) return 0;
-    return (uint32_t)((now + 8 * 3600) / 86400);
-}
-static void stats_load(ticket_stats_t *out) {
-    memset(out, 0, sizeof(*out));
-    nvs_handle_t h;
-#if KIIKO_BOARD_METALIO47
-    if (nvs_open("mt_ticket", NVS_READONLY, &h) != ESP_OK) return;
-#else
-    if (nvs_open("rp_ticket", NVS_READONLY, &h) != ESP_OK) return;
-#endif
-    size_t len = sizeof(*out);
-    esp_err_t err = nvs_get_blob(h, "stats", out, &len);
-    nvs_close(h);
-    if (err != ESP_OK || len != sizeof(*out) || out->magic != TICKET_MAGIC) memset(out, 0, sizeof(*out));
-}
-esp_err_t book_ticket_record(uint32_t seconds, uint32_t turns) {
-    if (!seconds && !turns) return ESP_OK;
-    ticket_stats_t stats; stats_load(&stats);
-    stats.magic = TICKET_MAGIC;
-    uint32_t day = local_day();
-    if (day && stats.day != day) { stats.day = day; stats.today_seconds = 0; stats.today_turns = 0; }
-    stats.total_seconds += seconds;
-    stats.total_turns += turns;
-    if (day) { stats.today_seconds += seconds; stats.today_turns += turns; }
-    nvs_handle_t h;
-#if KIIKO_BOARD_METALIO47
-    esp_err_t err = nvs_open("mt_ticket", NVS_READWRITE, &h);
-#else
-    esp_err_t err = nvs_open("rp_ticket", NVS_READWRITE, &h);
-#endif
-    if (err != ESP_OK) return err;
-    err = nvs_set_blob(h, "stats", &stats, sizeof(stats));
-    if (err == ESP_OK && day && seconds) {
-        // 先迁移旧环，再同时维护两个环，保留降级兼容。/ Migrate before updating both rings, preserving downgrade compatibility.
-        ticket_month_t month; month_load(h, &month);
-        unsigned mslot = day % 32;
-        if (month.day[mslot] != day) { month.day[mslot] = day; month.seconds[mslot] = 0; }
-        uint32_t previous = month.seconds[mslot];
-        month.seconds[mslot] = UINT32_MAX - previous < seconds ? UINT32_MAX : previous + seconds;
-        err = nvs_set_blob(h, "heat32", &month, sizeof(month));
-        ticket_heat_t heat = {0};
-        size_t len = sizeof(heat);
-        if (nvs_get_blob(h, "heatmap", &heat, &len) != ESP_OK ||
-            len != sizeof(heat) || heat.magic != TICKET_HEAT_MAGIC) {
-            memset(&heat, 0, sizeof(heat));
-            heat.magic = TICKET_HEAT_MAGIC;
-        }
-        unsigned slot = day % 30;
-        if (heat.day[slot] != day) { heat.day[slot] = day; heat.seconds[slot] = 0; }
-        uint32_t old = heat.seconds[slot];
-        heat.seconds[slot] = UINT32_MAX - old < seconds ? UINT32_MAX : old + seconds;
-        if (err == ESP_OK) err = nvs_set_blob(h, "heatmap", &heat, sizeof(heat));
-    }
-    if (err == ESP_OK) err = nvs_commit(h);
-    nvs_close(h);
-    return err;
-}
-bool book_ticket_recent_days(uint32_t seconds[30]) {
-    if (!seconds) return false;
-    memset(seconds, 0, 30 * sizeof(*seconds));
-    uint32_t today = local_day();
-    if (!today) return false;
-    nvs_handle_t h;
-#if KIIKO_BOARD_METALIO47
-    if (nvs_open("mt_ticket", NVS_READONLY, &h) != ESP_OK) return true;
-#else
-    if (nvs_open("rp_ticket", NVS_READONLY, &h) != ESP_OK) return true;
-#endif
-    ticket_heat_t heat = {0};
-    size_t len = sizeof(heat);
-    esp_err_t err = nvs_get_blob(h, "heatmap", &heat, &len);
-    nvs_close(h);
-    if (err != ESP_OK || len != sizeof(heat) || heat.magic != TICKET_HEAT_MAGIC) return true;
-    for (unsigned i = 0; i < 30; ++i) {
-        uint32_t day = today - (29 - i);
-        unsigned slot = day % 30;
-        if (heat.day[slot] == day) seconds[i] = heat.seconds[slot];
-    }
-    return true;
-}
-bool book_ticket_month_days(int year, int month, uint32_t seconds[31]) {
-    if (!seconds) return false;
-    memset(seconds, 0, 31*sizeof(*seconds));
-    uint32_t today = local_day();
-    if (!today || year < 2024 || year > 9999 || month < 1 || month > 12) return false;
-    time_t timestamp = (time_t)today * 86400;
-    struct tm date = {0}; gmtime_r(&timestamp, &date);
-    if (date.tm_year+1900 != year || date.tm_mon+1 != month) return false;
-    nvs_handle_t h;
-#if KIIKO_BOARD_METALIO47
-    if (nvs_open("mt_ticket", NVS_READONLY, &h) != ESP_OK) return true;
-#else
-    if (nvs_open("rp_ticket", NVS_READONLY, &h) != ESP_OK) return true;
-#endif
-    ticket_month_t heat; month_load(h, &heat); nvs_close(h);
-    uint32_t first = today-(date.tm_mday-1);
-    for (int i=0; i<date.tm_mday; ++i) {
-        uint32_t day=first+i; unsigned slot=day%32;
-        if (heat.day[slot]==day) seconds[i]=heat.seconds[slot];
-    }
-    return true;
-}
+#include "book/book_ticket_data.inc"
+
 static void text_fit(char *text, int px, int width) {
     while (*text && ui_text_fixed_width_px(ui_text_effective_px(px), text) > width) {
         size_t n = strlen(text) - 1;
@@ -191,6 +61,12 @@ static uint8_t *cover_load(const char *path, const char *title, const char *auth
             *width = BOOK_COVER_W; *height = BOOK_COVER_H;
             return gray;
         }
+    }
+    const char *ext = strrchr(path, '.');
+    if (ext && !strcasecmp(ext, ".txt") &&
+        book_auto_cover_render(title, author, BOOK_COVER_W, BOOK_COVER_H, gray)) {
+        *width = BOOK_COVER_W; *height = BOOK_COVER_H;
+        return gray;
     }
     free(gray);
     return NULL;
@@ -341,19 +217,20 @@ static int ticket_heading(uint8_t *fb,int top,int height,int px,const char *text
     return 1;
 }
 bool book_ticket_draw(uint8_t *fb, bool reader_background) {
-    (void)reader_background;
     char path[288];
-    if (!book_progress_last_path(path, sizeof(path))) return false;
+    if (reader_background && s_position.magic == TICKET_POSITION_MAGIC) strcpy(path, s_position.path);
+    else if (!book_progress_last_path(path, sizeof(path))) return false;
     struct stat st;
     bool file_valid = stat(path, &st) == 0 && S_ISREG(st.st_mode) && st.st_size >= 0 &&
                       (uint64_t)st.st_size <= UINT32_MAX;
     book_progress_t progress = {0};
-    bool progress_valid = file_valid && book_progress_load(path, st.st_size, &progress);
+    const bool saved = file_valid && book_progress_load(path, st.st_size, &progress);
+    char chapter[128] = {0};
+    const bool progress_valid = file_valid &&
+        position_for_ticket(path, st.st_size, reader_background, saved, &progress, chapter);
     char title[256] = {0}, author[128] = {0};
-    if (!book_name_from_path(path,title,sizeof(title),author,sizeof(author))) snprintf(title, sizeof(title), "未命名");
-    char custom_title[256] = {0};
-    if (book_title_get(path, custom_title, sizeof(custom_title)) && custom_title[0])
-        snprintf(title, sizeof(title), "%s", custom_title);
+    if (!book_display_name_from_path(path, title, sizeof(title), author, sizeof(author)))
+        snprintf(title, sizeof(title), "未命名");
     const char *ext = strrchr(path, '.');
     if (ext && !strcasecmp(ext, ".epub")) {
         char meta_title[256] = {0},meta_author[128]={0};
@@ -377,22 +254,29 @@ bool book_ticket_draw(uint8_t *fb, bool reader_background) {
     cover_draw(fb, gray, cover_width, cover_height, title);
     free(gray);
     ui_hairline(fb, 768, 82, 520, UI_GRAY_BLACK);
-    char line[96];
-    if (progress_valid) snprintf(line, sizeof(line), "已读 %u%%  ·  第 %u 章", progress.pct,
-                                 (unsigned)progress.chapter + 1);
-    else snprintf(line, sizeof(line), "已读 —  ·  章节 —");
+    char line[200];
+    if (progress_valid && chapter[0])
+        snprintf(line, sizeof(line), "已读 %u%%  ·  %s", progress.pct, chapter);
+    else if (progress_valid)
+        snprintf(line, sizeof(line), "已读 %u%%", progress.pct);
+    else
+        snprintf(line, sizeof(line), "已读 —");
     ticket_stat(fb, 802, 54, 34, line);
     EpdRect track = {82, 868, 520, 10};
     ui_fill_rect_fast(track, UI_GRAY_LIGHT, fb);
     track.width = progress_valid ? track.width * progress.pct / 100 : 0;
     if (track.width) ui_fill_rect_fast(track, UI_GRAY_BLACK, fb);
-    if (day && stats.day == day) snprintf(line, sizeof(line), "今日阅读 %llu 分钟  ·  翻页 %u 次",
-        (unsigned long long)(stats.today_seconds / 60), (unsigned)stats.today_turns);
-    else snprintf(line, sizeof(line), "今日阅读 —  ·  日期未同步");
+    char elapsed[64];
+    if (day) {
+        const ticket_day_t today = stats_day(&stats, day);
+        book_ticket_format_time(elapsed, sizeof(elapsed), today.milliseconds);
+        snprintf(line, sizeof(line), "今日阅读 %s  ·  翻页 %u 次", elapsed, (unsigned)today.turns);
+    } else {
+        snprintf(line, sizeof(line), "今日阅读 —  ·  日期未同步");
+    }
     ticket_stat(fb, 914, 48, 28, line);
-    snprintf(line, sizeof(line), "累计阅读 %llu 小时 %llu 分钟  ·  翻页 %u 次",
-             (unsigned long long)(stats.total_seconds / 3600),
-             (unsigned long long)((stats.total_seconds / 60) % 60), (unsigned)stats.total_turns);
+    book_ticket_format_time(elapsed, sizeof(elapsed), stats.total_ms);
+    snprintf(line, sizeof(line), "累计阅读 %s  ·  翻页 %u 次", elapsed, (unsigned)stats.total_turns);
     ticket_stat(fb, 969, 74, 28, line);
     ui_hairline(fb, 1050, 82, 520, UI_GRAY_BLACK);
     ui_text(fb, 82, 1080, 26, "在每一页里，留下时间的凭证", EPD_DRAW_ALIGN_LEFT, false);

@@ -346,11 +346,13 @@ static enum EpdDrawError page_turn_run(EpdiyHighlevelState* hl, EpdRect area,
         if (!any) continue;
 
         if (line_ph) {
-            int xs = phys.x & ~1;
-            int xe = (phys.x + phys.width + 1) & ~1;
-            if (xe > xs) {
-                memset(hl->dirty_columns + xs / 2, 0xFF, (size_t)((xe - xs) / 2));
-            }
+            const int end = phys.x + phys.width;
+            const int first_pair = (phys.x + 1) / 2;
+            const int end_pair = end / 2;
+            if (end_pair > first_pair)
+                memset(hl->dirty_columns + first_pair, 0xff, (size_t)(end_pair - first_pair));
+            if (phys.x & 1) hl->dirty_columns[phys.x / 2] |= 0xf0;
+            if (end & 1) hl->dirty_columns[end / 2] |= 0x0f;
             epd_set_line_phase_luts(s_lut_ptr, s_line_phase);
         } else {
             memset(hl->dirty_lines + y0, 1, (size_t)(y1 - y0));

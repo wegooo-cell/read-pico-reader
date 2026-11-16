@@ -38,6 +38,11 @@ bool book_index_cache_prepare(const char *source,const char *tag,uint32_t versio
  *key=(book_index_cache_header_t){.magic=123,.version=version,.source_size=(uint32_t)st.st_size,.modified=st.st_mtime,.path_hash=456};
  return snprintf(path,cap,"%s.idx",source)>0;
 }
+bool book_index_cache_prepare_file(const char *source,const char *tag,uint32_t version,
+ uint64_t size,int64_t modified,char *path,size_t cap,book_index_cache_header_t *key){
+ return book_index_cache_prepare(source,tag,version,path,cap,key) &&
+        key->source_size==size && key->modified==modified;
+}
 FILE *book_index_cache_open_read(const char *path,const book_index_cache_header_t *key){
  FILE *f=fopen(path,"rb");if(!f)return NULL;book_index_cache_header_t found;
  if(fread(&found,1,sizeof(found),f)!=sizeof(found)||found.magic!=key->magic||found.version!=key->version||

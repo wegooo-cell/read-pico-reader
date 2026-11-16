@@ -12,13 +12,11 @@
 #include <stdbool.h>
 #include <string.h>
 
-// 用户2026-10-29：涉及书架的根页切换补八相，其余补六相，插在原保持前；等灰保持。
-// Root switches involving the shelf add eight changed-white phases; other roots add six before native settling.
-const EpdWaveform* display_main_clean_waveform_with_phases(
-    const EpdWaveform* source, enum EpdDrawMode draw_mode, unsigned white_phases
+// 保留原迁移和定稿尾段，将同向擦白插在保持相之前。/ Insert directional white drive before the original settling tail.
+static const EpdWaveform* main_white_waveform(
+    const EpdWaveform* source, enum EpdDrawMode draw_mode, unsigned white_phases, bool fast
 ) {
-#if KIIKO_PICO_MAIN_CLEAN
-    enum { SLOTS=12, MAX_SOURCE=37 };
+    enum { SLOTS = 16, MAX_SOURCE = 37, MAX_PHASES = 48 };
     typedef struct {
         const EpdWaveform *source;
         int mode;
@@ -31,9 +29,8 @@ const EpdWaveform* display_main_clean_waveform_with_phases(
     } slot_t;
     static slot_t slots[SLOTS];
     const int mode=draw_mode&0x3f;
-    if(!source || (mode!=MODE_DU && mode!=MODE_GL16) ||
-       (white_phases!=6 && white_phases!=8))return source;
-    // Rebase a cached result before choosing another strength; never stack cleanup phases.
+    if (!source || (mode != MODE_DU && mode != MODE_GL16)) return source;
+    // 派生表先还原到源表再选择力度。/ Rebase derived inputs before choosing a strength.
     for(unsigned i=0;i<SLOTS;++i)
         if(slots[i].source && &slots[i].wave==source && slots[i].mode==mode){source=slots[i].source;break;}
     for(unsigned i=0;i<SLOTS;++i){
@@ -45,7 +42,7 @@ const EpdWaveform* display_main_clean_waveform_with_phases(
        source->num_temp_ranges!=1 || !source->temp_intervals)return source;
     unsigned index=0;while(index<SLOTS && slots[index].source)++index;
     if(index==SLOTS)return source;
-    // Equal pixels are held, so only changed-pixel actions determine the native settling tail.
+    // 只用变化像素判断原波形的保持尾段。/ Use changed-pixel actions to locate the native settling tail.
     int holds=0;
     for(int f=original->phases-1;f>=0&&holds<3;--f){
         bool empty=true;
@@ -57,7 +54,7 @@ const EpdWaveform* display_main_clean_waveform_with_phases(
     const int release=holds?0:1;
     const int white=(int)white_phases;
     const int count=original->phases+white+release;
-    if(count>45)return source;
+    if (count > MAX_PHASES) return source;
     uint8_t (*data)[16][4]=heap_caps_malloc((size_t)count*16*4,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!data)return source;
     const int drive=original->phases-holds;
@@ -65,19 +62,36 @@ const EpdWaveform* display_main_clean_waveform_with_phases(
     memset(data+drive,0,(size_t)white*64);
     memcpy(data+drive+white,original->luts+(size_t)drive*64,(size_t)holds*64);
     if(release)memset(data+count-1,0,64);
-    for(int f=0;f<count;++f)
-        for(int gray=0;gray<16;++gray)
-            data[f][gray][gray/4]&=(uint8_t)~(3u<<(6-2*(gray%4)));
-    for(int f=drive;f<drive+white;++f)
-        for(int from=0;from<15;++from)data[f][15][from/4]|=(uint8_t)(2u<<(6-2*(from%4)));
+    if (!fast) {
+        for (int f = 0; f < count; ++f)
+            for (int gray = 0; gray < 16; ++gray)
+                data[f][gray][gray / 4] &= (uint8_t)~(3u << (6 - 2 * (gray % 4)));
+    }
+    // 快刷切页同时擦除白到白的残影；新增阶段对黑色和中灰保持。/ Fast switches also maintain white-to-white; the added phases hold black and midgrays.
+    for (int f = drive; f < drive + white; ++f)
+        for (int from = 0; from < (fast ? 16 : 15); ++from)
+            data[f][15][from / 4] |= (uint8_t)(2u << (6 - 2 * (from % 4)));
     slot_t *slot=&slots[index];slot->mode=mode;slot->white_phases=white_phases;
     slot->phases=(EpdWaveformPhases){count,(const uint8_t*)data,NULL};slot->range=&slot->phases;
     slot->profile=(EpdWaveformMode){mode,1,&slot->range};slot->profile_ptr=&slot->profile;
     slot->wave=(EpdWaveform){.num_modes=1,.num_temp_ranges=1,.mode_data=&slot->profile_ptr,.temp_intervals=source->temp_intervals};
     slot->source=source;return &slot->wave;
-#else
-    (void)draw_mode;(void)white_phases;return source;
+}
+
+const EpdWaveform* display_main_clean_waveform_with_phases(
+    const EpdWaveform* source, enum EpdDrawMode draw_mode, unsigned white_phases
+) {
+#if KIIKO_PICO_MAIN_CLEAN
+    if (white_phases == 6 || white_phases == 8)
+        return main_white_waveform(source, draw_mode, white_phases, false);
 #endif
+    (void)draw_mode;
+    (void)white_phases;
+    return source;
+}
+
+const EpdWaveform* display_main_fast_white_waveform(const EpdWaveform* source, enum EpdDrawMode mode) {
+    return main_white_waveform(source, mode, PICO_MAIN_FAST_WHITE_PHASES, true);
 }
 
 const EpdWaveform* display_main_clean_waveform(const EpdWaveform* source, enum EpdDrawMode mode) {

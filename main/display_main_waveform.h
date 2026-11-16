@@ -33,6 +33,12 @@ const EpdWaveform* display_main_clean_waveform_with_phases(
     const EpdWaveform* source, enum EpdDrawMode mode, unsigned white_phases
 );
 
+#if !KIIKO_BOARD_METALIO47
+#define PICO_MAIN_FAST_WHITE_PHASES 10u
+/// PICO快刷切页为所有目标白补十相，保留原迁移及定稿。/ Add ten white drives to all white targets on Pico fast switches, retaining native actions and settling.
+const EpdWaveform* display_main_fast_white_waveform(const EpdWaveform* source, enum EpdDrawMode mode);
+#endif
+
 #if KIIKO_BOARD_METALIO47
 /// 用户批准的快刷跨根页背景维护：独立于实验开关，六/八相全目标白及两相释放。
 /// Approved board-native fast root maintenance: six/eight white-target drives and two holds, independent of experiment flags.

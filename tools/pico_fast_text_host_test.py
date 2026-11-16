@@ -35,7 +35,7 @@ static enum EpdRotation rotation;
 static EpdWaveform E0470_WAVEFORM={1},native_du={2},normal={3},E0470_FOLLOW_WAVEFORM={4},PICO_SETTINGS_MOTION_WAVEFORM={5};
 static bool s_bulk_io;
 static int effect=2,depth,latency,scans,recoveries,regular,fulls,prefill,scan_type;
-static bool full_requested,intercept,available=true;
+static bool full_requested,intercept,exact,available=true;
 static enum EpdDrawError result,recovered;
 static EpdRect requested;
 static int64_t now;
@@ -70,6 +70,14 @@ static EpdRect epd_difference_image_cropped(const uint8_t*to,const uint8_t*from,
 }
 static enum EpdDrawError epd_draw_base(EpdRect a,const uint8_t*d,EpdRect crop,enum EpdDrawMode m,int t,const bool*r,const uint8_t*c,const EpdWaveform*w){
  assert(depth&&a.width==W&&crop.height==H&&d==difference&&r==lines&&c==columns&&t==25);
+ if(exact){
+  for(int x=0;x<W;++x){
+   const bool in=x>=requested.x&&x<requested.x+requested.width;
+   assert(((c[x/2]>>((x&1)*4))&15)==(in?15:0));
+  }
+  for(int y=0;y<H;++y)assert(r[y]==(y>=requested.y&&y<requested.y+requested.height));
+  ++scans;return result;
+ }
  assert(w==&native_du&&m==(MODE_DU|MODE_PACKING_1PPB_DIFFERENCE));
  assert(scan_type==READ_PICO_EPD_SCAN_FULL&&prefill==127&&!memcmp(back,old_back,B));
  for(int y=requested.y;y<requested.y+requested.height;++y)for(int x=requested.x;x<requested.x+requested.width;++x){unsigned p=d[y*W+x];assert((p>>4)==0||(p>>4)==15);assert((p&15)==6);}
@@ -77,11 +85,9 @@ static enum EpdDrawError epd_draw_base(EpdRect a,const uint8_t*d,EpdRect crop,en
 }
 '''
 highlevel=ROOT/'components/epdiy/src/highlevel.c'
-unit+=function('_inverse_rotated_area',highlevel)+'\n'+function('hl_update_area',highlevel)+'\n'
+unit+='\n'.join(function(n,highlevel) for n in ('_inverse_rotated_area','hl_update_area','epd_hl_update_area_full_exact','epd_hl_update_area_diff_exact'))+'\n'
 unit+=r'''
-static enum EpdDrawError epd_hl_update_area(EpdiyHighlevelState*h,enum EpdDrawMode m,int t,EpdRect a){return hl_update_area(h,m,t,a,false);}
-static enum EpdDrawError update_display_area_diff_with(EpdiyHighlevelState*h,const EpdWaveform*w,int m,EpdRect a){(void)h;(void)a;assert(w==&normal&&m==MODE_GL16);++regular;return result;}
-static enum EpdDrawError update_display_area_diff_with_unlocked(EpdiyHighlevelState*h,const EpdWaveform*w,int m,EpdRect a){return update_display_area_diff_with(h,w,m,a);}
+static enum EpdDrawError update_display_reader_area(EpdiyHighlevelState*h,const EpdWaveform*w,int m,EpdRect a,bool full){(void)h;(void)a;assert(w==&normal&&m==MODE_GL16&&!full);++regular;return result;}
 static enum EpdDrawError update_display_full_unlocked(EpdiyHighlevelState*h){(void)h;++fulls;return result;}
 static enum EpdDrawError main_recover(EpdiyHighlevelState*h,enum EpdDrawError e){
  assert(e==result&&e!=EPD_DRAW_SUCCESS&&!memcmp(back,old_back,B));++recoveries;
@@ -113,6 +119,20 @@ int main(void){
  reset();full_requested=true;assert(update_display_text_turn(&h,a,0)==EPD_DRAW_SUCCESS&&fulls==1&&!scans&&!memcmp(front,old_front,B));
  reset();intercept=true;assert(update_display_text_turn(&h,a,0)==EPD_DRAW_SUCCESS&&!scans&&!memcmp(front,old_front,B));
  reset();available=false;assert(update_display_text_turn(&h,a,0)==EPD_DRAW_SUCCESS&&regular==1&&!scans&&!memcmp(front,old_front,B));
+ for(int rot=0;rot<4;++rot){
+  reset();exact=true;rotation=(enum EpdRotation)rot;
+  EpdRect body={3,105,131,47};
+  ++depth;
+  assert(epd_hl_update_area_full_exact(&h,MODE_GC16,25,body)==EPD_DRAW_SUCCESS&&scans==1);
+  for(int y=0;y<H;++y)for(int x=0;x<W;++x){
+   const bool inside=x>=requested.x&&x<requested.x+requested.width&&y>=requested.y&&y<requested.y+requested.height;
+   assert(((back[y*W/2+x/2]>>((x&1)*4))&15)==(inside?7:6));
+  }
+  reset();result=EPD_DRAW_EMPTY_LINE_QUEUE;
+  assert(epd_hl_update_area_full_exact(&h,MODE_GC16,25,body)==result&&!memcmp(back,old_back,B));
+  --depth;exact=false;
+ }
+ puts("PASS: full-pixel body crop masks the exact requested columns and commits only that crop, including odd nibbles, rotations and scan failure");
  puts("PASS: actual Pico outlet/highlevel submits one native-DU batch,FULL timing/127 prefill,real gray history,4 rotations,success-only back commit,full priority,fallback and failed-scan recovery");
 }
 '''

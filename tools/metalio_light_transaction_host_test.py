@@ -24,7 +24,7 @@ enum {ESP_OK=0,ESP_ERR_NOT_FINISHED=1,ESP_ERR_INVALID_STATE=-1,ESP_ERR_TIMEOUT=-
 #define ESP_LOGI(tag,...) do {if(0)printf(__VA_ARGS__);} while(0)
 #define ESP_LOGW ESP_LOGI
 static const char *esp_err_to_name(int e){(void)e;return "error";}
-static bool s_lock_io_pending,s_lock_io_no_media,usb,busy,online,queued,allow_key,keys,rails,pins,lcd,touch,media,usb_at_timer,slow_media,confirmed;
+static bool s_lock_sd_parked,s_lock_io_pending,s_lock_io_no_media,usb,busy,online,queued,allow_key,keys,rails,pins,lcd,touch,media,usb_at_timer,slow_media,confirmed;
 static bool off_success;static unsigned parked_off;
 static jmp_buf off_jump;
 static unsigned sleeps,stop_after,usb_after,timers,cut,restore,closes,mounts,resume,keys_restored,latches;
@@ -57,9 +57,12 @@ static bool lock_prepare_key_wake(void){if(fail())return false;keys=true;return 
 static int esp_sleep_enable_timer_wakeup(uint64_t us){assert(us>0&&us<=60000000);timer_us=us;if(usb_at_timer)usb=true;return fail()?-2:ESP_OK;}
 static int metalio_sleep_cut_rails(uint16_t *s){*s=123;rails=true;++cut;return fail()?-2:ESP_OK;}
 static int metalio_hold_for_light_sleep(void){return fail()?-2:ESP_OK;}
-static int metalio_light_sleep_start(void){
+static int metalio_light_sleep_start(bool *power_confirmed){
  assert(pins&&rails&&keys&&touch&&lcd&&!media);assert(++sleeps<=181);
- clock_us+=(int64_t)timer_us;return fail()?-2:ESP_OK;
+ clock_us+=(int64_t)timer_us;
+ int err=fail()?-2:ESP_OK;
+ *power_confirmed=!err&&sleeps==stop_after&&confirmed;
+ return err;
 }
 static uint32_t esp_sleep_get_wakeup_causes(void){return 1u<<(sleeps==stop_after?ESP_SLEEP_WAKEUP_EXT1:ESP_SLEEP_WAKEUP_TIMER);}
 static int read_pico_ioe_int_level(void){return 1;}
@@ -70,9 +73,11 @@ static int esp_sleep_disable_wakeup_source(int s){assert(s==ESP_SLEEP_WAKEUP_TIM
 static int metalio_sleep_restore_rails(uint16_t s){assert(s==123);rails=false;++restore;return fail()?-2:ESP_OK;}
 static void lock_restore_key_wake(void){keys=false;++keys_restored;}
 static void read_pico_pmu_latch_power_wakeup(void){assert(!keys);queued=true;++latches;}
-static int read_pico_sd_remount(void){assert(!rails&&!pins);++mounts;media=true;return ESP_OK;}
-static int lock_resume_media_io(unsigned wait){assert(wait==500&&(!closes||media)&&!lcd&&!touch);++resume;s_lock_io_pending=slow_media;return slow_media?ESP_ERR_NOT_FINISHED:ESP_OK;}
-static void read_pico_epd_restore_lcd(void){assert(!rails&&!pins&&(!closes||media));lcd=false;}
+static int lock_resume_media_io(unsigned wait){
+ assert(!wait&&!lcd&&!touch&&!rails&&!pins&&!s_lock_sd_parked);
+ ++resume;s_lock_io_pending=false;return ESP_OK;
+}
+static void read_pico_epd_restore_lcd(void){assert(!rails&&!pins);lcd=false;}
 static int cst836u_wake(void *t){assert(t);touch=false;return fail()?-2:ESP_OK;}
 '''
 unit += r'''
@@ -82,21 +87,24 @@ unit += function('lock_light_sleep_slice_us', source)
 unit += function('lock_light_sleep_once', source)
 unit += r'''
 static void reset(void){
- s_lock_io_no_media=s_lock_io_pending=usb=busy=online=queued=keys=rails=pins=lcd=touch=usb_at_timer=slow_media=false;
+ s_lock_sd_parked=s_lock_io_no_media=s_lock_io_pending=usb=busy=online=queued=keys=rails=pins=lcd=touch=usb_at_timer=slow_media=false;
  off_success=false;parked_off=0;media=allow_key=confirmed=true;sleeps=usb_after=timers=cut=restore=closes=mounts=resume=keys_restored=latches=0;
  stop_after=1;fail_at=operation=0;clock_us=0;
 }
-static void restored(void){assert(!keys&&!rails&&!pins&&!lcd&&!touch);assert(cut==restore);assert(closes==mounts);}
+static void restored(void){
+ assert(!keys&&!rails&&!pins&&!lcd&&!touch);
+ assert(cut==restore&&!mounts);
+ assert(!closes||(s_lock_sd_parked&&s_lock_io_pending&&!resume));
+}
 int main(void){
  bool key;
  reset();assert(lock_light_sleep_once((void*)1,(void*)2,&key,0,false)==ESP_OK&&key&&latches==1);restored();
- reset();slow_media=true;assert(lock_light_sleep_once((void*)1,(void*)2,&key,0,false)==ESP_OK&&key&&s_lock_io_pending);restored();
- // Three hours of timer slices only prepare/close/remount once; none of the timer wakes grants unlock.
+ // Three hours of timer slices only park TF once; none of the timer wakes mounts it or grants unlock.
  reset();stop_after=180;assert(lock_light_sleep_once((void*)1,(void*)2,&key,0,false)==ESP_OK&&key);
- assert(sleeps==180&&closes==1&&mounts==1&&cut==1&&restore==1&&latches==1&&clock_us>=10800000000LL);restored();
+ assert(sleeps==180&&closes==1&&cut==1&&restore==1&&latches==1&&clock_us>=10800000000LL);restored();
  // Inserting USB exits maintenance and restores the normal serial route's peripherals without unlocking.
  reset();stop_after=180;usb_after=3;assert(lock_light_sleep_once((void*)1,(void*)2,&key,0,false)==ESP_OK&&!key&&!latches);
- assert(sleeps==3&&mounts==1&&closes==1);restored();
+ assert(sleeps==3&&closes==1);restored();
  // Double-click remains enforced after a single EXT1: the caller stays locked and retries later.
  reset();allow_key=false;assert(lock_light_sleep_once((void*)1,(void*)2,&key,0,false)==ESP_ERR_INVALID_STATE&&!key&&latches==1);restored();
  // A shared EXT1 without verified physical P17 is not an unlock in single or double mode.
@@ -119,7 +127,7 @@ int main(void){
  reset();usb_at_timer=true;assert(lock_light_sleep_once((void*)1,(void*)2,&key,0,false)!=ESP_OK&&!key&&!sleeps);restored();
  // A timer session stops at the deep deadline rather than endlessly repeating60s slices.
  reset();stop_after=180;assert(lock_light_sleep_once((void*)1,(void*)2,&key,600000000,false)==ESP_OK&&!key);
- assert(clock_us>=600000000&&clock_us<600100000&&sleeps==10&&mounts==1&&!latches);restored();
+ assert(clock_us>=600000000&&clock_us<600100000&&sleeps==10&&!latches);restored();
  // Short final slices and already-expired deadlines cannot oversleep by another minute.
  reset();stop_after=180;assert(lock_light_sleep_once((void*)1,(void*)2,&key,1500000,false)==ESP_OK&&!key);
  assert(clock_us==1500000&&sleeps==1);restored();

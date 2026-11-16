@@ -14,12 +14,41 @@ static int glyph_count(const char *text) {
         if ((*p & 0xc0) != 0x80) ++count;
     return count;
 }
+static const char *system_font = "", *reading_font = "", *expected_font;
+static bool external_face, storage_ready = true, antialias;
+static unsigned ttf_draws, builtin_draws, borrowed;
+const char *app_settings_system_font_path(void) { return system_font; }
+const char *app_settings_font_path(void) { return reading_font; }
+const char *ttf_font_path(void) { return "builtin"; }
+bool ttf_font_path_is_builtin(const char *path) { return !path || !*path || !strcmp(path, "builtin"); }
+bool pico_boot_asset_allowed(const char *path) { return path && strcmp(path, "/sdcard/blocked.ttf"); }
+bool read_pico_sd_io_ready(void) { return storage_ready; }
+bool ttf_font_draw_with_path(const char *path, bool (*draw)(void *), void *context) {
+    external_face = !ttf_font_path_is_builtin(path);
+    if (external_face) {
+        assert(expected_font && !strcmp(path, expected_font));
+        ++borrowed;
+    }
+    bool result = draw(context);
+    external_face = false;
+    return result;
+}
+int ttf_font_selected(void) { return external_face ? 1 : 0; }
+bool ttf_font_slot_ready(int slot) { return slot == 0 || external_face; }
+bool ttf_font_slot_has_text(int slot, const char *text) {
+    return slot == 1 && strcmp(text, "缺");
+}
+bool ttf_get_antialias(void) { return antialias; }
+void ttf_set_antialias(bool enabled) { antialias = enabled; }
 bool ui_font_has_text(const char *text) { (void)text; return true; }
-int ui_font_ascender_px(int px) { return px; }
 int ui_font_text_width_px(int px, const char *text) { return glyph_count(text) * px; }
-bool ttf_font_ready(void) { return true; }
-int ttf_ascender_px(int px) { return px; }
-int ttf_text_width_px(int px, const char *text) { return ui_font_text_width_px(px, text); }
+int ttf_text_width_px(int px, const char *text) { return glyph_count(text) * (px - 2); }
+void ui_font_measure_line_px(int px, const char *text, int *a, int *b) {
+    (void)text; *a = px - 2; *b = 0;
+}
+void ttf_measure_line_px(int px, const char *text, int *a, int *b) {
+    ui_font_measure_line_px(px, text, a, b);
+}
 static void glyph_rect(uint8_t *fb, int x, int baseline, int px, const char *text,
                        enum EpdFontFlags align, uint8_t fg) {
     int width = ui_font_text_width_px(px, text);
@@ -39,22 +68,22 @@ static void glyph_rect(uint8_t *fb, int x, int baseline, int px, const char *tex
 }
 void ui_font_draw_text_px(uint8_t *fb, int x, int baseline, int px, const char *text,
                           enum EpdFontFlags align, uint8_t fg, uint8_t bg, bool black_white) {
-    (void)bg; (void)black_white;
+    (void)bg; (void)black_white; ++builtin_draws;
     glyph_rect(fb, x, baseline, px, text, align, fg);
 }
 void ttf_draw_text_px(uint8_t *fb, int x, int baseline, int px, const char *text,
                       enum EpdFontFlags align, uint8_t fg, uint8_t bg) {
-    (void)bg;
-    glyph_rect(fb, x, baseline, px, text, align, fg);
+    (void)bg; ++ttf_draws;
+    glyph_rect(fb, x, baseline, px - 2, text, align, fg);
 }
 
 enum { W = 176, H = 240, N = W * H };
-static void render_checked(const char *identity, const char *title, const char *author,
+static void render_checked(const char *title, const char *author,
                            uint8_t out[N]) {
     uint8_t *guard = malloc(N + 32);
     assert(guard);
     memset(guard, 0xa5, N + 32);
-    assert(book_auto_cover_render(identity, title, author, W, H, guard + 16));
+    assert(book_auto_cover_render(title, author, W, H, guard + 16));
     for (int i = 0; i < 16; ++i) assert(guard[i] == 0xa5 && guard[N + 16 + i] == 0xa5);
     memcpy(out, guard + 16, N);
     free(guard);
@@ -62,36 +91,51 @@ static void render_checked(const char *identity, const char *title, const char *
 int main(void) {
     uint8_t *a = malloc(N), *b = malloc(N);
     assert(a && b);
-    bool found[3] = {0};
-    char path[80];
-    for (int i = 0; i < 100; ++i) {
-        snprintf(path, sizeof(path), "/sdcard/books/book-%d.txt", i);
-        found[book_auto_cover_template(path, "夏天、烟火和我的尸体", "作者")] = true;
+    const char *title = "重生之女将星", *author = "千山茶客";
+    assert(!book_auto_cover_font_key());
+    render_checked(title, author, a);
+    render_checked(title, author, b);
+    assert(!memcmp(a, b, N) && !ttf_draws && builtin_draws && !antialias);
+    const int mx = W * 9 / 100, my = H * 11 / 100;
+    assert(a[0] == 51 && a[N - 1] == 51);
+    for (int x = mx; x < W - mx; ++x) {
+        assert(a[my * W + x] == 255);
+        assert(a[(H - my - 1) * W + x] == 255);
     }
-    assert(found[0] && found[1] && found[2]);
-    bool checked_split_cover = false;
-    for (int i = 0; i < 100 && !checked_split_cover; ++i) {
-        snprintf(path, sizeof(path), "/sdcard/books/book-%d.txt", i);
-        if (book_auto_cover_template(path, "时间的褶皱", "作者") != 2) continue;
-        render_checked(path, "时间的褶皱", "作者", b);
-        for (int y = 120; y < H; ++y)
-            for (int x = 0; x < W; ++x)
-                assert(b[y * W + x] >= 238); /* Lower panel is intentionally text-free. */
-        assert(b[20 * W + 4] < 160);
-        checked_split_cover = true;
-    }
-    assert(checked_split_cover);
-    assert(book_auto_cover_template("/sdcard/books/long.epub", "书名", "作者") ==
-           book_auto_cover_template("/sdcard/books/long.epub", "A renamed book", "Another author"));
-    render_checked("/sdcard/books/long.epub", "夏天、烟火和我的尸体：一个很长很长的中文书名", "三天两觉", a);
-    render_checked("/sdcard/books/long.epub", "夏天、烟火和我的尸体：一个很长很长的中文书名", "三天两觉", b);
-    assert(!memcmp(a, b, N));
-    render_checked("/sdcard/books/english.txt", "The Extremely Long English Title That Must Wrap Cleanly Without Escaping Its Frame", "An Author With a Very Long Name", b);
+    int title_ink = 0, author_ink = 0;
+    for (int y = my + 2; y < H - my - 2; ++y)
+        for (int x = mx + 2; x < W - mx - 2; ++x) {
+            assert(a[y * W + x] == 51 || (y > 90 && y < 160));
+            if (a[y * W + x] > 51) {
+                title_ink += y < 131;
+                author_ink += y >= 131;
+            }
+        }
+    assert(title_ink > author_ink && author_ink > 100);
+    expected_font = reading_font = "/sdcard/reading.ttf";
+    const uint64_t reading_key = book_auto_cover_font_key();
+    assert(reading_key);
+    render_checked(title, author, b);
+    assert(borrowed == 1 && ttf_draws && memcmp(a, b, N) && !external_face);
+    expected_font = system_font = "/sdcard/system.ttf";
+    assert(book_auto_cover_font_key() && book_auto_cover_font_key() != reading_key);
+    builtin_draws = ttf_draws = 0;
+    render_checked("测试缺字", author, b);
+    assert(borrowed == 2 && builtin_draws == 1 && ttf_draws > 1);
+    storage_ready = false;
+    render_checked(title, author, b);
+    assert(borrowed == 2 && !memcmp(a, b, N));
+    storage_ready = true;
+    system_font = "/sdcard/blocked.ttf";
+    assert(!book_auto_cover_font_key());
+    render_checked(title, author, b);
+    assert(borrowed == 2 && !memcmp(a, b, N));
+    render_checked("夏天、烟火和我的尸体：一个很长很长的中文书名", "三天两觉", a);
+    render_checked("The Extremely Long English Title That Must Wrap Cleanly Without Escaping Its Frame", "", b);
     assert(memcmp(a, b, N));
-    render_checked("/sdcard/books/empty-author.txt", "没有作者的书", "", b);
-    assert(!book_auto_cover_render("x", "", "", W, H, b));
-    assert(!book_auto_cover_render("x", "title", "", 8, H, b));
+    assert(!book_auto_cover_render("", "", W, H, b));
+    assert(!book_auto_cover_render("title", "", 8, H, b));
     free(a); free(b);
-    puts("automatic cover templates: OK");
+    puts("PASS: only framed dark layout; imported system/reading priority, missing glyph fallback and no unavailable-card load");
     return 0;
 }

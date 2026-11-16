@@ -86,6 +86,9 @@ CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
 # 使用SDK交叉签名验证，保留真实证书有效期/主机名检查，不添加废弃根。 / Use SDK cross-signed validation without deprecated roots or bypassing real certificate checks.
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+# S31 Wi-Fi and display can exhaust the DMA heap during TLS record decryption.
+# Software AES uses the same TLS suites and certificate checks without AES DMA buffers.
+# CONFIG_MBEDTLS_HARDWARE_AES is not set
 CONFIG_IDF_TARGET="esp32s31"
 CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y

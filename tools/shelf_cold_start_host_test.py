@@ -24,10 +24,10 @@ typedef struct {char path[288],name[256],author[128];uint32_t size;uint16_t chap
 static shelf_entry_t s_shelf[25];static int s_visible_count=25,s_view=SHELF;
 static unsigned s_cover_pending_mask,s_chapters_pending,s_cover_generation;
 static bool s_chapters_started,s_chapters_changed,s_prefetch_active,s_clear_confirm,s_batch_confirm;
-static bool s_shelf_page_pending;
+static bool s_shelf_page_pending __attribute__((unused));
 static bool s_category_menu __attribute__((unused)), s_sort_menu __attribute__((unused));
 static bool pico_online_busy(void){return false;}
-static bool shelf_title_card(const char *p){return strstr(p,".txt")!=NULL;}
+static bool shelf_is_txt(const char *p){return strstr(p,".txt")!=NULL;}
 static bool shelf_cover_ram_hit(int index,int row,bool load){(void)index;(void)row;assert(!load);return false;}
 static void shelf_record_cover_result(int index,int state,const book_cover_result_t *result){
  if(state>0&&result->metadata){s_shelf[index].chapters=result->chapters;s_shelf[index].chapters_checked=true;}
@@ -47,9 +47,12 @@ static EpdRect shelf_cover_image(int row){return(EpdRect){48,197+row*96,51,70};}
 unsigned book_cover_jobs_begin(void){++begins;memset(queued,0,sizeof(queued));memset(complete,0,sizeof(complete));return ++generation;}
 bool book_cover_jobs_submit(unsigned g,unsigned slot,const book_cover_job_t*q){assert(g==generation&&slot<9);if(fail_submit)return false;assert(!queued[slot]);queued[slot]=true;requests[slot]=*q;++submitted;return true;}
 int book_cover_jobs_take(unsigned g,unsigned slot,book_cover_result_t*r){if(g!=generation||!queued[slot])return -1;if(!complete[slot])return 0;queued[slot]=false;*r=(book_cover_result_t){.metadata=true,.chapters=slot==2?0:37,.size=100};return 1;}
+int book_cover_jobs_take_ready(unsigned g,unsigned slot,book_cover_result_t*r){return book_cover_jobs_take(g,slot,r);}
 void book_cover_jobs_cancel(unsigned g){if(g==generation)++generation;}
 bool book_cover_jobs_idle(void){return idle;}
 """
+# The shared source has conditional implementations; select the S31 path.
+u += '#define KIIKO_BOARD_METALIO47 1\n'
 for name in ('shelf_chapters_tick', 'shelf_record_prefetch_result', 'shelf_prefetch_tick'):
     u += function(name, source) + '\n'
 u+=r"""

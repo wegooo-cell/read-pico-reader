@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "version": "0.3.3-rc107",
+  "version": "0.3.3-rc108",
   "project": "Read_Pico",
   "board": "RDP-G01-W",
   "layout": "pico-dual-4m-v1",
   "minimum_base_version": "0.3.3-rc72",
-  "url": "https://wegooo-cell.github.io/read-pico-reader/Pico-update-0.3.3-rc107.bin",
-  "size": 4133056,
-  "sha256": "4d74d7b5687e621a6b7483834083eea50d7c9f26bd04f54ca39644a209f2b8de",
-  "notes": "设置列表快滑松手直接滚动约半屏，松手后立即清理残影。\n阅读缓存迁入 .kiikoread 目录。\n阅读和主页切换恢复 RC104 刷新方式。\n锁屏浅睡前确认屏幕断电，未通过时重试。"
+  "url": "https://wegooo-cell.github.io/read-pico-reader/Pico-update-0.3.3-rc108.bin",
+  "size": 4171440,
+  "sha256": "61b60317be5c15ddb650ca19266cad281d61607f0d6aa111e7cd333395b8710e",
+  "notes": "书架提前加载，封面整页显示，切页和开书可打断。\nTXT 封面支持 Z-Library 和手选小图，保存到 TF 卡。\n票根校准章节和阅读时长，修复 TXT 导入和异常续读。\n页码局部刷新，继续阅读去掉浅灰背景。"
 }

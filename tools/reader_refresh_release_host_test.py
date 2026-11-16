@@ -13,6 +13,8 @@ unit=r'''
 #include <stdbool.h>
 static void book_shelf_page_release(void){}
 static bool s_shelf_page_key_valid,s_shelf_page_loading,s_shelf_page_cached;
+static bool s_txt_opening;
+static void pico_boot_book_end(bool opened){assert(opened);}
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -37,12 +39,12 @@ static int E0470_WAVEFORM,E0470_FULL_WAVEFORM,E0470_FOLLOW_WAVEFORM;
 #ifndef display_main_normal_waveform
 #define display_main_normal_waveform() (&E0470_WAVEFORM)
 #endif
+typedef int EpdWaveform;
 static int reader_waveform,soft_turn_waveform;
 static const int *display_main_gray_waveform(void){return &reader_waveform;}
 static const int *display_reader_soft_turn_waveform(void){return &soft_turn_waveform;}
 static bool s_reader_clock_pending,s_input_settle,s_shelf_feedback_pending,s_cover_batch_present_pending,s_shelf_page_pending;
 static bool s_reader_image_refresh_pending,s_reader_cleanup,s_reader_turn_pending,s_water_turn_pending,s_clear_confirm,s_reader_fullscreen,s_reader_footer_pending,s_reader_text_frame;
-static int64_t s_reader_footer_due_ms;
 static bool s_toolbar;
 static int s_view=READING,s_reader_panel,s_mode=MODE_GL16,s_presented_view=READING,s_water_turn_dir,s_page,s_du_count;
 static unsigned s_cover_dirty_mask,s_cover_present_mask;
@@ -51,7 +53,7 @@ static int64_t s_reader_clock_minute,s_reader_clock_painted_minute,s_du_ms;
 static const char *s_text="text";
 static EpdRect s_area,s_du_area;
 static void reader_prefetch_end(bool started){assert(!started);}
-static int calls,selected,fail,rendered,prepares,images,tick;
+static int calls,selected,fail,rendered,prepares,images,tick,footer_commits;
 static bool background,immersive;
 static bool app_settings_reader_immersive(void){return immersive;}
 static EpdRect areas[8];
@@ -102,6 +104,12 @@ static enum EpdDrawError update_display_text_turn(void *hl,EpdRect area,int dir)
  (void)hl;(void)dir;assert(tick==2);return push_area(20,&E0470_FULL_WAVEFORM,MODE_DU,area);
 }
 #define update_display_fast_page(...) push(19)
+static enum EpdDrawError update_display_reader_area(void *hl,const EpdWaveform *wave,int mode,EpdRect area,bool full){
+ (void)hl;return push_area(full?14:13,wave,mode,area);
+}
+static bool present_reader_footer(app_ctx_t *ctx){
+ (void)ctx;assert(calls==1);++footer_commits;s_reader_footer_pending=false;return true;
+}
 '''
 unit+='enum {READER_PANEL_TOUCH_SETTINGS=90,READER_PANEL_TOUCH_MORE=91};\nstatic bool s_rc_full_was_visible,s_rc_double_pending;\nstatic bool rc_custom_modal(void){return false;}\nstatic void rc_pause_auto(void){}\nstatic void rc_stop_auto(void){}\nstatic void rc_cancel_side(void){}\n'
 unit+='static bool s_shelf_key_paint_pending;\n'
@@ -111,7 +119,6 @@ for name in ('clip_refresh_rect','ui_rect_union'):
 unit+='\n'.join(line for line in (root/'main/ui/ui_reader_layout.h').read_text().splitlines() if not line.startswith(('#include','#pragma'))) + '\n'
 for name in ('reader_area','reader_fullscreen_progress_area','progress_rect'):
  unit+=function(name,root/'main/apps/app_book.c')+'\n'
-unit+='static enum EpdDrawError reader_present_crop(void *hl,const int *wave,int mode,EpdRect area,bool full){return full?update_display_area_full_with(hl,wave,mode,area):update_display_area_diff_with(hl,wave,mode,area); }\n'
 unit+=function('present',root/'main/apps/app_book.c')
 
 unit+=r"""
@@ -120,10 +127,13 @@ static int s_shelf_key_delta,s_shelf_key_pressed;
 static struct {bool pending;} s_reader_tap;
 static char s_path[16]="book";
 static int64_t s_stats_last_ms;
-static int lock_saves,lock_flushes;
+static int lock_saves,lock_flushes,lock_cover_cancels,lock_stats_pauses;
 static void reader_indent_hold_cancel(void){}
 static void shelf_category_remember(app_ctx_t *ctx){(void)ctx;}
-static void track_ticket_stats(app_ctx_t *ctx){(void)ctx;}
+static void book_weread_cover_cancel(void){++lock_cover_cancels;}
+static void app_book_ticket_sample(int64_t now_ms,bool visible){
+ (void)now_ms;assert(!visible);++lock_stats_pauses;
+}
 static void save_progress(void){++lock_saves;}
 static void lock_draw(void){}
 static void invalidate_prep(void){}
@@ -137,7 +147,7 @@ unit+=r'''
 static void reset(void){
  calls=selected=rendered=prepares=fail=images=tick=0;background=immersive=false;s_view=s_presented_view=READING;
  s_reader_panel=READER_PANEL_NONE;s_mode=MODE_GL16;s_reader_fullscreen=true;
- s_reader_footer_pending=true;s_reader_cleanup=false;s_water_turn_pending=false;s_reader_turn_pending=true;
+ footer_commits=0;s_reader_footer_pending=false;s_reader_cleanup=false;s_water_turn_pending=false;s_reader_turn_pending=true;
  s_toolbar=s_clear_confirm=s_reader_image_refresh_pending=s_reader_clock_pending=false;s_reader_text_frame=false;
  s_turns=7;
  s_area=reader_area();memset(areas,0,sizeof(areas));memset(modes,0,sizeof(modes));memset(waves,0,sizeof(waves));
@@ -146,7 +156,7 @@ static void same_area(EpdRect a,EpdRect b){if(a.x!=b.x||a.y!=b.y||a.width!=b.wid
 int main(void){
  app_ctx_t ctx={0};
  before_lock(&ctx);
- assert(lock_saves==1&&lock_flushes==1&&!calls);
+ assert(lock_saves==1&&lock_flushes==1&&lock_cover_cancels==1&&lock_stats_pauses==1&&!calls);
  // 首页/书架/目录/唤醒进入正文：纯文字、背景或图片都只完整GC16一次，成功后重置清理计数。
  // Home/shelf/TOC/wake entry: text, wallpaper and images each get one complete GC16, resetting the cleanup count on success.
  const int origins[]={-1,SHELF,TOC};
@@ -177,14 +187,15 @@ int main(void){
   assert(present(&ctx,APP_REDRAW_AREA));
   assert(calls==1&&selected==14&&modes[0]==MODE_GL16&&waves[0]==&soft_turn_waveform&&s_reader_text_frame==(content==0));
   same_area(areas[0],reader_area());
-  assert(s_reader_footer_pending&&!s_reader_cleanup&&s_reader_footer_due_ms>=800);
+  assert(footer_commits==1&&!s_reader_footer_pending&&!s_reader_cleanup);
  }
- for(int full=0;full<2;++full){
-  reset();s_reader_fullscreen=full;s_reader_cleanup=true;
-  assert(present(&ctx,APP_REDRAW_AREA));assert(calls==1&&selected==14&&s_reader_text_frame);
+ for(int full=0;full<2;++full)for(int image=0;image<2;++image){
+  reset();s_reader_fullscreen=full;s_reader_cleanup=true;s_area=reader_area();
+  s_reader_image_refresh_pending=image;images=image;
+  assert(present(&ctx,APP_REDRAW_AREA));assert(calls==1&&selected==14&&s_reader_text_frame==!image);
   assert(modes[0]==MODE_GC16&&waves[0]==&E0470_FULL_WAVEFORM);
-  same_area(areas[0],(EpdRect){0,0,684,1216});
-  assert(!s_reader_cleanup&&!s_reader_turn_pending);
+  same_area(areas[0],reader_area());
+  assert(!s_reader_cleanup&&!s_reader_turn_pending&&footer_commits==1);
  }
  reset();s_reader_turn_pending=false;present(&ctx,APP_REDRAW_FULL);assert(calls==1&&selected==12&&rendered==1);
  reset();s_reader_turn_pending=false;present(&ctx,APP_REDRAW_PAGE);assert(calls==1&&selected==13&&rendered==1);
@@ -209,11 +220,11 @@ int main(void){
   s_water_turn_pending=true;s_reader_footer_pending=false;s_water_turn_dir=dir;
   assert(present(&ctx,APP_REDRAW_AREA)&&calls==1&&selected==18);
   same_area(areas[0],reader_area());
-  assert(s_reader_footer_pending&&!s_water_turn_pending);
+  assert(footer_commits==1&&!s_water_turn_pending);
  }
  reset();images=1;s_reader_image_refresh_pending=true;s_reader_footer_pending=false;
  present(&ctx,APP_REDRAW_AREA);assert(selected==14&&calls==1&&waves[0]==&soft_turn_waveform&&!s_reader_text_frame);
- same_area(areas[0],reader_area());assert(s_reader_footer_pending);
+ same_area(areas[0],reader_area());assert(footer_commits==1);
  reset();images=1;s_reader_image_refresh_pending=true;s_reader_footer_pending=false;tick=1;
  present(&ctx,APP_REDRAW_AREA);assert(selected==14&&calls==1&&waves[0]==&soft_turn_waveform&&!s_reader_text_frame);tick=0;
  reset();s_reader_clock_pending=true;s_reader_fullscreen=false;s_reader_turn_pending=false;
@@ -227,7 +238,7 @@ int main(void){
  for(int full=0;full<2;++full)for(int hide_status=0;hide_status<2;++hide_status) {
   reset();tick=2;s_reader_fullscreen=full;immersive=hide_status;s_reader_footer_pending=false;s_area=reader_area();
   assert(present(&ctx,APP_REDRAW_AREA)&&calls==1&&selected==20&&s_reader_text_frame);
-  same_area(areas[0],reader_area());assert(s_reader_footer_pending);
+  same_area(areas[0],reader_area());assert(footer_commits==1);
  }
  for(int kind=0;kind<9;++kind) {
   reset();tick=2;

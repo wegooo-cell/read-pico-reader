@@ -76,6 +76,9 @@ bool display_main_switch_erase_set(bool v){(void)v;return false;}
 bool display_main_shelf_home_erase_set(bool v){(void)v;return false;}
 bool app_sleep_media_ready(void){return true;}
 bool app_sleep_media_failed(void){return false;}
+bool app_sleep_media_pending(void){return false;}
+bool app_sleep_book_reopen_failed(void){return false;}
+void app_book_wake_file_failed(app_ctx_t *ctx){(void)ctx;assert(false);}
 #include "online_font.h"
 void online_font_status(online_font_status_t *s){s->busy=false;}
 void app_sleep_discard_media_io(void){}

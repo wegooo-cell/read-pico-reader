@@ -837,7 +837,11 @@ static unsigned s_media_recovery_attempts;
 // 页面已释放句柄后才排队恢复；缺卡等待稳定插入，持续故障按1/3/10/30秒退避。
 // Queue recovery only after page handles close; wait for insertion and back off persistent faults by 1/3/10/30 seconds.
 static void recover_media(app_ctx_t *ctx, const read_pico_sd_info_t *info) {
+#if KIIKO_BOARD_METALIO47
+    if (!info->present) {
+#else
     if (s_media_recovery_attempts && !info->present) {
+#endif
         s_media_recovery_after_ms = ctx->now_ms; return;
     }
     if (!read_pico_sd_needs_recovery() || ctx->now_ms < s_media_recovery_after_ms || pico_online_busy()) return;
@@ -861,44 +865,33 @@ static bool poll_media(app_ctx_t* ctx, const app_desc_t* current,
 #if KIIKO_BOARD_METALIO47
     if (app_sd_recovery_busy()) return false;
     static bool wake_pending;
-    static bool wake_consumers_closed;
     if (!app_sleep_media_ready()) {
-        wake_pending=true;
-        // 挂卡优先：字体/书籍恢复失败时仍让健康检查运行；挂载任务期间不抢生命周期。
-        // Media comes first: failed reopen must not suppress health checks or steal a mount task.
+        wake_pending = true;
         if (usb_storage_active() || pico_online_busy() || app_download_active()) return false;
-        read_pico_transfer_status_t owner={0};
-        online_font_status_t download={0};
+        read_pico_transfer_status_t owner = {0};
+        online_font_status_t download = {0};
         read_pico_transfer_get_status(&owner);
         online_font_status(&download);
         if (owner.state != READ_PICO_TRANSFER_STOPPED || download.busy) return false;
         read_pico_sd_poll_health();
-        if (!app_sleep_media_failed()) return false;
-        bool covers=book_cover_jobs_quiesce(0), avatar=ui_avatar_quiesce(0);
-        if (!covers || !avatar) return false;
-        bool changed=!wake_consumers_closed;
-        if (changed) {
-            // 部分句柄可能已恢复，必须全部释放，不能带着旧VFS句柄重挂。
-            // Partial resumes may own live descriptors: close all before replacing the VFS session.
-            if (current->on_media_lost) current->on_media_lost(ctx);
-            book_close();ttf_font_close_embedded();ttf_font_unload();
-            (void)ttf_font_open_builtin();ui_text_set_system_font(false);
-            ui_avatar_invalidate();book_lock_collage_invalidate();
-            *mounted=false;*invalidated=true;
-            wake_consumers_closed=true;
-        }
-        if (read_pico_sd_invalidate_io() == ESP_OK) {
+
+        read_pico_sd_info_t wake_info = {0};
+        esp_err_t wake_error = read_pico_sd_get_info(&wake_info);
+        if (wake_error == ESP_ERR_NOT_FINISHED || !app_sleep_media_failed()) return false;
+        if (wake_error == ESP_OK && wake_info.mounted) {
+            // A failed book/font reopen is local to that file. Keep the verified mount.
+            bool book_failed = app_sleep_book_reopen_failed();
             app_sleep_discard_media_io();
-            wake_consumers_closed=false;
-            s_media_recovery_after_ms=0;s_media_recovery_attempts=0;
+            if (book_failed && current == &app_book) app_book_wake_file_failed(ctx);
+            (void)app_font_recover_media();
+            wake_pending = false;
+            return true;
         }
-        return changed;
     }
     // 句柄恢复不一定改变挂载/字体路径，也必须补一次完整页面。
     // Resuming handles may leave mount/font identity unchanged; still repaint the page once.
     bool wake_restored=wake_pending;
     wake_pending=false;
-    wake_consumers_closed=false;
 #endif
     if (usb_storage_active()) {
         s_media_recovery_attempts = 0; s_media_recovery_after_ms = 0;
@@ -915,8 +908,15 @@ static bool poll_media(app_ctx_t* ctx, const app_desc_t* current,
         if (probe == ESP_ERR_NOT_FINISHED) return false;
     }
     if (err == ESP_ERR_NOT_FINISHED) return false;
+#if KIIKO_BOARD_METALIO47
+    const bool wake_failed = app_sleep_media_pending();
+    if (wake_failed) app_sleep_discard_media_io();
+#endif
     bool ready = err == ESP_OK && info.mounted;
     bool lost = *mounted && !ready;
+#if KIIKO_BOARD_METALIO47
+    lost |= wake_failed && !ready;
+#endif
     bool gained = !*mounted && ready;
     *mounted = ready;
     if (ready) *invalidated = false;
@@ -948,7 +948,16 @@ static bool poll_media(app_ctx_t* ctx, const app_desc_t* current,
     }
     *invalidated = true;
     if (current->on_media_lost) current->on_media_lost(ctx);
+#if KIIKO_BOARD_METALIO47
+    book_close();
+    ttf_font_close_embedded();
+    if (!ttf_font_ready() || !ttf_font_is_builtin()) {
+        ttf_font_unload();
+        (void)ttf_font_open_builtin();
+    }
+#else
     if (ttf_font_ready() && !ttf_font_is_builtin()) ttf_font_open_builtin();
+#endif
     ui_text_set_system_font(false);
     return true;
 }
@@ -1067,6 +1076,7 @@ void app_loop_run(const app_loop_config_t* config) {
     ui_power_dialog_t power_dialog = {0};
 #if KIIKO_BOARD_METALIO47
     bool power_dialog_open = false; ui_power_dialog_end();
+    bool wake_page_pending = false;
 #else
     bool power_dialog_open = false;
 #endif
@@ -1187,7 +1197,14 @@ void app_loop_run(const app_loop_config_t* config) {
 
         if (ctx.now_ms - last_media_poll_ms >= MEDIA_POLL_INTERVAL_MS) {
             last_media_poll_ms = ctx.now_ms;
-            if (poll_media(&ctx, current, &media_mounted, &media_invalidated)) {
+            bool media_redraw = poll_media(&ctx, current, &media_mounted, &media_invalidated);
+#if KIIKO_BOARD_METALIO47
+            if (wake_page_pending && (media_redraw || !app_sleep_media_pending())) {
+                wake_page_pending = false;
+                media_redraw = true;
+            }
+#endif
+            if (media_redraw) {
                 power_dialog_open = false;
                 ui_power_dialog_end();
                 ui_power_dialog_reset(&power_dialog, touch.touched);
@@ -1208,6 +1225,12 @@ void app_loop_run(const app_loop_config_t* config) {
         }
 
 #if KIIKO_BOARD_METALIO47
+        if (wake_page_pending) {
+            // The panel retains its lock frame until the reader's TF handles are available.
+            was_touched = touch.touched;
+            vTaskDelay(pdMS_TO_TICKS(LOOP_TICK_MS));
+            continue;
+        }
         // 实体AI输入先于页面触摸派发；覆盖时冻结底页，关层的抬手也不可穿透。
         // Route physical AI before page touches; freeze the underlay and consume the closing release.
         bool ai_owned=s_ai.open;
@@ -1602,11 +1625,17 @@ void app_loop_run(const app_loop_config_t* config) {
                         display_request_full_refresh();
                         ctx.now_ms = esp_timer_get_time() / 1000;
                         last_input_ms = ctx.now_ms;
-                        poll_media(&ctx, current, &media_mounted, &media_invalidated);
+                        const bool media_redraw = poll_media(&ctx, current, &media_mounted, &media_invalidated);
                         last_media_poll_ms = ctx.now_ms;
                         ctx.consumed = true;
                         ctx.pressed = false;
                         ctx.released = false;
+#if KIIKO_BOARD_METALIO47
+                        wake_page_pending = !media_redraw && app_sleep_media_pending();
+                        if (wake_page_pending) continue;
+#else
+                        (void)media_redraw;
+#endif
                         app_present(&ctx, current, APP_REDRAW_PAGE);
                     } else {
                         power_dialog_open = true;
@@ -1646,11 +1675,17 @@ void app_loop_run(const app_loop_config_t* config) {
                         display_request_full_refresh();
                         ctx.now_ms = esp_timer_get_time() / 1000;
                         last_input_ms = ctx.now_ms;
-                        poll_media(&ctx, current, &media_mounted, &media_invalidated);
+                        const bool media_redraw = poll_media(&ctx, current, &media_mounted, &media_invalidated);
                         last_media_poll_ms = ctx.now_ms;
                         ctx.consumed = true;
                         ctx.pressed = false;
                         ctx.released = false;
+#if KIIKO_BOARD_METALIO47
+                        wake_page_pending = !media_redraw && app_sleep_media_pending();
+                        if (wake_page_pending) continue;
+#else
+                        (void)media_redraw;
+#endif
                         // 醒来还在同一页，重画一次免得留着锁屏图。
                         // Still the same page; redraw so the lock image does not stay.
                         if (menu_open) present_menu(&ctx, current, menu_leaf, &feedback);
@@ -1748,7 +1783,10 @@ void app_loop_run(const app_loop_config_t* config) {
 #else
         if (s_quick.open && quick_status() != s_quick_status) quick_buttons_present(&ctx,current);
 #endif
-        if (!power_dialog_open && !s_quick.open && !quick_input_owned && !ui_click_feedback_active() && !menu_open && !ctx.request_app && !ctx.request_menu && !ctx.request_return && current->on_tick != NULL) {
+        const bool page_exposed = !power_dialog_open && !s_quick.open && !quick_input_owned &&
+            !menu_open && !ctx.request_app && !ctx.request_menu && !ctx.request_return;
+        if (current == &app_book) app_book_ticket_sample(ctx.now_ms, page_exposed && !ai_overlay_open());
+        if (page_exposed && !ui_click_feedback_active() && current->on_tick != NULL) {
             app_redraw_t redraw = current->on_tick(&ctx);
             if (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL) held_key = -1;
             present_page(&ctx, current, &gesture, redraw);
@@ -1812,9 +1850,15 @@ void app_loop_run(const app_loop_config_t* config) {
             display_request_full_refresh();
             ctx.now_ms = esp_timer_get_time() / 1000;
             last_input_ms = ctx.now_ms;
-            poll_media(&ctx, current, &media_mounted, &media_invalidated);
+            const bool media_redraw = poll_media(&ctx, current, &media_mounted, &media_invalidated);
             last_media_poll_ms = ctx.now_ms;
             ctx.pressed = ctx.released = false;
+#if KIIKO_BOARD_METALIO47
+            wake_page_pending = !media_redraw && app_sleep_media_pending();
+            if (wake_page_pending) continue;
+#else
+            (void)media_redraw;
+#endif
             if (menu_open) present_menu(&ctx, current, menu_leaf, &feedback);
             else app_present(&ctx, current, APP_REDRAW_PAGE);
         }

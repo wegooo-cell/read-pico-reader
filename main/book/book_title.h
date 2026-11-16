@@ -23,6 +23,10 @@ void book_title_clean_import(char *title);
 /// Bounded filename parsing with no IO; author may be NULL and uncertain names keep their original stem.
 bool book_name_from_path(const char *path,char *title,size_t title_cap,char *author,size_t author_cap);
 
+/// 返回自定义书名或识别后的文件名，作者沿用文件名识别。/ Resolve the saved title or parsed filename and its author.
+bool book_display_name_from_path(const char *path, char *title, size_t title_cap,
+                                 char *author, size_t author_cap);
+
 /// 清理显示作者的国别和外文别名；返回是否有中文名，无中文名保留原文，不修改缓存源。
 /// Remove country tags/foreign aliases for display; return whether Chinese remains, keeping original names when none exists.
 bool book_author_clean_display(char *author,size_t cap);

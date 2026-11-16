@@ -31,7 +31,7 @@ unit+=r'''
 #define KIIKO_BOARD_METALIO47 1
 typedef struct {int x,y,width,height;}EpdRect;
 enum {SETTINGS_MAIN,SETTINGS_POWER_SLEEP,SETTINGS_AUTO_LOCK,SETTINGS_SYSTEM_FONT,
- SETTINGS_SYSTEM_CONTRAST,SETTINGS_MAIN_REFRESH,SETTINGS_FRONTLIGHT,APP_REDRAW_PAGE,APP_REDRAW_NONE};
+ SETTINGS_SYSTEM_CONTRAST,SETTINGS_MAIN_REFRESH,SETTINGS_FRONTLIGHT,SETTINGS_LANGUAGE,APP_REDRAW_PAGE,APP_REDRAW_NONE};
 static int s_page=SETTINGS_MAIN,s_font_page;static char s_notice[96];
 static bool home_full;
 static void ttf_font_scan(void){}
@@ -74,7 +74,7 @@ int main(void){
  reload_wake(true,2);assert(app_settings_wake_presses()==2);
  reload_wake(true,1);assert(app_settings_wake_presses()==1);
  for(unsigned i=0;i<256;i++)if(i!=1&&i!=2){reload_wake(true,i);assert(app_settings_wake_presses()==1);}
- assert(SETTINGS_DISPLAY_ROWS==8);
+ assert(SETTINGS_DISPLAY_ROWS==9);
  const int top=SETTINGS_DISPLAY_Y+5*SETTINGS_ROW_H,scroll=500;
  assert(setting_tap(36,top-scroll,scroll)==APP_REDRAW_PAGE&&s_wake_presses==2&&s_page==SETTINGS_MAIN);
  assert(setting_tap(647,top+SETTINGS_ROW_H-1-scroll,scroll)==APP_REDRAW_PAGE&&s_wake_presses==1&&s_page==SETTINGS_MAIN);

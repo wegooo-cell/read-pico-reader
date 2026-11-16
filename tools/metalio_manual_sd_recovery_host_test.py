@@ -141,7 +141,8 @@ assert loop.index('if (app_sd_recovery_busy()) {')<loop.index('if (ctx.now_ms - 
 busy=loop[loop.index('if (app_sd_recovery_busy()) {'):loop.index('if (ctx.now_ms - last_media_poll_ms')]
 assert 'current->on_tick' in busy and 'continue;' in busy and 'read_pico_pmu_drain_events' in busy
 assert not re.search(r'read_pico_sd_format|app_settings_set_', (ROOT/'main/app/sd_recovery.c').read_text())
-pico=select_source(ui.read_text(),'pico')
+pico_overlay=ROOT/'boards/pico/src/main/apps/app_device_settings.c'
+pico=select_source((pico_overlay if pico_overlay.exists() else ui).read_text(),'pico')
 assert '内存卡恢复' not in pico and 'sd_recovery' not in pico
 with tempfile.TemporaryDirectory() as folder:
     c,exe=Path(folder)/'test.c',Path(folder)/'test'

@@ -55,6 +55,9 @@ const EpdWaveform* display_reader_water_waveform(void) {return &reader_soft;}
 const EpdWaveform* display_main_clean_waveform_with_phases(const EpdWaveform* wave,enum EpdDrawMode mode,unsigned white) {
     assert(wave&&(mode==MODE_GL16||mode==MODE_DU)&&white>=6&&white<=8);return wave;
 }
+const EpdWaveform* display_main_fast_white_waveform(const EpdWaveform* wave, enum EpdDrawMode mode) {
+    (void)wave; (void)mode; assert(false); return NULL;
+}
 const EpdWaveform* display_main_water_waveform(void) {return &soft_gray;}
 const EpdWaveform* display_main_normal_waveform(void) { return display_main_water_waveform(); }
 const EpdWaveform* display_main_ui_waveform(void) {return display_main_normal_waveform();}
@@ -167,6 +170,12 @@ enum EpdDrawError epd_hl_update_area_full(EpdiyHighlevelState* hl, enum EpdDrawM
 }
 // 与 highlevel.c:142 相同：白后缓冲后，强制整屏推目标前缓冲。
 // Match highlevel.c:142: whiten the back buffer, then force a full update from the target front buffer.
+enum EpdDrawError epd_hl_update_area_diff_exact(EpdiyHighlevelState *hl, enum EpdDrawMode mode, int temp, EpdRect area) {
+    return epd_hl_update_area(hl, mode, temp, area);
+}
+enum EpdDrawError epd_hl_update_area_full_exact(EpdiyHighlevelState *hl, enum EpdDrawMode mode, int temp, EpdRect area) {
+    return epd_hl_update_area_full(hl, mode, temp, area);
+}
 enum EpdDrawError epd_hl_update_screen_from_white(EpdiyHighlevelState* hl, enum EpdDrawMode mode, int temperature) {
     memset(hl->back_fb, 255, FB_BYTES);
     return epd_hl_update_screen_full(hl, mode, temperature);

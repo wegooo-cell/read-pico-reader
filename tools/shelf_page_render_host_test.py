@@ -149,8 +149,10 @@ static unsigned s_cover_generation;
 static bool s_prefetch_active;
 static int s_prefetch_index;
 static uint32_t book_store_revision(void){return store_revision;}
-static int shelf_record_prefetch_result(unsigned generation,unsigned slot,int index){
- (void)generation;(void)slot;(void)index;assert(false);return 0;
+static uint64_t cover_font;
+static uint64_t book_auto_cover_font_key(void){return cover_font;}
+static int shelf_record_prefetch_result(unsigned generation,unsigned slot,int index,bool render_auto){
+ (void)generation;(void)slot;(void)index;(void)render_auto;assert(false);return 0;
 }
 static char s_query[65],font[128];
 typedef struct{int leaf;}app_ctx_t;
@@ -191,7 +193,7 @@ int main(void){
  strcpy(s_shelf[0].name,"Edited title");changed(&ctx);strcpy(s_shelf[0].author,"Edited author");changed(&ctx);
  shelf_entry_t temp=s_shelf[0];s_shelf[0]=s_shelf[1];s_shelf[1]=temp;changed(&ctx);
  ++s_shelf[0].modified;changed(&ctx);++s_shelf[0].size;changed(&ctx);
- ++s_shelf_catalog_epoch;changed(&ctx);++store_revision;changed(&ctx);
+ ++s_shelf_catalog_epoch;changed(&ctx);++store_revision;changed(&ctx);++cover_font;changed(&ctx);
  rows=8;changed(&ctx);int count=s_request_count;
  s_visible_count=0;invalidate_covers();count=s_request_count;assert(!prepare_shelf_page(&ctx)&&!s_shelf_page_cache_allowed&&s_request_count==count);
  puts("PASS: actual page preparation keys modes/styles/order/page/rotation/contrast/font/category/query/content/file size+mtime; live progress/favorites skip rediscovery; media guards invalidate, and an empty page never caches");
@@ -214,7 +216,7 @@ def main():
     unit+='typedef struct{unsigned x,y,width,height;}book_crop_t;\n'+function('book_cover_crop',ROOT/'main/book/book_cover.c')+'\n'
     unit+='\n'.join(line for line in (ROOT/'main/ui/ui_book_manage_layout.h').read_text().splitlines() if not line.startswith(('#include','#pragma')))+'\n'+UI
     unit+=(ROOT/'main/apps/book_shelf_badges.inc').read_text()+'\n'
-    for name in ['row_rect','shelf_cover_image','shelf_title_card','shelf_cover_frame_ready','fast_cover_matches','draw_favorite_icon','draw_shelf_favorite_icon','cover_favorite_needs_white_edge','shelf_cover_white_edge','draw_shelf_cover_favorite','draw_shelf_cover','draw_list_title','draw_list_row','draw_shelf_furniture','draw_shelf_page_artwork']:
+    for name in ['row_rect','shelf_cover_image','shelf_is_txt','shelf_cover_frame_ready','fast_cover_matches','draw_favorite_icon','draw_shelf_favorite_icon','cover_favorite_needs_white_edge','shelf_cover_white_edge','draw_shelf_cover_favorite','draw_shelf_cover','draw_list_title','draw_list_row','draw_shelf_furniture','draw_shelf_page_artwork']:
         body=function(name,book)
         if name=='draw_shelf_cover':body=body.replace('{','{++cover_draws;',1)
         unit+=body+'\n'

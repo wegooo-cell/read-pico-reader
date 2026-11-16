@@ -25,5 +25,6 @@ void sim_assets_init(void){
 void sim_seed(void){app_settings_init();char last[288];if(book_progress_last_path(last,sizeof(last))&&last[0])return;
  const char*paths[]={"/sdcard/books/山间来信.epub","/sdcard/books/慢慢读.epub","/sdcard/books/海边的信.txt"};
  for(unsigned i=0;i<3;i++){struct stat st;if(!sim_stat(paths[i],&st)){book_progress_t p={.file_size=st.st_size,.px=48,.pct=5+i*7};book_progress_save(paths[i],&p);book_progress_set_last_path(paths[i]);}}
- const char*quote="阅读不必匆忙，留一点时间给自己。";html_text_t text={.utf8=(char*)quote,.len=strlen(quote)};book_excerpt_offer(paths[2],&text);book_ticket_record(480,3);
+ const char*quote="阅读不必匆忙，留一点时间给自己。";html_text_t text={.utf8=(char*)quote,.len=strlen(quote)};book_excerpt_offer(paths[2],0,&text);
+ book_ticket_record((uint32_t)(book_ticket_local_time_ms()/UINT64_C(86400000)),480000,3);
 }

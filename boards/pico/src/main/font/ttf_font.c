@@ -233,6 +233,7 @@ typedef struct {
     glyph_entry_t* f_lru_head;
     glyph_entry_t* f_lru_tail;
     size_t f_cache_bytes;
+    bool f_preview;        ///< 临时字体不映射整份轮廓 / transient faces do not map full outlines
     bool f_used;           ///< 槽位已被占用 / the slot is in use
 } ttf_slot_t;
 
@@ -2283,14 +2284,14 @@ static esp_err_t load_opened_font(void) {
 
     // CFF 没有 glyf 表，长度为零，不必去映射。
     // A CFF face has no glyf table; its length is zero and there is nothing to map.
-    if (file_glyf_len) {
+    if (file_glyf_len && !s_cur->f_preview) {
         try_map_table(
             file_glyf_off, file_glyf_len, &glyf_ram, &glyf_ram_off, &glyf_ram_len, "glyf"
         );
     }
 
     load_variation(header, sizeof(header));
-    if (gvar_ready && file_gvar_len > 0) {
+    if (gvar_ready && file_gvar_len > 0 && !s_cur->f_preview) {
         try_map_table(
             file_gvar_off, file_gvar_len,
             &gvar_ram, &gvar_ram_off, &gvar_ram_len, "gvar"
@@ -2570,6 +2571,47 @@ esp_err_t ttf_font_open(const char* path) {
     s_cur_index = keep;
     s_cur = &s_slots[keep];
     return err;
+}
+
+// 只在当前绘制期间借空槽，保留活动字体和书内字体的游标。/ Borrow an empty slot for the draw and restore the previous face and runs.
+bool ttf_font_draw_with_path(const char *path, ttf_face_draw_fn draw, void *context) {
+    if (!path || !draw) return false;
+    ttf_font_slots_init();
+    int slot = TTF_FONT_SLOT_SYSTEM;
+    const bool borrowed = !ttf_font_ready() || strcmp(path, ttf_font_path());
+    if (borrowed) {
+        for (slot = TTF_FONT_SLOT_SYSTEM + 1; slot < TTF_FONT_SLOTS; ++slot)
+            if (!s_slots[slot].f_used) break;
+        if (slot == TTF_FONT_SLOTS) return false;
+    }
+    const int saved_weight = s_slots[slot].f_weight;
+    const int keep = slot_lend(slot);
+    const ttf_run_t *saved_runs = s_draw_runs;
+    const size_t saved_run_count = s_draw_run_count;
+    s_draw_runs = NULL;
+    s_draw_run_count = 0;
+    bool ok = true;
+    if (borrowed) {
+        unload_here();
+        s_cur->f_used = true;
+        s_cur->f_preview = true;
+        s_cur->f_weight = s_slots[TTF_FONT_SLOT_SYSTEM].f_weight;
+        font_fd = open_font_file(path);
+        ok = font_fd >= 0 && ensure_work() && load_opened_font() == ESP_OK;
+    }
+    if (ok) ok = draw(context);
+    if (borrowed) {
+        slot_lend(slot);
+        unload_here();
+        heap_caps_free(s_cur->f_io_data);
+        heap_caps_free(s_cur->f_io_run_buf);
+        slot_init(s_cur);
+        s_cur->f_weight = saved_weight;
+    }
+    s_draw_runs = saved_runs;
+    s_draw_run_count = saved_run_count;
+    slot_restore(keep);
+    return ok;
 }
 
 esp_err_t ttf_font_init(void) {

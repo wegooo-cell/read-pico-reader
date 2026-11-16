@@ -32,9 +32,10 @@ unit = r'''
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL,APP_REDRAW_DONE} app_redraw_t;
 typedef int settings_page_t;
 enum {SETTINGS_MAIN,SETTINGS_BLUETOOTH,SETTINGS_BLE_SCAN,SETTINGS_SHELF_STYLE,
-      SETTINGS_ONLINE_FONTS,SETTINGS_PIN_ENTRY,SETTINGS_TEXT_EDIT,SETTINGS_UPGRADE,
+      SETTINGS_ONLINE_FONTS,SETTINGS_PIN_ENTRY,SETTINGS_MAIN_REFRESH,SETTINGS_TEXT_EDIT,SETTINGS_UPGRADE,
       SETTINGS_SYSTEM_FONT,SETTINGS_WALLPAPER,SETTINGS_AVATAR};
 enum EpdDrawMode {MODE_GC16,MODE_GL16,MODE_DU};
+enum EpdDrawError {EPD_DRAW_SUCCESS};
 enum {APP_MAIN_REFRESH_NORMAL,APP_MAIN_REFRESH_FAST,APP_MAIN_REFRESH_WATER,E0470_TURN_RTL};
 typedef int EpdWaveform;
 static const int E0470_WAVEFORM=2,E0470_FOLLOW_WAVEFORM=3,gray_wave=4,normal_wave=5,bw_wave=6,scroll_wave=7,settle_wave=8,motion_wave=9;
@@ -93,6 +94,8 @@ static bool settings_gray_preview(void){return false;}
 static void display_monochrome_content(uint8_t *fb){(void)fb;assert(false);}
 static void settings_navigation(uint8_t *fb){(void)fb;}
 static const EpdWaveform *display_main_gray_waveform(void){return &gray_wave;}
+static bool s_refresh_mode_white_pending;
+static const EpdWaveform *display_main_fast_white_waveform(const EpdWaveform *base,enum EpdDrawMode mode){(void)mode;return base;}
 static const EpdWaveform *display_main_normal_waveform(void){return &normal_wave;}
 static const EpdWaveform *display_main_bw_waveform(void){return &bw_wave;}
 static const EpdWaveform *display_settings_scroll_waveform(void){return &scroll_wave;}

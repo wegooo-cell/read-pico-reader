@@ -176,6 +176,7 @@ static const uint8_t s_shelf_style_ids[] = {1, 2, 6, 5};
 #define SHELF_STYLE_CHOICES 4
 static bool s_collage_prepare_pending;
 static bool s_scroll_drag_consumed, s_scroll_present_pending;
+static bool s_refresh_mode_white_pending;
 typedef struct {
     bool tracking, active, following, disabled, frame_pending, settle_pending;
     settings_page_t page;
@@ -2515,7 +2516,11 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if (s_page == SETTINGS_MAIN_REFRESH) {
         for (int i = 0; i < 3; ++i) {
             if (!ui_rect_hit((EpdRect){36, 298 + i * 158, 612, 132}, ev->x0, y)) continue;
+            const app_main_refresh_mode_t before = app_settings_main_refresh_mode();
             app_settings_set_main_refresh_mode((app_main_refresh_mode_t)i);
+            const app_main_refresh_mode_t after = app_settings_main_refresh_mode();
+            s_refresh_mode_white_pending = before != after &&
+                (before == APP_MAIN_REFRESH_FAST || after == APP_MAIN_REFRESH_FAST);
             return APP_REDRAW_PAGE;
         }
         return APP_REDRAW_NONE;
@@ -2873,6 +2878,21 @@ static bool settings_navigation_enabled(app_ctx_t *ctx) {
 }
 static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
     if(redraw==APP_REDRAW_FULL||redraw==APP_REDRAW_PAGE)settings_drag_reset();
+    if (s_refresh_mode_white_pending && (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL)) {
+        s_refresh_mode_white_pending = false;
+        if (redraw == APP_REDRAW_PAGE && s_page == SETTINGS_MAIN_REFRESH) {
+            display_main_transition_cancel();
+            render(ctx, ctx->fb);
+            const EpdWaveform *base = display_main_gray_waveform();
+            const EpdWaveform *wave = display_main_fast_white_waveform(base, MODE_GL16);
+            const EpdRect area = {0, 0, UI_LOCK_WIDTH, UI_NAV_REFRESH_END};
+            const enum EpdDrawError result = wave == base
+                ? update_display_area_diff_with(ctx->hl, base, MODE_GL16, area)
+                : update_display_area_full_with(ctx->hl, wave, MODE_GL16, area);
+            guard_draw_result(ctx->hl, result);
+            return true;
+        }
+    }
     if(redraw==APP_REDRAW_AREA) {
         if(s_scroll_present_pending)settings_drag_quick(ctx);
         if(settings_drag_present(ctx))return true;

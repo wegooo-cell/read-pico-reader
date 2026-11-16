@@ -55,7 +55,7 @@
 #endif
 #define LOCK_CACHE_DIR BOOK_LOCK_CACHE_PARENT "/locks"
 #define LOCK_CACHE_VERSION 1u
-#define LOCK_RENDER_REVISION 4u
+#define LOCK_RENDER_REVISION 5u
 #define LOCK_CACHE_MAGIC UINT32_C(0x4c434431)
 #define LOCK_COVER_HEIGHT 334.f
 #define LOCK_GAP 18.f
@@ -64,7 +64,7 @@
 #define LOCK_SIN 0.2588190451f
 
 typedef struct {
-    char path[BOOK_STORE_PATH_MAX], title[256];
+    char path[BOOK_STORE_PATH_MAX], title[256], author[128];
     uint32_t size, recent;
     int64_t modified;
     uint64_t key;
@@ -82,6 +82,7 @@ typedef struct {
     struct stat font_stat;
     bool font_stat_valid;
     int font_weight;
+    uint64_t cover_font_key;
 } lock_library_t;
 typedef struct {
     uint32_t magic, version;
@@ -139,6 +140,16 @@ static int book_order(const lock_book_t *a, const lock_book_t *b) {
     int title = strcmp(a->title, b->title);
     return title ? title : strcmp(a->path, b->path);
 }
+static uint64_t cover_key(const lock_book_t *book, const struct stat *source, const char *font,
+                          const struct stat *font_stat, int weight, uint64_t cover_font) {
+    uint64_t key = file_key(UINT64_C(14695981039346656037), book->path, source);
+    key = hash_text(hash_text(key, book->title), book->author);
+    key = file_key(key, font, font_stat);
+    key = hash_bytes(key, &weight, sizeof(weight));
+    key = hash_bytes(key, &cover_font, sizeof(cover_font));
+    const unsigned revision = BOOK_AUTO_COVER_VERSION;
+    return hash_bytes(key, &revision, sizeof(revision));
+}
 static bool collect_book(lock_library_t *library, const char *path,
                           const struct stat *st, const book_progress_t *saved) {
     const char *ext = strrchr(path, '.');
@@ -149,7 +160,8 @@ static bool collect_book(lock_library_t *library, const char *path,
     // Keep only fifteen recent books while counting every eligible title; exclude folders and fonts.
     lock_book_t candidate = {0};
     snprintf(candidate.path, sizeof(candidate.path), "%s", path);
-    if (!book_title_from_path(path, candidate.title, sizeof(candidate.title))) return false;
+    if (!book_name_from_path(path, candidate.title, sizeof(candidate.title),
+                             candidate.author, sizeof(candidate.author))) return false;
     if (library->count < UINT_MAX) ++library->count;
     candidate.source_w = BOOK_COVER_W; candidate.source_h = BOOK_COVER_H;
     candidate.size = (uint32_t)st->st_size;
@@ -157,11 +169,8 @@ static bool collect_book(lock_library_t *library, const char *path,
     book_progress_t progress;
     if (saved) candidate.recent = saved->last_open_s;
     else if (book_progress_load(path, candidate.size, &progress)) candidate.recent = progress.last_open_s;
-    candidate.key = file_key(UINT64_C(14695981039346656037), path, st);
-    candidate.key = hash_text(candidate.key, candidate.title);
-    candidate.key = file_key(candidate.key, library->font_path,
-        library->font_stat_valid ? &library->font_stat : NULL);
-    candidate.key = hash_bytes(candidate.key, &library->font_weight, sizeof(library->font_weight));
+    candidate.key = cover_key(&candidate, st, library->font_path,
+        library->font_stat_valid ? &library->font_stat : NULL, library->font_weight, library->cover_font_key);
     unsigned at = 0;
     while (at < library->used && book_order(&library->books[at], &candidate) <= 0) ++at;
     if (at >= LOCK_BOOKS) return true;
@@ -256,6 +265,7 @@ static bool index_restore(lock_library_t *library) {
 static lock_library_t *library_load(void) {
     lock_library_t *library=lock_alloc(sizeof(*library));if(!library)return NULL;
     library->cache_complete=true;library->font_path=ttf_font_path();
+    library->cover_font_key = book_auto_cover_font_key();
     library->font_stat_valid=!stat(library->font_path,&library->font_stat);library->font_weight=ttf_get_weight();
 #if KIIKO_BOARD_METALIO47
     (void)nvs_open("mt_shelf",NVS_READONLY,&library->hidden);
@@ -419,7 +429,7 @@ static uint8_t *cover_load_bounded(lock_book_t *book, bool *complete, size_t lim
         sw = BOOK_COVER_W; sh = BOOK_COVER_H;
         book->width = sw; book->height = sh;
         gray = lock_alloc((size_t)sw * sh);
-        if (gray && !book_auto_cover_render(book->path, book->title, "", sw, sh, gray)) {
+        if (gray && !book_auto_cover_render(book->title, book->author, sw, sh, gray)) {
             free(gray); gray = NULL;
         }
     }
@@ -446,13 +456,12 @@ bool book_lock_collage_warm_cover(const char *path) {
         heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) < 3u*1024u*1024u) return false;
     lock_book_t book = {0};
     snprintf(book.path, sizeof(book.path), "%s", path);
-    if (!book_title_from_path(path, book.title, sizeof(book.title))) return false;
-    book.key = file_key(UINT64_C(14695981039346656037), path, &st);
-    book.key = hash_text(book.key, book.title);
-    const char *font_path = ttf_font_path(); struct stat font_stat;
-    bool font_valid = !stat(font_path, &font_stat); int weight = ttf_get_weight();
-    book.key = file_key(book.key, font_path, font_valid ? &font_stat : NULL);
-    book.key = hash_bytes(book.key, &weight, sizeof(weight));
+    if (!book_name_from_path(path, book.title, sizeof(book.title), book.author, sizeof(book.author))) return false;
+    const char *font_path = ttf_font_path();
+    struct stat font_stat;
+    const bool font_valid = !stat(font_path, &font_stat);
+    book.key = cover_key(&book, &st, font_path, font_valid ? &font_stat : NULL,
+                         ttf_get_weight(), book_auto_cover_font_key());
     bool complete = true;
     uint8_t *gray = cover_load_bounded(&book, &complete, 512u*1024u);
     bool ok = gray && complete;

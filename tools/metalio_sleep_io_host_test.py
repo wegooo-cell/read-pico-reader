@@ -2,6 +2,7 @@
 from pathlib import Path
 import subprocess, tempfile
 from home_cover_cache_host_test import function
+from board_source_view import select_source
 root=Path(__file__).resolve().parents[1]
 unit=r'''
 #define _DARWIN_C_SOURCE 1
@@ -33,10 +34,16 @@ static struct stat s_io_stat;
 static int book_epub_suspend_io(void *b){(void)b;return ESP_OK;}
 static int book_epub_resume_io(void *b){(void)b;return ESP_OK;}
 '''
-for name,rel in [('ttf_font_suspend_io','font/ttf_font.c'),('ttf_font_resume_io','font/ttf_font.c'),
-                 ('zip_suspend_io','book/zip_reader.c'),('zip_resume_io','book/zip_reader.c'),
-                 ('book_suspend_io','book/book_source.c'),('book_resume_io','book/book_source.c')]:
-    unit+=function(name,root/'main'/rel)+'\n'
+with tempfile.TemporaryDirectory() as excerpts:
+    for rel, names in {
+        'font/ttf_font.c': ('ttf_font_suspend_io', 'ttf_font_resume_io'),
+        'book/zip_reader.c': ('zip_suspend_io', 'zip_resume_io'),
+        'book/book_source.c': ('book_suspend_io', 'book_resume_io'),
+    }.items():
+        source = Path(excerpts) / Path(rel).name
+        source.write_text(select_source((root / 'main' / rel).read_text(), 'metalio47'))
+        for name in names:
+            unit += function(name, source) + '\n'
 unit+=r'''
 static void fill(const char *path){FILE *f=fopen(path,"wb");assert(f);assert(fwrite("abcdefgh",1,8,f)==8);assert(!fclose(f));}
 int main(void){

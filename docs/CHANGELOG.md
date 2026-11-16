@@ -1,5 +1,15 @@
 # 版本变更 / Changelog
 
+## 小纸 PICO 0.3.3-rc108 / Metalio S31 0.3.3-rc114 — 2026-11-16
+
+- **双机型**：提前准备书架首页，进入书架后继续预热后续页。缓存封面整页显示，切页和开书可打断后台工作。
+- **双机型**：书架管理新增一键获取 TXT 封面。支持微信读书和 Z-Library、模糊匹配、手选候选小图及 TF 卡缓存。缺少封面时使用统一的书名封面。
+- **双机型**：票根读取实际章节位置，按正文停留时间统计阅读时长。阅星瞳导入校验 TXT 完整性，开书异常后跳过该书自动续读。
+- **PICO**：阅读页脚页码使用局部刷新，继续阅读模块去掉浅灰背景。
+- **S31**：短锁屏保留 TF 挂载，浅睡唤醒集中恢复，按设置单击或双击唤醒，并沿用 RC113 的翻页参数。修复获取封面时的 Wi-Fi 重启和 HTTPS 收包失败。
+
+Both boards prewarm shelf pages, batch ready cover updates, fetch TXT covers from WeRead and Z-Library, cache selections on the TF card, and align ticket chapters and reading time with the reader. PICO refreshes page numbers locally. S31 retains TF mounts during brief locks, applies the configured wake gesture, keeps RC113 page-turn settings, and improves cover-fetch network stability.
+
 ## Metalio S31 0.3.3-rc113 — 2026-11-12
 
 - 修复首次进入书架时只显示底部封面、加载提示停留的问题。书架先显示书名和已就绪的封面，后台完成一批就补画一批，加载结束后自动清除提示。

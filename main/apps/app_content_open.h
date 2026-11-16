@@ -9,6 +9,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 bool app_book_request_open(const char *path);
 bool app_book_request_open_from_home(const char *path);
@@ -19,10 +20,12 @@ bool app_book_resume_context(char *path, size_t capacity, bool *fullscreen);
 bool app_image_request_open(const char *path);
 void app_files_request_folder(int folder);
 void app_book_request_manage(void);
+void app_book_return_from_cover_wifi(bool connected);
 /// 共用设置中的书架样式页，返回保留管理上下文。/ Reuse the settings chooser and retain the originating management context.
 void app_device_settings_request_shelf_style(void);
 void app_book_return_from_shelf_style(void);
 bool app_book_reader_body_visible(void);
+void app_book_ticket_sample(int64_t now_ms, bool exposed);
 /// 系统覆盖层延后计时，不关闭用户自动翻页开关。/ Defer timed turns during overlays without disabling the user switch.
 void app_book_pause_auto(void);
 /// 全屏触摸图不允许时钟或电量覆盖。/ Full-screen touch diagrams reject clock/power overlays.
@@ -41,6 +44,8 @@ void app_device_settings_resume_lock_style(void);
 bool app_book_volume_key(app_ctx_t *ctx, int direction, app_redraw_t *redraw);
 /// 仅当前正文允许AI书签，复用原书签保存/提示。/ AI bookmark only on the visible reader body, using existing persistence/notices.
 bool app_book_ai_bookmark(void);
+/// Return to the current shelf when the resumed file failed on an otherwise mounted card.
+void app_book_wake_file_failed(app_ctx_t *ctx);
 #endif
 /// 模式/对比度变化时释放旧格式封面；绘制前由主循环一次调用。/ Drop obsolete cover formats once on mode/contrast changes, before drawing.
 void app_book_cover_mode_changed(void);

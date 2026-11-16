@@ -5,6 +5,7 @@ English: Exercise production cloud import with mocked HTTP, real files and joine
 """
 from pathlib import Path
 import json
+from home_cover_cache_host_test import function
 import argparse, re, subprocess, tempfile, os, io, zipfile, base64, struct, zlib, shlex, sys
 ROOT=Path(__file__).resolve().parents[1]
 p=argparse.ArgumentParser();p.add_argument('--cjson',type=Path);p.add_argument('--image-deps',type=Path);p.add_argument('--png-prefix',type=Path);p.add_argument('--board',choices=['pico','metalio47'],default='pico');args=p.parse_args()
@@ -24,11 +25,19 @@ static bool aes_gcm_seal(const uint8_t k[32],const uint8_t iv[12],const char*p,u
 '''+source[b:]
 source=source.replace('#define XTEINK_PICTURES_DIR "/sdcard/Pictures"','#define XTEINK_PICTURES_DIR pictures_path')
 source=re.sub(r'^#include ["<].*[">]\n','',source,flags=re.M)
+txt_source=ROOT/'main/book/book_txt.c'
+probe_const=re.search(r'^#define BOOK_TXT_PROBE_BYTES .*$',(ROOT/'main/book/book_source_internal.h').read_text(),re.M).group()
+probe_source=probe_const+'\n#if KIIKO_BOARD_METALIO47\n'
+probe_source+='\n'.join(function(name,txt_source) for name in
+                        ('utf16_unit','utf16_one','utf16_probe','book_txt_detect_utf16'))
+probe_source+='\n#endif\n'
+
 header=(ROOT/'main/book/book_xteink_sync.h').read_text();header=re.sub(r'^#include .*\n|^#pragma once\n','',header,flags=re.M)
 stubs=r'''
 #define _GNU_SOURCE
 #include <assert.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -94,6 +103,8 @@ static bool card_ready=true;static bool read_pico_sd_io_ready(void){return card_
 #define BOOK_IMAGE_FILE_MAX (50u*1024u*1024u)
 bool book_image_file_dimensions(const char*,bool,unsigned*,unsigned*);
 bool book_image_file_grayscale(const char*,bool,unsigned,unsigned,uint8_t*);
+bool book_image_xth_dimensions(const char*,unsigned*,unsigned*);
+bool book_image_file_xth_grayscale(const char*,unsigned,unsigned,uint8_t*);
 bool read_pico_webp_rgb565(const uint8_t*d,size_t s,size_t m,uint8_t**o,unsigned*w,unsigned*h){(void)d;(void)s;(void)m;(void)o;(void)w;(void)h;return false;}
 static int book_store_upload_root(book_store_root_t*r){strcpy(r->path,root_path);return ESP_OK;}
 static const char*app_settings_fonts_dir(void){return fonts_path;}
@@ -166,11 +177,18 @@ int main(void){
  char directory[]="/tmp/cloud-import-host-XXXXXX";assert(mkdtemp(directory));strcpy(root_path,directory);snprintf(fonts_path,sizeof(fonts_path),"%s/fonts",directory);snprintf(pictures_path,sizeof(pictures_path),"%s/Pictures",directory);
  char *prepared=download_url_prepare("http://cdn.example.test:80/a%20b.epub?sign=a%2Bb#anchor");assert(prepared&&!strcmp(prepared,"https://cdn.example.test/a%20b.epub?sign=a%2Bb"));heap_caps_free(prepared);
  char out[1024];assert(xteink_base64url_encode((const uint8_t*)"f",1,out,sizeof(out))==2&&!strcmp(out,"Zg"));assert(xteink_base64url_encode((const uint8_t*)"fo",2,out,sizeof(out))==3&&!strcmp(out,"Zm8"));assert(xteink_base64url_encode((const uint8_t*)"foo",3,out,sizeof(out))==4&&!strcmp(out,"Zm9v"));assert(xteink_url_encode_path("/书 名%20.txt",out,sizeof(out))&&!strcmp(out,"/%E4%B9%A6%20%E5%90%8D%20.txt"));
- init_once();identity_init();assert(!strcmp(s_state.id.firmware_name,"kiikoread")&&!strcmp(s_state.id.device_type,"pico"));char envelope[1024];assert(build_bind_envelope(1800000000u,envelope,sizeof(envelope))&&strstr(envelope,"\"firmware_name\":\"kiikoread\""));strcpy(s_state.root,root_path);strcpy(s_state.access_token,"saved-one");assert(state_save());char path[400];assert(state_file_path(path,sizeof(path),""));assert(exists(path));strcpy(s_state.access_token,"saved-two");assert(state_save());FILE*f=fopen(path,"wb");assert(f);fputs("corrupted",f);fclose(f);s_state_loaded=false;s_state.access_token[0]=0;assert(state_load()&&!strcmp(s_state.access_token,"saved-one"));
+ init_once();identity_init();assert(!strcmp(s_state.id.firmware_name,"kiikoread")&&!strcmp(s_state.id.device_type,KIIKO_BOARD_METALIO47?"metalio47":"pico"));char envelope[1024];assert(build_bind_envelope(1800000000u,envelope,sizeof(envelope))&&strstr(envelope,"\"firmware_name\":\"kiikoread\""));strcpy(s_state.root,root_path);strcpy(s_state.access_token,"saved-one");assert(state_save());char path[400];assert(state_file_path(path,sizeof(path),""));assert(exists(path));strcpy(s_state.access_token,"saved-two");assert(state_save());FILE*f=fopen(path,"wb");assert(f);fputs("corrupted",f);fclose(f);s_state_loaded=false;s_state.access_token[0]=0;assert(state_load()&&!strcmp(s_state.access_token,"saved-one"));
  xteink_sync_close();mac_tail=9;identity_init();strcpy(s_state.root,root_path);assert(!state_load()&&!s_state.access_token[0]);xteink_sync_close();network_ready=false;init_tasks();
  run_refresh();assert(network_ready&&starts==1&&stops==0);assert(xteink_sync_bound()&&xteink_sync_task_count()==12);xteink_task_t item;assert(xteink_sync_task_get(11,&item)&&!strcmp(item.task_id,"task-11"));assert(!xteink_sync_task_get(12,&item));
  int calls=request_count;for(int i=0;i<10;i++){xteink_sync_status_t st;xteink_sync_get_status(&st);assert(st.bound&&!st.busy);}assert(request_count==calls);
  assert(xteink_sync_download(11)==0);join_worker();assert(network_ready&&starts==1&&stops==0);snprintf(out,sizeof(out),"%s/book11.txt",root_path);assert(exists(out));assert(complete_count==1&&strstr(completed_body,"\"success\":true"));assert(xteink_sync_import_count()==1&&xteink_sync_task_get(11,&item)&&item.imported);
+ static char invalid_txt[74000];memset(invalid_txt,'x',sizeof(invalid_txt));invalid_txt[sizeof(invalid_txt)-5]=0;
+ download_body=invalid_txt;download_length=sizeof(invalid_txt);
+ assert(xteink_sync_download(1)==ESP_OK);join_worker();
+ snprintf(out,sizeof(out),"%s/book1.txt",root_path);
+ assert(!exists(out)&&xteink_sync_task_get(1,&item)&&item.failed&&strstr(item.error,"TXT"));
+ snprintf(out,sizeof(out),"%s/.readpico/cloud/incoming/download.part",root_path);assert(!exists(out));
+ download_body="a simple novel\nsecond line\n";download_length=0;
  truncated=true;assert(xteink_sync_download(1)==0);join_worker();xteink_sync_cancel_join();truncated=false;snprintf(out,sizeof(out),"%s/book1.txt",root_path);assert(!exists(out));assert(xteink_sync_import_count()==1&&strstr(completed_body,"\"success\":false"));
  download_body="invalid";xSemaphoreTake(s_lock,portMAX_DELAY);strcpy(s_tasks[2].save_path,"font.ttf");s_tasks[2].is_font=true;xSemaphoreGive(s_lock);assert(xteink_sync_download(2)==0);join_worker();xteink_sync_cancel_join();snprintf(out,sizeof(out),"%s/font.ttf",fonts_path);assert(!exists(out)&&xteink_sync_import_count()==1);
  block_download=true;assert(xteink_sync_download(3)==0);while(!http_started)usleep(1000);xteink_sync_cancel_join();join_worker();block_download=false;assert(!xteink_sync_busy());snprintf(out,sizeof(out),"%s/book3.txt",root_path);assert(!exists(out));snprintf(out,sizeof(out),"%s/.readpico/cloud/incoming/download.part",root_path);assert(!exists(out));
@@ -206,6 +224,13 @@ int main(void){
 
  FILE*font_file=fopen(TEST_FONT_PATH,"rb");assert(font_file&&!fseek(font_file,0,SEEK_END));long font_size=ftell(font_file);assert(font_size>0&&!fseek(font_file,0,SEEK_SET));char *font_data=malloc((size_t)font_size);assert(font_data&&fread(font_data,1,(size_t)font_size,font_file)==(size_t)font_size);fclose(font_file);download_body=font_data;download_length=(size_t)font_size;
  xSemaphoreTake(s_lock,portMAX_DELAY);strcpy(s_tasks[2].save_path,"cloud-font.ttf");s_tasks[2].is_image=false;s_tasks[2].is_font=true;xSemaphoreGive(s_lock);assert(xteink_sync_download(2)==ESP_OK);join_worker();snprintf(out,sizeof(out),"%s/cloud-font.ttf",fonts_path);assert(verify_font(out)&&xteink_sync_task_get(2,&item)&&item.imported);free(font_data);
+ char txt_fixture[400];snprintf(txt_fixture,sizeof(txt_fixture),"%s/encoding.txt",directory);
+ const unsigned char utf16le[]={0xff,0xfe,'a',0,'b',0,'c',0,'d',0,'e',0,'\n',0,0x2d,0x4e};
+ FILE *text=fopen(txt_fixture,"wb");assert(text&&fwrite(utf16le,1,sizeof(utf16le),text)==sizeof(utf16le)&&!fclose(text));
+ assert(verify_text(txt_fixture,sizeof(utf16le))==(KIIKO_BOARD_METALIO47!=0));
+ assert(!verify_text(txt_fixture,sizeof(utf16le)+2));
+ text=fopen(txt_fixture,"wb");assert(text&&fwrite(utf16le+2,1,sizeof(utf16le)-2,text)==sizeof(utf16le)-2&&!fclose(text));
+ assert(verify_text(txt_fixture,sizeof(utf16le)-2)==(KIIKO_BOARD_METALIO47!=0));
  char traversal_saved[512],traversal_incoming[512];snprintf(traversal_incoming,sizeof(traversal_incoming),"%s/.readpico/cloud/incoming",root_path);int prior_traversal=request_count;assert(download_file("https://cdn.example.test/a.png","..\\escape.png",traversal_incoming,traversal_saved,sizeof(traversal_saved))!=0&&request_count==prior_traversal);
 
  int before_no_card=request_count;card_ready=false;assert(xteink_sync_download(0)==ESP_OK);join_worker();assert(xteink_sync_task_get(0,&item)&&item.failed&&strstr(item.error,"TF卡"));assert(request_count==before_no_card+1);card_ready=true;
@@ -263,7 +288,7 @@ with tempfile.TemporaryDirectory(prefix='kiiko-cloud-test-') as t:
     jpeg=base64.b64decode('/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCABgAEgDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDGooor2DywooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKAP/2Q==')
     for name,data in [('png',png),('jpeg',jpeg)]:fixture+='static const unsigned char '+name+'_payload[]={'+','.join(map(str,data))+'};\n'
     fixture+='#define TEST_FONT_PATH '+json.dumps(str(ROOT/'main/assets/builtin.ttf'))+'\n'
-    unit=Path(t)/'cloud.c';unit.write_text(stubs+'\n'+header+'\n'+source+'\n'+fixture+tests)
+    unit=Path(t)/'cloud.c';unit.write_text(stubs+'\n'+probe_source+'\n'+header+'\n'+source+'\n'+fixture+tests)
     exe=Path(t)/'cloud'
     deps=args.image_deps or cjson.parent.parent
     png_prefix=args.png_prefix
@@ -278,6 +303,7 @@ with tempfile.TemporaryDirectory(prefix='kiiko-cloud-test-') as t:
     image_objects=[]
     for i,path in enumerate([ROOT/'main/book/book_cover.c',ROOT/'main/book/book_image_header.c',jpeg_dir/'tjpgd/tjpgd.c',ROOT/'components/jpegdec/src/JPEGDEC.cpp',ROOT/'components/jpegdec/src/jpegdec_shim.cpp']):
         cpp=path.suffix=='.cpp';obj=work/f'image{i}.o';extra=['-fno-sanitize=alignment,shift'] if path.name=='JPEGDEC.cpp' else []
+        if path.name=='book_cover.c':extra+=['-include',str(ROOT/'tools/book_epub_stubs/esp_log.h')]
         subprocess.run(['c++' if cpp else 'cc','-std=c++17' if cpp else '-std=c11',*flags,*extra,*includes,'-c',str(path),'-o',str(obj)],check=True);image_objects.append(str(obj))
     # 云服务自身仍用严格警告；其他源文件独立编译，使用其现有stub。/ Keep strict warnings for the service, compiling codec sources separately.
     obj=work/'cloud.o'

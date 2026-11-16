@@ -35,6 +35,7 @@ typedef enum {
 typedef struct {
     read_pico_transfer_mode_t mode; ///< 网络模式，默认热点 / Network mode, default AP
     bool network_only; ///< 仅连接已有 WiFi，不启动上传服务或访问存储 / Connect saved WiFi without upload server or storage
+    bool cover_lookup; ///< Use the cover-download station profile (S31).
     const char *root_dir; ///< 已挂载根目录，start 内复制 / Mounted root, copied by start
     bool is_flash; ///< 内置存储标志 / Internal storage flag
     size_t file_limit; ///< 单文件上限，零表示不限 / Per-file limit, zero means unlimited
@@ -59,6 +60,7 @@ typedef struct {
     char wifi_ssid[33]; ///< 已保存网络名称，不含密码 / Saved network name, never a password
     bool wifi_configured; ///< 存在有效凭据 / Valid credentials saved
     bool network_ready; ///< 已取得可用网络地址 / Usable network address acquired
+    bool cover_lookup; ///< Active station was configured for cover lookup.
     unsigned sta_count; ///< 连接数 / Station count
     char ssid[33]; ///< 热点名称 / AP name
     char cur_name[241]; ///< 完整 UTF-8 文件名 / Complete UTF-8 filename

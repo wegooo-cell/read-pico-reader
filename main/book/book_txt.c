@@ -15,7 +15,7 @@
 #include <strings.h>
 #include <ctype.h>
 #include <limits.h>
-#define READ_BLOCK (64 * 1024)
+#define READ_BLOCK (BOOK_TXT_PROBE_BYTES - 3u)
 #define PART_TARGET (48 * 1024)
 // 两板缓存只重建定位表，不迁移原进度、书签或TXT。/ Rebuild locations on both boards without migrating progress, bookmarks or source TXT.
 #define TXT_CACHE_VERSION 5u
@@ -107,6 +107,17 @@ static uint8_t utf16_probe(const unsigned char *s,size_t n) {
     for(size_t i=0;i+1<n;){uint32_t cp;size_t k=utf16_one(s+i,n-i,result==2,&cp);
         errors+=cp==0xfffd&&utf16_unit(s+i,result==2)!=0xfffd;++scalars;i+=k;}
     return errors*100>scalars?0:result;
+}
+
+uint8_t book_txt_detect_utf16(const unsigned char *sample, size_t length, uint32_t *bom) {
+    *bom = 0;
+    if (length >= 2 &&
+        ((sample[0] == 0xff && sample[1] == 0xfe) || (sample[0] == 0xfe && sample[1] == 0xff))) {
+        *bom = 2;
+        return sample[0] == 0xff ? 1 : 2;
+    }
+    if (length >= 3 && !memcmp(sample, "\xef\xbb\xbf", 3)) return 0;
+    return utf16_probe(sample, length);
 }
 #endif
 static bool next(reader_t *r, uint32_t *cp) {
@@ -506,7 +517,7 @@ size_t book_txt_nav_position(const book_txt_t *b,size_t chapter,size_t text_offs
     if(!b->mapped || chapter!=b->mapped_chapter || !b->nav_count)return SIZE_MAX;
     size_t lo=b->mapped_begin,hi=b->mapped_end;
     while(lo<hi){size_t mid=lo+(hi-lo)/2;if(nav_at(b,mid)->text_offset<=text_offset)lo=mid+1;else hi=mid;}
-    return lo?lo-1:0;
+    return lo ? lo - 1 : SIZE_MAX;
 }
 static size_t title_scalar(const book_txt_t *b,const unsigned char *s,size_t n,uint32_t *cp) {
 #if KIIKO_BOARD_METALIO47
@@ -768,13 +779,9 @@ esp_err_t book_txt_open(book_txt_t *b, const char *path) {
         size_t n = fread(r->bytes, 1, READ_BLOCK + 3, b->file);
         if (ferror(b->file)) err = ESP_FAIL;
 #if KIIKO_BOARD_METALIO47
-        else if(n>=2&&r->bytes[0]==0xff&&r->bytes[1]==0xfe){b->utf16=1;b->bom=2;}
-        else if(n>=2&&r->bytes[0]==0xfe&&r->bytes[1]==0xff){b->utf16=2;b->bom=2;}
+        else if ((b->utf16 = book_txt_detect_utf16(r->bytes, n, &b->bom)) != 0) {}
 #endif
         else if (n >= 3 && !memcmp(r->bytes, "\xef\xbb\xbf", 3)) b->bom = 3;
-#if KIIKO_BOARD_METALIO47
-        else if((b->utf16=utf16_probe(r->bytes,n))!=0){}
-#endif
         else for (size_t i = 0; i < n && i < READ_BLOCK;) {
             uint32_t cp; size_t k = utf8_one(r->bytes + i, n - i, &cp);
             if (k == 1 && r->bytes[i] >= 0x80) { b->gbk = true; break; } i += k;

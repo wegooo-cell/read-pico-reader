@@ -148,11 +148,13 @@ bool book_store_roots_degraded(void){return false;}
 esp_err_t book_progress_list(book_progress_visit_fn f,void *c){if(foreign_records){char path[512];snprintf(path,sizeof(path),"%s/foreign.wread",fixtures);book_progress_t value={.file_size=1,.last_open_s=1000};(void)f(path,&value,c);}return ESP_OK;}
 bool book_progress_load(const char *p,uint32_t s,book_progress_t *out){(void)s;const char *name=strrchr(p,'/');int id=atoi(name+1);out->last_open_s=100-(unsigned)id+recent_bump+(id==promoted?1000:0);return true;}
 bool book_title_from_path(const char *p,char *s,size_t n){const char *name=strrchr(p,'/');snprintf(s,n,"%s",name?name+1:p);char *ext=strrchr(s,'.');if(ext)*ext=0;return true;}
+uint64_t book_auto_cover_font_key(void){return 0;}
+bool book_name_from_path(const char *p,char *t,size_t n,char *a,size_t z){if(a&&z)a[0]=0;return book_title_from_path(p,t,n);}
 bool pico_boot_asset_allowed(const char *p){(void)p;return true;}
 esp_err_t book_epub_cover_bounded(const char *p,uint8_t **d,size_t *n,bool *png,size_t budget){++cover_requests;FILE *book=fopen(p,"rb");if(!book)return ESP_ERR_NOT_FOUND;int id=fgetc(book);fclose(book);char path[256];snprintf(path,sizeof(path),"%s/images/%02d.raw",fixtures,id);FILE *f=fopen(path,"rb");if(!f)return ESP_ERR_NOT_FOUND;assert(!fseek(f,0,SEEK_END));*n=ftell(f);rewind(f);if(*n>budget){fclose(f);return ESP_ERR_NO_MEM;}*d=heap_caps_malloc(*n,3);if(!*d){fclose(f);return ESP_ERR_NO_MEM;}assert(fread(*d,1,*n,f)==*n);fclose(f);*png=true;return ESP_OK;}
 bool book_image_dimensions(const uint8_t *d,size_t n,bool png,unsigned *w,unsigned *h){(void)png;if(n<16)return false;uint32_t header[4];memcpy(header,d,16);*w=header[0];*h=header[1];return true;}
 bool book_image_grayscale(const uint8_t *d,size_t n,bool png,unsigned w,unsigned h,uint8_t *out){(void)png;uint32_t header[4];memcpy(header,d,16);assert(n==16+(size_t)header[2]*header[3]);++decoded;for(unsigned y=0;y<h;++y)for(unsigned x=0;x<w;++x)out[y*w+x]=d[16+(y*header[3]/h)*header[2]+x*header[2]/w];return true;}
-bool book_auto_cover_render(const char *p,const char *t,const char *a,unsigned w,unsigned h,uint8_t *out){(void)p;(void)t;(void)a;memset(out,200,w*h);return true;}
+bool book_auto_cover_render(const char *t,const char *a,unsigned w,unsigned h,uint8_t *out){(void)t;(void)a;memset(out,200,w*h);return true;}
 static void corrupt_frame(void){FILE *f=fopen(LOCK_CACHE_DIR "/collage.bin","r+b");assert(f);assert(fseek(f,sizeof(lock_cache_t)+50,SEEK_SET)==0);int c=fgetc(f);assert(fseek(f,-1,SEEK_CUR)==0&&fputc(c^1,f)!=EOF);fclose(f);}
 int main(int argc,char **argv){
  assert(argc==4);fixtures=argv[1];assert(ttf_font_open(argv[2])==ESP_OK);assert(!ttf_font_is_builtin());

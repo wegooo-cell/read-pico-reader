@@ -63,7 +63,13 @@ typedef struct{bool mounted;}read_pico_sd_info_t;
 static int read_pico_sd_get_info(read_pico_sd_info_t *i){i->mounted=!sd_closed;return 0;}
 static int book_suspend_io(void){return 0;}
 static void metalio_haptic_stop(void){}
-static int lock_resume_media_io(unsigned wait){assert(wait==15000||wait==500);s_lock_io_pending=false;return 0;}
+static bool s_lock_sd_parked,s_lock_io_no_media;
+static int lock_resume_media_io(unsigned wait){
+ assert(wait==15000||wait==500);
+ if(s_lock_sd_parked)sd_closed=0;
+ s_lock_sd_parked=s_lock_io_pending=false;
+ return 0;
+}
 static int cst836u_set_mode(void *t,int mode){assert(t&&mode==3);if(hardware_error==1)return -3;deep_touch=true;return 0;}
 static int cst836u_wake(void *t){assert(t);deep_touch=false;return 0;}
 static int metalio_prepare_light_sleep_pins(void){deep_pins=true;return hardware_error==2?-3:0;}
@@ -79,7 +85,6 @@ static unsigned off_calls, resumes, ble_resumes;
 static bool online;
 static bool pico_online_busy(void){return online;}
 static void ble_pt_resume_after_sleep(void){++ble_resumes;}
-static int read_pico_sd_remount(void){sd_closed=0;return ESP_OK;}
 static void metalio_haptic_resume(void){++resumes;}
 static void metalio_poweroff(void){++off_calls;}
 static void epd_lcd_deinit(void){++lcd_deinit;}
@@ -96,7 +101,7 @@ for name in ('metalio_io_read','metalio_prepare_key_wake','metalio_restore_key_i
 for name in ('lock_restore_key_wake','lock_prepare_key_wake','lock_power_off','app_enter_host_sleep','lock_wait_for_unlock'):
     unit+=function(name,root/'main/sleep.c')+'\n'
 unit+=r'''
-static void reset(void){io_calls=io_fail_at=io_taken=delay_ms=irq_low=key_low=font_closed=sd_closed=sd_error=restored=hold_calls=lcd_deinit=wake_source=sleep_calls=0;paused=usb=transfer_busy=ble_failed=deep_success=false;config[0]=0xc0;config[1]=0xe3;latches[0]=outputs[0];latches[1]=outputs[1];waits=wait_timeouts=0;s_lock_sleep_touch=NULL;s_lock_io_pending=deep_pins=deep_rails=deep_touch=late_usb=false;hardware_error=0;}
+static void reset(void){io_calls=io_fail_at=io_taken=delay_ms=irq_low=key_low=font_closed=sd_closed=sd_error=restored=hold_calls=lcd_deinit=wake_source=sleep_calls=0;paused=usb=transfer_busy=ble_failed=deep_success=false;config[0]=0xc0;config[1]=0xe3;latches[0]=outputs[0];latches[1]=outputs[1];waits=wait_timeouts=0;s_lock_sleep_touch=NULL;s_lock_io_pending=s_lock_sd_parked=s_lock_io_no_media=deep_pins=deep_rails=deep_touch=late_usb=false;hardware_error=0;}
 static void intact(void){assert(!font_closed&&!sd_closed&&!hold_calls&&!lcd_deinit&&!sleep_calls&&!paused&&!deep_pins&&!deep_rails&&!deep_touch&&!s_lock_io_pending);assert(config[0]==0xc0&&config[1]==0xe3&&latches[0]==0x20&&latches[1]==0x14);}
 int main(void){
  reset();assert(app_enter_host_sleep(99)==ESP_ERR_INVALID_ARG);intact();

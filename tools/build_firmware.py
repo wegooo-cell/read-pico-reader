@@ -259,8 +259,12 @@ def build_one(board, args):
                   'CONFIG_ESP_WIFI_AMPDU_TX_ENABLED':'y','CONFIG_ESP_WIFI_AMPDU_RX_ENABLED':'y',
                   'CONFIG_ESP_WIFI_TX_BA_WIN':'64','CONFIG_LWIP_SO_RCVBUF':'y'}
         lines=[line for line in lines if not any(line.startswith(key+'=') or line=='# '+key+' is not set' for key in transfer)]
+        # Apply the board's software AES choice to builds with an existing SDK config.
+        aes = 'CONFIG_MBEDTLS_HARDWARE_AES'
+        lines = [line for line in lines if not line.startswith(aes + '=') and line != f'# {aes} is not set']
         path.write_text('\n'.join(lines+[key+'=y' for key in required]+
-                                  [key+'='+value for key,value in transfer.items()])+'\n')
+                                  [key+'='+value for key,value in transfer.items()]+
+                                  [f'# {aes} is not set'])+'\n')
     cache = getattr(args, 'managed_' + board)
     if cache:
         shutil.copytree(cache, source / 'managed_components', dirs_exist_ok=True)

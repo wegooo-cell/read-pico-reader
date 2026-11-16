@@ -10,6 +10,7 @@
 #include "book_cover_auto.h"
 #include "book_epub.h"
 #include "book_title.h"
+#include "book_weread_cover.h"
 #include <errno.h>
 #include <setjmp.h>
 #include <stdio.h>
@@ -915,9 +916,13 @@ static uint64_t cover_hash(uint64_t hash, const char *text) {
 }
 
 static void cover_cache_identity(const char *source, const char *title, const char *author,
-                                 uint64_t size, int64_t modified, cover_cache_header_t *header) {
+                                 uint64_t size, int64_t modified, uint64_t font_key,
+                                 cover_cache_header_t *header) {
     uint64_t path_hash = cover_hash(UINT64_C(14695981039346656037), source);
     uint64_t text_hash = cover_hash(cover_hash(UINT64_C(14695981039346656037), title), author);
+    const char *ext = source ? strrchr(source, '.') : NULL;
+    if (ext && !strcasecmp(ext, ".txt"))
+        text_hash = (text_hash ^ font_key) * UINT64_C(1099511628211);
     *header = (cover_cache_header_t){
         .magic = COVER_CACHE_MAGIC, .schema = COVER_CACHE_SCHEMA,
         .template_version = BOOK_AUTO_COVER_VERSION,
@@ -930,7 +935,7 @@ static bool cover_cache_key(const char *source, const char *title, const char *a
                             char *path, size_t cap, cover_cache_header_t *header) {
     struct stat st;
     if (stat(source, &st) || !S_ISREG(st.st_mode) || st.st_size < 0) return false;
-    cover_cache_identity(source, title, author, st.st_size, st.st_mtime, header);
+    cover_cache_identity(source, title, author, st.st_size, st.st_mtime, book_auto_cover_font_key(), header);
     // 用户2026-11-05：两板封面缓存统一放 TF:/kiikoread/covers，成品点阵直接读取。
     // User2026-11-05: both boards keep finished cover rasters under TF:/kiikoread/covers.
     return snprintf(path, cap, "/sdcard/.kiikoread/covers/%016llx-%ux%u.bin",
@@ -998,6 +1003,7 @@ static bool book_cover_load_gray_impl(const char *path, const char *title, const
                           bool allow_decode, bool *pending, bool allow_auto, bool *auto_cache) {
     if (pending) *pending = false;
     if (!path || !*path || !out) return false;
+    if (book_weread_cover_read(path, out, BOOK_COVER_W, BOOK_COVER_H)) return true;
     char canonical_title[256];
     if (book_title_from_path(path, canonical_title, sizeof(canonical_title))) title = canonical_title;
     else if (!title || !*title) return false;
@@ -1044,14 +1050,12 @@ static bool book_cover_load_gray_impl(const char *path, const char *title, const
         if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) cache_result = false;
     }
     if (!good && !allow_auto) { if(pending)*pending=true;if(auto_cache)*auto_cache=cache_result;return false; }
-    if (!good) { good = book_auto_cover_render(path, title, author, BOOK_COVER_W, BOOK_COVER_H, out); auto_used = good; }
+    if (!good) { good = book_auto_cover_render(title, author, BOOK_COVER_W, BOOK_COVER_H, out); auto_used = good; }
 #ifdef ESP_PLATFORM
     if (auto_used) ESP_LOGW("cover", "auto cover %s", path);
 #endif
-    // 默认封面只在本帧绘制（UI 的 AUTO 路径），不进入 RAM 成品缓存：否则下一次读取会把
-    // 生成封面当成真封面返回，整页缓存就会把它当成“已完成”固化下来。
-    // Generated defaults are painted by the UI AUTO path only and never enter the RAM raster
-    // cache; otherwise a later read returns them as a real cover and the page cache freezes it.
+    // 真实封面独立落盘；生成的 TXT 成品由作业队列按字体缓存于内存。
+    // Persist real covers here; the cover queue caches generated TXT rasters in RAM per face.
     if (good && cache_result && !auto_used) {
         cover_cache_write(cache_path, &key, out);
         metalio_cover_cache_put(&ram,out,BOOK_COVER_W*BOOK_COVER_H,meta);
@@ -1087,6 +1091,7 @@ static bool book_cover_load_list_gray_sized_impl(const char *path, const char *t
     if (!path || !out || !width || !height || !limit_w || !limit_h || limit_w>BOOK_COVER_W || limit_h>BOOK_COVER_H) return false;
     const bool compact=limit_w!=BOOK_COVER_W||limit_h!=BOOK_COVER_H;
     *width=limit_w;*height=limit_h;
+    if (book_weread_cover_read(path, out, limit_w, limit_h)) return true;
     char canonical[256], cache_path[120];
     if (book_title_from_path(path, canonical, sizeof(canonical))) title = canonical;
     if (!title || !*title) return false;
@@ -1170,7 +1175,7 @@ static bool book_cover_load_list_gray_sized_impl(const char *path, const char *t
     if (!good && !allow_auto) { if(pending)*pending=true;if(auto_cache)*auto_cache=cacheable;return false; }
     if (!good) {
         *width=limit_w;*height=limit_h;
-        good = book_auto_cover_render(path, title, author, *width, *height, out);
+        good = book_auto_cover_render(title, author, *width, *height, out);
         auto_used = good;
 #ifdef ESP_PLATFORM
         if (auto_used) ESP_LOGW("cover", "auto cover(list) %s", path);
@@ -1290,7 +1295,7 @@ static cover_cache_header_t shelf_cover_identity(const char *source, const char 
     char canonical[256];
     if (book_title_from_path(source, canonical, sizeof(canonical))) title = canonical;
     cover_cache_header_t header;
-    cover_cache_identity(source, title, author, size, modified, &header);
+    cover_cache_identity(source, title, author, size, modified, 0, &header);
     return header;
 }
 bool book_cover_shelf_no_artwork(const char *source, const char *title, const char *author,
@@ -1301,22 +1306,40 @@ bool book_cover_shelf_no_artwork(const char *source, const char *title, const ch
     return remember ? metalio_cover_cache_put(&key, &marker, sizeof(marker), (metalio_cover_meta_t){0})
                     : metalio_cover_cache_get(&key, &marker, sizeof(marker), NULL);
 }
-bool book_cover_shelf_ram_read(const char *source, const char *title, const char *author,
-        uint64_t size, int64_t modified, bool list, bool fast, book_fast_cover_key_t raster,
-        void *out, size_t capacity, metalio_cover_meta_t *meta) {
-    cover_cache_header_t header = shelf_cover_identity(source, title, author, size, modified);
+static metalio_cover_key_t shelf_cover_raster_key(const char *source, const char *title,
+        const char *author, uint64_t size, int64_t modified, uint64_t font_key, bool list, bool fast,
+        book_fast_cover_key_t raster) {
+    char canonical[256];
+    if (book_title_from_path(source, canonical, sizeof(canonical))) title = canonical;
+    cover_cache_header_t header;
+    cover_cache_identity(source, title, author, size, modified, font_key, &header);
     if (fast) {
         fast_cover_header_t packed = {
             .source = header, .revision = FAST_COVER_REVISION, .width = raster.width,
             .height = raster.height, .stride = raster.stride, .contrast = raster.contrast,
             .phase = raster.phase,
         };
-        metalio_cover_key_t key = finished_fast_ram_key(&packed);
-        return metalio_cover_cache_get(&key, out, capacity, meta);
+        return finished_fast_ram_key(&packed);
     }
     metalio_cover_key_t key = ram_key(&header, list ? 1 : 0);
     if (list) key.field[7] = ((uint64_t)raster.width << 32) | raster.height;
+    return key;
+}
+
+bool book_cover_shelf_ram_read(const char *source, const char *title, const char *author,
+        uint64_t size, int64_t modified, bool list, bool fast, book_fast_cover_key_t raster,
+        void *out, size_t capacity, metalio_cover_meta_t *meta) {
+    metalio_cover_key_t key = shelf_cover_raster_key(source, title, author, size, modified, book_auto_cover_font_key(), list, fast, raster);
     return metalio_cover_cache_get(&key, out, capacity, meta);
+}
+
+void book_cover_shelf_ram_store(const char *source, const char *title, const char *author,
+        uint64_t size, int64_t modified, uint64_t font_key, bool list, bool fast, book_fast_cover_key_t raster,
+        const uint8_t *pixels, bool white_edge) {
+    metalio_cover_key_t key = shelf_cover_raster_key(source, title, author, size, modified, font_key, list, fast, raster);
+    const size_t bytes = (size_t)(fast ? raster.stride : raster.width) * raster.height;
+    (void)metalio_cover_cache_put(&key, pixels, bytes,
+        (metalio_cover_meta_t){raster.width, raster.height, white_edge});
 }
 #if KIIKO_BOARD_METALIO47
 bool book_cover_peek_gray(const char *source,const char *title,const char *author,bool list,

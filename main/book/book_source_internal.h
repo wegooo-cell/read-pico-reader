@@ -11,6 +11,10 @@
 #include <stdio.h>
 #define BOOK_CHAPTER_MAX 2048
 #define BOOK_CHAPTER_BYTES_MAX (96 * 1024)
+#define BOOK_TXT_PROBE_BYTES (64u * 1024u + 3u)
+#if KIIKO_BOARD_METALIO47
+uint8_t book_txt_detect_utf16(const unsigned char *sample, size_t length, uint32_t *bom);
+#endif
 #define TXT_NAV_PAGE 128u
 #define TXT_NAV_MAX 16384u
 #define TXT_NAV_PAGES (TXT_NAV_MAX / TXT_NAV_PAGE)

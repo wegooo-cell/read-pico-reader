@@ -6,6 +6,7 @@
  * English: Bounded filenames yield display titles/authors; NVS overrides retain full-path collision checks.
  */
 #include "book_title.h"
+#include "book_weread_cover.h"
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -47,7 +48,10 @@ static bool name_group(name_span_t s,name_span_t *body,size_t *start) {
     if(!s.n)return false;
     const char *left=NULL,*right=NULL;size_t width=1;
     switch(s.p[s.n-1]){case ')':left="(";right=")";break;case ']':left="[";right="]";break;
-      default:if(s.n>=3&&!memcmp(s.p+s.n-3,"）",3)){left="（";right="）";width=3;}else return false;}
+      default:
+        if(s.n>=3&&!memcmp(s.p+s.n-3,"）",3)){left="（";right="）";width=3;}
+        else if(s.n>=3&&!memcmp(s.p+s.n-3,"】",3)){left="【";right="】";width=3;}
+        else return false;}
     unsigned depth=0;
     for(size_t i=s.n;i;){
         if(i>=width&&!memcmp(s.p+i-width,right,width)){++depth;i-=width;}
@@ -60,6 +64,7 @@ static bool name_group(name_span_t s,name_span_t *body,size_t *start) {
 }
 static bool name_source_token(name_span_t s) {
     s=name_trim(s);if(name_starts(s,"www.")){s.p+=4;s.n-=4;}
+    if (s.n == 4 && name_starts(s, "zlib")) return true;
     const char *roots[]={"z-library","z-lib","1lib"};
     for(unsigned i=0;i<sizeof(roots)/sizeof(*roots);++i){
         size_t n=strlen(roots[i]);if(!name_starts(s,roots[i]))continue;
@@ -215,6 +220,21 @@ bool book_name_from_path(const char *path,char *title,size_t title_cap,char *aut
         }
         s=name_library_title(s);
     }
+    // TXT 文件名中的明确作者标记不进入封面书名。/ Keep an explicit author tag out of the TXT title.
+    if (!auth.n && dot && !strcasecmp(dot, ".txt")) {
+        const char *markers[] = {"作者：", "作者:"};
+        for (unsigned i = 0; i < sizeof(markers) / sizeof(*markers); ++i) {
+            const char *tag = strstr(s.p, markers[i]);
+            const size_t len = strlen(markers[i]);
+            if (!tag || tag == s.p || tag + len >= s.p + s.n) continue;
+            name_span_t credit = name_trim((name_span_t){tag + len, (size_t)(s.p + s.n - tag - len)});
+            if (!name_author_candidate(credit)) continue;
+            s.n = (size_t)(tag - s.p);
+            s = name_trim(s);
+            auth = credit;
+            break;
+        }
+    }
     if(!s.n)return false;
     name_copy(author,author_cap,auth);
     (void)book_author_clean_display(author,author_cap);
@@ -288,6 +308,21 @@ bool book_title_get(const char *path, char *out, size_t cap) {
     if (strlen(title) >= cap) return false;
     strcpy(out, title);
     return true;
+}
+bool book_display_name_from_path(const char *path, char *title, size_t title_cap,
+                                 char *author, size_t author_cap) {
+    // 先识别文件名以保留作者；已保存的自定义书名优先显示。/ Keep the parsed author and prefer a saved custom title.
+    const bool named = book_name_from_path(path, title, title_cap, author, author_cap);
+    (void)book_weread_cover_metadata(path, title, title_cap, author, author_cap);
+    char custom[TITLE_MAX + 1];
+    if (title && title_cap && book_title_get(path, custom, sizeof(custom))) {
+        const size_t length = strlen(custom);
+        if (length && length < title_cap) {
+            memcpy(title, custom, length + 1);
+            return true;
+        }
+    }
+    return named;
 }
 esp_err_t book_title_set(const char *path, const char *title) {
     if (!path_ok(path) || !title || !valid_utf8(title, TITLE_MAX)) return ESP_ERR_INVALID_ARG;

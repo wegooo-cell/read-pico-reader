@@ -6,6 +6,7 @@ import subprocess,tempfile
 from home_cover_cache_host_test import function
 ROOT=Path(__file__).resolve().parents[1]
 ticket=ROOT/'main/book/book_ticket.c'
+pico_ticket=ROOT/'boards/pico/src/main/book/book_ticket.c'
 unit=r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -22,7 +23,8 @@ enum {UI_GRAY_BLACK=0,UI_GRAY_WHITE=255,UI_GRAY_LIGHT=192,EPD_DRAW_ALIGN_LEFT,EP
 #define UI_LOCK_HEIGHT 1216
 #define MALLOC_CAP_SPIRAM 1
 #define MALLOC_CAP_8BIT 2
-static bool oom;static unsigned allocations,reads,list_reads,grid_reads,source_case;
+static bool oom;static unsigned allocations,reads,list_reads,grid_reads,source_case,generated;
+static bool generate_ok=true;
 static unsigned system_scale=100,advance_factor=1;
 static void *heap_caps_malloc(size_t n,int caps){assert(n==176*240&&caps==3);if(oom)return NULL;void *p=malloc(n);if(p)++allocations;return p;}
 static bool book_cover_load_gray(const char*p,const char*t,const char*a,uint8_t*out,bool decode,bool*pending){
@@ -32,6 +34,12 @@ static bool book_cover_load_gray(const char*p,const char*t,const char*a,uint8_t*
 static bool book_cover_load_list_gray(const char*p,const char*t,const char*a,uint8_t*out,bool decode,bool*pending,unsigned*w,unsigned*h){
  (void)p;(void)t;assert(!decode&&!pending);++reads;++list_reads;
  if((source_case==1&&!strcmp(a,""))||source_case==3){*w=source_case==3?1:166;*h=240;for(unsigned y=0;y<*h;++y)for(unsigned x=0;x<*w;++x)out[y**w+x]=(x*13+y*7)&255;return true;}return false;
+}
+static bool book_auto_cover_render(const char *title,const char *author,unsigned w,unsigned h,uint8_t *out){
+ assert(!strcmp(title,"自定义书名")&&!strcmp(author,"作者")&&w==176&&h==240);
+ ++generated;
+ if(!generate_ok)return false;
+ memset(out,51,w*h);out[11*w+9]=255;return true;
 }
 static uint8_t ui_contrast_gray(uint8_t g){return g;}
 static int ui_text_effective_px(int px){return px*system_scale/100;}
@@ -54,6 +62,7 @@ static void ui_text_vc(uint8_t*fb,int x,int y,int px,const char*t,int a,bool inv
 unit+=function('book_cover_crop',ROOT/'main/book/book_cover.c')+'\n'
 for name in ('text_fit','cover_load','cover_background_draw','cover_draw','heading_prefix','ticket_heading'):
  unit+=function(name,ticket)+'\n'
+unit+=function('cover_load',pico_ticket).replace('cover_load(', 'pico_cover_load(',1)+'\n'
 unit+=r'''
 enum {READING,SHELF};
 static int s_view=READING,lock_style=0;static char *s_text="body";static char s_path[288]="/sdcard/books/current.epub",s_book_title[256]="title";
@@ -103,11 +112,21 @@ int main(void){
   if(source_case==1){
    // The original portrait ratio survives. No stretched 252px-wide image.
    assert(pixels[(378+172)*684+216]==255);
-   assert(pixels[(378+172)*684+342]==ui_image_dither_gray(gray[120*w+83],342,550));
+   assert(pixels[(378+172)*684+342]==gray[120*w+83]);
   }
   free(gray);
  }
  reads=0;oom=true;unsigned w=0,h=0;assert(!cover_load("book.epub",title,"余华",&w,&h)&&!reads);oom=false;
+ source_case=0;
+ uint8_t *txt=cover_load("book.TXT","自定义书名","作者",&w,&h);
+ assert(txt&&w==176&&h==240&&txt[0]==51&&txt[11*w+9]==255&&generated==1);
+ free(txt);
+ txt=pico_cover_load("book.TXT","自定义书名","作者");
+ assert(txt&&txt[0]==51&&generated==2);free(txt);
+ generate_ok=false;
+ assert(!cover_load("book.txt","自定义书名","作者",&w,&h));
+ assert(!pico_cover_load("book.txt","自定义书名","作者")&&generated==4);
+ assert(!pico_cover_load("book.epub",title,"余华")&&generated==4);
  cover_background_draw(pixels,NULL,0,0);cover_draw(pixels,NULL,0,0,title);
  app_ctx_t ctx={.now_ms=799};warm_reader_ticket_cover(&ctx);assert(!submits);
  ctx.now_ms=800;media_ready=false;warm_reader_ticket_cover(&ctx);assert(!submits);media_ready=true;

@@ -34,6 +34,9 @@ static bool fat_locked;
 static bool defer_manual,fail_manual_task,fail_unmount;
 static void (*queued_manual)(void*);
 static void *queued_manual_arg;
+static void (*queued_resume)(void*);
+static void *queued_resume_arg;
+static bool defer_resume;
 static unsigned format_calls;
 
 static sdmmc_card_t test_card = {
@@ -78,6 +81,11 @@ const char* esp_err_to_name(esp_err_t err) { (void)err; return "test"; }
 BaseType_t xTaskCreate(void (*fn)(void*), const char* name, int stack,
                        void* arg, int priority, void* handle) {
     (void)name; (void)stack; (void)priority; (void)handle;
+    if (defer_resume && !strcmp(name, "sd_resume")) {
+        assert(!queued_resume);
+        queued_resume=fn;queued_resume_arg=arg;
+        return pdPASS;
+    }
     if(!strcmp(name,"sd_manual")){
         if(fail_manual_task)return !pdPASS;
         if(defer_manual){assert(!queued_manual);queued_manual=fn;queued_manual_arg=arg;return pdPASS;}
@@ -339,6 +347,16 @@ int main(void) {
     assert(raw_inits==8 && raw_stops==8 && !usb_card);
     assert(read_pico_sd_usb_release()==ESP_OK);raw_mode=false;
     assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
+    // Multiple observers of an unlock share the same pending TF mount and its result.
+    assert(read_pico_sd_sync()==ESP_OK && suspended && !card);
+    before=mount_calls;
+    defer_resume=true;
+    assert(read_pico_sd_resume()==ESP_ERR_NOT_FINISHED && queued_resume);
+    assert(read_pico_sd_resume()==ESP_ERR_NOT_FINISHED && mount_calls==before);
+    assert(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FINISHED);
+    work=queued_resume;queued_resume=NULL;work(queued_resume_arg);
+    assert(read_pico_sd_get_info(&info)==ESP_OK && info.mounted && mount_calls==before+1);
+    assert(read_pico_sd_resume()==ESP_OK && !queued_resume && mount_calls==before+1);
     assert(close_card()==ESP_OK && test_dma_allocs==test_dma_frees);
     puts("PASS: SD profiles/RTC and DMA, asynchronous manual recovery from failed/paused/removal states, lifecycle owners/OOM/unmount failure/retry/no autoformat/256GiB");
     return 0;

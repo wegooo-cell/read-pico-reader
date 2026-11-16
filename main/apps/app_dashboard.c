@@ -49,6 +49,8 @@
 #include "boot_state.h"
 #include "app_registry.h"
 #include "book_cover.h"
+#include "book_cover_auto.h"
+#include "book_weread_cover.h"
 #if KIIKO_BOARD_METALIO47
 #include "metalio_cover_cache.h"
 #else
@@ -110,6 +112,8 @@ typedef struct {
 static EXT_RAM_BSS_ATTR home_cover_cache_t s_cover_cache[7];
 #define HOME_COVER_RESERVE (512u * 1024u)
 static int s_cover_next;
+static uint64_t s_cover_font_key;
+static unsigned s_weread_cover_revision;
 static bool s_scan_pending;
 static bool s_books_cache_valid;
 static bool s_cached_sd_present;
@@ -198,6 +202,8 @@ static void copy_title(char *dst, size_t cap, const char *src) {
 static void title_for(home_book_t *item) {
     if (!book_name_from_path(item->path, item->title, sizeof(item->title),item->author,sizeof(item->author)))
         copy_title(item->title, sizeof(item->title), "未命名");
+    (void)book_weread_cover_metadata(item->path, item->title, sizeof(item->title),
+                                    item->author, sizeof(item->author));
 }
 
 static void consider_book(const char *path, const struct stat *st) {
@@ -377,9 +383,12 @@ static bool s_cover_waiting;
 static bool load_cover(home_book_t *item,int slot) {
     s_cover_waiting=false;
     if(!pico_boot_asset_allowed(item->path))return false;
+#if KIIKO_BOARD_METALIO47
+    const char *ext = strrchr(item->path, '.');
+#endif
     book_cover_job_t request={.list=true,.natural=true,.fast=app_settings_main_fast_refresh(),
 #if KIIKO_BOARD_METALIO47
-        .artwork_only=true,
+        .artwork_only=!(ext && !strcasecmp(ext, ".txt")),
 #endif
         .contrast=app_settings_system_contrast(),.phase=17};
     snprintf(request.path,sizeof(request.path),"%s",item->path);
@@ -890,9 +899,20 @@ static void refresh_excerpt(void) {
 static unsigned s_shelf_warm_next;static int64_t s_shelf_warm_after;
 #endif
 static void on_enter(app_ctx_t *ctx) {
+    const unsigned cover_revision = book_weread_cover_revision();
+    if (cover_revision != s_weread_cover_revision) {
+        s_weread_cover_revision = cover_revision;
+        app_home_cover_mode_changed();
+        s_books_cache_valid = false;
+    }
 #if !KIIKO_BOARD_METALIO47
     app_book_home_shelf_warm_stop();s_shelf_warm_next=0;s_shelf_warm_after=ctx->now_ms+1200;
 #endif
+    const uint64_t cover_font = book_auto_cover_font_key();
+    if (s_cover_font_key != cover_font) {
+        clear_cover_cache();
+        s_cover_font_key = cover_font;
+    }
     s_component_dirty=(EpdRect){0};
     s_cover_generation=book_cover_jobs_begin();
     const uint32_t progress_revision=book_progress_revision();

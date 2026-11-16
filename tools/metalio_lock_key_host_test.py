@@ -25,8 +25,20 @@ static power_double_click_t s_wake_click;
 static uint16_t inputs=0xffff;
 static unsigned input_reads,fail_read,release_read;
 static unsigned drains;
+static int ioe=1,mutex;
+static void battery_reset(void){}
+#define pdTRUE 1
+static int xSemaphoreTake(int m,int timeout){(void)m;assert(timeout==100);return pdTRUE;}
+static void xSemaphoreGive(int m){(void)m;}
 static int64_t esp_timer_get_time(void){return clock_us;}
 static int metalio_io_read(uint16_t *value){++input_reads;*value=input_reads==release_read?0xffff:inputs;return input_reads==fail_read?-1:io_error;}
+static int fca9555_read_input(int device,int port,uint8_t *value){
+ assert(device==ioe&&port==1);
+ uint16_t sample;
+ int status=metalio_io_read(&sample);
+ *value=(uint8_t)(sample>>8);
+ return status;
+}
 static void metalio_volume_sample(uint16_t value,int64_t ms){(void)value;(void)ms;}
 static void metalio_volume_clear(void){++drains;}
 #define GPIO_NUM_61 61
@@ -41,7 +53,8 @@ static void vTaskDelay(int ms){clock_us+=(int64_t)ms*1000;}
 for name in ('read_pico_pmu_lock_key_serial','keys','read_pico_pmu_keys_pause','read_pico_pmu_keys_resume','read_pico_pmu_latch_power_wakeup','read_pico_pmu_drain_events','read_pico_pmu_take_key_wakeup','read_pico_pmu_take_key_wakeup_single'):
     unit+=function(name,ROOT/'components/read_pico_pmu/metalio_power_adapter.c')+'\n'
 unit+=function('metalio_confirm_power_key',ROOT/'components/metalio_hw/metalio_hw.c')+'\n'
-unit+=function('app_lock_wait_key_idle',ROOT/'main/sleep.c')+'\n'
+unit+=function('metalio_confirm_light_wake_key',ROOT/'components/metalio_hw/metalio_hw.c')+'\n'
+unit+=function('app_lock_wait_key_idle',ROOT/'boards/metalio47/src/main/sleep.c')+'\n'
 unit+=r'''
 static void sample(bool down,int ms){inputs=down?0x7fff:0xffff;clock_us=(int64_t)ms*1000;keys();}
 static void reset(void){s_wake_click=(power_double_click_t){0};held=long_sent=candidate=keys_paused=false;key_epoch=s_lock_key_serial=0;candidate_since=down_since=clock_us=0;state.key_state=0;action=io_error=poll_error=drains=0;inputs=0xffff;input_reads=fail_read=release_read=0;}
@@ -105,6 +118,12 @@ int main(void){
   reset();inputs=0x7fff;
   if(i<2)fail_read=i+1;else if(i==2)release_read=2;else inputs=0xfffe;
   assert(!metalio_confirm_power_key()&&!s_lock_key_serial&&!action);
+ }
+ reset();inputs=0x7fff;assert(metalio_confirm_light_wake_key()&&input_reads==2&&clock_us==10000);
+ for(unsigned i=0;i<4;i++){
+  reset();inputs=0x7fff;
+  if(i<2)fail_read=i+1;else if(i==2)release_read=2;else inputs=0xfeff;
+  assert(!metalio_confirm_light_wake_key()&&!s_lock_key_serial&&!action);
  }
  puts("PASS: production S31 short/long wake consumption, no held-level duplicate, queued click during collage, shared-IRQ independent release and failed-poll timeout");
 }

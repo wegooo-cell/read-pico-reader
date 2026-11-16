@@ -510,7 +510,7 @@ esp_err_t read_pico_sd_usb_acquire(sdmmc_card_t **out) {
 }
 
 static void probe_task(void* arg) {
-    (void)arg;
+    const bool resuming = arg != NULL;
     read_pico_sd_info_t info = { 0 };
     esp_err_t detect_err = read_pico_sd_detect(&info.present);
     if (detect_err == ESP_OK && !info.present) {
@@ -522,7 +522,18 @@ static void probe_task(void* arg) {
     }
 
     esp_err_t err = mount_card(false);
-    if(err==ESP_ERR_NOT_FINISHED){abort_operation();vTaskDelete(NULL);return;}
+    if (err == ESP_ERR_NOT_FINISHED) {
+        if (resuming) {
+            portENTER_CRITICAL(&state_lock);
+            suspended = true;
+            probe_state = 0;
+            portEXIT_CRITICAL(&state_lock);
+        } else {
+            abort_operation();
+        }
+        vTaskDelete(NULL);
+        return;
+    }
     fill_info(&info, err);
     if (err == ESP_OK) {
         ESP_LOGI(
@@ -571,6 +582,42 @@ esp_err_t read_pico_sd_start_probe(void) {
         return ESP_ERR_NO_MEM;
     }
     return ESP_ERR_NOT_FINISHED;
+}
+
+esp_err_t read_pico_sd_resume(void) {
+    portENTER_CRITICAL(&state_lock);
+    esp_err_t result = cached_info.error;
+    if (usb_owned || probe_state == 1 || space_busy || health_busy) {
+        result = ESP_ERR_NOT_FINISHED;
+    } else if (suspended) {
+        suspended = false;
+        if (cached_info.needs_format) {
+            // Keep the diagnosed filesystem error until the user retries or changes media.
+        } else if (cached_info.present) {
+            media_invalidated = false;
+            cached_info.error = ESP_ERR_NOT_FINISHED;
+            probe_state = 1;
+            result = ESP_OK;
+        } else {
+            probe_state = 2;
+            cached_info.error = ESP_ERR_NOT_FOUND;
+            result = ESP_ERR_NOT_FOUND;
+        }
+    } else if (cached_info.mounted && !media_invalidated) {
+        result = ESP_OK;
+    } else if (probe_state == 0) {
+        result = ESP_ERR_INVALID_STATE;
+    }
+    const bool start = result == ESP_OK && probe_state == 1;
+    portEXIT_CRITICAL(&state_lock);
+    if (!start) return result;
+    if (xTaskCreate(probe_task, "sd_resume", 4096, (void *)1, 5, NULL) == pdPASS)
+        return ESP_ERR_NOT_FINISHED;
+    portENTER_CRITICAL(&state_lock);
+    suspended = true;
+    probe_state = 0;
+    portEXIT_CRITICAL(&state_lock);
+    return ESP_ERR_NO_MEM;
 }
 
 esp_err_t read_pico_sd_get_info(read_pico_sd_info_t* info) {
@@ -696,10 +743,13 @@ void read_pico_sd_poll_health(void) {
         portEXIT_CRITICAL(&state_lock);
     }
 }
+static bool recovery_needed_locked(void) {
+    return !usb_owned && !suspended && probe_state != 1 && !cached_info.mounted &&
+           !cached_info.needs_format && (media_invalidated || mounted_once || cached_info.present);
+}
 bool read_pico_sd_needs_recovery(void) {
     portENTER_CRITICAL(&state_lock);
-    bool needed = !suspended && probe_state != 1 && !cached_info.mounted &&
-        (media_invalidated || mounted_once || cached_info.present);
+    const bool needed = recovery_needed_locked();
     portEXIT_CRITICAL(&state_lock);
     return needed;
 }
@@ -753,8 +803,13 @@ static void recovery_task(void *arg) {
     vTaskDelete(NULL);
 }
 esp_err_t read_pico_sd_start_recovery(void) {
-    if (!read_pico_sd_needs_recovery()) return ESP_ERR_INVALID_STATE;
-    if (!begin_operation()) return ESP_ERR_NOT_FINISHED;
+    portENTER_CRITICAL(&state_lock);
+    const bool busy = usb_owned || probe_state == 1 || space_busy || health_busy;
+    const bool needed = !busy && recovery_needed_locked();
+    if (needed) probe_state = 1;
+    portEXIT_CRITICAL(&state_lock);
+    if (busy) return ESP_ERR_NOT_FINISHED;
+    if (!needed) return ESP_ERR_INVALID_STATE;
     if (xTaskCreate(recovery_task,"sd_recover",4096,NULL,3,NULL) == pdPASS) return ESP_OK;
     portENTER_CRITICAL(&state_lock);
     probe_state = 2;
@@ -782,19 +837,20 @@ esp_err_t read_pico_sd_sync(void) {
     esp_err_t err = close_card();
     if(err==ESP_ERR_NOT_FINISHED){abort_operation();return err;}
     if (err != ESP_OK) {
-        read_pico_sd_info_t info = { .present = true, .mounted = true, .error = err };
-        (void)read_pico_sd_detect(&info.present);
-        publish_info(&info);
+        publish_info(&previous);
         return err;
     }
     // S31没有CD检测脚：卸载不等于拔卡，保留已知存在状态，允许随后重新挂载字体。
     // S31 has no card-detect pin: unmounting is not removal; retain known presence for font remounts.
-    read_pico_sd_info_t info = { .present = previous.present, .error = ESP_ERR_INVALID_STATE };
-    publish_info(&info);
+    read_pico_sd_info_t info = {
+        .present = previous.present,
+        .needs_format = previous.needs_format,
+        .error = previous.needs_format ? previous.error : ESP_ERR_INVALID_STATE,
+    };
     portENTER_CRITICAL(&state_lock);
-    if(cached_info.present && !media_invalidated) probe_state=0;
     suspended = true;
     portEXIT_CRITICAL(&state_lock);
+    publish_info(&info);
     return ESP_OK;
 }
 

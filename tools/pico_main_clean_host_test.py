@@ -56,6 +56,30 @@ static void verify(const EpdWaveform *source,int mode,unsigned white){
  assert(wave==source);
 #endif
 }
+static void verify_fast(const EpdWaveform *source, enum EpdDrawMode mode){
+ const EpdWaveformPhases *native=e0470_waveform_phases(source,mode);
+ const EpdWaveform *wave=display_main_fast_white_waveform(source,mode);
+ const EpdWaveformPhases *phases=e0470_waveform_phases(wave,mode);
+ assert(wave!=source&&native&&phases&&PICO_MAIN_FAST_WHITE_PHASES==10);
+ int holds=0;
+ for(int f=native->phases-1;f>=0&&holds<3;--f){
+  bool empty=true;
+  for(int to=0;to<16;++to)for(int from=0;from<16;++from)
+   if(to!=from&&e0470_phase_action(native,f,to,from))empty=false;
+  if(!empty)break;
+  ++holds;
+ }
+ assert(phases->phases==native->phases+10+(holds?0:1)&&phases->phases<=48);
+ const int drive=native->phases-holds;
+ for(int f=0;f<phases->phases;++f)for(int to=0;to<16;++to)for(int from=0;from<16;++from){
+  const int expected=f<drive?e0470_phase_action(native,f,to,from):
+   f<drive+10?(to==15?2:0):f<native->phases+10?e0470_phase_action(native,f-10,to,from):0;
+  assert(e0470_phase_action(phases,f,to,from)==expected);
+ }
+ unsigned before=allocations;
+ assert(display_main_fast_white_waveform(wave,mode)==wave);
+ assert(display_main_fast_white_waveform(source,mode)==wave&&before==allocations);
+}
 static void verify_scroll(void){
  const EpdWaveform *base=display_main_normal_waveform();
  const EpdWaveformPhases *source=e0470_waveform_phases(base,MODE_GL16);
@@ -112,10 +136,23 @@ int main(void){
 #else
  assert(allocations==before&&bytes==start);
 #endif
- EpdWaveform overflow=*sources[0];assert(display_main_clean_waveform(&overflow,MODE_GL16)==&overflow);
+
+ oom=true;assert(display_main_fast_white_waveform(sources[4],MODE_DU)==sources[4]);oom=false;
+ verify_fast(sources[4],MODE_DU);
+ verify_fast(display_main_gray_waveform(),MODE_GL16);
+ assert(display_main_fast_white_waveform(&E0470_WAVEFORM,MODE_GC16)==&E0470_WAVEFORM);
+ assert(display_main_fast_white_waveform(&E0470_FOLLOW_WAVEFORM,MODE_DU)==&E0470_FOLLOW_WAVEFORM);
+
  for(int i=0;i<3;++i){const EpdWaveformPhases *p=e0470_waveform_phases(&E0470_WAVEFORM,native_modes[i]);assert(!memcmp(vendor[i],p->luts,(size_t)p->phases*64));}
  verify_scroll();
- puts("PASS: Pico native six root LUTs,20/24/37 sources,exact original actions,six/eight changed-white/original settling,equal-gray hold,45-phase cap,OOM retry/idempotent bounded cache/vendor bytes intact");
+ EpdWaveform extra[16];
+ for(unsigned i=0;i<16;++i){
+  extra[i]=*sources[0];
+  const EpdWaveform *wave=display_main_fast_white_waveform(&extra[i],MODE_GL16);
+  if(wave==&extra[i]){assert(i==16-(KIIKO_PICO_MAIN_CLEAN?14:2));break;}
+  assert(i<16-(KIIKO_PICO_MAIN_CLEAN?14:2));
+ }
+ puts("PASS: Pico native six root LUTs,20/24/37 sources,exact original actions,six/eight changed-white/original settling,equal-gray hold,45-phase cap, ten-phase fast white in normal builds, OOM fallback and native bytes intact");
 }
 '''
 
@@ -187,7 +224,10 @@ int main(void){
     static int app_index_of(const app_desc_t *app){return app->index;}
     static bool visible(app_ctx_t *ctx){(void)ctx;return drawing->visible;}
     enum{APP_MAIN_REFRESH_FAST=1};
-    static __attribute__((unused)) int app_settings_main_refresh_mode(void){return 0;}
+    #define PICO_MAIN_FAST_WHITE_PHASES 10u
+    static int refresh_mode;
+    static __attribute__((unused)) int app_settings_main_refresh_mode(void){return refresh_mode;}
+    static __attribute__((unused)) bool app_settings_main_fast_refresh(void){return refresh_mode==APP_MAIN_REFRESH_FAST;}
     static __attribute__((unused)) bool display_main_fast_background_set(bool active){(void)active;return false;}
     static unsigned display_main_quality_set(unsigned phases){unsigned prior=quality;quality=phases;return prior;}
     static void display_main_transition_disarm(void){}
@@ -197,19 +237,20 @@ int main(void){
             scope+=select_source(function(name,path),'pico')+'\n'
         scope+='static void app_present_impl(app_ctx_t*c,const app_desc_t*a,app_redraw_t r){observed=quality;main_present_finished(c,a,r);}\n'
         scope+=select_source(function('app_present',path),'pico')+'\n'
+        scope+='#define PICO_OVERRIDE '+str(int(scope_path.startswith('boards/')))+'\n'
         scope+=r'''
     static void present(app_desc_t *app,app_redraw_t redraw,unsigned expected){drawing=app;observed=!expected;app_present(&ctx,app,redraw);assert(observed==expected&&!quality);}
     int main(void){
      app_desc_t pages[5];for(int i=0;i<5;++i)pages[i]=(app_desc_t){.index=i,.visible=true,.main_page_visible=visible};
-     for(int a=0;a<4;++a)for(int b=0;b<4;++b){
+     for(refresh_mode=0;refresh_mode<3;++refresh_mode)for(int a=0;a<4;++a)for(int b=0;b<4;++b){
       s_presented_root=s_presented_main=NULL;
-      present(&pages[a],APP_REDRAW_PAGE,false);present(&pages[b],APP_REDRAW_PAGE,a==b?0u:a==1||b==1?8u:6u);
+      present(&pages[a],APP_REDRAW_PAGE,false);present(&pages[b],APP_REDRAW_PAGE,a==b?0u:PICO_OVERRIDE&&refresh_mode==1?10u:a==1||b==1?8u:6u);
       present(&pages[b],APP_REDRAW_PAGE,false);present(&pages[a],APP_REDRAW_FULL,false);
       present(&pages[b],APP_REDRAW_AREA,false);pages[a].visible=false;
       present(&pages[a],APP_REDRAW_PAGE,false);present(&pages[b],APP_REDRAW_PAGE,false);pages[a].visible=true;
      }
      present(&pages[4],APP_REDRAW_PAGE,false);present(&pages[0],APP_REDRAW_PAGE,false);
-     puts("PASS: actual presenter scopes Pico quality only to visible root changes,shelf source OR destination=8/other=6,excluding entry/same/full/area/children/reader and restores state");
+     puts("PASS: actual presenter scopes Pico quality only to visible root changes,fast=10, shelf source OR destination=8/other=6 in other modes,excluding entry/same/full/area/children/reader and restores state");
     }
     '''
         (d/'scope.c').write_text(scope)

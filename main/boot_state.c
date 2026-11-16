@@ -190,7 +190,9 @@ void pico_boot_init(bool abnormal_reset) {
         memcpy(s_record.blocked, s_record.opening, sizeof(s_record.blocked));
         s_record.opening[0] = 0;
     }
-    if (s_record.resume_valid && !s_recovery) {
+    const bool blocked_resume = s_record.resume.reader && s_record.blocked[0] &&
+        !strcmp(s_record.resume.path, s_record.blocked);
+    if (s_record.resume_valid && !s_recovery && !blocked_resume) {
         s_resume = s_record.resume;
         s_resume_pending = true;
         s_resume_frame = s_record.reserved[0] == 1;

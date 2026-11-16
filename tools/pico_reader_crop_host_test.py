@@ -24,7 +24,7 @@ enum EpdDrawError{EPD_DRAW_SUCCESS,EPD_DRAW_EMPTY_LINE_QUEUE};
 typedef struct{int unused;}EpdWaveform;
 typedef struct{uint8_t *front_fb,*back_fb,*difference_fb;bool *dirty_lines;uint8_t *dirty_columns;const EpdWaveform *waveform;}EpdiyHighlevelState;
 static _Alignas(16) uint8_t front[B],back[B],diff[W*H],cols[W/2],old[B];
-static bool rows[H],full,fail,same;
+static bool rows[H],full,fail,same,exact;
 static int rotation,scans,checks;
 static EpdRect expected;
 static int epd_height(void){return H;}
@@ -63,14 +63,13 @@ static void check(EpdRect logical){
  // RC104 scans and commits complete physical columns in groups of 32.
  int dirty_x=expected.x;
  int right=(expected.x+expected.width+31)/32*32;
- expected.x=expected.x/32*32;
- expected.width=(right<W?right:W)-expected.x;
+ if(!exact){expected.x=expected.x/32*32;expected.width=(right<W?right:W)-expected.x;}
  // Pending changes outside the aligned physical crop must not be committed.
  if(!same)for(int y=0;y<H;++y)for(int x=0;x<W;x+=7)front[y*W/2+x/2]^=(uint8_t)(15u<<(4*(x&1)));
  if(!same)front[expected.y*W/2+dirty_x/2]^=(uint8_t)(7u<<(4*(dirty_x&1)));
  memcpy(old,back,B);scans=0;
  EpdiyHighlevelState h={front,back,diff,rows,cols,NULL};
- assert(hl_update_area(&h,MODE_GL16,25,logical,full)==(fail?EPD_DRAW_EMPTY_LINE_QUEUE:EPD_DRAW_SUCCESS));
+ assert(hl_update_area(&h,MODE_GL16,25,logical,full,exact)==(fail?EPD_DRAW_EMPTY_LINE_QUEUE:EPD_DRAW_SUCCESS));
  assert(scans==1);
  for(int y=0;y<H;++y)for(int x=0;x<W;++x){
   assert(pixel(back,x,y)==(!fail&&inside(x,y)?pixel(front,x,y):pixel(old,x,y)));
@@ -78,6 +77,7 @@ static void check(EpdRect logical){
  ++checks;
 }
 int main(void){
+ for(int e=0;e<2;++e){exact=e;
  for(rotation=0;rotation<4;++rotation)for(int f=0;f<2;++f)for(int failure=0;failure<2;++failure){
   full=f;fail=failure;
   if(rotation&1){
@@ -88,14 +88,31 @@ int main(void){
   check((EpdRect){11,13,61,35});check((EpdRect){32,32,64,64});
   for(int x=0;x<4;++x)for(int n=1;n<=3;++n)check((EpdRect){x,9,n,3});
  }
+ }
  full=true;fail=false;same=true;
  for(rotation=1;rotation<4;rotation+=2)check((EpdRect){0,0,H,1204});
  // No-op/empty updates must not submit a scan or alter either framebuffer.
  EpdiyHighlevelState h={front,back,diff,rows,cols,NULL};
  rotation=0;scans=0;
- assert(hl_update_area(&h,MODE_GL16,25,(EpdRect){0,0,W,H},false)==EPD_DRAW_SUCCESS);
- assert(hl_update_area(&h,MODE_GL16,25,(EpdRect){0,0,0,3},true)==EPD_DRAW_SUCCESS);
+ assert(hl_update_area(&h,MODE_GL16,25,(EpdRect){0,0,W,H},false,false)==EPD_DRAW_SUCCESS);
+ assert(hl_update_area(&h,MODE_GL16,25,(EpdRect){0,0,0,3},true,false)==EPD_DRAW_SUCCESS);
  assert(!scans&&!memcmp(front,back,B));
+ // Nonaligned reading body neighbors the first row of the real footer.
+ // Body has one changed pixel in the same on-screen row as changed page digits.
+ exact=true;rotation=3;fail=false;full=false;
+ memset(front,0xff,B);memset(back,0xff,B);
+ front[33*W/2+1045/2]=0x0f;
+ front[33*W/2+1051/2]=0x0f;
+ front[33*W/2+1057/2]=0x0f;
+ memcpy(old,back,B);
+ expected=(EpdRect){176,0,872,H};
+ assert(hl_update_area(&h,MODE_GL16,25,(EpdRect){0,176,H,872},false,true)==EPD_DRAW_SUCCESS);
+ assert(pixel(back,1045,33)==0&&pixel(back,1051,33)==15&&pixel(back,1057,33)==15);
+ memcpy(old,back,B);
+ expected=(EpdRect){1051,33,7,1};
+ assert(hl_update_area(&h,MODE_DU,25,(EpdRect){H-34,1051,1,7},false,true)==EPD_DRAW_SUCCESS);
+ assert(pixel(back,1051,33)==0&&pixel(back,1057,33)==0);
+ puts("PASS: text and footer sharing a32-column group retain independent, exact physical history");
  puts("PASS: real Pico diff/highlevel 32-column scan masks and success-only commits; immersive/footer/standard crops,4 rotations,odd nibbles,narrow/aligned areas and failures");
 }
 '''

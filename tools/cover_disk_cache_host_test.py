@@ -14,6 +14,7 @@ unit=r'''
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <errno.h>
 #include <sys/stat.h>
 #include "metalio_cover_cache.h"
@@ -25,6 +26,8 @@ size_t heap_caps_get_largest_free_block(unsigned caps){assert(caps==3);return 16
 #define BOOK_COVER_W 176
 #define BOOK_COVER_H 240
 #define BOOK_AUTO_COVER_VERSION 1
+static uint64_t cover_font;
+static uint64_t book_auto_cover_font_key(void){return cover_font;}
 static const char *root;
 static bool write_fail, deny_storage;
 static void map(const char *p,char out[1024]){assert(!strncmp(p,"/sdcard",7));assert(snprintf(out,1024,"%s%s",root,p+7)<1024);}
@@ -44,7 +47,7 @@ typedef struct {unsigned width,height,stride,contrast,phase;} book_fast_cover_ke
 unit+=s[s.index('#define COVER_CACHE_MAGIC'):s.index('static uint64_t cover_hash')]
 revision=s.index('#define FAST_COVER_REVISION')
 unit+=s[revision:s.index('static uint64_t fast_cover_checksum',revision)]
-for n in ('cover_hash','cover_cache_identity','cover_cache_key','ram_key','fast_cover_checksum','fast_cover_key','finished_fast_ram_key','shelf_cover_identity','book_cover_shelf_no_artwork','book_cover_shelf_ram_read','book_cover_fast_cache_read','fast_cache_write','book_cover_fast_cache_write','book_cover_fast_cache_write_checked'):
+for n in ('cover_hash','cover_cache_identity','cover_cache_key','ram_key','fast_cover_checksum','fast_cover_key','finished_fast_ram_key','shelf_cover_identity','book_cover_shelf_no_artwork','shelf_cover_raster_key','book_cover_shelf_ram_read','book_cover_shelf_ram_store','book_cover_fast_cache_read','fast_cache_write','book_cover_fast_cache_write','book_cover_fast_cache_write_checked'):
  unit+=function(n,cover)+'\n'
 unit+=r'''
 #define MALLOC_CAP_SPIRAM 1
@@ -131,6 +134,20 @@ int main(int argc,char **argv){
  assert(book_cover_shelf_no_artwork("/sdcard/books/no.epub","none","",42,123,true));
  assert(book_cover_shelf_no_artwork("/sdcard/books/no.epub","none","",42,123,false));
  assert(!book_cover_shelf_no_artwork("/sdcard/books/no.epub","none","",42,124,false));
+ const char *txt="/sdcard/books/title.TXT";
+ book_cover_shelf_ram_store(txt,"title","",42,123,0,true,true,key,bits,true);
+ assert(book_cover_shelf_ram_read(txt,"title","",42,123,true,true,key,out,sizeof(out),&meta));
+ assert(meta.width==164&&meta.height==214&&meta.white_edge&&!memcmp(out,bits,sizeof(bits)));
+ book_fast_cover_key_t small={51,70,21,100,0};
+ uint8_t gray[51*70];memset(gray,238,sizeof(gray));
+ book_cover_shelf_ram_store(txt,"title","",42,123,0,true,false,small,gray,false);
+ assert(book_cover_shelf_ram_read(txt,"title","",42,123,true,false,small,out,sizeof(out),&meta));
+ assert(meta.width==51&&meta.height==70&&!meta.white_edge&&!memcmp(out,gray,sizeof(gray)));
+ cover_font=42;
+ assert(!book_cover_shelf_ram_read(txt,"title","",42,123,true,false,small,out,sizeof(out),&meta));
+ book_cover_shelf_ram_store(txt,"title","",42,123,42,true,false,small,gray,false);
+ assert(book_cover_shelf_ram_read(txt,"title","",42,123,true,false,small,out,sizeof(out),&meta));
+ cover_font=0;
  deny_storage=false;
  uint64_t hits=metalio_cover_cache_stats().hits;
  assert(book_cover_fast_cache_read(path,"name","author",key,out,&edge)&&edge&&!memcmp(out,bits,4494));

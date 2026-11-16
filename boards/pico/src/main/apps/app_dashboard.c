@@ -23,8 +23,8 @@
  * Latest user revision: resume titles reuse the loaded system face at the original 40px, without loading the reader face or adding built-in fonts.
  * 用户修订：首页静止时按分钟局部更新时间，不扫描图书或重画整页；保留快刷白底。
  * User revision: locally advance the idle clock by minute without scanning books or repainting the page; retain the fast white background.
- * 用户修订：普通/水波纹续读卡有浅灰底，三模式结构边线加粗；快刷组件预先二值化且不增加补刷。
- * User revision: ordinary/water resume cards have a light-gray fill and thicker rules in all modes; fast widgets are pre-binarized without an extra refresh.
+ * 用户修订：三种模式的续读卡均用白底，保留加粗边线；快刷组件预先二值化。
+ * User revision: the resume card uses white in all three modes, retaining its thicker frame; fast widgets are pre-binarized.
  * 用户修订：Kehai秒针保持未变化的表盘像素，避免灰底形成矩形黑闪；快刷只驱动黑白圆点差分。
  * User revision: Kehai seconds hold unchanged face pixels to avoid rectangular gray-background flashes; fast mode drives binary dot differences only.
  * 用户修订：首页题头与书架、文件和设置共用左侧起点、顶边及52px名义字号，仍使用当前系统字体。
@@ -44,6 +44,8 @@
 #include "boot_state.h"
 #include "app_registry.h"
 #include "book_cover.h"
+#include "book_cover_auto.h"
+#include "book_weread_cover.h"
 #include "book_cover_jobs.h"
 #include "ui_image_dither.h"
 #include "book_epub.h"
@@ -100,6 +102,8 @@ typedef struct {
 static EXT_RAM_BSS_ATTR home_cover_cache_t s_cover_cache[7];
 #define HOME_COVER_RESERVE (512u * 1024u)
 static int s_cover_next;
+static uint64_t s_cover_font_key;
+static unsigned s_weread_cover_revision;
 static bool s_scan_pending;
 static bool s_books_cache_valid;
 static bool s_cached_sd_present;
@@ -193,6 +197,8 @@ static void copy_title(char *dst, size_t cap, const char *src) {
 static void title_for(home_book_t *item) {
     if (!book_name_from_path(item->path, item->title, sizeof(item->title),item->author,sizeof(item->author)))
         copy_title(item->title, sizeof(item->title), "未命名");
+    (void)book_weread_cover_metadata(item->path, item->title, sizeof(item->title),
+                                    item->author, sizeof(item->author));
 }
 
 static void consider_book(const char *path, const struct stat *st) {
@@ -634,18 +640,18 @@ static void render_root(uint8_t *fb) {
     if(s_avatar_ready)ui_wallpaper_draw_avatar(fb,s_avatar,(EpdRect){588,88,60,60},30);
     else {epd_fill_circle(618,118,30,0x30,fb);label(fb,618,118,30,"K",EPD_DRAW_ALIGN_CENTER,0xff);}
     HOME_STAGE("header");
-    const uint8_t card_gray=app_settings_main_fast_refresh()?0xff:0xee;
-    ui_fill_round_rect(fb,(EpdRect){36,184,612,378},28,card_gray);
+    const uint8_t card_background = UI_GRAY_WHITE;
+    ui_fill_round_rect(fb,(EpdRect){36,184,612,378},28,card_background);
     home_frame(fb,(EpdRect){36,184,612,378},28);
     for(int side=0;side<2;++side) {
         int x=side?648:36;epd_fill_circle(x,252,14,0xff,fb);circle_frame(fb,x,252,14);
         ui_fill_rect_fast((EpdRect){side?x:0,237,side?36:36,30},0xff,fb);
     }
-    label_on(fb,60,222,24,"最近阅读",EPD_DRAW_ALIGN_LEFT,0x60,card_gray);
+    label_on(fb,60,222,24,"最近阅读",EPD_DRAW_ALIGN_LEFT,0x60,card_background);
     if(s_excerpt[0]) {
         char quote[BOOK_EXCERPT_CAP+12];snprintf(quote,sizeof(quote),"“%s”",s_excerpt);
         int px=22;while(px>16&&ui_text_fixed_width_px(px,quote)>426)--px;
-        if(ui_text_fixed_width_px(px,quote)<=426)label_on(fb,622,222,px,quote,EPD_DRAW_ALIGN_RIGHT,0x60,card_gray);
+        if(ui_text_fixed_width_px(px,quote)<=426)label_on(fb,622,222,px,quote,EPD_DRAW_ALIGN_RIGHT,0x60,card_background);
     }
     ui_draw_separator(fb,252,66,552,0x50);
     HOME_STAGE("card_top");
@@ -654,14 +660,14 @@ static void render_root(uint8_t *fb) {
         // 按住整张卡片时封面轻抬4px；原边框不动，不追加黑框或整页刷新。
         // Lift the cover4px while holding any part of the card; keep its frame still without extra boxes/full refreshes.
         draw_cover(fb,b,(EpdRect){60,continue_card_pressed()?274:278,176,240});
-        int rows=title_lines(fb,b->title,card_gray);
-        if(b->author[0]) {char author[128];snprintf(author,sizeof(author),"%s",b->author);fit(author,25,358);label_on(fb,264,rows==2?406:367,25,author,EPD_DRAW_ALIGN_LEFT,0x50,card_gray);}
+        int rows=title_lines(fb,b->title,card_background);
+        if(b->author[0]) {char author[128];snprintf(author,sizeof(author),"%s",b->author);fit(author,25,358);label_on(fb,264,rows==2?406:367,25,author,EPD_DRAW_ALIGN_LEFT,0x50,card_background);}
         snprintf(value,sizeof(value),"已读 %u%%",b->has_progress?b->progress.pct:0);
-        label_on(fb,264,482,27,value,EPD_DRAW_ALIGN_LEFT,0x20,card_gray);
-        label_on(fb,622,482,24,"继续阅读 ›",EPD_DRAW_ALIGN_RIGHT,0,card_gray);
+        label_on(fb,264,482,27,value,EPD_DRAW_ALIGN_LEFT,0x20,card_background);
+        label_on(fb,622,482,24,"继续阅读 ›",EPD_DRAW_ALIGN_RIGHT,0,card_background);
         EpdRect track={264,511,358,7};ui_fill_round_rect(fb,track,3,0xcc);
         track.width=358*(b->has_progress?b->progress.pct:0)/100;if(track.width)ui_fill_round_rect(fb,track,3,0x30);
-    } else label_on(fb,342,410,23,"打开一本书后，会在这里继续阅读",EPD_DRAW_ALIGN_CENTER,0x60,card_gray);
+    } else label_on(fb,342,410,23,"打开一本书后，会在这里继续阅读",EPD_DRAW_ALIGN_CENTER,0x60,card_background);
     HOME_STAGE("card_body");
     ui_draw_separator(fb,606,36,612,0x50);
     if(app_settings_home_component()==APP_HOME_FOLDER) {
@@ -853,6 +859,17 @@ static void refresh_excerpt(void) {
     if(book->has_progress)book_excerpt_load(book->path,book->progress.chapter,s_excerpt);
 }
 static void on_enter(app_ctx_t *ctx) {
+    const unsigned cover_revision = book_weread_cover_revision();
+    if (cover_revision != s_weread_cover_revision) {
+        s_weread_cover_revision = cover_revision;
+        app_home_cover_mode_changed();
+        s_books_cache_valid = false;
+    }
+    const uint64_t cover_font = book_auto_cover_font_key();
+    if (s_cover_font_key != cover_font) {
+        clear_cover_cache();
+        s_cover_font_key = cover_font;
+    }
     s_cover_generation=book_cover_jobs_begin();
     const uint32_t progress_revision=book_progress_revision();
     s_component_dirty=(EpdRect){0};s_view=HOME_ROOT;

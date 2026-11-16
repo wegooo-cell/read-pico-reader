@@ -9,7 +9,7 @@ u=r'''
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
-typedef struct{int static_rx_buf_num, dynamic_rx_buf_num, rx_ba_win, ampdu_rx_enable, nvs_enable;}wifi_init_config_t;
+typedef struct{int static_rx_buf_num, dynamic_rx_buf_num, rx_ba_win, ampdu_rx_enable, nvs_enable, ampdu_tx_enable;}wifi_init_config_t;
 #include <stdio.h>
 typedef int esp_err_t;typedef int wifi_interface_t;
 #define ESP_OK 0
@@ -25,7 +25,7 @@ static int esp_wifi_set_max_tx_power(int8_t power){assert(power==48&&calls==2);r
 #include "transfer_s31_radio_profile.h"
 int main(void){
  for(int bulk=0;bulk<2;++bulk)for(int ampdu=0;ampdu<2;++ampdu){
-  wifi_init_config_t init={6,64,12,ampdu,0};
+  wifi_init_config_t init={6,64,12,ampdu,0,1};
   transfer_s31_bulk_receive_config(&init,bulk);
   int expected_ba=12;
 #ifdef CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP
@@ -34,22 +34,28 @@ int main(void){
   assert(init.static_rx_buf_num==(bulk&&ampdu?expected_ba:6));
   assert(init.rx_ba_win==expected_ba&&init.dynamic_rx_buf_num==64&&!init.nvs_enable);
  }
- for(int n=1;n<=16;++n){wifi_init_config_t init={2,64,n,1,0};transfer_s31_bulk_receive_config(&init,true);
+ for(int n=1;n<=16;++n){wifi_init_config_t init={2,64,n,1,0,1};transfer_s31_bulk_receive_config(&init,true);
 #ifdef CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP
   assert(init.static_rx_buf_num==16&&init.rx_ba_win==16);
 #else
   assert(init.static_rx_buf_num==(n<2?2:n));
 #endif
  }
- wifi_init_config_t already={16,64,12,1,0};transfer_s31_bulk_receive_config(&already,true);
+ wifi_init_config_t already={16,64,12,1,0,1};transfer_s31_bulk_receive_config(&already,true);
 #ifdef CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP
  assert(already.static_rx_buf_num==16&&already.rx_ba_win==16);
 #else
  assert(already.static_rx_buf_num==16&&already.rx_ba_win==12);
 #endif
- wifi_init_config_t variants[]={{6,8,12,1,0},{6,64,32,1,0},{6,64,0,1,0}};
+ wifi_init_config_t variants[]={{6,8,12,1,0,1},{6,64,32,1,0,1},{6,64,0,1,0,1}};
  for(unsigned i=0;i<sizeof(variants)/sizeof(variants[0]);++i){wifi_init_config_t old=variants[i];transfer_s31_bulk_receive_config(&variants[i],true);assert(!memcmp(&old,&variants[i],sizeof(old)));}
  transfer_s31_bulk_receive_config(NULL,true);
+ wifi_init_config_t cover={6,64,12,1,0,1};
+ transfer_s31_bulk_receive_config(&cover,false);
+ assert(cover.ampdu_rx_enable && cover.ampdu_tx_enable);
+ transfer_s31_cover_receive_config(&cover);
+ assert(!cover.ampdu_rx_enable && !cover.ampdu_tx_enable);
+ assert(cover.static_rx_buf_num==6 && cover.dynamic_rx_buf_num==64 && cover.rx_ba_win==12);
  for(selected=0;selected<2;++selected)for(fail=0;fail<4;++fail){calls=0;int err=transfer_s31_radio_profile(selected);assert(err==(fail?-7:0));assert(calls==(fail?fail:3));}puts("PASS: bounded bulk RX/BA, PSRAM16 minimum, normal STA/disabled AMPDU/unsupported budgets unchanged; STA/AP PS_NONE, BGN and12dBm unchanged; failures propagate");}
 '''
 with tempfile.TemporaryDirectory() as tmp:

@@ -34,8 +34,10 @@ bool lock_pin_grace_active(void);
 #if KIIKO_BOARD_METALIO47
 /// 解锁后继续浅睡媒体恢复，未完成时保留挂起的字体/书籍句柄。/ Continue light-sleep media recovery after unlock, retaining pending font/book handles.
 bool app_sleep_media_ready(void);
-/// 卡恢复优先：有界重开失败后，由主循环释放消费者并安排重挂。/ Yield failed reopen to loop-owned card recovery.
+/// Report a terminal wake error so the UI can distinguish file failures from a lost mount.
 bool app_sleep_media_failed(void);
+/// True when the current book could not reopen, independent of the font result.
+bool app_sleep_book_reopen_failed(void);
 /// 无I/O快照，阻止其他字体入口绕过恢复顺序。/ IO-free snapshot protecting the media-before-font ordering.
 bool app_sleep_media_pending(void);
 /// Only after closing all book/font slots: replace pending wake IO with a manual recovery transaction.
@@ -80,6 +82,7 @@ void app_lock_wait_key_idle(int timeout_ms);
 // 十分钟交接由S31等待事务内部管理，外层超时不能被当作解锁。
 // The S31 wait transaction owns the ten-minute handoff; an outer timeout is never an unlock.
 #define APP_LOCK_IDLE_TIMEOUT_MS 0U
+#define APP_LOCK_RETAIN_TF_US INT64_C(10000000)
 #define APP_LOCK_OFF_AFTER_US INT64_C(600000000)
 /// 锁屏先浅睡十分钟后同步RTC并硬关机；USB暂缓。/ Light sleep for ten minutes, sync RTC and power off; defer for USB.
 #else

@@ -25,5 +25,5 @@ void CaptureReset();
 void ReportReset();
 void BeginCycle();
 void Checkpoint(Phase phase, unsigned applied);
-esp_err_t LightSleep(unsigned applied);
+esp_err_t LightSleep(unsigned applied, bool *power_key_confirmed);
 }  // namespace s31_sleep

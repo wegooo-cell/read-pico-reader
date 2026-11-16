@@ -39,6 +39,7 @@
 #include <strings.h>
 
 #include "app.h"
+#include "app_content_open.h"
 #include "book_store.h"
 #include "book_progress.h"
 #include "book_title.h"
@@ -64,9 +65,10 @@
 
 // 引导复用网络后端时不登记或绘制主页面底栏。/ Setup reuses networking without root-tab ink or hit registrations.
 static bool s_setup_chrome;
+static bool s_cover_wifi_only;
 void app_transfer_set_setup_chrome(bool active){s_setup_chrome=active;}
 static void transfer_navigation(uint8_t *fb,int active) {
-    if(!s_setup_chrome)ui_nav_draw(fb,active);
+    if(!s_setup_chrome && !s_cover_wifi_only)ui_nav_draw(fb,active);
 }
 
 static const char* TAG = "transfer_page";
@@ -157,6 +159,17 @@ void app_transfer_request_usb_start(void) {
 void app_transfer_request_wifi_setup(void) {
     s_wifi_setup_requested = true;
     s_wifi_settings_only = true;
+    s_cover_wifi_only = false;
+}
+
+void app_transfer_request_cover_wifi(void) {
+    app_transfer_request_wifi_setup();
+    s_cover_wifi_only = true;
+}
+
+static void return_from_wifi_setup(app_ctx_t *ctx, bool connected) {
+    if (s_cover_wifi_only) app_book_return_from_cover_wifi(connected);
+    ctx->request_return = true;
 }
 
 void app_transfer_request_wifi_upload(void) {
@@ -324,7 +337,7 @@ static void draw_networks(uint8_t* fb) {
         transfer_navigation(fb,3);
         return;
     }
-    transfer_header(fb, "无线网络", NULL);
+    transfer_header(fb, s_cover_wifi_only ? "连接 WiFi" : "无线网络", NULL);
     ui_text(fb, 42, 182, 24, "当前网络", EPD_DRAW_ALIGN_LEFT, false);
     EpdRect current = {36, 224, 612, 154};
     ui_fill_round_rect(fb, current, 22, UI_GRAY_WHITE);
@@ -338,10 +351,12 @@ static void draw_networks(uint8_t* fb) {
         ui_text(fb, 64, 297, 23, state, EPD_DRAW_ALIGN_LEFT, false);
         char address[80];
         const char *url = !strncmp(s_status.url, "http://", 7) ? s_status.url + 7 : s_status.url;
-        snprintf(address, sizeof(address), "%.79s", s_status.network_ready ? url[0] ? url : "已连接，可传书和对时" : "连接后可传书和对时");
+        snprintf(address, sizeof(address), "%.79s", s_cover_wifi_only ? (s_status.network_ready ? "可继续获取封面" : "连接后自动获取封面") :
+             s_status.network_ready ? url[0] ? url : "已连接，可传书和对时" : "连接后可传书和对时");
         fit_label(address, 21, 419);
         ui_text(fb, 64, 336, 21, address, EPD_DRAW_ALIGN_LEFT, false);
-        network_button(fb, 6, s_status.network_ready ? "断开" : "连接", !s_status.network_ready);
+        network_button(fb, 6, s_status.network_ready ? (s_cover_wifi_only ? "继续" : "断开") : "连接",
+                       !s_status.network_ready || s_cover_wifi_only);
         if (s_pressed == 11) ui_draw_pressed_round_rect(fb, network_control_rect(11), 14);
         ui_text_vc(fb, 563, 341, 21, "遗忘网络", EPD_DRAW_ALIGN_CENTER, false);
     } else {
@@ -389,6 +404,7 @@ static void draw_networks(uint8_t* fb) {
     ui_text(fb, 42, 976, 21, "支持 2.4 GHz WiFi（信道 1–13）", EPD_DRAW_ALIGN_LEFT, false);
     char message[96];
     snprintf(message, sizeof(message), "%s", s_network_message[0] ? s_network_message :
+             s_cover_wifi_only ? "连接 WiFi 后进入获取封面" :
              s_status.network_ready ? "退出此页后，WiFi 仍保持连接。" : "连接后，可退出此页继续使用。");
     fit_label(message, 21, 600);
     ui_text(fb, 42, transfer_footer_top()+38, 21, message, EPD_DRAW_ALIGN_LEFT, false);
@@ -472,10 +488,16 @@ static app_redraw_t network_ui_tick(app_ctx_t* ctx) {
     if (s_view != TRANSFER_NETWORKS || s_forget_confirm || ctx->consumed) return APP_REDRAW_NONE;
     if (s_network_connect_pending) {
         s_network_connect_pending = false;
-        read_pico_transfer_cfg_t cfg = {.mode = READ_PICO_TRANSFER_MODE_STA, .network_only = true};
+        read_pico_transfer_cfg_t cfg = {.mode = READ_PICO_TRANSFER_MODE_STA,
+            .network_only = true, .cover_lookup = s_cover_wifi_only};
+        ttf_font_cache_clear();
         esp_err_t err = read_pico_transfer_start(&cfg);
         s_session_started = err == ESP_OK;
         read_pico_transfer_get_status(&s_status);
+        if (s_cover_wifi_only && err == ESP_OK && s_status.network_ready) {
+            return_from_wifi_setup(ctx, true);
+            return APP_REDRAW_NONE;
+        }
         if (err != ESP_OK) snprintf(s_network_message, sizeof(s_network_message), "连接启动失败，请重试");
         return APP_REDRAW_PAGE;
     }
@@ -485,7 +507,13 @@ static app_redraw_t network_ui_tick(app_ctx_t* ctx) {
         read_pico_transfer_get_status(&next);
         bool changed = next.state != s_status.state || next.network_ready != s_status.network_ready ||
                        next.last_error != s_status.last_error;
+        const bool just_connected = !s_status.network_ready && next.network_ready &&
+            next.mode == READ_PICO_TRANSFER_MODE_STA;
         s_status = next;
+        if (s_cover_wifi_only && just_connected) {
+            return_from_wifi_setup(ctx, true);
+            return APP_REDRAW_NONE;
+        }
         if (s_status.network_ready) snprintf(s_network_message, sizeof(s_network_message), "连接成功");
         else if (s_status.state == READ_PICO_TRANSFER_ERROR) snprintf(s_network_message, sizeof(s_network_message), "连接失败，请检查密码或信号");
         return changed ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
@@ -674,6 +702,17 @@ static app_redraw_t provisioning_gesture(app_ctx_t* ctx, const ui_gesture_event_
     EpdRect old_rect = s_view == TRANSFER_PASSWORD ? password_control_rect(old >= 0 ? old : origin >= 0 ? origin : 0)
                                                   : network_control_rect(old >= 0 ? old : origin >= 0 ? origin : 0);
     if (action) {
+        if (s_cover_wifi_only && origin == 6 && s_status.network_ready) {
+            // Aggregation is set at driver init. Reconnect to the saved network if
+            // the current association was opened by another feature.
+            if (!s_status.cover_lookup) {
+                if (stop_upload_if_idle()) queue_network_start(READ_PICO_TRANSFER_MODE_STA);
+                else snprintf(s_network_message, sizeof(s_network_message), "网络正在使用，请稍后重试");
+                return APP_REDRAW_PAGE;
+            }
+            return_from_wifi_setup(ctx, true);
+            return APP_REDRAW_NONE;
+        }
         if (s_view == TRANSFER_PASSWORD && origin == 47) {
             ui_text_input_tap(&s_password_input, password_control_rect(47), UI_PX_BODY,
                               !s_password_visible, NULL, ev->x0, ev->y0);
@@ -961,7 +1000,7 @@ static bool stop_upload_if_idle(void) {
 // Join HTTP before clearing the old root; in-flight requests never move to another storage.
 static void transfer_on_media_lost(app_ctx_t* ctx) {
     (void)ctx;
-    if (s_root.is_flash) return;
+    if (s_root.is_flash || s_cover_wifi_only) return;
     stop_session();
     s_start_pending = s_scan_pending = false;
     s_view = s_direct_entry ? TRANSFER_HOME : TRANSFER_METHODS;
@@ -991,6 +1030,7 @@ static void transfer_on_exit(app_ctx_t* ctx) {
         clear_qr();
         s_session_started = false; // 全局循环接管保活；再次进页会从组件状态恢复。
     } else stop_session();
+    s_cover_wifi_only = false;
     s_wifi_settings_only = false;
     s_usb_entry = false;
     s_direct_entry = false;
@@ -1184,7 +1224,7 @@ static app_redraw_t on_gesture(app_ctx_t* ctx, const ui_gesture_event_t* ev) {
         if (s_usb_entry || usb_storage_active()) return stop_usb_for_navigation(ctx, false);
         if (s_view == TRANSFER_PASSWORD) { clear_password(); s_view = TRANSFER_NETWORKS; return APP_REDRAW_PAGE; }
         if (s_view == TRANSFER_NETWORKS) {
-            if (s_wifi_settings_only) { ctx->request_return = true; return APP_REDRAW_NONE; }
+            if (s_wifi_settings_only) { return_from_wifi_setup(ctx, false); return APP_REDRAW_NONE; }
             if (s_direct_entry) { ctx->request_return = true; return APP_REDRAW_NONE; }
             s_view = TRANSFER_METHODS; return APP_REDRAW_PAGE;
         }
@@ -1240,7 +1280,7 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
     if (key == UI_KEY_2) { ui_nav_request(ctx, 0); return APP_REDRAW_NONE; }
     if (s_view == TRANSFER_PASSWORD) { clear_password(); s_view = TRANSFER_NETWORKS; return APP_REDRAW_PAGE; }
     if (s_view == TRANSFER_NETWORKS) {
-        if (s_wifi_settings_only || s_direct_entry) { ctx->request_return = true; return APP_REDRAW_NONE; }
+        if (s_wifi_settings_only || s_direct_entry) { return_from_wifi_setup(ctx, false); return APP_REDRAW_NONE; }
         s_view = TRANSFER_METHODS; return APP_REDRAW_PAGE;
     }
     if (s_view == TRANSFER_HOME) {
@@ -1283,6 +1323,9 @@ static bool transfer_edge_back(app_ctx_t *ctx) {
     (void)ctx;
     return !usb_storage_active() && s_status.state != READ_PICO_TRANSFER_UPLOADING;
 }
+static bool transfer_navigation_enabled(app_ctx_t *ctx) {
+    return !s_cover_wifi_only && transfer_edge_back(ctx);
+}
 static bool transfer_menu_handle_enabled(app_ctx_t* ctx) {
     (void)ctx;
     return false;
@@ -1294,7 +1337,7 @@ static bool transfer_back_swipe_area(app_ctx_t *ctx,const ui_gesture_event_t *ev
 }
 
 const app_desc_t app_transfer = {
-    .binary_ui = true,.persistent_navigation=true,.navigation_enabled=transfer_edge_back,
+    .binary_ui = true,.persistent_navigation=true,.navigation_enabled=transfer_navigation_enabled,
     .on_media_lost = transfer_on_media_lost,
     .title = "传书 Transfer", .detail = "热点或已有 WiFi，浏览器上传", .enter_full = false,
     .on_enter = on_enter, .on_exit = transfer_on_exit, .render = render, .present = present,

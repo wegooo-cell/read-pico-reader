@@ -11,6 +11,7 @@ unit=r'''
 #include <stdio.h>
 #include <setjmp.h>
 #define APP_LOCK_OFF_AFTER_US INT64_C(600000000)
+#define APP_LOCK_RETAIN_TF_US INT64_C(10000000)
 typedef int app_wake_source_t;
 enum {APP_WAKE_NONE,APP_WAKE_KEY,APP_WAKE_PICKUP,APP_WAKE_TIMEOUT};
 typedef void *sc7a20h_handle_t;
@@ -21,7 +22,7 @@ typedef struct {int x_mg,y_mg,z_mg;unsigned status;} sc7a20h_sample_t;
 static const char *esp_err_to_name(int e){(void)e;return "error";}
 #define APP_SLEEP_OFF 1
 static void *s_lock_sleep_touch;
-static bool s_lock_deep_ready,s_lock_frame_cached,s_lock_io_pending;
+static bool s_lock_deep_ready,s_lock_frame_cached,s_lock_io_pending,s_lock_sd_parked;
 static struct {int64_t pending_at,until;} s_lock_hint;
 static bool hint_window;
 static int64_t esp_timer_get_time(void);
@@ -45,7 +46,6 @@ static int lock_light_sleep_once(void*a,void*t,bool*k,int64_t until,bool off_at_
  int64_t step=light_step;if(until&&clock_us+step>until)step=until>clock_us?until-clock_us:0;
  clock_us+=step;*k=light_key||(recover_at>=0&&clock_us>=recover_at);return light_fail&&!*k?-1:0;
 }
-static int lock_resume_media_io(unsigned ms){assert(ms==0);return 0;}
 static int app_enter_host_sleep(int m){assert(m==APP_SLEEP_OFF);assert(clock_us>=(staged?APP_LOCK_OFF_AFTER_US:1));deep_calls++;if(deep_success)longjmp(deep_jump,1);return -1;}
 typedef int esp_err_t;
 static bool book_cover_jobs_quiesce(unsigned ms){assert(ms==2000);return true;}
@@ -76,7 +76,7 @@ static void app_settings_set_last_wake(unsigned source){last_wake=source;}
 unit+='static void lock_resume_service(void){}\n'
 unit+=function('app_light_sleep_wait_timed',root/'main/sleep.c')
 unit+=r'''
-static void reset(void){staged=true;keep_light=false;hint_window=false;s_lock_hint.pending_at=s_lock_hint.until=0;clock_us=0;recover_at=key_at=plug_at=unplug_at=-1;frontlight_calls=motion_reads=sensor_on=sensor_off=reconnects=scheduler_yields=0;pickup=usb=powered=stale_motion=false;light_calls=deep_calls=cached_marks=0;light_step=0;deep_success=false;cached_error=0;pin=s_lock_frame_cached=s_lock_io_pending=false;light_key=light_fail=s_lock_deep_ready=false;s_lock_sleep_touch=NULL;}
+static void reset(void){staged=true;keep_light=false;hint_window=false;s_lock_hint.pending_at=s_lock_hint.until=0;clock_us=0;recover_at=key_at=plug_at=unplug_at=-1;frontlight_calls=motion_reads=sensor_on=sensor_off=reconnects=scheduler_yields=0;pickup=usb=powered=stale_motion=false;light_calls=deep_calls=cached_marks=0;light_step=0;deep_success=false;cached_error=0;pin=s_lock_frame_cached=s_lock_io_pending=s_lock_sd_parked=false;light_key=light_fail=s_lock_deep_ready=false;s_lock_sleep_touch=NULL;}
 static void settled(void){assert(frontlight_calls==(last_wake==APP_WAKE_NONE?1:2));}
 int main(void){
  reset();assert(app_light_sleep_wait_timed(NULL,1000)==APP_WAKE_TIMEOUT&&last_wake==APP_WAKE_NONE&&scheduler_yields==34);settled();
@@ -90,7 +90,13 @@ int main(void){
  // Forty-five minutes and three hours: no deadline, only physical input returns, scheduler always progresses.
  for(unsigned mins=45;mins<=180;mins+=135){reset();key_at=(int64_t)mins*60*1000000;assert(app_light_sleep_wait_timed(NULL,0)==APP_WAKE_KEY&&clock_us>=key_at&&scheduler_yields==(int)(key_at/30000)&&!reconnects);settled();}
  reset();s_lock_sleep_touch=(void*)1;light_key=true;assert(app_light_sleep_wait_timed(NULL,0)==APP_WAKE_KEY&&light_calls==1&&!deep_calls);settled();
- reset();s_lock_sleep_touch=(void*)1;light_fail=true;key_at=500000;assert(app_light_sleep_wait_timed(NULL,0)==APP_WAKE_KEY&&light_calls==1);settled();
+ reset();s_lock_sleep_touch=(void*)1;light_fail=true;key_at=500000;
+ assert(app_light_sleep_wait_timed(NULL,0)==APP_WAKE_KEY&&!light_calls);settled();
+ reset();s_lock_sleep_touch=(void*)1;key_at=APP_LOCK_RETAIN_TF_US-1000;
+ assert(app_light_sleep_wait_timed(NULL,0)==APP_WAKE_KEY&&!light_calls);settled();
+ reset();s_lock_sleep_touch=(void*)1;s_lock_io_pending=s_lock_sd_parked=light_key=true;
+ assert(app_light_sleep_wait_timed(NULL,0)==APP_WAKE_KEY&&light_calls==1&&clock_us>=APP_LOCK_RETAIN_TF_US);
+ settled();
  // No checkpoint must not reboot or deep-sleep before the pending save has succeeded.
  reset();s_lock_sleep_touch=(void*)1;light_step=60000000;recover_at=700000000;key_at=800000000;
  assert(app_light_sleep_wait_timed(NULL,0)==APP_WAKE_KEY&&!deep_calls&&clock_us>=700000000);settled();
@@ -113,10 +119,10 @@ int main(void){
  reset();s_lock_sleep_touch=(void*)1;usb=true;key_at=500000;assert(app_light_sleep_wait_timed(NULL,0)==APP_WAKE_KEY&&!light_calls);settled();
  reset();hint_window=true;s_lock_sleep_touch=(void*)1;light_key=true;assert(app_light_sleep_wait_timed(NULL,0)==APP_WAKE_KEY&&light_calls==1&&clock_us>=500000);settled();
  // A transient IRQ/IO admission failure recovers in the same lock session, without a reboot.
- reset();s_lock_sleep_touch=(void*)1;light_fail=true;recover_at=3500000;key_at=12000000;
- assert(app_light_sleep_wait_timed(NULL,0)==APP_WAKE_KEY&&light_calls==3&&clock_us>=4000000&&clock_us<4200000);settled();
+ reset();s_lock_sleep_touch=(void*)1;light_fail=true;recover_at=13500000;key_at=22000000;
+ assert(app_light_sleep_wait_timed(NULL,0)==APP_WAKE_KEY&&light_calls==3&&clock_us>=14000000&&clock_us<14200000);settled();
  // Permanent faults are bounded at 1/3/10/30s, rather than retried every 30ms or disabled forever.
- reset();s_lock_sleep_touch=(void*)1;light_fail=true;key_at=75000000;
+ reset();s_lock_sleep_touch=(void*)1;light_fail=true;key_at=85000000;
  assert(app_light_sleep_wait_timed(NULL,0)==APP_WAKE_KEY&&light_calls==6);settled();
  reset();s_lock_sleep_touch=(void*)1;s_lock_io_pending=true;key_at=500000;
  assert(app_light_sleep_wait_timed(NULL,0)==APP_WAKE_KEY&&!light_calls);settled();
@@ -139,7 +145,7 @@ int main(void){
  reset();keep_light=true;s_lock_sleep_touch=(void*)1;s_lock_deep_ready=true;usb=true;unplug_at=720000000;
  light_step=60000000;recover_at=1800000000;
  assert(app_light_sleep_wait_timed(NULL,0)==APP_WAKE_KEY&&!deep_calls&&light_calls>=18);
- puts("PASS: production S31 10min actual wait handoff model, no early power-off, PIN/art checkpoint boundaries, key priority, USB exclusion, power-off refusal then bounded retry, transient light recovery");
+ puts("PASS: production S31 10min actual wait handoff model, no early power-off, PIN/art checkpoint boundaries, key priority, USB exclusion, power-off refusal then bounded retry, transient light recovery, short locks keep TF mounted and parked TF can sleep again");
 }
 '''
 with tempfile.TemporaryDirectory() as d:

@@ -163,6 +163,19 @@ bool metalio_confirm_power_key(void) {
     vTaskDelay(pdMS_TO_TICKS(30));
     return metalio_io_read(&again)==ESP_OK && !(again&(1u<<15));
 }
+bool metalio_confirm_light_wake_key(void) {
+    // 睡眠期间仍保留P17输入；只读端口1，尽量在短按松手前完成确认。
+    // P17 remains an input in sleep; read only port 1 to confirm a tap before release.
+    if (!ioe || xSemaphoreTake(mutex, pdMS_TO_TICKS(100)) != pdTRUE) return false;
+    uint8_t input = 0xff;
+    bool low = fca9555_read_input(ioe, 1, &input) == ESP_OK && !(input & 0x80);
+    if (low) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+        low = fca9555_read_input(ioe, 1, &input) == ESP_OK && !(input & 0x80);
+    }
+    xSemaphoreGive(mutex);
+    return low;
+}
 bool metalio_boot_power_key(void) { return boot_power_key; }
 void metalio_capture_boot_power_key(void) {
     early_boot_power_key=false;

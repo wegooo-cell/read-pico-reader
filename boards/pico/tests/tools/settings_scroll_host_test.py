@@ -53,8 +53,9 @@ unit = r'''
 #include "ui_gesture.h"
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL} app_redraw_t;
 enum {SETTINGS_MAIN,SETTINGS_BLUETOOTH,SETTINGS_BLE_SCAN,SETTINGS_UPGRADE,SETTINGS_SHELF_STYLE,
-      SETTINGS_SYSTEM_FONT,SETTINGS_WALLPAPER,SETTINGS_AVATAR,SETTINGS_TEXT_EDIT,SETTINGS_PIN_ENTRY};
+      SETTINGS_SYSTEM_FONT,SETTINGS_WALLPAPER,SETTINGS_AVATAR,SETTINGS_TEXT_EDIT,SETTINGS_PIN_ENTRY,SETTINGS_MAIN_REFRESH};
 enum EpdDrawMode {MODE_GC16,MODE_GL16,MODE_DU};
+enum EpdDrawError {EPD_DRAW_SUCCESS};
 #define UI_NAV_TOP 1096
 #define UI_NAV_REFRESH_END 1088
 #define UI_LOCK_WIDTH 684
@@ -67,6 +68,10 @@ static const int E0470_WAVEFORM=0,E0470_FOLLOW_WAVEFORM=1,settings_soft=2;
 static int s_page,s_main_scroll,s_ble_scroll,s_style_scroll,selected_mode,paint_mode;
 
 static const EpdWaveform *display_settings_scroll_waveform(void){return &settings_soft;}
+static bool s_refresh_mode_white_pending, white_oom;
+static const EpdWaveform fast_white=3;
+static const EpdWaveform *display_main_gray_waveform(void){return &settings_soft;}
+static const EpdWaveform *display_main_fast_white_waveform(const EpdWaveform *base,enum EpdDrawMode mode){assert(base==&settings_soft&&mode==MODE_GL16);return white_oom?base:&fast_white;}
 static bool s_scroll_drag_consumed,s_scroll_present_pending,s_input_layout,s_input_settle;
 // Isolate original discrete/OOM fallback; actual cached gesture/presenter integration runs below.
 static struct {bool tracking;int origin_offset,origin_y;} s_list_drag;
@@ -78,14 +83,14 @@ static bool settings_drag_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev,in
 }
 
 static EpdRect s_input_area;
-static int paints,pushes,row_taps,cancels;
+static int paints,pushes,row_taps,cancels,full_pushes;
 static EpdRect pushed;
 static enum EpdDrawMode pushed_mode;
 static void render(app_ctx_t *ctx,uint8_t *fb){(void)ctx;(void)fb;++paints;paint_mode=selected_mode;}
 static int update_display_area_diff_with(void *hl,const int *wave,enum EpdDrawMode mode,EpdRect area){
- (void)hl;assert(wave==&E0470_WAVEFORM||wave==&E0470_FOLLOW_WAVEFORM||wave==&settings_soft);if(s_scroll_present_pending==false&&s_page!=SETTINGS_UPGRADE&&s_page!=SETTINGS_TEXT_EDIT&&s_page!=SETTINGS_PIN_ENTRY)assert(wave==&settings_soft);++pushes;pushed=area;pushed_mode=mode;return 0;
+ (void)hl;assert(wave==&E0470_WAVEFORM||wave==&E0470_FOLLOW_WAVEFORM||wave==&settings_soft||wave==&fast_white);if(s_scroll_present_pending==false&&s_page!=SETTINGS_UPGRADE&&s_page!=SETTINGS_TEXT_EDIT&&s_page!=SETTINGS_PIN_ENTRY&&s_page!=SETTINGS_MAIN_REFRESH)assert(wave==&settings_soft);++pushes;pushed=area;pushed_mode=mode;return 0;
 }
-static int update_display_area_full_with(void *hl,const int *wave,enum EpdDrawMode mode,EpdRect area){return update_display_area_diff_with(hl,wave,mode,area);}
+static int update_display_area_full_with(void *hl,const int *wave,enum EpdDrawMode mode,EpdRect area){++full_pushes;return update_display_area_diff_with(hl,wave,mode,area);}
 static void guard_draw_result(void *hl,int status){(void)hl;assert(!status);}
 static void display_main_transition_cancel(void){++cancels;}
 
@@ -151,6 +156,16 @@ int main(void){
    assert(pushed_mode==MODE_GL16&&pushed.y==(s_page==SETTINGS_SHELF_STYLE?242:190)&&pushed.y+pushed.height==settings_content_end());
   }
  }
+ s_page=SETTINGS_MAIN_REFRESH;
+ int prior_full=full_pushes, prior_push=pushes;
+ s_refresh_mode_white_pending=true;
+ assert(settings_present(&ctx,APP_REDRAW_PAGE)&&!s_refresh_mode_white_pending);
+ assert(full_pushes==prior_full+1&&pushes==prior_push+1&&pushed.y==0&&pushed.height==UI_NAV_REFRESH_END);
+ assert(!settings_present(&ctx,APP_REDRAW_PAGE));
+ s_refresh_mode_white_pending=true;white_oom=true;
+ assert(settings_present(&ctx,APP_REDRAW_PAGE)&&full_pushes==prior_full+1&&pushes==prior_push+2);
+ s_refresh_mode_white_pending=true;
+ assert(!settings_present(&ctx,APP_REDRAW_FULL)&&!s_refresh_mode_white_pending);
  s_page=SETTINGS_UPGRADE;assert(settings_present(&ctx,APP_REDRAW_AREA)&&pushed.y==468&&pushed.height==64);
  assert(!settings_present(&ctx,APP_REDRAW_NONE));
  puts("PASS: original discrete fallback/preview pages with new motion hooks isolated: all three modes use one discrete step and one shared fast-difference update per swipe; retained AA/avatars, one bounded list-gray pass, no extra release/idle frames or periodic full flash; root crop preserves navigation and child crop stops above persistent navigation; selectors and OTA remain");

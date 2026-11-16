@@ -17,6 +17,8 @@ static inline EpdRect ui_book_manage_cover(bool grid,int i){
 static inline EpdRect ui_book_manage_search(void){return (EpdRect){36,160,612,64};}
 static inline EpdRect ui_book_manage_style(void){return (EpdRect){520,79,64,66};}
 static inline EpdRect ui_book_manage_layout(void){return (EpdRect){584,79,64,66};}
+enum { UI_BOOK_MANAGE_COVER_CONTROL = 117 };
+static inline EpdRect ui_book_manage_get_cover(void){return (EpdRect){116,240,124,54};}
 static inline EpdRect ui_book_manage_sort(void){return (EpdRect){252,240,170,54};}
 static inline EpdRect ui_book_manage_import(void){return (EpdRect){434,240,112,54};}
 static inline EpdRect ui_book_manage_select(void){return (EpdRect){560,240,88,54};}

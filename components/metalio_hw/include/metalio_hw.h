@@ -26,6 +26,8 @@ bool metalio_key_down(void);
 /// 两次有效P17低电平才确认电源键；共享GPIO2中断或读失败不能确认。
 /// Confirm power only after two valid low P17 samples; shared GPIO2 or failed reads are insufficient.
 bool metalio_confirm_power_key(void);
+/// 浅睡返回后立即读P17，两次低电平才确认。/ On light-sleep return, require two immediate P17 low samples.
+bool metalio_confirm_light_wake_key(void);
 /// 深睡启动硬件初始化时确认的真实按键。/ Real key confirmed early during deep-boot hardware initialization.
 bool metalio_boot_power_key(void);
 /// Consume optional one-use bootloader P17 evidence before loading UI/media.

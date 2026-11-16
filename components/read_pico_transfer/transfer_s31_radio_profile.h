@@ -30,3 +30,10 @@ static inline void transfer_s31_bulk_receive_config(wifi_init_config_t *init, bo
     init->rx_ba_win=window;
     if(init->static_rx_buf_num<window)init->static_rx_buf_num=window;
 }
+
+// Cover downloads do not need aggregation. Keep the S31 ROM block-ACK path
+// out of this connection, including when using credentials from an earlier session.
+static inline void transfer_s31_cover_receive_config(wifi_init_config_t *init) {
+    init->ampdu_rx_enable = 0;
+    init->ampdu_tx_enable = 0;
+}

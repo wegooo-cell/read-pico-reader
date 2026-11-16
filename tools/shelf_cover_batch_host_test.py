@@ -60,10 +60,15 @@ static unsigned app_settings_system_contrast(void){return 100;}
 static EpdRect shelf_cover_image(int row){return(EpdRect){20,192+row*282,164,214};}
 static void copy_text(char *to,size_t cap,const char *from){snprintf(to,cap,"%s",from);}
 static bool app_touch_input_pending(app_ctx_t *ctx){return ctx->request_app||queued_touch;}
+static __attribute__((unused)) bool app_poll_main_navigation(app_ctx_t *ctx){
+ (void)ctx;return nav_stop>=0 && (int)++nav_polls>=nav_stop;
+}
 static bool pico_boot_asset_allowed(const char *path){return path!=NULL;}
 unsigned book_cover_jobs_begin(void){return 1;}
 bool book_cover_jobs_submit(unsigned generation,unsigned slot,const book_cover_job_t *q){
- assert(generation==1&&slot<9&&q->fast==fast);queued|=1u<<slot;
+ assert(generation==1&&slot<9&&q->fast==fast);
+ if (strchr(q->path, '.')) assert(q->artwork_only==!strstr(q->path,".TXT"));
+ queued|=1u<<slot;
  return true;
 }
 int book_cover_jobs_take(unsigned generation,unsigned slot,book_cover_result_t *result){assert(generation==1);
@@ -79,7 +84,7 @@ static book_shelf_page_state_t book_shelf_page_poll(void){return BOOK_SHELF_PAGE
 static void prepare_covers(app_ctx_t *ctx){(void)ctx;assert(false);}
 '''
 unit += function('shelf_page_mask', book) + '\n'
-functions=['prepare_cover_batch','shelf_cover_frame_ready','shelf_cover_reveal_mask']
+functions=['shelf_is_txt','prepare_cover_batch','shelf_cover_frame_ready','shelf_cover_reveal_mask']
 for name in functions:
  unit+=function(name,book)+'\n'
 present=function('present',book)
@@ -114,7 +119,7 @@ static void draw_shelf_cover_favorite(uint8_t *fb,int row,EpdRect rect,bool favo
 static void draw_list_row(uint8_t *fb,int row,void *entry){(void)fb;(void)row;(void)entry;}
 static __attribute__((unused)) void draw_cover_progress(uint8_t *fb,EpdRect rect,int progress){(void)fb;(void)rect;(void)progress;}
 '''
-for name in ['shelf_title_card','prepare_shelf_cover_slots','draw_shelf_page_artwork']:
+for name in ['prepare_shelf_cover_slots','draw_shelf_page_artwork']:
     unit += function(name, book) + '\n'
 if 'shelf_loading_hint_active(' in source:
     unit += function('shelf_loading_hint_active', book) + '\n'
@@ -170,26 +175,26 @@ int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
  strcpy(s_shelf[2].path,"title.TXT");
  strcpy(s_shelf[3].path,"no-cover.epub");
  prepare_shelf_cover_slots(&ctx);
- assert(s_cover_pending_mask==11&&s_covers[2].index==2);
+ assert(s_cover_pending_mask==15&&s_covers[2].index==2);
  render(&ctx,ctx.fb);assert(!center_hint&&slots_drawn==15&&!art_drawn);
- ready_mask=2;
+ ready_mask=6;
  queued_touch=true;
  assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&queued==0);
  queued_touch=false;
- assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&queued==11&&s_cover_dirty_mask==2);
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&queued==15&&s_cover_dirty_mask==6);
  render(&ctx,ctx.fb);assert(!art_drawn);
- ack_present(APP_REDRAW_PAGE,EPD_DRAW_SUCCESS);assert(s_cover_dirty_mask==2);
+ ack_present(APP_REDRAW_PAGE,EPD_DRAW_SUCCESS);assert(s_cover_dirty_mask==6);
  no_artwork_mask=8;
  assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&s_shelf_no_artwork_mask==8);
  assert(s_cover_retry_count[3]==0);
- ready_mask=3;
+ ready_mask=7;
  queued_touch=true;
- assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&s_cover_dirty_mask==2);
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&s_cover_dirty_mask==6);
  queued_touch=false;
- assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==3&&art_drawn==3);
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==7&&art_drawn==7);
  assert(s_area.y==192&&s_area.y+s_area.height==452&&!s_message[0]);
  ack_present(APP_REDRAW_AREA,EPD_DRAW_FAULT);
- assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==3);
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==7);
  ack_present(APP_REDRAW_AREA,EPD_DRAW_SUCCESS);
  assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE);
 
@@ -209,7 +214,7 @@ int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
  ack_present(APP_REDRAW_AREA,EPD_DRAW_SUCCESS);
  assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&queued==0);
  shelf_page_turn=false;
- puts("PASS: shelf holds partial results, skips TXT and known missing artwork, and reveals a completed page in one retry-safe update");
+ puts("PASS: shelf holds partial results, includes TXT covers and skips known missing artwork, and reveals a completed page in one retry-safe update");
  (void)warm_calls;(void)s_cover_warm_mask;(void)s_cover_warm_after_ms;
  for(unsigned i=0;i<9;++i){free(s_covers[i].gray);free(s_covers[i].fast_bits);}
  puts("PASS: queue without IO, reveal ready cells, retain dirty covers through failed displays, retry with backoff and prioritize touch");

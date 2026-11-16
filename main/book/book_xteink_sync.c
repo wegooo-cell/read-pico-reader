@@ -23,6 +23,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
@@ -51,6 +52,7 @@
 
 #include "book_cover.h"
 #include "book_store.h"
+#include "book_source_internal.h"
 #include "settings.h"
 
 #define XTEINK_BASE_URL "https://api-prod.xteink.cn"
@@ -704,16 +706,41 @@ static bool verify_font(const char *path) {
     fclose(file);return ok&&cmap&&head&&metrics&&outline;
 }
 
-static bool verify_text(const char* path) {
+static bool verify_text(const char *path, uint64_t downloaded) {
     struct stat st;
-    if (stat(path, &st) || st.st_size <= 0) return false;
-    FILE* file = fopen(path, "rb");
-    uint8_t buffer[1024];
-    size_t length = file ? fread(buffer, 1, sizeof(buffer), file) : 0;
-    if (file) fclose(file);
-    for (size_t i = 0; i < length; ++i)
-        if (buffer[i] == 0) return false;
-    return length > 0;
+    if (stat(path, &st) || !S_ISREG(st.st_mode) || st.st_size <= 0 ||
+        (uint64_t)st.st_size != downloaded || downloaded > UINT32_MAX ||
+        downloaded > (uint64_t)LONG_MAX - 4) return false;
+    FILE *file = fopen(path, "rb");
+    if (!file) return false;
+    const size_t block = KIIKO_BOARD_METALIO47 ? BOOK_TXT_PROBE_BYTES + 1u : 4096u;
+    uint8_t *buffer = heap_caps_malloc(block, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buffer) { fclose(file); return false; }
+    size_t length = fread(buffer, 1, block, file);
+    bool valid = length > 0;
+    bool utf16 = false;
+#if KIIKO_BOARD_METALIO47
+    uint32_t bom = 0;
+    const size_t sample = length < BOOK_TXT_PROBE_BYTES ? length : BOOK_TXT_PROBE_BYTES;
+    utf16 = book_txt_detect_utf16(buffer, sample, &bom) != 0;
+    if (utf16) valid = downloaded > bom && downloaded % 2 == 0;
+#endif
+    uint64_t read = 0;
+    while (valid && length && !s_cancel) {
+        if (utf16) {
+            for (size_t i = 0; i + 1 < length; i += 2) {
+                if (buffer[i] == 0 && buffer[i + 1] == 0) { valid = false; break; }
+            }
+        } else if (memchr(buffer, 0, length)) valid = false;
+        const uint64_t before = read;
+        read += length;
+        if (!valid || read > downloaded) break;
+        if ((before >> 18) != (read >> 18)) vTaskDelay(1);
+        length = fread(buffer, 1, block, file);
+    }
+    valid = valid && !s_cancel && read == downloaded && !ferror(file);
+    heap_caps_free(buffer);
+    return fclose(file) == 0 && valid;
 }
 
 static bool verify_epub(const char* path) {
@@ -948,12 +975,14 @@ static int download_file(const char* url, const char* save_path, const char* inc
                     : kind == XTEINK_FILE_FONT ? verify_font(temp)
                     : kind == XTEINK_FILE_XTH  ? verify_xth(temp)
                     : image ? verify_image(temp,kind==XTEINK_FILE_PNG)
-                                               : verify_text(temp);
+                                               : verify_text(temp, ctx.written);
     if (!verified||s_cancel) {
         ESP_LOGE(TAG, "verify failed: %s kind=%d", name, (int)kind);
         unlink(temp);
         if(image&&!s_cancel)snprintf(s_download_error,sizeof(s_download_error),
             kind==XTEINK_FILE_XTH?"XTH 壁纸格式错误":"图片解码失败，请使用非交错PNG或JPG");
+        if (kind == XTEINK_FILE_TEXT && !s_cancel)
+            snprintf(s_download_error, sizeof(s_download_error), "TXT 文件不完整或编码异常");
         return 2;
     }
     const char* target_dir = image ? XTEINK_PICTURES_DIR

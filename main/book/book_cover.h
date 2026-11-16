@@ -98,6 +98,10 @@ void book_cover_fast_cache_write_checked(const char *path,const char *title,cons
 bool book_cover_shelf_ram_read(const char *path, const char *title, const char *author,
         uint64_t size, int64_t modified, bool list, bool fast, book_fast_cover_key_t raster,
         void *out, size_t capacity, metalio_cover_meta_t *meta);
+/// TXT 生成封面存于有界 RAM。/ Store generated TXT covers in the bounded RAM cache.
+void book_cover_shelf_ram_store(const char *path, const char *title, const char *author,
+        uint64_t size, int64_t modified, uint64_t font_key, bool list, bool fast, book_fast_cover_key_t raster,
+        const uint8_t *pixels, bool white_edge);
 bool book_cover_shelf_no_artwork(const char *path, const char *title, const char *author,
         uint64_t size, int64_t modified, bool remember);
 #if KIIKO_BOARD_METALIO47

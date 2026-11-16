@@ -29,10 +29,12 @@ if __name__ == '__main__':
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <time.h>
 #include "ui_image_dither.h"
 #include "book_cover_jobs.h"
+#define KIIKO_BOARD_METALIO47 1
 #define EXT_RAM_BSS_ATTR
 #define BOOK_STORE_PATH_MAX 288
 #define BOOK_COVER_W 176
@@ -124,6 +126,11 @@ int main(void){
     before=loads;assert(!load_cover(book_at(0),0)&&!live_bytes&&loads==before);psram=4*1024*1024;
     fast=false;app_home_cover_mode_changed();assert(!live_bytes&&!book_at(0)->cover);assert(load_cover(book_at(0),0)&&live_bytes==176u*240&&!book_at(0)->cover_fast);
     app_home_cover_mode_changed();alloc_fail=true;assert(!load_cover(book_at(0),0)&&!live_bytes);alloc_fail=false;asset_allowed=false;before=loads;assert(!load_cover(book_at(0),0)&&loads==before);
+    asset_allowed=true;book(0,0);strcpy(book_at(0)->path,"/book0.TXT");
+    assert(load_cover(book_at(0),0)&&!job_requests[0].artwork_only&&book_at(0)->cover);
+    clear_cover_cache();book(0,0);
+    assert(load_cover(book_at(0),0)&&job_requests[0].artwork_only);
+    clear_cover_cache();
     puts("PASS: 300 actual in-place Home reorderings; duplicate/missing/modified identities; no stale pointer or double free; fast 5,280-byte BW only; gray-only ordinary/ripple; checked OOM and recovery");
 }
 '''

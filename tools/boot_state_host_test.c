@@ -186,6 +186,25 @@ int main(void) {
     pico_boot_init(false);assert(!pico_boot_take_resume(&out));pico_boot_ready();
     fail_open=true;pico_boot_init(false);fail_open=false;
     assert(pico_boot_book_begin("/sdcard/books/recovered.txt")==ESP_OK);pico_boot_book_end(true);
+    // A reset during TXT first paint skips automatic resume even with a later lock record.
+    strcpy(resume.path, "/sdcard/books/imported.txt");
+    assert(pico_boot_book_begin(resume.path) == ESP_OK);
+    pico_boot_init(true);
+    assert(pico_boot_interrupted_book(interrupted, sizeof(interrupted)) && !strcmp(interrupted, resume.path));
+    assert(!pico_boot_take_resume(&out));
+    pico_boot_ready();
+    assert(pico_boot_save_resume(&resume) == ESP_OK);
+    pico_boot_init(false);
+    assert(!pico_boot_recovery() && !pico_boot_take_resume(&out) && !pico_boot_asset_allowed(resume.path));
+    pico_boot_clear_resume();
+    pico_boot_ready();
+    assert(pico_boot_book_begin(resume.path) == ESP_OK); // Manual retry is allowed.
+    pico_boot_book_end(true);
+    assert(pico_boot_asset_allowed(resume.path));
+    assert(pico_boot_save_resume(&resume) == ESP_OK);
+    pico_boot_init(false);
+    assert(pico_boot_take_resume(&out) && !strcmp(out.path, resume.path));
+    pico_boot_ready();
     seed_legacy(legacy);free_bytes=0;erases=0;fail_commit=true;
     assert(pico_boot_book_begin("/sdcard/books/unadmitted.epub")==ESP_FAIL);
     assert(present&&durable_size==sizeof(legacy)&&erases==1);

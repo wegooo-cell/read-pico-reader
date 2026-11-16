@@ -2202,7 +2202,8 @@ void read_pico_transfer_stop(void) {
 }
 
 esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
-    if (!cfg || (cfg->network_only && cfg->mode != READ_PICO_TRANSFER_MODE_STA) ||
+    if (!cfg || (cfg->cover_lookup && !cfg->network_only) ||
+        (cfg->network_only && cfg->mode != READ_PICO_TRANSFER_MODE_STA) ||
         (!cfg->network_only && (!cfg->root_dir || !cfg->free_bytes_cb)) ||
         (cfg->root_dir && strlen(cfg->root_dir) >= sizeof(s_root)) ||
         (cfg->mode != READ_PICO_TRANSFER_MODE_AP && cfg->mode != READ_PICO_TRANSFER_MODE_STA)) return ESP_ERR_INVALID_ARG;
@@ -2232,6 +2233,7 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
     memset(&s_status, 0, sizeof(s_status)); s_status.state = READ_PICO_TRANSFER_STARTING;
     s_stopping = s_upload_active = false;
     s_status.mode = cfg->mode;
+    s_status.cover_lookup = cfg->cover_lookup;
     portEXIT_CRITICAL(&s_lock);
     transfer_credentials_t saved = {0};
     wifi_config_t wifi = {0};
@@ -2293,6 +2295,10 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
              (unsigned)pre_internal, (unsigned)pre_largest,
              (unsigned)pre_dma_free, (unsigned)pre_dma_largest, (int)bulk_rx);
     transfer_s31_bulk_receive_config(&init, bulk_rx);
+    if (cfg->cover_lookup) {
+        transfer_s31_cover_receive_config(&init);
+        ESP_LOGI("transfer", "cover STA profile: RX/TX aggregation disabled");
+    }
     err = esp_wifi_init(&init);
     for (int retry = 0; err != ESP_OK && retry < 3; ++retry) {
         ESP_LOGW("transfer", "wifi init retry=%d err=%s internal free=%u largest=%u",
@@ -3907,7 +3913,8 @@ void read_pico_transfer_stop(void) {
 }
 
 esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
-    if (!cfg || (cfg->network_only && cfg->mode != READ_PICO_TRANSFER_MODE_STA) ||
+    if (!cfg || (cfg->cover_lookup && !cfg->network_only) ||
+        (cfg->network_only && cfg->mode != READ_PICO_TRANSFER_MODE_STA) ||
         (!cfg->network_only && (!cfg->root_dir || !cfg->free_bytes_cb)) ||
         (cfg->root_dir && strlen(cfg->root_dir) >= sizeof(s_root)) ||
         (cfg->mode != READ_PICO_TRANSFER_MODE_AP && cfg->mode != READ_PICO_TRANSFER_MODE_STA)) return ESP_ERR_INVALID_ARG;
@@ -3926,6 +3933,7 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
     memset(&s_status, 0, sizeof(s_status)); s_status.state = READ_PICO_TRANSFER_STARTING;
     s_stopping = s_upload_active = false;
     s_status.mode = cfg->mode;
+    s_status.cover_lookup = cfg->cover_lookup;
     portEXIT_CRITICAL(&s_lock);
     transfer_credentials_t saved = {0};
     wifi_config_t wifi = {0};

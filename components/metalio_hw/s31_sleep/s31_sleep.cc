@@ -16,6 +16,9 @@
 #include <soc/lp_clkrst_reg.h>
 #include <soc/regi2c_bias.h>
 #include <soc/hp_sys_clkrst_reg.h>
+extern "C" {
+#include "metalio_hw.h"
+}
 
 // Preserve existing log tags for serial tooling and previous diagnostic records.
 #define TAG "PowerHw"
@@ -154,16 +157,23 @@ void s31_sleep::BeginCycle() {
     s_sleep_trace.cycle = s_sleep_trace.cycle + 1;
 }
 
-esp_err_t s31_sleep::LightSleep(unsigned applied) {
+esp_err_t s31_sleep::LightSleep(unsigned applied, bool *power_key_confirmed) {
     s_sdk_sleep_active = true;
     const esp_err_t err = esp_light_sleep_start();
     // CPU retention may restore its continuation outside the PMU wrapper.
     // Never let the wake-only register workaround leak into normal clock use.
     s_pmu_sleep_active = false;
     s_sdk_sleep_active = false;
+    // 先留下RTC诊断，再在打印日志与恢复外设前读取P17。
+    // Leave the RTC diagnostic first, then sample P17 before printing or restoring peripherals.
+    s_sleep_trace.applied = applied;
+    s_sleep_trace.phase = static_cast<uint32_t>(Phase::AfterSleep);
+    *power_key_confirmed = err == ESP_OK &&
+        (esp_sleep_get_wakeup_causes() & (1u << ESP_SLEEP_WAKEUP_EXT1)) != 0 &&
+        metalio_confirm_light_wake_key();
     const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-    Checkpoint(Phase::AfterSleep, applied); // CPU returned, before any I2C access
-    esp_rom_printf("PowerHw: sleep returned cycle=%lu err=%d cause=%d before I2C\n",
+    Checkpoint(Phase::AfterSleep, applied);
+    esp_rom_printf("PowerHw: sleep returned cycle=%lu err=%d cause=%d\n",
                    static_cast<unsigned long>(s_sleep_trace.cycle), static_cast<int>(err), static_cast<int>(cause));
     return err;
 }
@@ -175,9 +185,9 @@ extern "C" esp_err_t metalio_sleep_sdk_init(void) {
     s31_sleep::CaptureReset();
     return s31_sleep::Init();
 }
-extern "C" esp_err_t metalio_light_sleep_start(void) {
+extern "C" esp_err_t metalio_light_sleep_start(bool *power_key_confirmed) {
     s31_sleep::BeginCycle();
-    return s31_sleep::LightSleep(0);
+    return s31_sleep::LightSleep(0, power_key_confirmed);
 }
 extern "C" void metalio_sleep_report_reset(void) {
     s31_sleep::ReportReset();

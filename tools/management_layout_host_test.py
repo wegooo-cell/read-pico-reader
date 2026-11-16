@@ -50,8 +50,10 @@ int main(void){
    for(int j=0;j<row;++j)assert(!overlaps(r,ui_book_manage_entry(grid,j)));
   }
  }
- EpdRect controls[]={ui_book_manage_search(),ui_book_manage_layout(),ui_book_manage_sort(),ui_book_manage_import(),ui_book_manage_select()};
- for(int i=0;i<5;++i){bounds(controls[i]);for(int j=0;j<i;++j)assert(!overlaps(controls[i],controls[j]));}
+ EpdRect cover=ui_book_manage_get_cover(), sort=ui_book_manage_sort();
+ assert(cover.y==sort.y&&cover.x+cover.width<sort.x&&hit(cover,cover.x+5,cover.y+5));
+ EpdRect controls[]={ui_book_manage_search(),ui_book_manage_layout(),cover,sort,ui_book_manage_import(),ui_book_manage_select()};
+ for(int i=0;i<6;++i){bounds(controls[i]);for(int j=0;j<i;++j)assert(!overlaps(controls[i],controls[j]));}
  for(int i=3;i<7;++i){EpdRect action=ui_book_manage_action(i);bounds(action);assert(action.y==1096&&action.height==120);assert(!overlaps(action,(EpdRect){36,1006,612,50}));for(int j=3;j<i;++j)assert(!overlaps(action,ui_book_manage_action(j)));}
  puts("PASS: stable body with disjoint visible crop/header/footer, immediate centre mode tap, retained image side zoom, 7 file rows/4 actions, 5 shelf rows and separated pager/actions");
 }

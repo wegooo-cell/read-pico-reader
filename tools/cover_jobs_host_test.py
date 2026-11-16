@@ -20,6 +20,7 @@ unit=f'#define KIIKO_BOARD_METALIO47 {int(s31)}\n#define TEST_SIZED_DEFAULT_CACH
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <strings.h>
 #include <setjmp.h>
 #include <sys/stat.h>
 #include "book_cover_jobs.h"
@@ -37,7 +38,7 @@ static unsigned jpeg_cancels;
 static __attribute__((unused)) void metalio_jpeg_cancel(void){++jpeg_cancels;}
 static bool media_ready_for_jobs=true;
 static bool read_pico_sd_io_ready(void){return media_ready_for_jobs;}
-static int jobs,decodes,fonts,writes,reads,mode,fail_alloc,task_ok=1,worker_context;
+static int jobs,decodes,fonts,writes,reads,ram_stores,mode,fail_alloc,task_ok=1,worker_context;
 static unsigned replaced;
 static size_t live,largest;
 static struct{void *p;size_t n;} memory[64];
@@ -58,7 +59,9 @@ static int mock_stat(const char *p,struct stat *st){assert(worker_context);++rea
 #define stat(p,s) mock_stat(p,s)
 static book_cover_job_t request(const char *p){book_cover_job_t q={.width=164,.height=214,.stride=21,.contrast=100};strcpy(q.path,p);strcpy(q.title,"title");return q;}
 static int chapter_reads;static uint16_t book_cached_chapter_count(const char*p,uint32_t n,int64_t m){assert(worker_context&&p&&n==100&&m==200);++chapter_reads;return 37;}
-static bool book_auto_cover_render(const char*,const char*,const char*,unsigned,unsigned,uint8_t*);
+static bool book_auto_cover_render(const char*,const char*,unsigned,unsigned,uint8_t*);
+static uint64_t cover_font;
+static uint64_t book_auto_cover_font_key(void){return cover_font;}
 static bool book_title_from_path(const char *p,char *out,size_t cap){(void)p;(void)out;(void)cap;return false;}
 '''
 unit+='\n'.join(x for x in (root/'main/book/book_cover_jobs.c').read_text().splitlines() if not x.startswith('#include'))
@@ -67,6 +70,13 @@ book_crop_t book_cover_crop(unsigned sw,unsigned sh,unsigned w,unsigned h){(void
 bool book_cover_list_cache_dimensions(const char *p,const char*t,const char*a,unsigned*w,unsigned*h){(void)t;(void)a;assert(worker_context);++reads;*w=80;*h=120;return *p=='P';}
 bool book_cover_fast_cache_read(const char*p,const char*t,const char*a,book_fast_cover_key_t k,uint8_t*out,bool*edge){(void)t;(void)a;assert(worker_context);++reads;if(*p!='P')return false;assert(k.width==80&&k.height==120);memset(out,255,(size_t)k.stride*k.height);*edge=false;return true;}
 void book_cover_fast_cache_write_checked(const char*p,const char*t,const char*a,book_fast_cover_key_t k,const uint8_t*out,bool edge,int64_t size,int64_t modified){(void)p;(void)t;(void)a;(void)k;(void)out;(void)edge;assert(size==100&&modified==200&&worker_context);++writes;}
+void book_cover_shelf_ram_store(const char*p,const char*t,const char*a,uint64_t n,int64_t m,uint64_t font_key,bool list,bool fast,book_fast_cover_key_t k,const uint8_t*out,bool edge){
+ (void)t;(void)a;(void)edge;
+ assert(worker_context&&font_key==cover_font&&!strcmp(p,"N.TXT")&&n==100&&m==200&&out);
+ if(list) assert(!fast&&k.width==51&&k.height==70&&out[0]==33);
+ else assert(fast&&k.width==164&&k.height==214&&k.stride==21);
+ ++ram_stores;
+}
 void book_cover_store_generated(const char*p,const char*t,const char*a,const uint8_t*out,bool list,int64_t size,int64_t modified){(void)p;(void)t;(void)a;(void)out;(void)list;assert(size==100&&modified==200&&worker_context);++writes;}
 int book_cover_load_io(const char*p,const char*t,const char*a,uint8_t*out,bool list,unsigned*w,unsigned*h,bool*cache){(void)t;(void)a;(void)list;assert(worker_context);++decodes;*w=176;*h=240;memset(out,*p,176*240);*cache=false;
  if(mode==1){mode=0;replaced=book_cover_jobs_begin();book_cover_job_t q=request("B");assert(book_cover_jobs_submit(replaced,0,&q));}
@@ -76,7 +86,7 @@ int book_cover_load_io(const char*p,const char*t,const char*a,uint8_t*out,bool l
 }
 int book_cover_load_sized_io(const char*p,const char*t,const char*a,uint8_t*out,unsigned w,unsigned h,bool*cache){(void)t;(void)a;assert(worker_context&&w==51&&h==70);++decodes;memset(out,*p,w*h);*cache=true;return (*p=='N'||*p=='H')?0:1;}
 void book_cover_store_sized(const char*p,const char*t,const char*a,const uint8_t*out,unsigned w,unsigned h,int64_t n,int64_t m){(void)p;(void)t;(void)a;assert(worker_context&&w==51&&h==70&&n==100&&m==200&&out[0]==33);++writes;}
-static bool book_auto_cover_render(const char*p,const char*t,const char*a,unsigned w,unsigned h,uint8_t*out){(void)p;(void)t;(void)a;assert(!worker_context&&w==176&&h==240);++fonts;memset(out,33,w*h);return true;}
+static bool book_auto_cover_render(const char*t,const char*a,unsigned w,unsigned h,uint8_t*out){(void)t;(void)a;assert(!worker_context&&w==176&&h==240);++fonts;memset(out,33,w*h);return true;}
 static void run(void){worker_pending=false;worker_context=1;if(!setjmp(done))task_fn(NULL);worker_context=0;}
 '''
 if has_cover_warm:
@@ -157,6 +167,16 @@ int main(void){
  assert(book_cover_jobs_submit(generation,0,&q));run();old_writes=writes;before_fonts=fonts;
  assert(book_cover_jobs_take(generation,0,&result)==0&&fonts==before_fonts+1);run();
  assert(book_cover_jobs_take(generation,0,&result)==1&&result.width==51&&result.height==70&&result.pixels[0]==33&&writes==old_writes+TEST_SIZED_DEFAULT_CACHE);free(result.pixels);
+ for(int style=0;style<2;++style){
+  q=request("N.TXT");q.list=style==0;q.fast=!q.list;
+  if(q.list){q.width=51;q.height=70;}
+  generation=book_cover_jobs_begin();assert(book_cover_jobs_submit(generation,0,&q));run();
+  before_fonts=fonts;old_writes=writes;
+  assert(book_cover_jobs_take_ready(generation,0,&result)==0&&fonts==before_fonts);
+  assert(book_cover_jobs_take(generation,0,&result)==0&&fonts==before_fonts+1);run();
+  assert(book_cover_jobs_take_ready(generation,0,&result)==1&&result.generated&&result.fast==q.fast);
+  assert(ram_stores==style+1&&writes==old_writes);free(result.pixels);
+ }
 #if KIIKO_BOARD_METALIO47
  book_cover_job_t cold=request("A");
  generation=book_cover_jobs_begin();

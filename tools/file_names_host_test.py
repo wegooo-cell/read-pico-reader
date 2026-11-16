@@ -8,6 +8,14 @@ root=Path(__file__).resolve().parents[1]
 s=root/'main/apps/app_files.c'
 unit=r'''
 #include <assert.h>
+#include <stdbool.h>
+#include <stddef.h>
+bool book_weread_cover_metadata(const char *path, char *title, size_t title_cap,
+                                char *author, size_t author_cap) {
+    (void)path; (void)title; (void)title_cap; (void)author; (void)author_cap;
+    return false;
+}
+
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -76,7 +84,7 @@ if 'book_epub_metadata_cached_for_file' in book.read_text():
     unit+='static int book_epub_metadata_cached_for_file(const char*p,uint64_t size,int64_t modified,char*t,size_t n,char*a,size_t z){(void)size;(void)modified;return book_epub_metadata_cached(p,t,n,a,z); }\n'
 unit+='enum{EXPECTED_SCAN_STAT='+('4' if 'book_epub_metadata_cached_for_file' in function('scan_shelf_dir',book) else '7')+'};\n'
 unit+='static int shelf_stat_calls;static int shelf_stat(const char*p,struct stat*s){++shelf_stat_calls;return stat(p,s); }\n#define stat(p,s) shelf_stat(p,s)\n'
-for name in ['copy_text','clean_filename','scan_shelf_dir','shelf_backfill_visit']:
+for name in ['copy_text','clean_filename','shelf_scan_interrupted','scan_shelf_dir','shelf_backfill_visit']:
     unit+=function(name,book).replace('s_count','shelf_count').replace('s_view','shelf_view')+'\n'
 unit+='\n#undef stat\n'
 home=root/'main/apps/app_dashboard.c'

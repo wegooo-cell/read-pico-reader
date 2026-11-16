@@ -10,6 +10,12 @@
 #include <assert.h>
 #include "../components/read_pico_transfer/transfer_signature.h"
 int metalio_haptic_click(void){return ESP_OK;}
+static unsigned cover_wifi_returns;
+static bool cover_wifi_ready;
+void app_book_return_from_cover_wifi(bool connected) {
+    ++cover_wifi_returns;
+    cover_wifi_ready = connected;
+}
 static bool test_usb_active;
 static esp_err_t test_usb_stop_error;
 esp_err_t usb_storage_start(void) { test_usb_active = true; return ESP_OK; }
@@ -392,5 +398,51 @@ int main(void) {
     test_status=(read_pico_transfer_status_t){.mode=READ_PICO_TRANSFER_MODE_STA,.state=READ_PICO_TRANSFER_READY,.network_ready=true};
     s_session_started=true;int before_exit=test_stop_count;transfer_on_exit(&ctx);
     assert(test_stop_count==before_exit&&!s_wifi_settings_only&&!s_session_started);
+    const read_pico_transfer_status_t ready = {.mode=READ_PICO_TRANSFER_MODE_STA,
+        .state=READ_PICO_TRANSFER_READY, .network_ready=true, .wifi_configured=true, .cover_lookup=true};
+    ctx.request_return = false;
+    test_status = ready;
+    app_transfer_request_cover_wifi();
+    on_enter(&ctx);
+    assert(s_view == TRANSFER_NETWORKS && s_cover_wifi_only && !transfer_navigation_enabled(&ctx));
+    assert(network_ui_tick(&ctx) == APP_REDRAW_NONE && !ctx.request_return);
+    tap(&ctx, network_control_rect(6));
+    assert(ctx.request_return && cover_wifi_returns == 1 && cover_wifi_ready);
+    transfer_on_exit(&ctx);
+    assert(!s_cover_wifi_only && test_status.network_ready);
+
+    ctx.request_return = false;
+    app_transfer_request_cover_wifi();
+    on_enter(&ctx);
+    tap(&ctx, (EpdRect){36, 79, 50, 50});
+    assert(ctx.request_return && cover_wifi_returns == 2 && !cover_wifi_ready);
+    transfer_on_exit(&ctx);
+
+    ctx.request_return = false;
+    test_status = (read_pico_transfer_status_t){0};
+    app_transfer_request_cover_wifi();
+    on_enter(&ctx);
+    s_session_started = true;
+    test_status = ready;
+    assert(network_ui_tick(&ctx) == APP_REDRAW_NONE);
+    assert(ctx.request_return && cover_wifi_returns == 3 && cover_wifi_ready);
+    transfer_on_exit(&ctx);
+
+    // The connected general-purpose STA is replaced on Continue, with saved credentials.
+    ctx.request_return = false;
+    test_status = ready;
+    test_status.cover_lookup = false;
+    app_transfer_request_cover_wifi();
+    on_enter(&ctx);
+    tap(&ctx, network_control_rect(6));
+    assert(!ctx.request_return && s_network_connect_pending && cover_wifi_returns == 3);
+    test_status = (read_pico_transfer_status_t){.mode=READ_PICO_TRANSFER_MODE_STA,
+        .state=READ_PICO_TRANSFER_STARTING, .cover_lookup=true};
+    assert(network_ui_tick(&ctx) == APP_REDRAW_PAGE && test_cover_profile_requested);
+    assert(!ctx.request_return);
+    test_status = ready;
+    assert(network_ui_tick(&ctx) == APP_REDRAW_NONE && ctx.request_return &&
+           cover_wifi_returns == 4 && cover_wifi_ready);
+    transfer_on_exit(&ctx);
     puts("transfer_ui_host_test: PASS");
 }

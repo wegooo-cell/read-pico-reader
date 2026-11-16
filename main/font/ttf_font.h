@@ -104,6 +104,10 @@ bool ttf_font_draw_preview(const char *path, uint8_t *fb, int x, int y, int px,
                            const char *text, int width);
 #else
 #endif
+typedef bool (*ttf_face_draw_fn)(void *context);
+/// 绘制期间使用指定字体，随后还原活动槽和字体分段；调用方持有绘制锁。
+/// Use the chosen face for the draw and restore the prior slot and runs. Caller holds the draw lock.
+bool ttf_font_draw_with_path(const char *path, ttf_face_draw_fn draw, void *context);
 bool ttf_font_is_builtin(void);
 bool ttf_font_path_is_builtin(const char* path);
 void ttf_font_unload(void);

@@ -380,7 +380,10 @@ void app_present(app_ctx_t* ctx,const app_desc_t* app,app_redraw_t redraw) {
     const bool white_switch=root_switch||child_white;
     const bool shelf_switch=root_switch &&
         (app_index_of(s_presented_root)==1 || app_index_of(app)==1);
-    unsigned previous=display_main_quality_set(white_switch?(shelf_switch?8u:6u):0u);
+    unsigned white_phases = 0;
+    if (white_switch)
+        white_phases = app_settings_main_fast_refresh() ? PICO_MAIN_FAST_WHITE_PHASES : shelf_switch ? 8u : 6u;
+    unsigned previous = display_main_quality_set(white_phases);
     app_present_impl(ctx,app,redraw);
     display_main_quality_set(previous);
 }
@@ -1251,7 +1254,10 @@ void app_loop_run(const app_loop_config_t* config) {
             while (ble_pt_pop_raw(&raw_event)) {}
         }
         if (s_quick.open && quick_status() != s_quick_status) quick_buttons_present(&ctx,current);
-        if (!power_dialog_open && !s_quick.open && !quick_input_owned && !ui_click_feedback_active() && !menu_open && !ctx.request_app && !ctx.request_menu && !ctx.request_return && current->on_tick != NULL) {
+        const bool page_exposed = !power_dialog_open && !s_quick.open && !quick_input_owned &&
+            !menu_open && !ctx.request_app && !ctx.request_menu && !ctx.request_return;
+        if (current == &app_book) app_book_ticket_sample(ctx.now_ms, page_exposed);
+        if (page_exposed && !ui_click_feedback_active() && current->on_tick != NULL) {
             app_redraw_t redraw = current->on_tick(&ctx);
             if (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL) held_key = -1;
             present_page(&ctx, current, &gesture, redraw);
