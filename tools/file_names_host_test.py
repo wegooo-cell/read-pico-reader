@@ -62,6 +62,8 @@ typedef int nvs_handle_t;
 typedef struct{int unused;}app_ctx_t;
 typedef struct{uint32_t file_size,last_open_s;uint16_t chapter;uint8_t pct;}book_progress_t;
 typedef struct{DIR*dir;char path[288];}shelf_scan_frame_t;
+static bool s_shelf_scan_yield_to_touch;
+static bool app_touch_input_pending(app_ctx_t*c){(void)c;return false;}
 static void *heap_caps_calloc(size_t n,size_t z,int caps){assert(caps==3);return calloc(n,z);}
 static bool app_poll_main_navigation(app_ctx_t*c){(void)c;return false;}
 static const char*app_settings_books_dir(void){return test_root;}
@@ -78,6 +80,8 @@ static unsigned metadata_calls;static bool have_metadata;static const char *cach
 static int book_epub_metadata_cached(const char*p,char*t,size_t n,char*a,size_t z){(void)p;(void)n;++metadata_calls;t[0]=0;snprintf(a,z,"%s",have_metadata?cached_author:"");return have_metadata?0:-1;}
 typedef struct{int favorites,hidden;bool truncated;}shelf_backfill_t;
 '''+shelf_type+'\nstatic shelf_entry_t s_shelf[8];static int shelf_count,shelf_view;\n'
+if 's_background_index_scan' in function('shelf_scan_interrupted',book):
+    unit+='static bool s_background_index_scan,s_shelf_scan_cancelled;\n'
 if 'book_progress_load(' not in function('scan_shelf_dir',book):
     unit=unit.replace('static bool book_progress_load(const char*p,uint32_t z,book_progress_t*out){(void)p;(void)z;(void)out;return false;}','')
 if 'book_epub_metadata_cached_for_file' in book.read_text():
