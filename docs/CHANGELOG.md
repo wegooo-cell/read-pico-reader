@@ -2,6 +2,9 @@
 
 ## 本地测试 / Local test — 2026-11-17
 
+- 设置「连接与时间」新增设备同步：两台设备进入同一页，一台选发射、一台选接收，扫描后自动选中对端并显示四位配对码；接收端确认后经 ESP-NOW 分片同步排版、阅读进度、书签与已存 WiFi，整段校验通过才写入并重启。
+- Settings → Connection & time gains Device sync: both devices open the page, one sends and the other receives, the first peer is selected automatically and a four-digit pairing code is shown; after the receiver confirms, layout, reading progress, bookmarks and saved WiFi move over ESP-NOW in checked chunks and are applied only after the whole stream validates, then the receiver restarts.
+
 - S31 普通文字翻页使用原厂 GL37 白转中灰序列，空白补白与落字同时进行，补黑与退白重叠，扫描共 49 相。相间预填保留 192 行和 12 ms 节拍下限，发生欠载时清屏恢复并回退供数。水波纹各条带的空白与新字一起刷新。
 - S31 ordinary text turns use vendor GL37 white-to-midgray transitions, driving blank whites alongside text and overlapping black reinforcement with white erasure for 49 phases. Inter-phase prefill retains 192 lines and a 12 ms cadence floor, with panel recovery and fallback on underruns. Ripple bands drive blank whites together with new text.
 

@@ -12,6 +12,7 @@
 #include "reader_controls.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
 
@@ -290,6 +291,12 @@ bool app_settings_set_fonts_dir(const char* path);
 /// 将设置、阅读记录和 WiFi 凭据保存到 TF 卡根目录；备份含明文密码，需妥善保管。
 /// Save settings, reading records and WiFi credentials to TF root; keep the plaintext-secret backup private.
 esp_err_t app_settings_backup_save(void);
+/// 导出本机设置备份流到内存（与 TF 卡备份同一字节布局）；成功后调用方 free。
+/// Export the settings backup stream to memory (same byte layout as the card backup); caller frees.
+esp_err_t app_settings_sync_export(uint8_t **data, size_t *length);
+/// 校验并应用内存里的设置备份流；失败时不保留部分设置。
+/// Validate and apply a memory backup stream; a failure leaves no partial settings.
+esp_err_t app_settings_sync_import(const uint8_t *data, size_t length);
 /// 校验备份后恢复 NVS；缺失的外部字体或壁纸回退到内建资源。
 /// Validate before restoring NVS; missing external assets fall back safely.
 esp_err_t app_settings_backup_restore(void);

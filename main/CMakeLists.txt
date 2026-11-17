@@ -6,6 +6,7 @@ set(main_requires
     read_pico
     metalio_hw
     read_pico_transfer
+    kiiko_device_sync
     read_pico_search
     espressif__qrcode
     espressif__esp_jpeg
@@ -141,6 +142,16 @@ kiiko_board_sources(kiiko_selected_sources "${CMAKE_CURRENT_LIST_DIR}" "app_main
         "factory/pmu_selftest.c"
         "factory/vcom_setup.c"
         "factory/debug_panel.c")
+# 设置页与书籍解析/列表都只做文字与索引工作，按体积编译，给 5MB 应用分区腾空间。
+# The settings page and book parsing/listing only do text and index work, so compile them for size
+# and leave the 5 MB app partition some headroom.
+if(NOT CMAKE_SCRIPT_MODE_FILE)
+foreach(kiiko_source IN LISTS kiiko_selected_sources)
+    if(kiiko_source MATCHES "(app_device_settings|book_epub|book_layout|book_store|book_source|book_txt|zip_reader|html_text|gbk|app_files)\\.c$")
+        set_source_files_properties("${kiiko_source}" PROPERTIES COMPILE_OPTIONS "-Os")
+    endif()
+endforeach()
+endif()
 idf_component_register(
     LDFRAGMENTS "metalio_crash.lf"
     SRCS ${kiiko_selected_sources}
@@ -201,6 +212,7 @@ set(main_requires
     kiiko_board
     read_pico
     read_pico_transfer
+    kiiko_device_sync
     read_pico_search
     espressif__qrcode
     espressif__esp_jpeg
@@ -329,6 +341,16 @@ kiiko_board_sources(kiiko_selected_sources "${CMAKE_CURRENT_LIST_DIR}" "app_main
         "font/ui_hanzi.c"
         "factory/pmu_selftest.c"
         "factory/vcom_setup.c")
+# 设置页几乎全是文字与命中测试，Pico 的应用分区又贴着上限，因此只给这一页按体积编译。
+# The settings page is nearly all text and hit-tests, and the Pico app partition sits at its ceiling,
+# so only this page is compiled for size.
+if(NOT CMAKE_SCRIPT_MODE_FILE)
+foreach(kiiko_source IN LISTS kiiko_selected_sources)
+    if(kiiko_source MATCHES "(app_device_settings|book_epub|book_layout|book_store|book_source|book_txt|zip_reader|html_text|gbk|app_files)\\.c$")
+        set_source_files_properties("${kiiko_source}" PROPERTIES COMPILE_OPTIONS "-Os")
+    endif()
+endforeach()
+endif()
 idf_component_register(
     SRCS ${kiiko_selected_sources}
     REQUIRES ${main_requires}
