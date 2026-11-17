@@ -28,6 +28,7 @@
 
 #include <stdio.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <errno.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -1142,8 +1143,9 @@ static bool backup_card_ready(void) {
     return read_pico_sd_get_info(&info) == ESP_OK && info.mounted;
 }
 
-esp_err_t app_settings_backup_save(void) {
-    if (!backup_card_ready()) return ESP_ERR_INVALID_STATE;
+// 备份先写进调用方给的流：TF 卡和内存导出共用同一份字节。
+// Write into a caller-owned stream so the card and memory exports share one byte layout.
+static esp_err_t backup_write_stream(FILE *file, bool rotate) {
     settings_backup_v1_t backup = {0};
     memcpy(backup.magic, "PICOSETP", sizeof(backup.magic));
     uint8_t *f = backup.flags;
@@ -1211,6 +1213,12 @@ esp_err_t app_settings_backup_save(void) {
     for (unsigned i = 0; i < 4; ++i) weight.checksum[i] = (uint8_t)(weight_hash >> (8 * i));
     settings_backup_wifi_t wifi = {0};
     esp_err_t wifi_err = read_pico_transfer_export_wifi_backup(&wifi.credentials);
+    // 没存过网络时导出返回未找到；备份仍可用，只是一条 WiFi 记录都不带。
+    // An unconfigured device reports not-found; keep the backup usable without a WiFi record.
+    if (wifi_err == ESP_ERR_NOT_FOUND || wifi_err == ESP_ERR_NVS_NOT_FOUND) {
+        memset(&wifi, 0, sizeof(wifi));
+        wifi_err = ESP_OK;
+    }
     if (wifi_err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); return wifi_err; }
     backup_wifi_seal(&wifi);
     settings_backup_background_t background = {0};
@@ -1218,8 +1226,6 @@ esp_err_t app_settings_backup_save(void) {
     uint32_t background_hash = backup_background_checksum(&background);
     for (unsigned i = 0; i < 4; ++i) background.checksum[i] = (uint8_t)(background_hash >> (8 * i));
 
-    FILE *file = fopen(BACKUP_TEMP, "wb");
-    if (!file) { backup_erase_secret(&wifi, sizeof(wifi)); return ESP_FAIL; }
     bool ok = fwrite(&backup, 1, sizeof(backup), file) == sizeof(backup);
     if (ok) ok = fwrite(extension, 1, sizeof(extension), file) == sizeof(extension);
     if (ok) ok = fwrite(&profile, 1, sizeof(profile), file) == sizeof(profile);
@@ -1245,8 +1251,11 @@ esp_err_t app_settings_backup_save(void) {
     if(ok)ok=fwrite(&shelf,1,sizeof(shelf),file)==sizeof(shelf);
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
-    if (ok) ok = fsync(fileno(file)) == 0;
+    // memstream 没有文件描述符；只有卡上的文件需要 fsync。
+    // A memstream has no descriptor; only the card file needs fsync.
+    if (ok && fileno(file) >= 0) ok = fsync(fileno(file)) == 0;
     if (fclose(file) != 0) ok = false;
+    if (!rotate) return ok ? ESP_OK : ESP_FAIL;
     bool rotated = false;
     if (ok && remove(BACKUP_PREVIOUS) != 0 && errno != ENOENT) ok = false;
     if (ok && rename(BACKUP_FILE, BACKUP_PREVIOUS) == 0) rotated = true;
@@ -1254,7 +1263,32 @@ esp_err_t app_settings_backup_save(void) {
     if (ok && rename(BACKUP_TEMP, BACKUP_FILE) != 0) ok = false;
     if (!ok && rotated) (void)rename(BACKUP_PREVIOUS, BACKUP_FILE);
     if (ok && rotated) (void)remove(BACKUP_PREVIOUS);
-    if (!ok) { (void)remove(BACKUP_TEMP); return ESP_FAIL; }
+    if (!ok) { if (rotate) (void)remove(BACKUP_TEMP); return ESP_FAIL; }
+    return ESP_OK;
+}
+
+esp_err_t app_settings_backup_save(void) {
+    if (!backup_card_ready()) return ESP_ERR_INVALID_STATE;
+    FILE *file = fopen(BACKUP_TEMP, "wb");
+    if (!file) return ESP_FAIL;
+    return backup_write_stream(file, true);
+}
+
+// 内存导出：调用方拿到 malloc 的整段字节，长度由接收端随会话带过来。
+// Memory export: the caller owns the malloc'ed stream; the receiver learns its length
+// from the session announcement.
+esp_err_t app_settings_sync_export(uint8_t **data, size_t *length) {
+    if (!data || !length) return ESP_ERR_INVALID_ARG;
+    *data = NULL;
+    *length = 0;
+    char *buffer = NULL;
+    size_t size = 0;
+    FILE *file = open_memstream(&buffer, &size);
+    if (!file) return ESP_ERR_NO_MEM;
+    esp_err_t error = backup_write_stream(file, false);
+    if (error != ESP_OK || !buffer || !size) { free(buffer); return error == ESP_OK ? ESP_FAIL : error; }
+    *data = (uint8_t *)buffer;
+    *length = size;
     return ESP_OK;
 }
 
@@ -1308,17 +1342,10 @@ static bool backup_file_exists(const char *path, bool directory) {
     return stat(path, &st) == 0 && (directory ? S_ISDIR(st.st_mode) : S_ISREG(st.st_mode));
 }
 
-esp_err_t app_settings_backup_restore(void) {
-    if (!backup_card_ready()) return ESP_ERR_INVALID_STATE;
-    // 依次识别统一名与两板旧名，旧卡或换板后的备份可直接恢复。
-    // Accept the unified name and both legacy names so old cards and moved backups still restore.
-    const char *source = NULL;
-    FILE *file = NULL;
-    for (unsigned i = 0; i < sizeof(BACKUP_RESTORE_FILES) / sizeof(BACKUP_RESTORE_FILES[0]) && !file; ++i) {
-        source = BACKUP_RESTORE_FILES[i];
-        file = fopen(source, "rb");
-    }
-    if (!file) return ESP_ERR_NOT_FOUND;
+// 应用一个只读备份流：卡上的文件与内存里收到的一段字节走同一条校验/写入路径。
+// Apply one read-only backup stream; the card file and the received memory block share
+// this validation and write path.
+static esp_err_t backup_apply_stream(FILE *file) {
     settings_backup_v1_t backup;
     bool ok = fread(&backup, 1, sizeof(backup), file) == sizeof(backup);
     unsigned version = ok ? backup_version(&backup) : 0;
@@ -1405,7 +1432,6 @@ esp_err_t app_settings_backup_restore(void) {
         history_position = ftell(file);
         ok = history_position >= 0 && book_history_backup_validate(file);
     } else if (ok) ok = fgetc(file) == EOF && !ferror(file);
-    if (fclose(file) != 0) ok = false;
     if (!ok || !backup_valid(&backup)) {
         backup_erase_secret(&wifi, sizeof(wifi));
         return ESP_ERR_INVALID_RESPONSE;
@@ -1561,11 +1587,10 @@ esp_err_t app_settings_backup_restore(void) {
     strlcpy(s_wallpaper, backup.wallpaper, sizeof(s_wallpaper));
     strlcpy(s_bookmark,bookmark.path,sizeof(s_bookmark));
     if (has_history) {
-        file = fopen(source, "rb");
-        if (!file) { backup_erase_secret(&wifi, sizeof(wifi)); return ESP_FAIL; }
+        // 同一个只读流回到阅读记录段，不再按路径重开。
+        // Rewind the same read-only stream to the history section instead of reopening by path.
         esp_err_t history_err = fseek(file, history_position, SEEK_SET) == 0
             ? book_history_backup_restore(file) : ESP_FAIL;
-        if (fclose(file) != 0 && history_err == ESP_OK) history_err = ESP_FAIL;
         if (history_err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); return history_err; }
     }
     if (has_wifi) {
@@ -1574,4 +1599,28 @@ esp_err_t app_settings_backup_restore(void) {
         if (wifi_err != ESP_OK) return wifi_err;
     }
     return ESP_OK;
+}
+
+esp_err_t app_settings_backup_restore(void) {
+    if (!backup_card_ready()) return ESP_ERR_INVALID_STATE;
+    // 依次识别统一名与两板旧名，旧卡或换板后的备份可直接恢复。
+    // Accept the unified name and both legacy names so old cards and moved backups still restore.
+    FILE *file = NULL;
+    for (unsigned i = 0; i < sizeof(BACKUP_RESTORE_FILES) / sizeof(BACKUP_RESTORE_FILES[0]) && !file; ++i)
+        file = fopen(BACKUP_RESTORE_FILES[i], "rb");
+    if (!file) return ESP_ERR_NOT_FOUND;
+    esp_err_t error = backup_apply_stream(file);
+    if (fclose(file) != 0 && error == ESP_OK) error = ESP_FAIL;
+    return error;
+}
+
+// 内存导入：对端整段字节先进只读 memstream，再走与卡上恢复相同的校验。
+// Memory import: wrap the peer's bytes in a read-only memstream and validate as a card restore.
+esp_err_t app_settings_sync_import(const uint8_t *data, size_t length) {
+    if (!data || !length) return ESP_ERR_INVALID_ARG;
+    FILE *file = fmemopen((void *)data, length, "rb");
+    if (!file) return ESP_ERR_NO_MEM;
+    esp_err_t error = backup_apply_stream(file);
+    if (fclose(file) != 0 && error == ESP_OK) error = ESP_FAIL;
+    return error;
 }

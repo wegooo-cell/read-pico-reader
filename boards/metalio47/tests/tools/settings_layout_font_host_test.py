@@ -86,6 +86,11 @@ static uint8_t app_settings_wake_presses(void){return wake_presses;}
 static void app_settings_set_wake_presses(uint8_t n){wake_presses=n;}
 static void ttf_font_scan(void){++font_scans;}
 static void app_transfer_request_wifi_setup(void){++wifi_requests;}
+static bool shelf_badges;
+static bool app_settings_shelf_progress_badges(void){return shelf_badges;}
+static bool app_settings_set_shelf_progress_badges(bool v){shelf_badges=v;return true;}
+static bool devsync_opened;
+static void devsync_open(void){devsync_opened=true;}
 static bool ble_pt_pop_raw(ble_pt_raw_t*p){(void)p;return false;}
 static bool app_settings_home_full_refresh(void){return home_full;}
 static void app_settings_set_home_full_refresh(bool v){home_full=v;}
@@ -127,20 +132,22 @@ int main(void){
    assert(SETTINGS_DISPLAY_Y>SETTINGS_WIRELESS_Y+3*SETTINGS_ROW_H);
    assert(SETTINGS_PERSONAL_Y>SETTINGS_DISPLAY_Y+6*SETTINGS_ROW_H);
    const int tops[]={SETTINGS_WIRELESS_Y,SETTINGS_DISPLAY_Y,SETTINGS_PERSONAL_Y,SETTINGS_MAINTENANCE_Y};
-   const int counts[]={3,8,5,6};
-   const int destinations[][8]={{-1,SETTINGS_BLUETOOTH,SETTINGS_TIME},
+   const int counts[]={4,8,6,6};
+   const int destinations[][8]={{-1,SETTINGS_BLUETOOTH,-6,SETTINGS_TIME},
      {SETTINGS_SYSTEM_FONT,SETTINGS_SYSTEM_CONTRAST,SETTINGS_MAIN_REFRESH,-2,SETTINGS_AUTO_LOCK,-2,SETTINGS_POWER_SLEEP,SETTINGS_FRONTLIGHT},
-     {SETTINGS_SHELF_STYLE,SETTINGS_LOCK_STYLE,SETTINGS_LOCK_PIN,-3,-5},
+     {SETTINGS_SHELF_STYLE,-2,SETTINGS_LOCK_STYLE,SETTINGS_LOCK_PIN,-3,-5},
      {SETTINGS_UPGRADE,SETTINGS_SD_RECOVERY,SETTINGS_CONFIG,-4,SETTINGS_BOOT,SETTINGS_FACTORY_RESET}};
    for(int group=0;group<4;++group)for(int i=0;i<counts[group];++i){
      s_page=SETTINGS_MAIN;int center=tops[group]+i*SETTINGS_ROW_H+SETTINGS_ROW_H/2;s_main_scroll=center-500;ctx.request_app=NULL;
      bool fast_before=fast_charge;unsigned fast_writes_before=fast_charge_writes;
+     devsync_opened=false;
      main_tap(&ctx,300,500);
      if(destinations[group][i]>=0)assert((int)s_page==destinations[group][i]);
      else if(destinations[group][i]==-1)assert(ctx.request_app==&app_transfer);
      else if(destinations[group][i]==-2)assert(s_page==SETTINGS_MAIN);
      else if(destinations[group][i]==-4)assert(s_panel_repair_pending&&s_page==SETTINGS_MAIN);
      else if(destinations[group][i]==-5)assert(s_page==SETTINGS_MAIN&&fast_charge!=fast_before&&fast_charge_writes==fast_writes_before+1&&charger_applies==fast_charge_writes);
+     else if(destinations[group][i]==-6)assert(devsync_opened);
      else assert(profile_edits>0);
      s_page=SETTINGS_MAIN;assert(main_tap(&ctx,10,500)==APP_REDRAW_NONE&&s_page==SETTINGS_MAIN);
    }

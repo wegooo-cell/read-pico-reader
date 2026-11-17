@@ -74,7 +74,9 @@
 #include "read_pico_pmu.h"
 #include "read_pico_pmu_protocol.h"
 #include "read_pico_transfer.h"
+#include "kiiko_device_sync.h"
 #include "esp_log.h"
+
 #include "ttf_font.h"
 #if KIIKO_BOARD_METALIO47
 #include "font_filename.h"
@@ -131,7 +133,7 @@ typedef enum { SETTINGS_MAIN, SETTINGS_WIFI, SETTINGS_TIME,
 #else
                SETTINGS_POWER_SLEEP, SETTINGS_AUTO_LOCK, SETTINGS_PROFILE, SETTINGS_AVATAR,
 #endif
-               SETTINGS_BLUETOOTH, SETTINGS_BLE_SCAN,
+               SETTINGS_BLUETOOTH, SETTINGS_BLE_SCAN, SETTINGS_DEVICE_SYNC,
 #if KIIKO_BOARD_METALIO47
                SETTINGS_LOCK_PIN, SETTINGS_PIN_ENTRY, SETTINGS_TEXT_EDIT, SETTINGS_FRONTLIGHT, SETTINGS_LANGUAGE } settings_page_t;
 #else
@@ -446,7 +448,7 @@ static int settings_main_row_height(void) {
     return 82;
 }
 #define SETTINGS_ROW_H settings_main_row_height()
-#define SETTINGS_WIRELESS_ROWS 3
+#define SETTINGS_WIRELESS_ROWS 4
 #if KIIKO_BOARD_METALIO47
 #define SETTINGS_DISPLAY_ROWS 9
 #else
@@ -915,6 +917,164 @@ static void back_header(uint8_t *fb, const char *title) {
     settings_divider(fb, 174, 36, 612);
 }
 
+/* ---- 设备同步 / Device sync ---- */
+// 角色 -1 表示还没选；绘制游标记录已经上屏的状态，避免每个 tick 都整页重刷。
+// Role -1 means nothing chosen yet; the draw cursor records what is already on the panel so the
+// page is not repainted on every tick.
+static int s_devsync_role = -1;
+static unsigned s_devsync_code;
+static int s_devsync_percent = -1;
+static kiiko_sync_state_t s_devsync_state = KIIKO_SYNC_IDLE;
+static esp_err_t s_devsync_start_error = ESP_OK;
+static int64_t s_devsync_done_ms;
+static const kiiko_sync_io_t s_devsync_io = {app_settings_sync_export, app_settings_sync_import};
+
+static void devsync_leave(void) {
+    kiiko_sync_status_t st;
+    kiiko_sync_get_status(&st);
+    const bool restart = s_devsync_role == (int)KIIKO_SYNC_ROLE_RECEIVE && st.state == KIIKO_SYNC_DONE;
+    kiiko_sync_stop();
+    s_devsync_role = -1;
+    s_devsync_done_ms = 0;
+    // 接收方已经写入设置，离开也先重启，别让旧缓存继续跑。
+    // The receiver already wrote the settings; restart even when leaving so stale caches stop running.
+    if (restart) esp_restart();
+}
+
+static void devsync_open(void) {
+    devsync_leave();
+    s_devsync_state = KIIKO_SYNC_IDLE;
+    s_devsync_code = 0;
+    s_devsync_percent = -1;
+    s_devsync_start_error = ESP_OK;
+    s_page = SETTINGS_DEVICE_SYNC;
+}
+
+static void devsync_start(kiiko_sync_role_t role) {
+    if (kiiko_sync_active()) kiiko_sync_stop();
+    s_devsync_role = (int)role;
+    s_devsync_code = 0;
+    s_devsync_percent = 0;
+    s_devsync_done_ms = 0;
+    s_devsync_start_error = ESP_OK;
+    s_devsync_state = KIIKO_SYNC_SCANNING;
+    const esp_err_t error = kiiko_sync_start(role, &s_devsync_io);
+    if (error != ESP_OK) {
+        s_devsync_start_error = error;
+        s_devsync_state = KIIKO_SYNC_FAILED;
+    }
+}
+
+static void devsync_failure_text(esp_err_t error, char *text, size_t size) {
+    if (error == ESP_ERR_TIMEOUT) snprintf(text, size, "连接超时，请靠近两台设备后重试");
+    else if (error == ESP_ERR_INVALID_CRC) snprintf(text, size, "数据校验失败，请重新同步");
+    else if (error == ESP_ERR_INVALID_RESPONSE) snprintf(text, size, "配对失败，请两端重新进入此页");
+    else if (error == ESP_ERR_NO_MEM) snprintf(text, size, "内存不足，请重启设备后重试");
+    else if (error == ESP_ERR_INVALID_SIZE) snprintf(text, size, "本机设置备份为空或过大");
+    else if (error == ESP_ERR_INVALID_STATE) snprintf(text, size, "正在传书或射频被占用，请稍后再试");
+    else if (error == ESP_ERR_NOT_FOUND) snprintf(text, size, "没有可同步的设置数据");
+    else snprintf(text, size, "同步失败：%s", esp_err_to_name(error));
+}
+
+static void devsync_status_line(const kiiko_sync_status_t *st, esp_err_t error, char *text, size_t size) {
+    switch (st->state) {
+    case KIIKO_SYNC_SCANNING: snprintf(text, size, "正在搜索另一台设备…"); break;
+    case KIIKO_SYNC_PAIRED: snprintf(text, size, "已找到另一台设备"); break;
+    case KIIKO_SYNC_TRANSFERRING:
+        snprintf(text, size, st->role == KIIKO_SYNC_ROLE_SEND ? "正在发送设置 %u%%" : "正在接收设置 %u%%",
+                 st->percent);
+        break;
+    case KIIKO_SYNC_APPLYING: snprintf(text, size, "正在写入设置…"); break;
+    case KIIKO_SYNC_DONE: snprintf(text, size, "同步完成"); break;
+    case KIIKO_SYNC_FAILED: devsync_failure_text(error, text, size); break;
+    default: snprintf(text, size, "准备中…"); break;
+    }
+}
+
+static void draw_device_sync(uint8_t *fb) {
+    back_header(fb, "设备同步");
+    kiiko_sync_status_t st;
+    kiiko_sync_get_status(&st);
+    const esp_err_t error = st.error ? st.error : s_devsync_start_error;
+    if (s_devsync_role < 0) {
+        section(fb, 236, "两台设备都进入此页，选择相反的角色");
+        settings_card(fb, (EpdRect){36, 292, 612, 150}, 22, UI_GRAY_WHITE, 0x70);
+        ui_text_vc(fb, 64, 344, 30, "作为发射端", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_vc(fb, 64, 394, 20, "把这台设备的设置与阅读进度发出去", EPD_DRAW_ALIGN_LEFT, false);
+        settings_card(fb, (EpdRect){36, 470, 612, 150}, 22, UI_GRAY_WHITE, 0x70);
+        ui_text_vc(fb, 64, 522, 30, "作为接收端", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_vc(fb, 64, 572, 20, "接收另一台设备的设置并覆盖本机", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(fb, 48, 668, 20, "扫描到设备后显示配对码，两端一致再确认。", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(fb, 48, 706, 20, "同步包含排版、阅读进度、书签与已存 WiFi。", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(fb, 48, 744, 20, "接收方会覆盖自己的设置，完成后自动重启。", EPD_DRAW_ALIGN_LEFT, false);
+        settings_navigation(fb);
+        return;
+    }
+    const bool receive = s_devsync_role == (int)KIIKO_SYNC_ROLE_RECEIVE;
+    section(fb, 236, receive ? "接收端" : "发射端");
+    settings_card(fb, (EpdRect){36, 286, 612, 232}, 22, UI_GRAY_WHITE, 0x70);
+    char line[96];
+    devsync_status_line(&st, error, line, sizeof(line));
+    ui_text(fb, 60, 316, 26, line, EPD_DRAW_ALIGN_LEFT, false);
+    if (st.state == KIIKO_SYNC_PAIRED) {
+        char code[32];
+        snprintf(code, sizeof(code), "配对码 %04u", st.code);
+        // 最后一个参数是反色而不是加粗；配对码用正色大字，并按系统字号缩到卡片内。
+        // The last argument inverts the ink, it is not bold; draw the code solid and shrink it
+        // to the card under the system text scale.
+        int code_px = 44;
+        while (code_px > 24 && ui_text_fixed_width_px(ui_text_effective_px(code_px), code) > 548) --code_px;
+        ui_text_vc(fb, 342, 396, code_px, code, EPD_DRAW_ALIGN_CENTER, false);
+        ui_text(fb, 60, 452, 20, receive ? "与另一台设备核对后点下面的按钮" : "等待接收端确认…",
+                EPD_DRAW_ALIGN_LEFT, false);
+    } else if (st.state == KIIKO_SYNC_TRANSFERRING || st.state == KIIKO_SYNC_APPLYING) {
+        char progress[64];
+        snprintf(progress, sizeof(progress), "%u%% · %u / %u KB", st.percent,
+                 (unsigned)(st.done / 1024u), (unsigned)(st.total / 1024u));
+        ui_text(fb, 60, 372, 22, progress, EPD_DRAW_ALIGN_LEFT, false);
+        ui_fill_round_rect(fb, (EpdRect){60, 418, 564, 18}, 9, 0xd8);
+        const int width = (int)((564u * st.percent) / 100u);
+        if (width > 0) ui_fill_round_rect(fb, (EpdRect){60, 418, width, 18}, 9, UI_GRAY_BLACK);
+        ui_text(fb, 60, 460, 19, receive ? "请勿退出此页或关机" : "请保持两台设备靠近",
+                EPD_DRAW_ALIGN_LEFT, false);
+    } else if (st.state == KIIKO_SYNC_DONE) {
+        ui_text(fb, 60, 372, 22, receive ? "设置已写入，正在重启…" : "另一台设备已应用这些设置",
+                EPD_DRAW_ALIGN_LEFT, false);
+    } else if (st.state == KIIKO_SYNC_FAILED) {
+        ui_text(fb, 60, 372, 20, "可以返回后重新选择角色再试一次", EPD_DRAW_ALIGN_LEFT, false);
+    } else {
+        ui_text(fb, 60, 372, 20, "另一台设备也请在此页选择相反的角色", EPD_DRAW_ALIGN_LEFT, false);
+    }
+    if (receive && st.state == KIIKO_SYNC_PAIRED)
+        ui_draw_button(fb, (EpdRect){36, 556, 612, 92}, "确认接收并覆盖本机设置", true);
+    if (st.state == KIIKO_SYNC_SCANNING || st.state == KIIKO_SYNC_PAIRED ||
+        st.state == KIIKO_SYNC_TRANSFERRING)
+        ui_draw_button(fb, (EpdRect){36, 700, 612, 83}, "取消同步", false);
+    else if (st.state == KIIKO_SYNC_FAILED || (st.state == KIIKO_SYNC_DONE && !receive))
+        ui_draw_button(fb, (EpdRect){36, 700, 612, 83}, "返回设置", false);
+    settings_navigation(fb);
+}
+
+// 轮询同步状态；只有阶段、配对码或十个百分点的进度变化才重画整页。
+// Poll the sync state; repaint only on phase, pairing-code or ten-percent progress changes.
+static app_redraw_t devsync_tick(app_ctx_t *ctx) {
+    kiiko_sync_status_t st;
+    kiiko_sync_get_status(&st);
+    const bool receive = s_devsync_role == (int)KIIKO_SYNC_ROLE_RECEIVE;
+    if (st.state != s_devsync_state || st.code != s_devsync_code ||
+        (st.state == KIIKO_SYNC_TRANSFERRING && (int)st.percent >= s_devsync_percent + 10)) {
+        s_devsync_state = st.state;
+        s_devsync_code = st.code;
+        s_devsync_percent = (int)st.percent;
+        return APP_REDRAW_PAGE;
+    }
+    if (st.state == KIIKO_SYNC_DONE && receive) {
+        if (!s_devsync_done_ms) s_devsync_done_ms = ctx->now_ms;
+        else if (ctx->now_ms - s_devsync_done_ms > 1500) esp_restart();
+    }
+    return APP_REDRAW_NONE;
+}
+
 static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
     // 每个设置项对应一个 Lucide 图标；索引顺序由各分组传入的 icons[] 数组决定。
     // One Lucide icon per setting row; the index order comes from each group's icons[] array.
@@ -940,6 +1100,7 @@ static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
         UI_ICON_LOCK,              // 18 双击解锁 / double-press unlock
         UI_ICON_ZAP,               // 19 快充 / fast charge
         [20] = UI_ICON_CHART_COLUMN, // 20 书籍百分比 / cover progress
+        [21] = UI_ICON_REFRESH_CW,  // 21 设备同步 / device sync
     };
     if (index < 0 || index >= (int)(sizeof(icons) / sizeof(icons[0]))) return;
     ui_draw_icon(fb, cx, cy, SETTINGS_ICON_PX, icons[index], SETTINGS_ICON_INK);
@@ -1613,6 +1774,7 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         settings_navigation(fb);
         return;
     }
+    if (s_page == SETTINGS_DEVICE_SYNC) { draw_device_sync(fb); return; }
     if (s_page == SETTINGS_CONFIG) {
         back_header(fb, "保存与恢复配置");
         section(fb, 248, "换机或刷机后，快速恢复个性化设置");
@@ -1768,9 +1930,9 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         ui_draw_icon(fb,625,profile_y+profile_h/2,26,UI_ICON_CHEVRON_RIGHT,UI_GRAY_BLACK);
     }
     char wifi[56];snprintf(wifi,sizeof(wifi),"%s",s_main_wifi_saved?s_main_wifi:"未配置");
-    const char *connection_labels[]={"WiFi","蓝牙翻页器","日期与时间"};
-    const char *connection_values[]={wifi,app_settings_ble_turner()?"已开启":"已关闭","设置"};
-    const int connection_icons[]={0,1,6};
+    const char *connection_labels[]={"WiFi","蓝牙翻页器","设备同步","日期与时间"};
+    const char *connection_values[]={wifi,app_settings_ble_turner()?"已开启":"已关闭","两台互传","设置"};
+    const int connection_icons[]={0,1,21,6};
     setting_group(fb,SETTINGS_WIRELESS_Y-49,"连接与时间",SETTINGS_WIRELESS_Y,
                   connection_icons,connection_labels,connection_values,SETTINGS_WIRELESS_ROWS);
     char font_name[96],contrast[24],idle[24],signature[96];
@@ -2242,6 +2404,8 @@ static void on_enter(app_ctx_t *ctx) {
     s_sync_pending = false;
     s_font_sync_confirm = false; s_font_sync_path[0] = 0;
     s_config_confirm = false;
+    s_devsync_role = -1; s_devsync_code = 0; s_devsync_percent = -1;
+    s_devsync_state = KIIKO_SYNC_IDLE; s_devsync_done_ms = 0; s_devsync_start_error = ESP_OK;
     s_panel_repair_pending = false;
     s_boot_pending = s_local_pending = s_upgrade_restart = false;
     s_upgrade_offer_pending = s_upgrade_confirm = false;
@@ -2314,6 +2478,10 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
         return APP_REDRAW_PAGE;
     }
 #endif
+    // 离开同步页就收射频；同步页自己做状态轮询，不落到下面的列表逻辑。
+    // Drop the radio when the sync page is left, and let that page own its own polling.
+    if (s_page != SETTINGS_DEVICE_SYNC && kiiko_sync_active()) devsync_leave();
+    if (s_page == SETTINGS_DEVICE_SYNC) return devsync_tick(ctx);
     // 屏幕修复：先画最终结果，再在 tick 中整屏恢复；成功后不重复推页。
     // Paint the final notice before the tick's full restoration; do not push the page twice on success.
     if (s_panel_repair_pending) {
@@ -2886,7 +3054,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if (s_page == SETTINGS_BLE_SCAN && y < 190) {
         ble_pt_scan_stop(); s_page = SETTINGS_BLUETOOTH; s_ble_scroll = 0; return APP_REDRAW_PAGE;
     }
-    if (s_page != SETTINGS_MAIN && y < 190) { s_page = SETTINGS_MAIN; (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
+    if (s_page != SETTINGS_MAIN && y < 190) { if (s_page == SETTINGS_DEVICE_SYNC) devsync_leave(); s_page = SETTINGS_MAIN; (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
     if (s_page == SETTINGS_LOCK_PIN) return APP_REDRAW_NONE;
     if (s_page == SETTINGS_AUTO_LOCK) {
         const uint8_t values[] = {1, 5, 10, 0};
@@ -3029,6 +3197,27 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             return APP_REDRAW_PAGE;
         }
         if (y >= 518 && y < 588) { time_open(); return APP_REDRAW_PAGE; }
+        return APP_REDRAW_NONE;
+    }
+    if (s_page == SETTINGS_DEVICE_SYNC) {
+        if (ev->type != UI_GESTURE_TAP) return APP_REDRAW_NONE;
+        kiiko_sync_status_t st;
+        kiiko_sync_get_status(&st);
+        if (s_devsync_role < 0) {
+            if (y >= 292 && y < 442) { devsync_start(KIIKO_SYNC_ROLE_SEND); return APP_REDRAW_PAGE; }
+            if (y >= 470 && y < 620) { devsync_start(KIIKO_SYNC_ROLE_RECEIVE); return APP_REDRAW_PAGE; }
+            return APP_REDRAW_NONE;
+        }
+        if (st.state == KIIKO_SYNC_PAIRED && s_devsync_role == (int)KIIKO_SYNC_ROLE_RECEIVE &&
+            ui_rect_hit((EpdRect){36, 556, 612, 92}, ev->x0, y)) {
+            kiiko_sync_confirm();
+            return APP_REDRAW_PAGE;
+        }
+        if (y >= 700 && y < 783) {
+            devsync_leave();
+            if (st.state == KIIKO_SYNC_DONE || st.state == KIIKO_SYNC_FAILED) s_page = SETTINGS_MAIN;
+            return APP_REDRAW_PAGE;
+        }
         return APP_REDRAW_NONE;
     }
 #if KIIKO_BOARD_METALIO47
@@ -3221,6 +3410,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             s_page=SETTINGS_BLUETOOTH;s_ble_scroll=s_ble_learning=0;s_ble_notice[0]=s_ble_feedback[0]=0;
             ble_pt_raw_t unused;while(ble_pt_pop_raw(&unused)){}return APP_REDRAW_PAGE;
         }
+        if(row==2){devsync_open();return APP_REDRAW_PAGE;}
         s_page=SETTINGS_TIME;return APP_REDRAW_PAGE;
     }
     if(y>=SETTINGS_DISPLAY_Y && y<SETTINGS_DISPLAY_Y+SETTINGS_DISPLAY_ROWS*SETTINGS_ROW_H) {
@@ -3343,6 +3533,7 @@ static void settings_exit(app_ctx_t *ctx) {
     bookmark_preview_release();s_bookmark_picker=false;
     s_font_sync_confirm=false;s_font_sync_path[0]=0;
     pin_setup_close();
+    devsync_leave();
     s_collage_prepare_pending = false;
     s_upgrade_job = UPGRADE_JOB_NONE;
     (void)ctx; ui_keyboard_end(); pico_online_cancel_join(); ble_pt_scan_stop(); s_ble_learning = 0;
@@ -3358,6 +3549,7 @@ static void on_before_lock(app_ctx_t *ctx) {
 #endif
     s_font_sync_confirm=false;s_font_sync_path[0]=0;
     if (s_page == SETTINGS_PIN_ENTRY) { pin_setup_close(); s_page = SETTINGS_LOCK_PIN; }
+    devsync_leave();
     s_upgrade_job = UPGRADE_JOB_NONE;
     (void)ctx; pico_online_cancel_join(); ble_pt_scan_stop(); s_ble_learning = 0;
     (void)ble_pt_stop(2000);
