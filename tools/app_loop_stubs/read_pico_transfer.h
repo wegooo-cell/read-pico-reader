@@ -7,7 +7,8 @@ static inline void read_pico_transfer_service_poll(void) {}
 #define READ_PICO_TRANSFER_UPLOADING 3
 #define READ_PICO_TRANSFER_MODE_STA 1
 #define READ_PICO_TRANSFER_MODE_AP 2
-typedef struct {int state,mode;bool network_ready;} read_pico_transfer_status_t;
+typedef struct {int state,mode;bool network_ready,wifi_enabled;} read_pico_transfer_status_t;
+void read_pico_transfer_idle_poll(bool in_use);
 typedef struct {int mode;bool network_only;} read_pico_transfer_cfg_t;
 void read_pico_transfer_get_status(read_pico_transfer_status_t *s);
 int read_pico_transfer_get_saved_wifi(char *ssid,bool *configured);

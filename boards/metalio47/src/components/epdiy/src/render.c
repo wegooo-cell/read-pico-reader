@@ -244,6 +244,8 @@ static enum EpdDrawError IRAM_ATTR epd_draw_base_impl(
     const uint8_t* drawn_columns,
     const EpdWaveform* waveform, int first_phase
 ) {
+    const bool phase_prefill = (mode & MODE_PHASE_PREFILL) != 0;
+    mode &= ~MODE_PHASE_PREFILL;
     if (waveform == NULL) {
         return EPD_DRAW_NO_PHASES_AVAILABLE;
     }
@@ -338,6 +340,8 @@ static enum EpdDrawError IRAM_ATTR epd_draw_base_impl(
 
     render_context.current_frame = skip;
     render_context.cycle_frames = frame_count - skip;
+    render_context.phase_prefill_requested = phase_prefill && !render_context.phase_luts &&
+        (mode & MODE_PACKING_1PPB_DIFFERENCE) && (mode & MODE_UNKNOWN_WAVEFORM) == MODE_GL16;
     render_context.phase_times = NULL;
     if (waveform_phases != NULL && waveform_phases->phase_times != NULL) {
         render_context.phase_times = waveform_phases->phase_times;
@@ -477,10 +481,12 @@ void epd_renderer_init(enum EpdInitOptions options) {
     render_context.static_line_buffer = NULL;
 
     render_context.frame_done = xSemaphoreCreateBinary();
+    render_context.phase_prefill_ready = xSemaphoreCreateCounting(NUM_RENDER_THREADS, 0);
     s_diff_done=xSemaphoreCreateBinary();
 
     for (int i = 0; i < NUM_RENDER_THREADS; i++) {
         render_context.feed_done_smphr[i] = xSemaphoreCreateBinary();
+        render_context.phase_feed_resume[i] = xSemaphoreCreateBinary();
     }
 
     // When using the LCD peripheral, we may need padding lines to
@@ -541,7 +547,10 @@ void epd_renderer_deinit() {
         lq_free(&render_context.line_queues[i]);
         heap_caps_free(render_context.feed_line_buffers[i]);
         vSemaphoreDelete(render_context.feed_done_smphr[i]);
+        if (render_context.phase_feed_resume[i])
+            vSemaphoreDelete(render_context.phase_feed_resume[i]);
     }
+    if (render_context.phase_prefill_ready) vSemaphoreDelete(render_context.phase_prefill_ready);
 
     epd_control_reg_deinit();
 

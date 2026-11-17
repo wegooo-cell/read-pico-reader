@@ -355,6 +355,13 @@ endif()
 endif()
 
 if(NOT KIIKO_BOARD_METALIO47)
+    # Keep recovery and storage compatible with the existing 4 MiB application slots.
+    # Size-optimize settings and file/transfer screens rather than renderer and decoder loops.
+    foreach(source IN LISTS kiiko_selected_sources)
+        if(source MATCHES "/(settings|apps/app_(device_settings|files|transfer|onboarding))[.]c$")
+            set_property(SOURCE "${source}" APPEND PROPERTY COMPILE_OPTIONS "-Os")
+        endif()
+    endforeach()
     option(PICO_MAIN_CLEAN_EXPERIMENT "Local Pico stronger root-switch white erasure" OFF)
     if(PICO_MAIN_CLEAN_EXPERIMENT)
         target_compile_definitions(${COMPONENT_LIB} PRIVATE KIIKO_PICO_MAIN_CLEAN=1)

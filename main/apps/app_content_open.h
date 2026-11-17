@@ -25,6 +25,7 @@ void app_book_return_from_cover_wifi(bool connected);
 void app_device_settings_request_shelf_style(void);
 void app_book_return_from_shelf_style(void);
 bool app_book_reader_body_visible(void);
+bool app_book_reading_active(void);
 void app_book_ticket_sample(int64_t now_ms, bool exposed);
 /// 系统覆盖层延后计时，不关闭用户自动翻页开关。/ Defer timed turns during overlays without disabling the user switch.
 void app_book_pause_auto(void);

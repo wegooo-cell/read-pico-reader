@@ -117,7 +117,133 @@ static void pace_phase(int64_t phase_start_us) {
     }
 }
 
+// Each feeder appends every one of its rows in order. Once both feeders return,
+// old-phase rows still in the FIFO can drain while the next rows are appended.
+static bool IRAM_ATTR retrieve_prefilled_line(void* payload, uint8_t* buf) {
+    RenderContext_t* ctx = payload;
+    const int row = ctx->lines_consumed;
+    if (row >= ctx->lines_total) return false;
+    if (lq_read(&ctx->line_queues[row % NUM_RENDER_THREADS], buf) != 0) {
+        if (ctx->underrun_row < 0) {
+            ctx->underrun_row = row;
+            ctx->underrun_reason = 3;
+        }
+        ctx->error |= EPD_DRAW_EMPTY_LINE_QUEUE;
+        memset(buf, 0, ctx->display_width / 4);
+    }
+    ctx->lines_consumed = row + 1;
+    return false;
+}
+
+static bool phase_prefill_available(const RenderContext_t* ctx) {
+    if (!ctx->phase_prefill_requested || ctx->cycle_frames < 2 || ctx->phase_times ||
+        ctx->lines_total <= s_prefill_lines + NUM_RENDER_THREADS || !ctx->phase_prefill_ready)
+        return false;
+    for (int i = 0; i < NUM_RENDER_THREADS; ++i)
+        if (!ctx->phase_feed_resume[i] || ctx->line_queues[i].size <= s_prefill_lines / NUM_RENDER_THREADS)
+            return false;
+    return true;
+}
+
+static void lcd_do_update_prefilled(RenderContext_t* ctx) {
+    const TickType_t timeout = pdMS_TO_TICKS(2000);
+    const int64_t started = esp_timer_get_time();
+    int64_t previous = 0, periods_total = 0;
+    int period_min = INT32_MAX, period_max = 0, completed = 0;
+    const int local = xPortGetCoreID();
+    unsigned feeding = 0;
+    bool scanning = false;
+    ctx->phase_prefill_active = true;
+    while (xSemaphoreTake(ctx->phase_prefill_ready, 0) == pdTRUE) {}
+    for (int i = 0; i < NUM_RENDER_THREADS; ++i)
+        (void)xSemaphoreTake(ctx->phase_feed_resume[i], 0);
+    epd_set_mode(1);
+
+    for (int phase = 0; phase < ctx->cycle_frames; ++phase) {
+        // The prior producers are done. The scanner reads the committed FIFO
+        // rows only and does not use the conversion table or producer indices.
+        prepare_context_phase_lut(ctx);
+        feeding = (1u << NUM_RENDER_THREADS) - 1u;
+        // Waking the local high-priority feeder can preempt the update task.
+        xTaskNotifyGive(ctx->feed_tasks[!local]);
+        xTaskNotifyGive(ctx->feed_tasks[local]);
+        for (int i = 0; i < NUM_RENDER_THREADS; ++i)
+            if (ctx->error || xSemaphoreTake(ctx->phase_prefill_ready, timeout) != pdTRUE) goto failed;
+        if (scanning) {
+            if (xSemaphoreTake(ctx->frame_done, timeout) != pdTRUE) goto failed;
+            scanning = false;
+            if (ctx->error) goto failed;
+            ++completed;
+        }
+        if (ctx->error) goto failed;
+        if (previous) pace_phase(previous);
+        ctx->lines_consumed = 0;
+        ctx->underrun_row = -1;
+        ctx->underrun_reason = 0;
+        epd_lcd_frame_done_cb(handle_lcd_frame_done, ctx);
+        epd_lcd_line_source_cb(retrieve_prefilled_line, ctx);
+        scanning = true;
+        epd_lcd_start_frame();
+        const int64_t now = esp_timer_get_time();
+        if (previous) {
+            const int period = (int)(now - previous);
+            periods_total += period;
+            if (period < period_min) period_min = period;
+            if (period > period_max) period_max = period;
+        }
+        previous = now;
+        xSemaphoreGive(ctx->phase_feed_resume[!local]);
+        xSemaphoreGive(ctx->phase_feed_resume[local]);
+        for (int i = 0; i < NUM_RENDER_THREADS; ++i) {
+            if (xSemaphoreTake(ctx->feed_done_smphr[i], timeout) != pdTRUE) goto failed;
+            feeding &= ~(1u << i);
+        }
+        if (ctx->error) goto failed;
+        ++ctx->current_frame;
+    }
+    if (xSemaphoreTake(ctx->frame_done, timeout) != pdTRUE) goto failed;
+    scanning = false;
+    if (ctx->error) goto failed;
+    ++completed;
+    pace_phase(previous);
+    goto done;
+
+failed:
+    ctx->error |= EPD_DRAW_EMPTY_LINE_QUEUE;
+    epd_lcd_frame_done_cb(NULL, NULL);
+    epd_lcd_line_source_cb(NULL, NULL);
+    if (scanning) epd_lcd_abort_frame();
+    (void)xSemaphoreTake(ctx->frame_done, 0);
+    for (int i = 0; i < NUM_RENDER_THREADS; ++i) {
+        if (feeding & (1u << i)) {
+            xSemaphoreGive(ctx->phase_feed_resume[i]);
+            xSemaphoreTake(ctx->feed_done_smphr[i], portMAX_DELAY);
+        }
+        lq_reset(&ctx->line_queues[i]);
+    }
+    ESP_LOGW("epd_lcd", "phase prefill failed completed=%d row=%d reason=%d",
+             completed, ctx->underrun_row, ctx->underrun_reason);
+
+done:
+    epd_lcd_line_source_cb(NULL, NULL);
+    epd_lcd_frame_done_cb(NULL, NULL);
+    epd_set_mode(0);
+    ctx->phase_prefill_active = false;
+    if (completed == ctx->cycle_frames && completed > 1) {
+        const int avg = (int)(periods_total / (completed - 1));
+        __atomic_store_n(&last_phase_average, avg, __ATOMIC_RELAXED);
+        __atomic_store_n(&last_phase_minimum, period_min, __ATOMIC_RELAXED);
+        __atomic_store_n(&last_phase_maximum, period_max, __ATOMIC_RELAXED);
+        ESP_LOGI("EpdTiming", "phase prefill us: avg=%d min=%d max=%d frames=%d cycle=%dms",
+                 avg, period_min, period_max, completed, (int)((esp_timer_get_time() - started) / 1000));
+    }
+}
+
 void lcd_do_update(RenderContext_t* ctx) {
+    if (phase_prefill_available(ctx)) {
+        lcd_do_update_prefilled(ctx);
+        return;
+    }
     const int64_t cycle_start=esp_timer_get_time();
     int64_t previous_phase_start=0, period_total=0;
     int period_min=INT32_MAX, period_max=0, periods=0;
@@ -310,17 +436,23 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
     const uint8_t* ptr_start;
     get_buffer_params(ctx, &bytes_per_line, &ptr_start, &min_y, &max_y, &_ppB);
 
-    assert(area.width == ctx->display_width && area.x == 0 && !ctx->error);
+    assert(area.width == ctx->display_width && area.x == 0);
 
     const int trigger_line = int_min(s_prefill_lines, ctx->lines_total-1);
+    const bool phase_prefill = ctx->phase_prefill_active;
 
     // Fixed ownership bounds each producer to half the prefill. With dynamic
     // claims one core can fill its 127-slot queue before a larger prefill starts.
     for (l=thread_id; l<ctx->lines_total; l+=NUM_RENDER_THREADS) {
-        ctx->line_threads[l] = (uint8_t)thread_id;
+        if (ctx->error) return;
+        if (!phase_prefill) ctx->line_threads[l] = (uint8_t)thread_id;
 
         // 预填够行后开扫，随后边扫边喂
-        if (l == trigger_line) {
+        if (phase_prefill && l == s_prefill_lines + thread_id) {
+            xSemaphoreGive(ctx->phase_prefill_ready);
+            xSemaphoreTake(ctx->phase_feed_resume[thread_id], portMAX_DELAY);
+            if (ctx->error) return;
+        } else if (!phase_prefill && l == trigger_line) {
             // Claimed rows are not necessarily committed: the other core may
             // still own an early row. Start scanning only when the entire
             // prefill prefix is ready, not when a producer claims row 127.
@@ -343,7 +475,7 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
             int wait_iters = 0;
             while (buf == NULL) {
                 if (ctx->error & EPD_DRAW_EMPTY_LINE_QUEUE) {
-                    lq_reset(lq);
+                    if (!phase_prefill) lq_reset(lq);
                     return;
                 }
                 buf = lq_current(lq);
@@ -353,13 +485,13 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
                 vTaskDelay(0);
                 if (++wait_iters > 30000) {
                     ctx->error |= EPD_DRAW_EMPTY_LINE_QUEUE;
-                    lq_reset(lq);
+                    if (!phase_prefill) lq_reset(lq);
                     return;
                 }
             }
             memset(buf, 0x00, lq->element_size);
             lq_commit(lq);
-            __atomic_store_n(&ctx->line_ready[l],1,__ATOMIC_RELEASE);
+            if (!phase_prefill) __atomic_store_n(&ctx->line_ready[l],1,__ATOMIC_RELEASE);
             continue;
         }
 
@@ -373,7 +505,7 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
         int wait_iters = 0;
         while (buf == NULL) {
             if (ctx->error & EPD_DRAW_EMPTY_LINE_QUEUE) {
-                lq_reset(lq);
+                if (!phase_prefill) lq_reset(lq);
                 return;
             }
             buf = lq_current(lq);
@@ -383,7 +515,7 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
             vTaskDelay(0);
             if (++wait_iters > 30000) {
                 ctx->error |= EPD_DRAW_EMPTY_LINE_QUEUE;
-                lq_reset(lq);
+                if (!phase_prefill) lq_reset(lq);
                 return;
             }
         }
@@ -414,7 +546,7 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
 
         epd_apply_line_mask_VE(buf, ctx->line_mask, ctx->display_width / 4);
         lq_commit(lq);
-        __atomic_store_n(&ctx->line_ready[l],1,__ATOMIC_RELEASE);
+        if (!phase_prefill) __atomic_store_n(&ctx->line_ready[l],1,__ATOMIC_RELEASE);
     }
 }
 

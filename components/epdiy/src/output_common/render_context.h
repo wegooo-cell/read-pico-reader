@@ -52,7 +52,11 @@ typedef struct {
 
     const EpdWaveform* waveform;
     enum EpdDrawMode mode;
+#if KIIKO_BOARD_METALIO47
+    atomic_int error;
+#else
     enum EpdDrawError error;
+#endif
 
     // Lookup table size.
     size_t conversion_lut_size;
@@ -80,6 +84,10 @@ typedef struct {
     uint8_t* line_ready;
     int underrun_row;
     int underrun_reason;
+    bool phase_prefill_requested;
+    bool phase_prefill_active;
+    SemaphoreHandle_t phase_prefill_ready;
+    SemaphoreHandle_t phase_feed_resume[NUM_RENDER_THREADS];
 #else
 #endif
 
@@ -109,6 +117,10 @@ void get_buffer_params(
  * (Reset counters, etc)
  */
 void prepare_context_for_next_frame(RenderContext_t* ctx);
+#if KIIKO_BOARD_METALIO47
+/// Build the next conversion table after its previous producers have finished.
+void prepare_context_phase_lut(RenderContext_t* ctx);
+#endif
 
 /**
  * Populate an output line mask from line dirtyness with two bits per pixel.

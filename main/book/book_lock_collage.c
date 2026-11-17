@@ -23,6 +23,7 @@
 #include "boot_state.h"
 #include "book_cover.h"
 #include "book_cover_auto.h"
+#include "book_weread_cover.h"
 #include "book_epub.h"
 #include "book_progress.h"
 #include "book_store.h"
@@ -55,7 +56,7 @@
 #endif
 #define LOCK_CACHE_DIR BOOK_LOCK_CACHE_PARENT "/locks"
 #define LOCK_CACHE_VERSION 1u
-#define LOCK_RENDER_REVISION 5u
+#define LOCK_RENDER_REVISION 6u
 #define LOCK_CACHE_MAGIC UINT32_C(0x4c434431)
 #define LOCK_COVER_HEIGHT 334.f
 #define LOCK_GAP 18.f
@@ -68,6 +69,7 @@ typedef struct {
     uint32_t size, recent;
     int64_t modified;
     uint64_t key;
+    bool downloaded;
     unsigned source_w, source_h, width, height;
 } lock_book_t;
 typedef struct { DIR *dir; char path[BOOK_STORE_PATH_MAX]; } lock_dir_t;
@@ -149,6 +151,11 @@ static uint64_t cover_key(const lock_book_t *book, const struct stat *source, co
     key = hash_bytes(key, &cover_font, sizeof(cover_font));
     const unsigned revision = BOOK_AUTO_COVER_VERSION;
     return hash_bytes(key, &revision, sizeof(revision));
+}
+static void cover_refresh_download(lock_book_t *book) {
+    uint64_t stamp = book_weread_cover_stamp(book->path);
+    book->downloaded = stamp != 0;
+    if (stamp) book->key = hash_bytes(book->key, &stamp, sizeof(stamp));
 }
 static bool collect_book(lock_library_t *library, const char *path,
                           const struct stat *st, const book_progress_t *saved) {
@@ -378,6 +385,11 @@ static void cover_size(lock_book_t *book, unsigned sw, unsigned sh) {
     book->source_w = sw; book->source_h = sh;
 }
 static void cover_dimensions_load(lock_book_t *book, bool *complete) {
+    if (book->downloaded) {
+        book->width = book->source_w = BOOK_COVER_W;
+        book->height = book->source_h = BOOK_COVER_H;
+        return;
+    }
     if (cover_dimensions_read(book)) return;
     uint8_t *data = NULL; size_t bytes = 0; bool png = false;
     unsigned sw = BOOK_COVER_W, sh = BOOK_COVER_H;
@@ -397,8 +409,18 @@ static void cover_dimensions_load(lock_book_t *book, bool *complete) {
     book->height = book->source_h = BOOK_COVER_H;
 }
 static uint8_t *cover_load_bounded(lock_book_t *book, bool *complete, size_t limit) {
-    uint8_t *gray = cover_read(book);
-    if (gray) return gray;
+    uint8_t *gray;
+    if (book->downloaded) {
+        cover_dimensions_load(book, complete);
+        gray = lock_alloc(BOOK_COVER_W * BOOK_COVER_H);
+        if (gray && book_weread_cover_read(book->path, gray, BOOK_COVER_W, BOOK_COVER_H))
+            return gray;
+        free(gray);
+        *complete = false;
+    } else {
+        gray = cover_read(book);
+        if (gray) return gray;
+    }
     uint8_t *data = NULL; size_t bytes = 0; bool png = false;
     unsigned sw = BOOK_COVER_W, sh = BOOK_COVER_H;
     bool decoded = false;
@@ -434,7 +456,7 @@ static uint8_t *cover_load_bounded(lock_book_t *book, bool *complete, size_t lim
         }
     }
     book->source_w = sw; book->source_h = sh;
-    if (gray && (decoded || error == ESP_ERR_NOT_FOUND)) {
+    if (gray && !book->downloaded && (decoded || error == ESP_ERR_NOT_FOUND)) {
         char path[112]; image_cache_path(book, path);
         lock_cache_t header = {.magic = LOCK_CACHE_MAGIC, .version = LOCK_CACHE_VERSION,
             .key = book->key, .width = book->width, .height = book->height,
@@ -462,6 +484,7 @@ bool book_lock_collage_warm_cover(const char *path) {
     const bool font_valid = !stat(font_path, &font_stat);
     book.key = cover_key(&book, &st, font_path, font_valid ? &font_stat : NULL,
                          ttf_get_weight(), book_auto_cover_font_key());
+    cover_refresh_download(&book);
     bool complete = true;
     uint8_t *gray = cover_load_bounded(&book, &complete, 512u*1024u);
     bool ok = gray && complete;
@@ -683,6 +706,7 @@ static bool collage_draw(uint8_t *fb, bool defer_cache) {
     // must not invalidate the full frame merely because a recent timestamp advanced.
     key = hash_bytes(key, &library->used, sizeof(library->used));
     for (unsigned i = 0; i < library->used; ++i) {
+        cover_refresh_download(&library->books[i]);
         key = hash_bytes(key, &library->books[i].key, sizeof(library->books[i].key));
     }
     FILE *cached = fopen(LOCK_CACHE_DIR "/collage.bin", "rb");

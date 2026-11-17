@@ -30,6 +30,14 @@ static int image_probe_count;
 static int rotated_draws;
 static int last_rotated_x, last_rotated_y;
 static int vertical_draws, first_vertical_x, last_vertical_x, first_vertical_y, last_vertical_y;
+static EpdRect flow_areas[2];
+static size_t flow_count;
+static void capture_heading(uint8_t *fb,EpdRect area,const char *text,size_t len,bool vertical) {
+    (void)fb;
+    assert(flow_count < 2 && (vertical ? area.width == 204 : area.height == 272));
+    flow_areas[flow_count++] = area;
+    strncat(drawn,text,len);
+}
 // PR9 尺寸由调用方提供；测试用图片表模拟真实解码回调。/ PR9 asks its caller for dimensions; simulate the decoded image table.
 static bool fixture_image(void *ctx, int image, int *width, int *height) {
     const html_text_t *chapter = ctx;
@@ -57,6 +65,9 @@ uint8_t test_guide_gray;
 // check that measuring follows the runs.
 static unsigned test_slot_ready_mask = 1u;
 static int test_slot;
+static int test_weight=400,last_draw_weight;
+int ttf_get_weight(void){return test_weight;}
+void ttf_set_weight(int weight){test_weight=weight;}
 // 每个槽每字额外加宽，用来把“量宽到底走了哪个槽”变成看得见的折行差异。
 // Extra per-glyph width per slot, so which slot measured a glyph shows up as a wrap change.
 static int test_slot_advance[TTF_FONT_SLOTS];
@@ -94,6 +105,7 @@ void ttf_draw_text_px(uint8_t* fb, int x, int y, int px, const char* text,
     assert(fg <= 15 && bg <= 15);
     if (!drawn[0]) { first_draw_px = px; first_draw_x = x; first_draw_y = y; }
     last_draw_px = px;
+    last_draw_weight = test_weight;
     last_draw_x = x;
     last_draw_y = y;
     assert(strlen(drawn) + strlen(text) < sizeof(drawn));
@@ -413,25 +425,82 @@ int main(void) {
     book_layout_draw_page(&fb, 0, r, 10);
     book_layout_draw_page(&fb, 1, r, 10);
     assert(!strcmp(drawn, "Titlebody") && first_draw_px == 18 && last_draw_px == 10);
+    blocks[0].authored_style=true;blocks[0].font_percent=160;blocks[0].font_weight=7;
+    assert(book_layout_build_blocks(styled,strlen(styled),blocks,2,r,10));
+    drawn[0]=0;book_layout_draw_page(&fb,0,r,10);
+    assert(!strcmp(drawn,"Title") && last_draw_px==16 && last_draw_weight==700 && ttf_get_weight()==400);
     const char chapters[] = "One\nalpha\nTwo\nbeta";
     blk_t chapter_blocks[] = {
-        {.offset = 0, .len = 3, .heading = true, .chapter_start = true, .image = -1},
+        {.offset = 0, .len = 3, .heading = true, .chapter_start = true, .image = -1,
+         .reader_heading = BOOK_HEADING_EPUB},
         {.offset = 4, .len = 5, .image = -1},
-        {.offset = 10, .len = 3, .heading = true, .chapter_start = true, .image = -1},
+        {.offset = 10, .len = 3, .heading = true, .chapter_start = true, .image = -1,
+         .align = 1, .margin_before_percent = 240, .reader_heading = BOOK_HEADING_EPUB},
         {.offset = 14, .len = 4, .image = -1},
     };
     EpdRect chapter_rect = {0, 0, 300, 120};
-    assert(book_layout_build_blocks(chapters, strlen(chapters), chapter_blocks, 4, chapter_rect, 10));
-    // PR9 不包含后来追加的块级 chapter_start 强制分页；这里验证其原始流式行为。
-    // PR9 excludes the later block-level forced chapter break; verify its original flow.
-    assert(book_layout_page_count() == 1 && book_layout_page_start_offset(0) == 0);
-    assert(book_layout_page_for_offset(10) == 0 && book_layout_page_for_offset(14) == 0);
-    drawn[0] = 0; book_layout_draw_page(&fb, 0, chapter_rect, 10);
-    assert(!strcmp(drawn, "OnealphaTwobeta"));
+    book_layout_set_vertical_balance(true);
+    book_layout_set_chapter_viewport(112, 20);
+    for (int v = 0; v < 2; ++v) {
+        book_layout_set_vertical(v);
+        assert(book_layout_build_blocks(chapters, strlen(chapters), chapter_blocks, 4, chapter_rect, 10));
+        assert(book_layout_page_count() == 2 && book_layout_page_start_offset(0) == 0);
+        assert(book_layout_page_start_offset(1) == 10);
+        assert(book_layout_page_for_offset(10) == 1 && book_layout_page_for_offset(14) == 1);
+        assert(book_layout_page_top_padding(0)==35 && book_layout_page_top_padding(1)==35);
+        {
+            drawn[0] = 0;
+            book_layout_draw_page(&fb, 0, chapter_rect, 10);
+            assert(!strcmp(drawn, "Onealpha"));
+            drawn[0] = 0;
+            book_layout_draw_page(&fb, 1, chapter_rect, 10);
+            assert(!strcmp(drawn, "Twobeta") && first_draw_y==(v ? 35 : 53));
+        }
+    }
+    book_layout_set_vertical(false);
+    book_layout_set_vertical_balance(false);
+    book_layout_set_chapter_viewport(0,0);
     book_layout_set_chapter_lead(4, 30);
     assert(book_layout_build_blocks(chapters, strlen(chapters), chapter_blocks, 4, chapter_rect, 10));
-    assert(book_layout_page_count() == 1 && book_layout_page_start_offset(0) == 4);
+    assert(book_layout_page_count() == 2 && book_layout_page_start_offset(0) == 4);
+    assert(book_layout_page_start_offset(1) == 10);
     book_layout_set_chapter_lead(0, 0);
+    const char txt_chapters[] = "\r\n　\r\nFirst\r\nAlpha\n\n　\nSecond\nBeta";
+    blk_t txt_blocks[] = {
+        {.offset=(size_t)(strstr(txt_chapters, "First") - txt_chapters),
+         .len=5,.heading=true,.image=-1,.reader_heading=BOOK_HEADING_TXT},
+        {.offset=(size_t)(strstr(txt_chapters, "Second") - txt_chapters),
+         .len=6,.heading=true,.image=-1,.reader_heading=BOOK_HEADING_TXT},
+    };
+    EpdRect txt_rect = {16,20,600,600};
+    book_layout_set_heading_draw(capture_heading);
+    book_layout_set_vertical_balance(true);
+    for (int v=0;v<2;++v) {
+        book_layout_set_vertical(v);
+        book_layout_set_chapter_viewport(460, 80);
+        book_layout_set_heading_extent(v ? 204 : 272);
+        flow_count=0;drawn[0]=0;
+        assert(book_layout_build_blocks(txt_chapters,strlen(txt_chapters),txt_blocks,2,txt_rect,10));
+        assert(book_layout_page_count()==2);
+        for (size_t page=0;page<2;++page) {
+            assert(book_layout_page_start_offset(page)==txt_blocks[page].offset);
+            assert(book_layout_page_content_height(page)==445);
+            assert(book_layout_page_top_padding(page)==95);
+            book_layout_draw_page(&fb,page,txt_rect,10);
+        }
+        assert(flow_count==2 && !strcmp(drawn,"FirstAlphaSecondBeta"));
+        assert(flow_areas[0].y==115 && flow_areas[1].y==115);
+        if (v) assert(flow_areas[0].x+flow_areas[0].width==txt_rect.x+txt_rect.width);
+        book_layout_set_chapter_viewport(460, 0);
+        flow_count=0;drawn[0]=0;
+        book_layout_draw_page(&fb,1,txt_rect,10);
+        assert(book_layout_page_for_offset(txt_blocks[1].offset)==1);
+        assert(flow_count==1 && flow_areas[0].y==35 && !strcmp(drawn,"SecondBeta"));
+    }
+    book_layout_set_vertical(false);
+    book_layout_set_chapter_viewport(0,0);
+    book_layout_set_vertical_balance(false);
+    book_layout_set_heading_draw(NULL);
     const char illustrated[] = "IMG\nAA\nIMG\nBB";
     blk_t illustrated_blocks[] = {
         {.offset = 0, .len = 3, .image = 0},
@@ -652,15 +721,16 @@ int main(void) {
     book_layout_draw_page(&fb, 0, r, 20);
     assert(last_draw_y - first_draw_y == 106);
     book_layout_free(); html_text_free(&split_title);
-    r = (EpdRect){0, 0, 100, 45};
+    r = (EpdRect){0, 0, 100, 60};
     book_layout_set_chapter_lead(6, 20);
     assert(book_layout_build_blocks(styled, strlen(styled), blocks, 2, r, 10));
     assert(book_layout_page_count() == 1);
     assert(book_layout_page_start_offset(0) == 6);
     drawn[0] = 0;
     book_layout_draw_page(&fb, 0, r, 10);
-    assert(!strcmp(drawn, "body"));
+    assert(!strcmp(drawn, "body") && book_layout_page_top_padding(0)==15);
     book_layout_set_chapter_lead(0, 0);
+    r.height = 45;
     r.width = 20;
     assert(book_layout_build_blocks(styled, strlen(styled), blocks, 2, r, 10));
     assert(book_layout_page_count() == 6);
@@ -929,9 +999,49 @@ int main(void) {
     drawn[0]=0;book_layout_draw_page(&fb,0,mixed_box,10);assert(!strcmp(drawn,"甲乙"));
     book_layout_set_images_visible(true);
     composed.blocks[3].chapter_start=true;
+    composed.blocks[3].reader_heading=BOOK_HEADING_EPUB;
     assert(book_layout_build_blocks(composed.utf8,composed.len,composed.blocks,composed.count,mixed_box,10));
-    assert(book_layout_page_count()==1);
+    assert(book_layout_page_count()==2 && book_layout_page_start_offset(1)==composed.blocks[3].offset);
     html_text_free(&composed);
+
+    const char banner[] = "<p>Intro</p><img src='banner.png'/><h1 style='text-align:center;"
+                          "margin-top:.5em'>Title</h1><p>Body</p>";
+    assert(html_to_blocks(banner,strlen(banner),&composed)==ESP_OK && composed.count==4);
+    composed.blocks[1].image_width=80;
+    composed.blocks[1].image_height=30;
+    composed.blocks[2].chapter_start=true;
+    EpdRect banner_box={10,0,100,90};
+    book_layout_set_chapter_viewport(80,10);
+    assert(book_layout_build_blocks(composed.utf8,composed.len,composed.blocks,composed.count,banner_box,10));
+    size_t title_page=book_layout_page_for_offset(composed.blocks[2].offset);
+    assert(book_layout_page_image_at(title_page,0,&index,&y,&w,&h) && index==0 && w==80 && h==30);
+    assert(book_layout_page_top_padding(title_page)==0);
+    drawn[0]=0; book_layout_draw_page(&fb,title_page,banner_box,10);
+    assert(strstr(drawn,"Title") && last_draw_y>=y+h);
+
+    banner_box.height=72;
+    assert(book_layout_build_blocks(composed.utf8,composed.len,composed.blocks,composed.count,banner_box,10));
+    title_page=book_layout_page_for_offset(composed.blocks[2].offset);
+    assert(title_page==1 && book_layout_page_start_offset(title_page)==composed.blocks[1].offset);
+    assert(book_layout_page_image_at(title_page,0,&index,&y,&w,&h) && index==0 && y==0);
+    drawn[0]=0; book_layout_draw_page(&fb,title_page,banner_box,10);
+    assert(!strncmp(drawn,"Title",5) && first_draw_x>banner_box.x && first_draw_y>h);
+    book_layout_set_chapter_viewport(0,0);
+    html_text_free(&composed);
+
+    const char explicit_breaks[] = "<p>Intro</p><h1 style='page-break-before:always;break-after:page;"
+                                     "margin-top:1em'>Title<br/>Subtitle</h1><p>Body</p>";
+    assert(html_to_blocks(explicit_breaks,strlen(explicit_breaks),&composed)==ESP_OK && composed.count==4);
+    assert(composed.blocks[1].page_break==HTML_BREAK_BEFORE && composed.blocks[2].page_break==HTML_BREAK_AFTER);
+    composed.blocks[1].chapter_start=true;
+    banner_box.height=150;
+    assert(book_layout_build_blocks(composed.utf8,composed.len,composed.blocks,composed.count,banner_box,10));
+    assert(book_layout_page_count()==3 && book_layout_page_start_offset(1)==composed.blocks[1].offset);
+    assert(book_layout_page_start_offset(2)==composed.blocks[3].offset);
+    drawn[0]=0; book_layout_draw_page(&fb,1,banner_box,10);
+    assert(!strcmp(drawn,"TitleSubtitle") && first_draw_y>first_draw_px);
+    html_text_free(&composed);
+
     const char *large="<img src='big.png'/>";
     assert(html_to_blocks(large,strlen(large),&composed)==ESP_OK);
     composed.blocks[0].image_width=1000;composed.blocks[0].image_height=2000;
@@ -1118,6 +1228,20 @@ int main(void) {
         }
     }
     capture_lines=false;book_layout_set_vertical(false);
+    const char *heading_html="<h1>第一章</h1><p>第1章</p><p>这里是正文。</p>";
+    html_text_t repeats={0};
+    assert(html_to_blocks(heading_html,strlen(heading_html),&repeats)==ESP_OK && repeats.count==3);
+    repeats.blocks[1].repeated_heading=true;
+    const EpdRect heading_box={0,0,220,220};
+    for(int vertical=0;vertical<2;++vertical){
+        book_layout_set_vertical(vertical);
+        assert(book_layout_build_blocks(repeats.utf8,repeats.len,repeats.blocks,repeats.count,heading_box,10));
+        assert(book_layout_page_count()==1 && book_layout_page_for_offset(repeats.blocks[1].offset)==0);
+        drawn[0]=0;
+        book_layout_draw_page(&fb,0,heading_box,10);
+        assert(!strcmp(drawn,"第一章这里是正文。"));
+    }
+    book_layout_free();book_layout_set_vertical(false);html_text_free(&repeats);
     // 大章节的行缓冲不应跟整章等大；沿用同样的分页结果与限制。
     // A large chapter's scratch line must not reserve a whole chapter; pagination rules stay intact.
     char *large_chapter=malloc(240001);assert(large_chapter);memset(large_chapter,'a',240000);large_chapter[240000]=0;

@@ -45,6 +45,11 @@ esp_err_t zip_extract(zip_reader_t* reader, int index, void* dst, size_t cap);
 /// 只读取资源前缀（最多 64 KiB），仅供尺寸探测，不代替完整提取的 CRC 校验。
 /// Read at most 64 KiB for advisory dimensions; full extraction still verifies CRC.
 esp_err_t zip_extract_prefix(zip_reader_t *reader, int index, void *dst, size_t cap);
+typedef struct zip_stream zip_stream_t;
+/// Bounded, sequential raw entry extraction. Read through EOF to verify the CRC.
+esp_err_t zip_stream_open(zip_reader_t *reader, int index, zip_stream_t **out);
+esp_err_t zip_stream_read(zip_stream_t *stream, void *dst, size_t cap, size_t *received);
+void zip_stream_close(zip_stream_t *stream);
 #if KIIKO_BOARD_METALIO47
 
 /// 每次最多读 4KiB，预取至多 512KiB 的压缩章节；实际提取仍验证 CRC。

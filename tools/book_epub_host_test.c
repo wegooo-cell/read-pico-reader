@@ -6,6 +6,7 @@
  * 冻结：仅用于主机测试。/ Frozen: Host tests only.
  */
 #include "book_epub.h"
+#include "book_chapter_lead.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,6 +27,65 @@ int main(int argc, char **argv) {
             printf("epub rejection passed: %s\n", argv[a]); continue;
         }
         assert(book_epub_open(argv[a], &book) == ESP_OK && book);
+        if (strstr(argv[a], "good_ncx_numbered_with_extra_pages")) {
+            const char *labels[] = {"11", "12", "17", "作家的话"};
+            const size_t destinations[] = {0, 1, 3, 4};
+            assert(book_epub_chapter_count(book) == 5);
+            assert(book_epub_navigation_count(book) == 4);
+            for (size_t i = 0; i < 4; ++i) {
+                char title[160];
+                assert(book_epub_navigation_chapter(book, i) == destinations[i]);
+                assert(book_epub_navigation_title(book, i, title, sizeof(title)) == ESP_OK);
+                assert(!strcmp(title, labels[i]));
+                assert(book_epub_navigation_source_offset(book, i) == SIZE_MAX);
+                const char *anchor = book_epub_navigation_anchor(book, i);
+                assert(anchor && !strcmp(anchor, "head"));
+                html_text_t text = {0};
+                size_t offset = SIZE_MAX;
+                assert(book_epub_load_anchor(book, destinations[i], anchor, &offset, &text) == ESP_OK);
+                assert(offset == 0 && text.blocks[0].heading);
+                html_text_free(&text);
+            }
+            book_epub_close(book);
+            puts("epub authored numeric labels, afterword, anchors and unlisted illustration passed");
+            continue;
+        }
+        if (strstr(argv[a], "good_numbered_")) {
+            bool volumes = strstr(argv[a], "volumes") != NULL;
+            const char *titles[] = {"1", "二", "第３章 ： 夜雨", "第十二章"};
+            const char *grouped[] = {"第一卷 出发", "一", "卷二：归来", "４"};
+            assert(book_epub_navigation_count(book) == 4);
+            assert(book_epub_navigation_volume_count(book) == (volumes ? 2u : 0u));
+            for (size_t i = 0; i < 4; ++i) {
+                char toc[160], title[128], label[32];
+                assert(book_epub_navigation_chapter(book, i) == i);
+                assert(book_epub_navigation_title(book, i, toc, sizeof(toc)) == ESP_OK);
+                assert(!strcmp(toc, volumes ? grouped[i] : titles[i]));
+                html_text_t text = {0};
+                size_t offset = 0;
+                const char *anchor = book_epub_navigation_anchor(book, i);
+                if (volumes) assert(anchor && !strcmp(anchor, "origin"));
+                assert(book_epub_load_target(book, i, anchor, book_epub_navigation_source_offset(book, i),
+                                             &offset, &text) == ESP_OK);
+                assert(offset == 0 && text.count == 4 && text.blocks[0].chapter_start);
+                assert(text.blocks[1].repeated_heading && !text.blocks[2].repeated_heading);
+                assert(!text.blocks[3].chapter_start && !text.blocks[3].repeated_heading);
+                size_t skip = epub_chapter_lead(&text, toc, title, sizeof(title), label, sizeof(label));
+                assert(skip == text.blocks[2].offset);
+                assert(!strncmp(text.utf8 + skip, "第一章说到的人", strlen("第一章说到的人")));
+                if (!volumes && i == 2) assert(!strcmp(title, "夜雨") && !strcmp(label, "第３章"));
+                if (!volumes && i == 0) assert(!strcmp(title, "1") && !label[0]);
+                if (volumes && i % 2 == 0) {
+                    book_volume_t group;
+                    assert(book_epub_navigation_volume(book, i / 2, &group));
+                    assert(group.begin == i && group.end == i + 2 && group.title == i && group.include_title);
+                }
+                html_text_free(&text);
+            }
+            book_epub_close(book);
+            printf("epub numbered labels, repeat blocks, anchors and volumes passed: %s\n", argv[a]);
+            continue;
+        }
         if (strstr(argv[a], "good_bounded_cover")) {
             book_epub_close(book);
             uint8_t *cover = NULL; size_t size = 0; bool png = false;
@@ -106,6 +166,48 @@ int main(int argc, char **argv) {
             uint8_t *cover = NULL; size_t cover_size = 0; bool png = false;
             assert(book_epub_cover(argv[a], &cover, &cover_size, &png) == ESP_ERR_NOT_FOUND);
             assert(!cover && !cover_size && !png);
+        }
+        if (strstr(argv[a], "good_heading_banner")) {
+            html_text_t text = {0};
+            assert(book_epub_load(book,0,&text)==ESP_OK && text.count==5);
+            assert(text.blocks[0].image==0 && text.blocks[1].chapter_start);
+            assert(text.blocks[1].reader_heading==BOOK_HEADING_NATIVE && text.blocks[1].align==1);
+            assert(text.blocks[1].margin_before_percent==100 && text.blocks[3].reader_heading==BOOK_HEADING_EPUB);
+            char title[128],label[32];
+            assert(epub_chapter_lead(&text,"第一章 起点",title,sizeof(title),label,sizeof(label))==0);
+            assert(!title[0] && !label[0]);
+            html_text_free(&text);
+            book_epub_close(book);
+            puts("epub illustrated chapter opening keeps its original heading");
+            continue;
+        }
+        if (strstr(argv[a], "good_heading_priority")) {
+            html_text_t text = {0};
+            assert(book_epub_load(book,0,&text)==ESP_OK && text.count==5);
+            assert(text.blocks[0].authored_style && text.blocks[0].font_percent==160 &&
+                   text.blocks[0].align==2 && text.blocks[0].margin_after_percent==100 &&
+                   text.blocks[0].reader_heading==BOOK_HEADING_NATIVE);
+            assert(text.blocks[1].repeated_heading);
+            assert(text.blocks[3].reader_heading==BOOK_HEADING_EPUB && !text.blocks[3].authored_style);
+            char title[128],label[32];
+            assert(epub_chapter_lead(&text,"第一章 起点",title,sizeof(title),label,sizeof(label))==0);
+            assert(!title[0] && !label[0]);
+            html_text_free(&text);
+            book_epub_set_fonts_enabled(book, false);
+            assert(book_epub_load(book,0,&text)==ESP_OK && text.count==5);
+            assert(text.blocks[0].chapter_start && text.blocks[0].reader_heading==BOOK_HEADING_EPUB);
+            assert(text.blocks[0].authored_style && !text.blocks[0].authored_heading_layout);
+            assert(text.blocks[1].repeated_heading);
+            assert(epub_chapter_lead(&text,"第一章 起点",title,sizeof(title),label,sizeof(label))==text.blocks[2].offset);
+            assert(!strcmp(title,"起点") && !strcmp(label,"第一章"));
+            html_text_free(&text);
+            book_epub_set_fonts_enabled(book, true);
+            assert(book_epub_load(book,0,&text)==ESP_OK && text.blocks[0].authored_heading_layout &&
+                   text.blocks[0].reader_heading==BOOK_HEADING_NATIVE);
+            html_text_free(&text);
+            book_epub_close(book);
+            puts("epub author CSS takes precedence; unstyled same-file chapter uses reader heading");
+            continue;
         }
         if (strstr(argv[a], "good_body_")) {
             bool samefile = strstr(argv[a], "samefile") != NULL;

@@ -43,4 +43,7 @@ void pico_boot_hold_resume(void);
 void pico_boot_clear_resume(void);
 /// 仅导出本次启动发现的中断图书；不把一般异常归因给最后阅读的书。/ Export only a book interrupted on this boot, never blame the last read for a generic reset.
 bool pico_boot_interrupted_book(char *path, size_t capacity);
+/// 离开中断图书提示后恢复日常模式，保留故障书的自动处理隔离。
+/// Restore normal operation when leaving the interrupted-book notice, preserving the book's quarantine.
+void pico_boot_leave_book_recovery(void);
 void pico_boot_forget_interrupted_book(void);

@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include "esp_err.h"
 #include "html_text.h"
+#include "book_volume.h"
 typedef enum {
     BOOK_KIND_TXT, ///< 文本 / Plain text
     BOOK_KIND_EPUB, ///< EPUB 容器 / EPUB container
@@ -26,8 +27,8 @@ void book_close(void);
 void book_set_embedded_fonts(bool on);
 /// 返回章节数。/ Return the chapter count.
 size_t book_chapter_count(void);
-/// 可见目录优先采用正文编号题头，仍映射到原始 spine 章节；进度继续使用 spine 索引。
-/// Prefer numbered body headings in the TOC while mapping back to original spine indices for progress.
+/// 可见目录保留已核对的书内导航；需要时从正文题头补出，进度继续使用原始 spine 索引。
+/// Keep corroborated authored navigation, recovering weak indexes from body headings while retaining spine progress.
 /// TXT目录按需读标题并定位到旧阅读分段内，保留已有进度/书签编号。/ TXT titles load on demand and target offsets inside legacy reading segments, preserving progress/bookmark IDs.
 size_t book_navigation_count(void);
 size_t book_navigation_chapter(size_t position);
@@ -36,12 +37,7 @@ const char *book_navigation_anchor(size_t position);
 size_t book_navigation_source_offset(size_t position);
 /// TXT按当前正文UTF8位置选目录；EPUB保留其原映射流程。/ Select TXT navigation by current UTF8 position; EPUB retains its existing mapping.
 size_t book_navigation_position(size_t chapter,size_t text_offset);
-/// TXT卷范围使用原可见目录索引；没有可靠分卷时返回零，EPUB保留原目录。/ TXT volumes use original navigation indices; zero means flat, and EPUB keeps its own navigation.
-typedef struct {
-    size_t begin, end; ///< 半开章节范围 / Half-open navigation range
-    size_t title; ///< 原卷名索引或SIZE_MAX / Source volume-title index or SIZE_MAX
-    unsigned number; ///< 缺少卷名时的编号，零为卷首内容 / Fallback ordinal, zero for front matter
-} book_volume_t;
+/// 卷范围使用原可见目录索引；没有可靠分卷时返回零。/ Volumes use original navigation indices; zero means a flat TOC.
 size_t book_navigation_volume_count(void);
 bool book_navigation_volume(size_t index, book_volume_t *out);
 size_t book_navigation_volume_for(size_t position);
@@ -51,13 +47,15 @@ esp_err_t book_chapter_title(size_t i, char *buf, size_t cap);
 /// 加载 NUL 结尾的 PSRAM UTF-8；调用方 free。/ Load NUL-terminated PSRAM UTF-8; caller frees it.
 esp_err_t book_chapter_load(size_t i, char **utf8, size_t *len);
 /// 保留 EPUB 标题/段落块；TXT 的 blocks 为 NULL，调用方 html_text_free。
-/// Preserve EPUB heading/paragraph blocks; TXT has NULL blocks; caller uses html_text_free.
+/// Preserve EPUB blocks and detected TXT headings; caller uses html_text_free.
 esp_err_t book_chapter_load_blocks(size_t i, html_text_t *out);
 esp_err_t book_chapter_load_blocks_anchor(size_t i, const char *anchor,
                                            size_t *anchor_offset, html_text_t *out);
 esp_err_t book_chapter_load_blocks_target(size_t i, const char *anchor,
                                            size_t source_offset, size_t *text_offset,
                                            html_text_t *out);
+esp_err_t book_chapter_load_part(size_t chapter, size_t offset, bool last, const char *anchor,
+                                 size_t source_offset, size_t *local, html_text_t *out);
 /// 读取当前 EPUB 章内图片。/ Read an image from the current EPUB chapter.
 esp_err_t book_chapter_image(size_t chapter, const char *src, uint8_t **data, size_t *size, bool *png);
 /// TXT 为源文件字节；EPUB 为 spine 原始 HTML 未压缩累计字节，不是 ZIP 文件大小。

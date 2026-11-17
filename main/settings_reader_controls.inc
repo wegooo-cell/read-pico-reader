@@ -2,6 +2,85 @@
 // English: Use each board's existing NVS namespace; missing keys use defaults without overwriting old settings.
 static reader_controls_config_t s_reader_controls;
 static bool s_reader_controls_loaded;
+
+#define NVS_KEY_BOOK_HEADING "bk_heading"
+#define NVS_KEY_BOOK_HEADING_V2 "bk_head_v2"
+#define NVS_KEY_BOOK_HEADING_SIZE "bk_head_size"
+#define BOOK_HEADING_DEFAULT_STYLE APP_BOOK_HEADING_RULE
+#define BOOK_HEADING_DEFAULT_ALIGN APP_BOOK_HEADING_ALIGN_LEFT
+static app_book_heading_style_t s_book_heading_style = BOOK_HEADING_DEFAULT_STYLE;
+static app_book_heading_align_t s_book_heading_align = BOOK_HEADING_DEFAULT_ALIGN;
+static uint8_t s_book_heading_size = APP_BOOK_HEADING_SIZE_DEFAULT;
+
+static bool book_heading_size_valid(unsigned percent) {
+    return percent >= APP_BOOK_HEADING_SIZE_MIN && percent <= APP_BOOK_HEADING_SIZE_MAX &&
+           percent % APP_BOOK_HEADING_SIZE_STEP == 0;
+}
+
+static void book_heading_style_load(nvs_handle_t h) {
+    uint8_t value;
+    if (nvs_get_u8(h, NVS_KEY_BOOK_HEADING_SIZE, &value) == ESP_OK && book_heading_size_valid(value))
+        s_book_heading_size = value;
+    if (nvs_get_u8(h, NVS_KEY_BOOK_HEADING_V2, &value) == ESP_OK &&
+        (value & 0xf) < APP_BOOK_HEADING_COUNT && (value >> 4) < APP_BOOK_HEADING_ALIGN_COUNT) {
+        s_book_heading_style = value & 0xf;
+        s_book_heading_align = value >> 4;
+        return;
+    }
+    // 旧的左右题头迁移到接近的样式和对齐。/ Preserve the nearest style and alignment for legacy settings.
+    if (nvs_get_u8(h, NVS_KEY_BOOK_HEADING, &value) == ESP_OK && value <= 2) {
+        s_book_heading_style = value == 2 ? APP_BOOK_HEADING_SIDE : APP_BOOK_HEADING_FLYLEAF;
+        s_book_heading_align = value ? APP_BOOK_HEADING_ALIGN_LEFT : APP_BOOK_HEADING_ALIGN_CENTER;
+    }
+}
+
+app_book_heading_style_t app_settings_book_heading_style(void) {
+    return s_book_heading_style;
+}
+
+app_book_heading_align_t app_settings_book_heading_align(void) {
+    return s_book_heading_align;
+}
+
+static bool book_heading_save_value(const char *key, uint8_t value) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
+    esp_err_t err = nvs_set_u8(h, key, value);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    return err == ESP_OK;
+}
+
+static bool book_heading_save(app_book_heading_style_t style, app_book_heading_align_t align) {
+    if ((unsigned)style >= APP_BOOK_HEADING_COUNT || (unsigned)align >= APP_BOOK_HEADING_ALIGN_COUNT)
+        return false;
+    if (style == s_book_heading_style && align == s_book_heading_align) return true;
+    if (!book_heading_save_value(NVS_KEY_BOOK_HEADING_V2, (align << 4) | style)) return false;
+    s_book_heading_style = style;
+    s_book_heading_align = align;
+    return true;
+}
+
+bool app_settings_set_book_heading_style(app_book_heading_style_t style) {
+    return book_heading_save(style, s_book_heading_align);
+}
+
+bool app_settings_set_book_heading_align(app_book_heading_align_t align) {
+    return book_heading_save(s_book_heading_style, align);
+}
+
+unsigned app_settings_book_heading_size(void) {
+    return s_book_heading_size;
+}
+
+bool app_settings_set_book_heading_size(unsigned percent) {
+    if (!book_heading_size_valid(percent)) return false;
+    if (percent == s_book_heading_size) return true;
+    if (!book_heading_save_value(NVS_KEY_BOOK_HEADING_SIZE, percent)) return false;
+    s_book_heading_size = percent;
+    return true;
+}
+
 static void reader_controls_normalize(reader_controls_config_t *c) {
     reader_controls_config_t d=reader_controls_defaults(KIIKO_BOARD_METALIO47);
     for(unsigned i=0;i<RC_SLOT_COUNT;++i)

@@ -28,7 +28,7 @@ int read_pico_sd_get_info(read_pico_sd_info_t*i){memset(i,0,sizeof(*i));i->prese
 int read_pico_sd_start_probe(void){return 0;}int read_pico_sd_remount(void){return 0;}int read_pico_sd_sync(void){return 0;}
 int read_pico_sd_format(void){return ESP_ERR_NOT_SUPPORTED;}
 const pmu_snapshot_t *read_pico_pmu_get(void){static pmu_snapshot_t p;p.present=p.status_ok=p.identity_ok=true;p.flags=PMU_STATUS_BATTERY_VALID;p.soc_permille=780;p.time_synced=true;p.unix_sec=time(NULL);return &p;}
-void read_pico_transfer_get_status(read_pico_transfer_status_t*s){memset(s,0,sizeof(*s));s->network_ready=wifi;s->mode=READ_PICO_TRANSFER_MODE_STA;}
+void read_pico_transfer_get_status(read_pico_transfer_status_t*s){memset(s,0,sizeof(*s));s->wifi_enabled=s->network_ready=wifi;s->mode=READ_PICO_TRANSFER_MODE_STA;}
 int read_pico_transfer_get_saved_wifi(char*out,bool*configured){if(out)strcpy(out,"Mac 模拟网络");if(configured)*configured=wifi;return 0;}
 void epd_hl_set_all_white(EpdiyHighlevelState*h){if(h->front_fb)memset(h->front_fb,255,1216*684/2);}
 uint8_t *epd_hl_get_framebuffer(EpdiyHighlevelState*h){return h->front_fb;}

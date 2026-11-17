@@ -74,6 +74,9 @@ enum EpdDrawError e0470_reader_ripple_with_waveform(
 enum EpdDrawError e0470_text_turn_with_waveform(
     EpdiyHighlevelState* hl, EpdRect area, e0470_turn_dir_t dir, const EpdWaveform* waveform
 );
+enum EpdDrawError e0470_text_turn_with_prefill(
+    EpdiyHighlevelState* hl, EpdRect area, const EpdWaveform* waveform
+);
 #endif
 
 /// 倒置竖屏的上下柔和区与中间校准区同时逐相输出；区域须全逻辑宽、32列对齐。

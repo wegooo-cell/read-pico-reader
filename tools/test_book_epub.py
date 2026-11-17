@@ -39,6 +39,51 @@ def make_large_book(path, chapters=5000):
                              f'<html><body><h1>第{i}章 {title}</h1><p>正文 {i}</p></body></html>')
 
 
+def make_segment_book(path, compression):
+    paragraphs = []
+    for i in range(2300):
+        anchor = ' id="later"' if i == 1999 else ''
+        text = '段落测试、中文&amp;实体。' * 6
+        paragraphs.append(f'<p{anchor}>MARK{i:04d} {text}</p>')
+    paragraphs.insert(1000, '<p>' + '长段落测试' * 5000 + '</p>')
+    chapter = ('<html><head><style>.story p {text-align:center}</style></head>'
+               '<body><div class="story"><h1>分段阅读</h1>' +
+               ''.join(paragraphs) + '<p>END OF CHAPTER</p></div></body></html>')
+
+    def png_header(width, height, padding):
+        return (b'\x89PNG\r\n\x1a\n' + struct.pack('>I4sII', 13, b'IHDR', width, height)
+                + bytes(padding))
+
+    with zipfile.ZipFile(path, 'w', compression=compression) as archive:
+        archive.writestr('META-INF/container.xml',
+                         '<container><rootfiles><rootfile full-path="OPS/book.opf" />'
+                         '</rootfiles></container>')
+        archive.writestr('OPS/book.opf',
+                         '<package><manifest><item id="long" href="text/long.xhtml" '
+                         'media-type="application/xhtml+xml"/></manifest>'
+                         '<spine><itemref idref="long"/></spine></package>')
+        archive.writestr('OPS/text/long.xhtml', chapter)
+        archive.writestr('OPS/big.png', png_header(1800, 1600, 500000))
+        archive.writestr('OPS/small.png', png_header(120, 90, 500))
+        archive.writestr('OPS/small.svg', '<svg><image href="small.png"/></svg>')
+
+
+def damage_segment_crc(source, target):
+    data = bytearray(source.read_bytes())
+    entry = b'OPS/text/long.xhtml'
+    with zipfile.ZipFile(source) as archive:
+        local = archive.getinfo(entry.decode()).header_offset
+        central = archive.start_dir
+    struct.pack_into('<I', data, local + 14, 0)
+    while data[central:central + 4] == b'PK\x01\x02':
+        name, extra, comment = struct.unpack_from('<HHH', data, central + 28)
+        if data[central + 46:central + 46 + name] == entry:
+            struct.pack_into('<I', data, central + 16, 0)
+            break
+        central += 46 + name + extra + comment
+    target.write_bytes(data)
+
+
 def make_book(path, change=None):
     container = '<container><rootfiles><rootfile full-path="OPS/pkg/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'
     items = ''.join(f'<item id="c{i}" href="../text/part%20{i}%26x.xhtml#start" media-type="application/xhtml+xml"/>' for i in range(1, 5))
@@ -226,6 +271,20 @@ def main():
             files['OPS/toc/book.ncx'] = ('<ncx><navMap><navPoint><navLabel><text>全书</text></navLabel>'
                 '<content src="../text/combined.xhtml"/></navPoint></navMap></ncx>')
         case('good_body_samefile', body_samefile)
+        def heading_priority(files):
+            multianchor(files)
+            files['OPS/styles/headings.css'] = 'h1.own{text-align:right;font-size:160%;margin-bottom:1em}'
+            files['OPS/text/combined.xhtml'] = ('<html><head><link rel="stylesheet" href="../styles/headings.css"/></head><body>'
+                '<h1 class="own" id="one">第一章 起点</h1><p>第1章 起点</p><p>这是第一章的正文。</p>'
+                '<h1 id="two">第二章 归来</h1><p>这是第二章的正文。</p></body></html>')
+        case('good_heading_priority', heading_priority)
+        def heading_banner(files):
+            multianchor(files)
+            files['OPS/text/combined.xhtml'] = ('<html><body><div style="text-align:center"><img src="banner.png"/>'
+                '<h1 id="one" style="margin-top:1em">第一章 起点</h1></div>'
+                '<p>这是第一章的正文。</p><h1 id="two">第二章 归来</h1>'
+                '<p>这是第二章的正文。</p></body></html>')
+        case('good_heading_banner', heading_banner)
         def body_partial(files):
             files['OPS/text/part 1&x.xhtml'] = '<html><body><h1>第一章 起点</h1><p>正文一</p></body></html>'
         case('good_body_partial', body_partial)
@@ -233,6 +292,40 @@ def main():
             files['OPS/text/part 1&x.xhtml'] = ('<html><body><p>第1章说到的人物并不是本章的标题</p>'
                 '<h1>无编号标题</h1><p>正文</p></body></html>')
         case('good_body_false_positive', body_false_positive)
+        def numbered_variants(files, volumes=False):
+            files['OPS/toc/book.ncx'] = '<ncx><navMap></navMap></ncx>'
+            titles = ('第一卷 出发', '一', '卷二：归来', '４') if volumes else ('1', '二', '第３章 ： 夜雨', '第十二章')
+            links = []
+            repeats = ('第1章', '第2章', '第三章夜雨', '第12章')
+            for i, title in enumerate(titles):
+                path = f'OPS/text/part {i+1}&x.xhtml'
+                prose = '第一章说到的人后来也回来了。'
+                repeat = repeats[i] if not volumes else title
+                tag = 'p' if i == 1 else 'h1'
+                files[path] = (f'<html><body><{tag} id="origin">{title}</{tag}>'
+                               f'<p>{repeat}</p><p>{prose}</p><p>123</p></body></html>')
+                links.append(f'<li><a href="../text/part%20{i+1}%26x.xhtml#origin">{title}</a></li>')
+            files['OPS/toc/nav.xhtml'] = ('<html><body><nav epub:type="toc"><ol>' +
+                                          (''.join(links) if volumes else '') + '</ol></nav></body></html>')
+        case('good_numbered_variants', numbered_variants)
+        case('good_numbered_volumes', lambda f: numbered_variants(f, True))
+        def numbered_ncx_extra_pages(files):
+            files['OPS/pkg/book.opf'] = files['OPS/pkg/book.opf'].replace(
+                '</manifest>', '<item id="plate" href="../text/plate" media-type="application/xhtml+xml"/></manifest>'
+            ).replace('<itemref idref="c3"/>', '<itemref idref="plate"/><itemref idref="c3"/>')
+            files['OPS/text/plate'] = '<html><body><img src="plate.png"/></body></html>'
+            files.pop('OPS/toc/nav.xhtml')
+            points = []
+            for i, (label, heading) in enumerate(zip(
+                ('11', '12', '17', '作家的话'), ('11', '第12章', '第十七章', '作家的话')
+            ), 1):
+                files[f'OPS/text/part {i}&x.xhtml'] = (
+                    f'<html><body><h1 id="head">{heading}</h1><p>本节正文。</p></body></html>'
+                )
+                points.append(f'<navPoint><navLabel><text>{label}</text></navLabel>'
+                              f'<content src="../text/part%20{i}%26x.xhtml#head"/></navPoint>')
+            files['OPS/toc/book.ncx'] = '<ncx><navMap>' + ''.join(points) + '</navMap></ncx>'
+        case('good_ncx_numbered_with_extra_pages', numbered_ncx_extra_pages)
         def resources(files):
             files['OPS/text/part 1&x.xhtml'] = ('<html><head><link rel="stylesheet" href="../styles/book.css"/></head>'
                 '<body><p class="center">正文</p><img data-src="../images/pic&amp;one.png"/></body></html>')
@@ -282,7 +375,12 @@ def main():
                         str(ROOT / 'main/book/html_text.c'), str(ROOT / 'main/book/book_index_cache.c'),
                         str(ROOT / 'main/book/book_image_header.c'),
                         '-lz', '-o', str(large_exe)], check=True)
-        subprocess.run([str(large_exe), str(large)], check=True)
+        stored, deflated, corrupt = (work / name for name in
+                                    ('segments_stored.epub', 'segments_deflated.epub', 'segments_crc_error.epub'))
+        make_segment_book(stored, zipfile.ZIP_STORED)
+        make_segment_book(deflated, zipfile.ZIP_DEFLATED)
+        damage_segment_crc(deflated, corrupt)
+        subprocess.run([str(large_exe), str(large), str(stored), str(deflated), str(corrupt)], check=True)
 
 
 if __name__ == '__main__':

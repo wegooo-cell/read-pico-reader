@@ -47,7 +47,7 @@ typedef struct {const uint8_t *data;size_t size,at;uint8_t block[256];int block_
 '''
 for name in ('book_gif_is', 'book_gif_frame'):
     unit += function(name, ROOT / 'main/book/book_image_header.c') + '\n'
-for name in ('gif_stream_byte', 'gif_lzw_decode', 'gif_gray'):
+for name in ('image_work_budget', 'gif_stream_byte', 'gif_lzw_decode', 'gif_gray'):
     unit += function(name, ROOT / 'main/book/book_cover.c') + '\n'
 pixels = [(x + y) % 2 for y in range(9) for x in range(3)]
 for name, data in [('one', gif(1, 1, [0])), ('below', gif(1, 1, [0], top=1)),

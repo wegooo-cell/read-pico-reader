@@ -91,7 +91,9 @@ int main(int argc, char **argv) {
             assert(book_chapter_load(i, &out, &len) == ESP_OK); assert(out[len] == 0);
             html_text_t blocks = {0}; assert(book_chapter_load_blocks(i, &blocks) == ESP_OK);
             assert(blocks.len == len && !memcmp(blocks.utf8, out, len));
-            assert(epub ? blocks.blocks != NULL && blocks.count > 0 : blocks.blocks == NULL && blocks.count == 0);
+            if (epub) assert(blocks.blocks != NULL && blocks.count > 0);
+            else for (size_t j = 0; j < blocks.count; ++j)
+                assert(blocks.blocks[j].reader_heading == BOOK_HEADING_TXT && blocks.blocks[j].image == -1);
             html_text_free(&blocks);
             assert(book_chapter_title(i, title, sizeof(title)) == ESP_OK);
             sum += len; free(out);

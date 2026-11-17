@@ -137,6 +137,12 @@ void ttf_draw_text_px(
     uint8_t* framebuffer, int x, int y, int pixel_height, const char* text,
     enum EpdFontFlags align, uint8_t fg, uint8_t bg
 );
+/// Cache the system status glyphs before switching the active font. NULL clears the cache.
+void ttf_status_capture(const char *signature, int number_px, int signature_px);
+/// Draw from the status cache without selecting a font or reading the card.
+bool ttf_status_draw(uint8_t *fb, int x, int y, int px, const char *text,
+                     enum EpdFontFlags align);
+
 /// 将活动字体的原生字形写入有界覆盖率遮罩，复用现有字形缓存，不切换字库。
 /// Rasterize the active native face into a bounded coverage mask, reusing its glyph cache.
 bool ttf_text_mask_px(uint8_t *mask, unsigned width, unsigned height, int x,
@@ -214,6 +220,9 @@ int ttf_get_stroke_adjust_fine(void);
 /// 绘制时使用灰阶覆盖或二值边缘，复用同一份字形缓存，不改变字宽。/ Select gray coverage or binary edges while drawing, reusing glyphs without changing advances.
 void ttf_set_antialias(bool enabled);
 bool ttf_get_antialias(void);
+#if KIIKO_BOARD_METALIO47 && defined(ESP_PLATFORM)
+void ttf_set_reader_body_aa(bool enabled);
+#endif
 int ttf_get_weight(void);
 
 void ttf_font_cache_clear(void);

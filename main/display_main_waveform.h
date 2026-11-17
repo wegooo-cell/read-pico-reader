@@ -60,6 +60,7 @@ const EpdWaveform* display_main_shelf37_waveform(bool art);
 /// 本地显式实验的16灰GL37面板表；未启用、源不兼容或分配失败返回NULL，调用方回退48相。
 /// Local opt-in16-gray GL37 panel profile; NULL on disabled/incompatible/OOM builds requires a48-phase fallback.
 const EpdWaveform* display_reader_panel37_waveform(void);
+const EpdWaveform* display_ui37_waveform(void);
 /// 用原DU20相位供已有条带动画读取；仅适配mode元数据。/ Expose original DU20 phases to the existing band engine; adapt mode metadata only.
 const EpdWaveform* display_main_bw_turn_waveform(void);
 /// S31十四相黑白维护：等白末三相补白，其他等值保持，迁移及总相数不变；未启用返回NULL。

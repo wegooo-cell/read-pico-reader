@@ -18,11 +18,13 @@ void epd_draw_circle(int x,int y,int radius,uint8_t color,uint8_t *fb);
 """,
     "book_source.h": """#pragma once
 #include <stddef.h>
+#include "book_volume.h"
 typedef int esp_err_t;
+typedef enum { BOOK_KIND_TXT, BOOK_KIND_EPUB } book_kind_t;
+book_kind_t book_kind(void);
 #define ESP_OK 0
 esp_err_t book_navigation_title(size_t position, char *out, size_t cap);
 size_t book_navigation_chapter(size_t position);
-typedef struct {size_t begin,end,title;unsigned number;} book_volume_t;
 size_t book_navigation_volume_count(void);
 bool book_navigation_volume(size_t index,book_volume_t *out);
 size_t book_navigation_volume_for(size_t position);
@@ -61,7 +63,10 @@ HARNESS = r'''
 #include <stdio.h>
 #include <string.h>
 #include "book_toc.c"
-static int cards;
+static int cards, serial_labels;
+static bool grouped;
+static book_kind_t kind;
+book_kind_t book_kind(void){return kind;}
 static int labels;
 static int large_titles,skip_labels,jump_summary,borders,pager_labels,jump_labels;
 static size_t nav_shift,seen_sources[8];
@@ -78,6 +83,7 @@ void ui_text_fixed(uint8_t *fb,int x,int y,int px,const char *text,enum EpdFontF
     (void)fb;(void)x;(void)y;(void)px;(void)align;(void)inverse;
     assert(!strchr(text,'\n') && !strchr(text,'\r') && !strchr(text,'\t'));
     if(px==30) large_titles++;
+    if(px==21 && !strcmp(text,"01")) ++serial_labels;
     if(strstr(text,"10页")){assert(px>=24);skip_labels++;}
     if(strstr(text,"上页")||strstr(text,"下页")){assert(px>=26);pager_labels++;}
     if(strstr(text,"按百分比跳转")){assert(px>=28);jump_labels++;}
@@ -103,14 +109,18 @@ bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<
 void ui_hairline(uint8_t *fb,int y,int x,int width,uint8_t gray){(void)fb;(void)y;(void)x;(void)width;(void)gray;}
 void ui_nav_status(uint8_t *fb){(void)fb;}
 void ui_nav_back(uint8_t *fb,int x,int y){(void)fb;(void)x;(void)y;}
-size_t book_navigation_volume_count(void){return 0;}
-bool book_navigation_volume(size_t i,book_volume_t *v){(void)i;(void)v;return false;}
-size_t book_navigation_volume_for(size_t p){(void)p;return SIZE_MAX;}
+size_t book_navigation_volume_count(void){return grouped?2:0;}
+bool book_navigation_volume(size_t i,book_volume_t *v){
+    if(!grouped || i>=2)return false;
+    *v=(book_volume_t){.begin=2*i,.end=2*i+2,.title=2*i,.number=(unsigned)i+1,.include_title=true};
+    return true;
+}
+size_t book_navigation_volume_for(size_t p){return grouped && p<4?p/2:SIZE_MAX;}
 esp_err_t book_navigation_volume_title(size_t i,char *b,size_t n){(void)i;(void)b;(void)n;return -1;}
 esp_err_t book_navigation_title(size_t position,char *out,size_t cap){
     size_t index=book_navigation_chapter(position);
     if(seen_count<8)seen_sources[seen_count++]=index;
-    const char *name=index==0?"第一章\n重叠\t标题":"普通章节";
+    const char *name=index==0?(kind==BOOK_KIND_EPUB?"一":"第一章\n重叠\t标题"):"普通章节";
     snprintf(out,cap,"%s",name);
     return ESP_OK;
 }
@@ -148,6 +158,17 @@ int main(void){
     assert(jump_summary==1);
     nav_shift=1;seen_count=0;book_toc_render(&fb,"目录",4,1,0,"");
     assert(seen_count==4&&seen_sources[0]==1&&seen_sources[3]==4);
+    kind=BOOK_KIND_EPUB;nav_shift=0;serial_labels=0;
+    book_toc_render(&fb,"目录",2,0,0,"");
+    assert(serial_labels==0);
+    grouped=true;
+    page=book_toc_open(2);
+    EpdRect row=book_toc_row_rect(2);
+    assert(book_toc_hit(row.x,row.y,page,4)==2);
+    int group_hit=book_toc_hit(50,book_toc_row_rect(0).y,page,4);
+    assert(book_toc_toggle(group_hit,&page));
+    row=book_toc_row_rect(1);
+    assert(book_toc_hit(row.x,row.y,page,4)==0);
     puts("book_toc: pages, taps, overflow, single-line titles, stable title font path and selected-row backgrounds passed");
     return 0;
 }
@@ -162,5 +183,5 @@ with tempfile.TemporaryDirectory() as tmp:
     output = directory / "test"
     subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
                     "-fsanitize=address,undefined", "-I", str(directory),
-                    "-I", str(SOURCE.parent), str(harness), "-o", str(output)], check=True)
+                    "-I", str(SOURCE.parent), "-I", str(ROOT / "main/book"), str(harness), "-o", str(output)], check=True)
     subprocess.run([str(output)], check=True)

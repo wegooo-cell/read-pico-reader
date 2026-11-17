@@ -19,6 +19,8 @@ typedef struct {
 void ttf_draw_set_runs(const ttf_run_t* runs, size_t count);
 int ttf_font_select(int slot);
 int ttf_font_selected(void);
+int ttf_get_weight(void);
+void ttf_set_weight(int weight);
 bool ttf_font_slot_ready(int slot);
 int ttf_text_width_px(int px, const char* text);
 int ttf_text_left_bearing_px(int px, const char* text);

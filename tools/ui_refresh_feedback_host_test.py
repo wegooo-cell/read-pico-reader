@@ -339,10 +339,12 @@ enum {UI_ICON_WIFI,UI_ICON_BLUETOOTH,UI_ICON_ZAP};
 #define UI_INK_WHITE 15
 #define READ_PICO_TRANSFER_MODE_STA 1
 typedef struct {bool time_synced;time_t unix_sec;} pmu_snapshot_t;
-typedef struct {bool network_ready;int mode;} read_pico_transfer_status_t;
+typedef struct {bool wifi_enabled;int mode;} read_pico_transfer_status_t;
 static pmu_snapshot_t pmu;
 static int pct;
 static bool wifi,bluetooth,s_system_ttf;
+static int s_power_signature;
+static int power_signature(unsigned radios){return (int)radios;}
 #define TTF_FONT_PATH_MAX 160
 static bool chosen_system,reading_context;
 static const char *app_settings_system_font_path(void){return chosen_system?"system.ttf":"";}
@@ -362,7 +364,7 @@ static int ttf_text_width_px(int px,const char *s){return letters(s)*px*3/4;}
 static void ui_font_measure_line_px(int px,const char *s,int *above,int *below){(void)s;*above=px*3/4;*below=1;}
 static void ttf_measure_line_px(int px,const char *s,int *above,int *below){(void)s;*above=px*2/3;*below=px/5;}
 typedef struct {int left,right,center,px,align;char text[96];} text_t;
-static text_t texts[3];static int text_count,network_left;
+static text_t texts[3];static int text_count,network_left;static bool cached_face,cached_used;
 static void draw_text(uint8_t *fb,int x,int baseline,int px,const char *s,enum EpdFontFlags align,int fg,int bg){
  (void)fb;(void)fg;(void)bg;assert(text_count<3);
  int above,below,width=s_system_ttf?ttf_text_width_px(px,s):ui_font_text_width_px(px,s);
@@ -372,10 +374,20 @@ static void draw_text(uint8_t *fb,int x,int baseline,int px,const char *s,enum E
 }
 static void ui_font_draw_text_px(uint8_t *f,int x,int y,int px,const char *s,enum EpdFontFlags a,int fg,int bg,bool bw){(void)bw;draw_text(f,x,y,px,s,a,fg,bg);}
 static void ttf_draw_text_px(uint8_t *f,int x,int y,int px,const char *s,enum EpdFontFlags a,int fg,int bg){draw_text(f,x,y,px,s,a,fg,bg);}
+static void ttf_status_capture(const char *s,int num_px,int sig_px){assert(!reading_context&&num_px==28&&sig_px==26);cached_face=s!=NULL;}
+static bool ttf_status_draw(uint8_t *fb,int x,int y,int px,const char *s,enum EpdFontFlags a){
+ assert(reading_context&&!s_system_ttf);
+ if(!cached_face)return false;
+ int above,below;ttf_measure_line_px(px,s,&above,&below);
+ s_system_ttf=true;draw_text(fb,x,y+(above-below)/2,px,s,a,0,15);s_system_ttf=false;
+ cached_used=true;
+ return true;
+}
 static void ui_draw_icon(uint8_t *fb,int x,int y,int px,int icon,int gray){(void)fb;(void)gray;assert(y==40);if(icon==UI_ICON_ZAP)return;if(x-px/2<network_left)network_left=x-px/2;}
 static void ui_nav_wifi_icon(uint8_t *fb,int x,int y,int px,int gray){ui_draw_icon(fb,x,y,px,UI_ICON_WIFI,gray);}
 static void ui_draw_round_rect(uint8_t *fb,EpdRect box,int radius,int gray){(void)fb;(void)radius;(void)gray;assert(box.y+box.height/2==40);}
 static void ui_fill_round_rect(uint8_t *fb,EpdRect box,int radius,int gray){(void)fb;(void)box;(void)radius;(void)gray;}
+static void ui_status_mark_visible(uint8_t *fb){(void)fb;}
 '''
 status += defines + "\n"
 for path, name in (("main/ui/ui_kit.c", "ui_text_fixed_context_width_px"),
@@ -384,7 +396,7 @@ for path, name in (("main/ui/ui_kit.c", "ui_text_fixed_context_width_px"),
                    ("main/ui/ui_kit.c", "ui_text_fixed_vc")):
     status += function(path, name) + "\n"
 status += nav[nav.index('static bool s_status_reading;'):nav.index('static const char *const labels[]')]
-for name in ('status_time','clock_text','ui_nav_status'):
+for name in ('status_radios','status_time','clock_text','ui_nav_status'):
     status += function('main/ui/ui_nav.c',name) + '\n'
 status += r'''
 int main(void){
@@ -404,8 +416,8 @@ int main(void){
    int system_network_left=network_left;
    // 阅读字体变化不重算系统签名宽度；不同字体仍显示同一UTF8前缀并保持图标间距。
    // Reader face changes do not recompute system signature widths: retain the same UTF8 prefix and icon spacing.
-   reading_context=true;s_system_ttf=false;ui_nav_status_font_context(true,true);text_count=0;network_left=1000;
-   ui_nav_status(&fb);assert(text_count==3&&!strcmp(texts[1].text,system_prefix)&&network_left==system_network_left);
+   reading_context=true;s_system_ttf=false;ui_nav_status_font_context(true,true);cached_used=false;text_count=0;network_left=1000;
+   ui_nav_status(&fb);assert(text_count==3&&!strcmp(texts[1].text,system_prefix)&&network_left==system_network_left&&cached_used==(bool)font);
    assert(texts[0].right+12<=texts[1].left&&texts[1].right+12<=(mask?network_left:texts[2].left));
  }
  reading_context=false;ui_nav_status_font_context(false,false);

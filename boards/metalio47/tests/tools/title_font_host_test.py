@@ -126,6 +126,33 @@ static void english_justification(void){
  }
  record_coverage=false;
 }
+static void status_font(const char *system, const char *reader) {
+ const char *text[]={"12:34","状态栏","100%","--%"};
+ const enum EpdFontFlags align[]={EPD_DRAW_ALIGN_LEFT,EPD_DRAW_ALIGN_CENTER,
+                                 EPD_DRAW_ALIGN_RIGHT,EPD_DRAW_ALIGN_RIGHT};
+ uint8_t expected[sizeof(pixels)];
+ assert(ttf_font_open(system)==ESP_OK);
+ ttf_set_stroke_adjust(0);ttf_set_antialias(true);
+ ttf_status_capture(text[1],28,26);
+ memset(expected,15,sizeof(expected));
+ for(int i=0;i<4;++i){
+  int px=i==1?26:28, above, below;
+  ttf_measure_line_px(px,text[i],&above,&below);
+  ttf_draw_text_px(expected,200,35+i*38+(above-below)/2,px,text[i],align[i],0,15);
+ }
+ assert(ttf_font_open(reader)==ESP_OK);
+ ttf_set_stroke_adjust(2);ttf_set_antialias(false);
+ unsigned opened=opens;
+ memset(pixels,15,sizeof(pixels));
+ for(int i=0;i<4;++i)
+  assert(ttf_status_draw(pixels,200,35+i*38,i==1?26:28,text[i],align[i]));
+ assert(!memcmp(pixels,expected,sizeof(pixels)));
+ assert(opens==opened&&active_fd==1&&!strcmp(ttf_font_path(),reader));
+ assert(!ttf_get_antialias()&&ttf_get_stroke_adjust()==2);
+ ttf_status_capture(NULL,28,26);
+ assert(!ttf_status_draw(pixels,200,35,28,text[0],align[0]));
+ ttf_set_stroke_adjust(0);ttf_set_antialias(true);
+}
 int main(int argc,char **argv){
  assert((argc==3||argc==4)&&ttf_get_antialias());const char *text="字体设置";unsigned widths[2];
  for(int face=0;face<2;++face){

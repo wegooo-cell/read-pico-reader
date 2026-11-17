@@ -94,18 +94,51 @@ void display_set_bulk_io(bool active) {
 
 // 对齐Moku/厂商：每次输出后立即断轨，保留XOE最短关闭等待及OTA递归互斥。
 // Match Moku/vendor: cut HV after each output, retaining XOE shutdown delay and OTA exclusion.
+enum { READER_RAILS_VERIFY_DELAY_MS = 50, READER_RAILS_OFF_RETRIES = 2 };
 static int64_t drive_release_retry_ms;
+static int64_t reader_rails_check_ms;
+static unsigned reader_rails_retries;
+static bool reader_rails_confirmed_once;
+
+static void reader_rails_schedule_check(void) {
+    reader_rails_retries = 0;
+    reader_rails_check_ms = esp_timer_get_time()/1000 + READER_RAILS_VERIFY_DELAY_MS;
+}
+
 void rails_keepalive(void) {
     bool held=pico_online_display_begin();
     const int64_t now_ms=esp_timer_get_time()/1000;
     drive_release_retry_ms=read_pico_epd_release_drive()?0:now_ms+50;
     epd_poweroff();
+    if (reader_rails_check_ms)
+        reader_rails_check_ms = esp_timer_get_time()/1000 + READER_RAILS_VERIFY_DELAY_MS;
     pico_online_display_end(held);
 }
 void rails_idle_check(int64_t now_ms) {
-    if(!drive_release_retry_ms||now_ms<drive_release_retry_ms)return;
+    const bool drive_due = drive_release_retry_ms && now_ms >= drive_release_retry_ms;
+    const bool reader_due = reader_rails_check_ms && now_ms >= reader_rails_check_ms;
+    if (!drive_due && !reader_due) return;
     bool held=pico_online_display_begin();
-    drive_release_retry_ms=read_pico_epd_release_drive()?0:now_ms+50;
+    if (drive_due) drive_release_retry_ms=read_pico_epd_release_drive()?0:now_ms+50;
+    if (reader_due) {
+        // 在放电后读回关电状态，失败只重发关电命令，不额外送屏。
+        // Confirm after discharge; retry power cut without sending display phases.
+        reader_rails_check_ms = 0;
+        const esp_err_t off = metalio_tps_verify_off();
+        if (off == ESP_OK) {
+            if (!reader_rails_confirmed_once || reader_rails_retries)
+                ESP_LOGI(TAG, "reader TPS shutdown confirmed, retries=%u", reader_rails_retries);
+            reader_rails_confirmed_once = true;
+        } else if (off != ESP_ERR_INVALID_STATE) {
+            if (reader_rails_retries < READER_RAILS_OFF_RETRIES) {
+                ++reader_rails_retries;
+                rails_keepalive();
+                reader_rails_check_ms = esp_timer_get_time()/1000 + READER_RAILS_VERIFY_DELAY_MS;
+            } else {
+                ESP_LOGW(TAG, "reader TPS shutdown unconfirmed: %s", esp_err_to_name(off));
+            }
+        }
+    }
     pico_online_display_end(held);
 }
 
@@ -471,7 +504,7 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
     // 周期清理直接使用原厂GC48，不允许柔和/短灰阶表替换；底栏保持原样。
     // Periodic cleanup uses raw GC48 without soft/short substitution; retain fixed navigation.
     const EpdWaveform *shelf37_soft=NULL,*shelf37_art=NULL;
-    if(normal&&cover_frame&&!body_full){
+    if(normal&&(cover_frame||changing_page)&&!body_full){
         shelf37_soft=display_main_shelf37_waveform(false);
         if(shelf37_soft)shelf37_art=display_main_shelf37_waveform(true);
         if(!shelf37_art)shelf37_soft=NULL;
@@ -560,7 +593,8 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
         EpdRect ripple = body_area;
         const int prior_tick=e0470_page_turn_tick_us();
         e0470_page_turn_set_tick_us(E0470_TURN_FAST_TICK_US);
-        const EpdWaveform *ripple_wave=main_switch_waveform(display_main_water_waveform(),MODE_GL16);
+        const EpdWaveform *short_gray=display_reader_panel37_waveform();
+        const EpdWaveform *ripple_wave=main_switch_waveform(short_gray?short_gray:display_main_water_waveform(),MODE_GL16);
         if(clean_switch)ripple_wave=main_switch_quality_waveform(ripple_wave,MODE_GL16);
         *result = e0470_page_turn_with_waveform_compact(hl, ripple, E0470_TURN_RTL,
                                                        ripple_wave, E0470_TURN_FAST_BANDS);
@@ -662,7 +696,8 @@ static enum EpdDrawError hl_update(
             waveform = app_settings_main_refresh_mode()==APP_MAIN_REFRESH_NORMAL ? display_main_normal_waveform() :
                 has_gray ? display_main_gray_waveform() : s_main_shelf_page
                 ? display_main_shelf_exit_waveform() : display_main_bw_waveform();
-            if(s_main_cover_frame&&app_settings_main_refresh_mode()==APP_MAIN_REFRESH_NORMAL){
+            if((s_main_cover_frame||s_main_changing_page)&&
+               app_settings_main_refresh_mode()==APP_MAIN_REFRESH_NORMAL){
                 const EpdWaveform *short_wave=display_main_shelf37_waveform(false);
                 if(short_wave)waveform=short_wave;
             }
@@ -730,7 +765,7 @@ static enum EpdDrawError update_display_mode_diff_unlocked(
     return result;
 }
 
-static enum EpdDrawError update_display_fast_page_unlocked(EpdiyHighlevelState* hl) {
+static enum EpdDrawError update_display_fast_page_unlocked(EpdiyHighlevelState* hl, bool toc_content) {
     enum EpdDrawError navigation;
     if (main_begin(hl, &navigation)) return navigation;
     enum EpdDrawError intercepted;
@@ -746,6 +781,19 @@ static enum EpdDrawError update_display_fast_page_unlocked(EpdiyHighlevelState* 
         rails_keepalive();
         ESP_LOGI(TAG, "fast navigation cleanup after %d transitions", APP_UI_FAST_GC16_EVERY);
         return result;
+    }
+    if (toc_content) {
+        const EpdWaveform *short_wave = display_ui37_waveform();
+        if (short_wave) {
+            const EpdRect page = {0, 0, epd_rotated_display_width(), epd_rotated_display_height()};
+            use_scan_for(short_wave, MODE_GL16);
+            epd_poweron();
+            epd_hl_waveform(hl, short_wave);
+            enum EpdDrawError result = epd_hl_update_area_diff_exact(hl, MODE_GL16, 25, page);
+            epd_hl_waveform(hl, &E0470_WAVEFORM);
+            rails_keepalive();
+            return result;
+        }
     }
     const bool ordinary = app_settings_main_refresh_mode() == APP_MAIN_REFRESH_NORMAL;
     const EpdWaveform* waveform = ordinary ? display_main_page_gray_waveform() : &E0470_WAVEFORM;
@@ -882,16 +930,18 @@ static enum EpdDrawError update_display_area_full_with_unlocked(
     return result;
 }
 
+static bool s_reader_phase_prefill_failed;
 static enum EpdDrawError update_display_reader_turn_unlocked(EpdiyHighlevelState* hl, EpdRect area,
                                              e0470_turn_dir_t dir, unsigned bands, bool main_gray) {
     enum EpdDrawError intercepted;
     if (main_before_update(hl, &intercepted)) return intercepted;
     if(s_system_binary&&!main_gray)system_normalize(hl);
-    // 用户2026-11-04：单带文字翻页用“白→灰直推”表；图文页仍走原厂柔和翻页表。
-    // User2026-11-04: single-band text turns use the white-side gray push; image pages keep the
-    // vendor soft-turn table.
+    const bool ordinary_text = bands == 1 && !main_gray && !s_system_binary &&
+        app_settings_reader_turn_effect() == 0 && area.x == 0 && area.y == 0 &&
+        area.width == epd_rotated_display_width() && area.height == epd_rotated_display_height();
     const EpdWaveform* turn_waveform = main_gray?display_main_water_waveform():s_system_binary
         ? (system_navigation_gray_changed(hl)?display_main_navigation_waveform():display_main_bw_turn_waveform())
+        : ordinary_text ? display_reader_ordinary_turn_waveform()
         : (bands==1?display_reader_text_turn_waveform():display_reader_text_waveform());
     // 普通文字整轮在差分生成前预唤醒TPS，实际驱动仍由引擎按原顺序上电。
     // Pre-wake TPS before ordinary text differences; the engine still enables drive in the established sequence.
@@ -900,9 +950,10 @@ static enum EpdDrawError update_display_reader_turn_unlocked(EpdiyHighlevelState
     if(!main_gray&&!s_system_binary&&bands==1&&app_settings_reader_turn_effect()==2&&
         display_reader_fast_text_prepare(hl,area))turn_waveform=display_reader_fast_text_waveform();
 #if KIIKO_S31_TEXT_RIPPLE
-    // 用户指定普通也用同一22相；单带同步输出，水波纹才分条带，黑白速读仍为原厂DU20。
-    // Ordinary shares the22-phase text sequence in one synchronous band; ripple staggers bands and FastBW retains vendorDU20.
-    const bool experimental = !main_gray && !s_system_binary && app_settings_reader_turn_effect()!=2 &&
+    // 试验波形只用于水波纹。普通翻页需要保留字形边缘完整的灰阶。
+    // Limit the experimental waveform to ripple; ordinary turns need all glyph-edge gray levels.
+    const bool experimental = !main_gray && !s_system_binary && bands > 1 &&
+        app_settings_reader_turn_effect() == 1 &&
         metalio_text_ripple_prepare(hl, area);
     if (experimental) {
         turn_waveform = metalio_text_ripple_waveform();
@@ -934,7 +985,10 @@ static enum EpdDrawError update_display_reader_turn_unlocked(EpdiyHighlevelState
     if(!prepared)epd_poweron();
     // 通用GL16连相同灰边也会重新压黑；S31文字序列保持等灰和官方相序，直接用于条带LUT。
     // Generic GL16 re-drives even equal gray edges; S31 text phases hold equal grays and retain vendor pulse order in the band LUT.
-    enum EpdDrawError result = bands == 1
+    const bool prefill = ordinary_text && !s_reader_phase_prefill_failed;
+    enum EpdDrawError result = prefill
+        ? e0470_text_turn_with_prefill(hl, area, turn_waveform)
+        : bands == 1
         ? e0470_text_turn_with_waveform(hl, area, dir, turn_waveform)
         : s_system_binary
             ? e0470_page_turn_with_waveform_compact(hl, area, dir, turn_waveform, bands)
@@ -942,7 +996,11 @@ static enum EpdDrawError update_display_reader_turn_unlocked(EpdiyHighlevelState
     if(prepared)metalio_tps_cancel_prepare();
     use_scan_for(&E0470_WAVEFORM, MODE_GL16);
     rails_keepalive();
-    if (result == EPD_DRAW_SUCCESS) return result;
+    if (result == EPD_DRAW_SUCCESS) {
+        if (ordinary_text || reader_ripple) reader_rails_schedule_check();
+        return result;
+    }
+    if (prefill) s_reader_phase_prefill_failed = true;
 #if KIIKO_S31_TEXT_RIPPLE
     if (experimental) metalio_text_ripple_disable();
 #endif
@@ -1034,15 +1092,23 @@ enum EpdDrawError update_display_mode_diff(
     return result;
 }
 
-enum EpdDrawError update_display_fast_page(EpdiyHighlevelState* hl) {
+static enum EpdDrawError update_display_page(EpdiyHighlevelState* hl, bool toc_content) {
     LATENCY_DISPLAY_BEGIN();
     bool held = pico_online_display_begin();
     enum EpdDrawError result = display_needs_full()
-        ? update_display_full_unlocked(hl) : update_display_fast_page_unlocked(hl);
+        ? update_display_full_unlocked(hl) : update_display_fast_page_unlocked(hl, toc_content);
     s_main_fault=result!=EPD_DRAW_SUCCESS;
     pico_online_display_end(held);
     LATENCY_DISPLAY_END();
     return result;
+}
+
+enum EpdDrawError update_display_fast_page(EpdiyHighlevelState* hl) {
+    return update_display_page(hl, false);
+}
+
+enum EpdDrawError update_display_toc_page(EpdiyHighlevelState* hl) {
+    return update_display_page(hl, true);
 }
 
 enum EpdDrawError update_display_from_white_with(
@@ -1415,13 +1481,21 @@ enum EpdDrawError update_display_reader_panel_fast(EpdiyHighlevelState* hl,EpdRe
     const bool binary=s_system_binary;
     s_system_binary=false;
     const EpdWaveform *wave=NULL;
-    enum EpdDrawError result;
+    enum EpdDrawError result=EPD_DRAW_SUCCESS;
     if(display_needs_full())result=update_display_full_unlocked(hl);
-    else {
+    else if(!main_before_update(hl,&result)&&area.width>0&&area.height>0) {
         if(!s_reader_panel37_failed)wave=display_reader_panel37_waveform();
-        result=wave?update_display_area_diff_with_unlocked(hl,wave,MODE_GL16,area):
-            update_display_area_full_with_unlocked(hl,&E0470_WAVEFORM,MODE_GL16,area);
-        if(wave&&result!=EPD_DRAW_SUCCESS)s_reader_panel37_failed=true;
+        if(wave){
+            // 面板走精确差分；同一张 GL37 表在正文入口允许强制驱动整块区域。
+            // Use an exact UI diff even though the shared GL37 table can force a body region.
+            epd_poweron();
+            use_scan_for(wave,MODE_GL16);
+            epd_hl_waveform(hl,wave);
+            result=epd_hl_update_area_diff_exact(hl,MODE_GL16,25,area);
+            epd_hl_waveform(hl,&E0470_WAVEFORM);
+            rails_keepalive();
+            if(result!=EPD_DRAW_SUCCESS)s_reader_panel37_failed=true;
+        }else result=update_display_area_full_with_unlocked(hl,&E0470_WAVEFORM,MODE_GL16,area);
     }
     s_system_binary=binary;
     s_main_fault=result!=EPD_DRAW_SUCCESS;

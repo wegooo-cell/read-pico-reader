@@ -3052,6 +3052,47 @@ static bool s_antialias = true;
 void ttf_set_antialias(bool enabled) { s_antialias = enabled; }
 bool ttf_get_antialias(void) { return s_antialias; }
 
+#if KIIKO_BOARD_METALIO47 && defined(ESP_PLATFORM)
+static bool s_reader_body_aa;
+static uint8_t s_reader_gray[4][256];
+
+void ttf_set_reader_body_aa(bool enabled) { s_reader_body_aa = enabled; }
+
+static void reader_gray_rebuild(void) {
+    // Distribute rounding across a 2x2 cell, preserving solid ink and paper.
+    static const uint8_t thresholds[4] = {31, 159, 223, 95};
+    for (unsigned i = 0; i < 4; ++i)
+        for (unsigned alpha = 0; alpha < 256; ++alpha)
+            s_reader_gray[i][alpha] = 15 - (s_cover[alpha] * 15u + thresholds[i]) / 255u;
+}
+
+static inline uint8_t reader_gray_at(uint8_t alpha, int x, int y) {
+    return s_reader_gray[((y & 1) << 1) | (x & 1)][alpha];
+}
+
+// Clip and rotate a glyph once. Each logical column is a contiguous physical row.
+static void blit_reader_portrait(uint8_t *fb, int left, int top, const glyph_entry_t *glyph) {
+    const int width = epd_width(), height = epd_height();
+    const int x0 = left < 0 ? 0 : left;
+    const int x1 = left + glyph->width < height ? left + glyph->width : height;
+    const int y0 = top < 0 ? 0 : top;
+    const int y1 = top + glyph->height < width ? top + glyph->height : width;
+    if (x0 >= x1 || y0 >= y1) return;
+    const int stride = width / 2;
+    for (int x = x0; x < x1; ++x) {
+        uint8_t *row = fb + (size_t)(height - 1 - x) * stride;
+        int source = (y0 - top) * glyph->width + x - left;
+        for (int y = y0; y < y1; ++y, source += glyph->width) {
+            uint8_t gray = reader_gray_at(glyph->bitmap[source], x, y);
+            if (gray == 15) continue;
+            uint8_t *pixel = row + y / 2;
+            if (y & 1) *pixel = (*pixel & 0x0f) | (gray << 4);
+            else *pixel = (*pixel & 0xf0) | gray;
+        }
+    }
+}
+#endif
+
 /* ---- 绘制 / Draw ---- */
 static void ttf_cover_lut_rebuild(void) {
     for (int i = 0; i < 256; i++) {
@@ -3061,6 +3102,9 @@ static void ttf_cover_lut_rebuild(void) {
         if (v > 255) v = 255;
         s_cover[i] = (uint8_t)v;
     }
+#if KIIKO_BOARD_METALIO47 && defined(ESP_PLATFORM)
+    reader_gray_rebuild();
+#endif
     s_cover_ready = true;
 }
 
@@ -3069,9 +3113,43 @@ static void ttf_cover_lut_init(void) {
     ttf_cover_lut_rebuild();
 }
 
-static uint8_t mix_ink(uint8_t alpha, uint8_t fg, uint8_t bg) {
-    if (!s_antialias) return alpha >= 128 ? fg : bg;
+static inline uint8_t mix_ink_aa(uint8_t alpha, uint8_t fg, uint8_t bg, bool antialias) {
+    if (!antialias) return alpha >= 128 ? fg : bg;
     return (uint8_t)(bg + s_cover[alpha] * ((int)fg - (int)bg) / 255);
+}
+
+static uint8_t mix_ink(uint8_t alpha, uint8_t fg, uint8_t bg) {
+    return mix_ink_aa(alpha, fg, bg, s_antialias);
+}
+
+// 正立落字形：pen_x 是字身框左边缘，baseline 是框内基线。
+// Blit an upright glyph: pen_x is the em box's left edge and baseline its baseline inside it.
+static void blit_upright(uint8_t* framebuffer, int pen_x, int baseline,
+                         const glyph_entry_t* glyph, uint8_t fg, uint8_t bg, bool antialias) {
+    if (glyph->bitmap == NULL) return;
+#if KIIKO_BOARD_METALIO47 && defined(ESP_PLATFORM)
+    const bool reader_gray = s_reader_body_aa && antialias && fg == 0 && bg == 15;
+    if (reader_gray && epd_get_rotation() == EPD_ROT_INVERTED_PORTRAIT) {
+        blit_reader_portrait(framebuffer, pen_x + glyph->left, baseline - glyph->top, glyph);
+        return;
+    }
+#endif
+    for (int gy = 0; gy < glyph->height; gy++) {
+        int yy = baseline - glyph->top + gy;
+        for (int gx = 0; gx < glyph->width; gx++) {
+            uint8_t alpha = glyph->bitmap[gy * glyph->width + gx];
+            if (alpha == 0) continue;
+#if KIIKO_BOARD_METALIO47 && defined(ESP_PLATFORM)
+            if (reader_gray) {
+                int xx = pen_x + glyph->left + gx;
+                uint8_t gray = reader_gray_at(alpha, xx, yy);
+                if (gray != 15) epd_draw_pixel(xx, yy, gray << 4, framebuffer);
+                continue;
+            }
+#endif
+            epd_draw_pixel(pen_x + glyph->left + gx, yy, mix_ink_aa(alpha, fg, bg, antialias) << 4, framebuffer);
+        }
+    }
 }
 
 void ttf_draw_text(
@@ -3104,21 +3182,12 @@ void ttf_draw_text_px(
         const glyph_entry_t* glyph = get_glyph(cp, pixel_height);
         if (glyph == NULL) continue;
 
-        if (glyph->bitmap != NULL) {
-            for (int gy = 0; gy < glyph->height; gy++) {
-                int yy = y - glyph->top + gy;
-                for (int gx = 0; gx < glyph->width; gx++) {
-                    uint8_t alpha = glyph->bitmap[gy * glyph->width + gx];
-                    if (alpha == 0) continue;
-                    epd_draw_pixel(
-                        cursor_x + glyph->left + gx, yy, mix_ink(alpha, fg, bg) << 4, framebuffer
-                    );
-                }
-            }
-        }
+        blit_upright(framebuffer, cursor_x, y, glyph, fg, bg, s_antialias);
         cursor_x += glyph->advance_x;
     }
 }
+
+#include "ttf_font_status.inc"
 
 bool ttf_text_mask_px(uint8_t *mask, unsigned width, unsigned height, int x,
                       int baseline, int pixel_height, const char *text) {
@@ -3166,17 +3235,7 @@ void ttf_draw_text_px_spaced(
         uint32_t cp = decode_utf8(&cursor);
         const glyph_entry_t* glyph = get_glyph(cp, pixel_height);
         if (glyph == NULL) continue;
-        if (glyph->bitmap != NULL) {
-            for (int gy = 0; gy < glyph->height; gy++) {
-                int yy = y - glyph->top + gy;
-                for (int gx = 0; gx < glyph->width; gx++) {
-                    uint8_t alpha = glyph->bitmap[gy * glyph->width + gx];
-                    if (alpha == 0) continue;
-                    epd_draw_pixel(cursor_x + glyph->left + gx, yy,
-                                   mix_ink(alpha, fg, bg) << 4, framebuffer);
-                }
-            }
-        }
+        blit_upright(framebuffer, cursor_x, y, glyph, fg, bg, s_antialias);
         cursor_x += glyph->advance_x;
         if (*cursor) cursor_x += tracking_px;
     }
@@ -3301,21 +3360,6 @@ static const glyph_entry_t* vertical_glyph_for(uint32_t cp, int pixel_height, ui
     return glyph;
 }
 
-// 正立落字形：pen_x 是字身框左边缘，baseline 是框内基线。
-// Blit an upright glyph: pen_x is the em box's left edge and baseline its baseline inside it.
-static void blit_upright(uint8_t* framebuffer, int pen_x, int baseline,
-                         const glyph_entry_t* glyph, uint8_t fg, uint8_t bg) {
-    if (glyph->bitmap == NULL) return;
-    for (int gy = 0; gy < glyph->height; gy++) {
-        int yy = baseline - glyph->top + gy;
-        for (int gx = 0; gx < glyph->width; gx++) {
-            uint8_t alpha = glyph->bitmap[gy * glyph->width + gx];
-            if (alpha == 0) continue;
-            epd_draw_pixel(pen_x + glyph->left + gx, yy, mix_ink(alpha, fg, bg) << 4, framebuffer);
-        }
-    }
-}
-
 // 旋转落字形：先在字身框里按横排基线落位，再把整个方框顺时针转 90°：(u, v) -> (px-1-v, u)。
 // 字的顶端因此朝右，和 OpenType 竖排对拉丁文的默认旋转一致。
 // Blit a rotated glyph: lay it on the horizontal baseline inside the em box, then turn the box
@@ -3333,7 +3377,15 @@ static void blit_rotated(uint8_t* framebuffer, int x, int y, int cell, int pixel
             if (alpha == 0) continue;
             int u = glyph->left + gx;
             if (u < 0 || u >= pixel_height) continue;
-            epd_draw_pixel(x + rx, y + cell + u, mix_ink(alpha, fg, bg) << 4, framebuffer);
+            int xx = x + rx, yy = y + cell + u;
+#if KIIKO_BOARD_METALIO47 && defined(ESP_PLATFORM)
+            if (s_reader_body_aa && s_antialias && fg == 0 && bg == 15) {
+                uint8_t gray = reader_gray_at(alpha, xx, yy);
+                if (gray != 15) epd_draw_pixel(xx, yy, gray << 4, framebuffer);
+                continue;
+            }
+#endif
+            epd_draw_pixel(xx, yy, mix_ink(alpha, fg, bg) << 4, framebuffer);
         }
     }
 }
@@ -3432,7 +3484,7 @@ int ttf_draw_text_px_vertical(
                 int dx = 0, dy = 0;
                 if (vertical_corner_cp(cp)) { dx = cell_px / 2; dy = -cell_px / 2; }
                 else if (centered) dx = run_dx;
-                blit_upright(framebuffer, x + dx, y + cell + baseline + dy, glyph, fg, bg);
+                blit_upright(framebuffer, x + dx, y + cell + baseline + dy, glyph, fg, bg, s_antialias);
             }
         }
         cell += glyph->advance_x;
@@ -3512,16 +3564,7 @@ void ttf_draw_text_px_fitted(
         run_apply((size_t)(cursor - text));
         uint32_t cp = decode_utf8(&cursor);
         const glyph_entry_t* glyph = get_glyph(cp, pixel_height);
-        if (glyph && glyph->bitmap) {
-            for (int gy = 0; gy < glyph->height; ++gy) {
-                int yy = y - glyph->top + gy;
-                for (int gx = 0; gx < glyph->width; ++gx) {
-                    uint8_t alpha = glyph->bitmap[gy * glyph->width + gx];
-                    if (alpha) epd_draw_pixel(cursor_x + glyph->left + gx, yy,
-                                              mix_ink(alpha, fg, bg) << 4, framebuffer);
-                }
-            }
-        }
+        if (glyph) blit_upright(framebuffer, cursor_x, y, glyph, fg, bg, s_antialias);
         if (glyph) cursor_x += glyph->advance_x;
         if (*cursor) {
             const char* peek = cursor;

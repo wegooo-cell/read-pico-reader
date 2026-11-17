@@ -30,8 +30,11 @@ void book_layout_set_runs(const html_run_t* runs, size_t count);
 /// 阅读器尾行省去多余行后间距，纯文字续页将不足一行余量上下均分；默认关闭。
 /// Reader policy: omit unused tail leading and balance sub-line slack on full text continuations; default off.
 void book_layout_set_vertical_balance(bool enabled);
-/// 本页正文的额外顶部留白；章末/题头/图片页为零，脚注命中随它对齐。
-/// Extra top padding for this page, zero on chapter ends/headings/images; note hit regions follow it.
+/// Reader-generated chapter headings start one body row below the standard viewport top.
+/// Top padding follows the visible chrome without repagination.
+void book_layout_set_chapter_viewport(int height, int top_padding);
+int book_layout_page_content_height(size_t page);
+/// Position of the visible body relative to the layout origin, including chrome and continuation balancing.
 int book_layout_page_top_padding(size_t page);
 /// 设置行高百分比与段后距离百分比，重排时生效。/ Set line height and paragraph gap percentages for the next layout.
 void book_layout_set_spacing(unsigned line_percent, unsigned paragraph_percent);
@@ -67,6 +70,11 @@ void book_layout_set_chapter_lead(size_t skip_bytes, unsigned height_px);
 /// heading, in pixels; the caller draws the heading into that same width. Horizontal setting
 /// ignores it. Call it with chapter_lead before each chapter layout.
 void book_layout_set_chapter_lead_width(unsigned width_px);
+/// 绘制正文中的章首。/ Draw a chapter heading that occurs within the text flow.
+typedef void (*book_heading_draw_fn)(uint8_t *fb, EpdRect area, const char *text, size_t len, bool vertical);
+void book_layout_set_heading_draw(book_heading_draw_fn draw);
+/// Heading band height in horizontal layout, width in vertical layout. Set before building.
+void book_layout_set_heading_extent(int extent);
 /// 返回该页的 EPUB 图片序号；文字页为 -1。/ Return an EPUB image index for this page, or -1 for text.
 /// 查询插图原始像素尺寸；返回 false 表示取不到，排版会退回整页显示。
 /// / Query an image's pixel dimensions; false means unavailable and layout falls back to a

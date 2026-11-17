@@ -37,7 +37,7 @@ static app_redraw_t rc_execute(app_ctx_t*ctx,unsigned action){
             s_reader_panel=READER_PANEL_NONE;s_rc_auto_waiting=false;reader_auto_start(&s_rc_auto,ctx->now_ms,reader_controls_seconds(app_settings_reader_controls()));rc_notice(ctx,"自动翻页已开启");
         }
         return APP_REDRAW_PAGE;
-    case RC_EFFECT:{unsigned effect=(app_settings_reader_turn_effect()+1)%3;app_settings_set_reader_turn_effect(effect);s_turns=0;rc_invalidate();rc_notice(ctx,effect==0?"普通翻页":effect==1?"水波纹翻页":"速读黑白翻页");return APP_REDRAW_PAGE;}
+    case RC_EFFECT:{unsigned effect=(app_settings_reader_turn_effect()+1)%3;app_settings_set_reader_turn_effect(effect);s_turns=0;invalidate_prep();rc_notice(ctx,effect==0?"普通翻页":effect==1?"水波纹翻页":"速读黑白翻页");return APP_REDRAW_PAGE;}
     case RC_REFRESH:return reader_manual_refresh(ctx);
     case RC_FULLSCREEN:return toggle_reader_fullscreen(ctx);
     case RC_TOOLS:{
@@ -76,6 +76,30 @@ static app_redraw_t rc_binding_tap(app_ctx_t*ctx,int x,int y){
         app_settings_set_reader_control(s_rc_menu_slot,rc_pool_action(s_rc_menu_group,index));
     if(ok)s_rc_menu_slot=-1;else rc_notice(ctx,"保存失败，请重试");return APP_REDRAW_PAGE;
 }
+static app_redraw_t rc_change_heading_size(app_ctx_t *ctx, unsigned size) {
+    lock_draw();
+    const size_t offset = book_layout_page_start_offset(s_page);
+    invalidate_prep();
+    apply_chapter_lead_at_size(s_chapter_heading_title, s_chapter_heading_label, s_chapter_lead_skip,
+                               s_chapter_lead_row_height, size);
+    bool layout_ok = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
+    if (!layout_ok || !app_settings_set_book_heading_size(size)) {
+        refresh_chapter_lead();
+        const bool restored = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
+        unlock_draw();
+        if (!restored) {
+            free_book();
+            s_view = SHELF;
+            copy_text(s_message, sizeof(s_message), "排版失败，请重新打开图书");
+        } else rc_notice(ctx, layout_ok ? "保存失败，请重试" : "排版失败，请重试");
+        return APP_REDRAW_PAGE;
+    }
+    s_page = book_layout_page_for_offset(offset);
+    unlock_draw();
+    save_progress();
+    return APP_REDRAW_PAGE;
+}
+
 static app_redraw_t rc_panel_action(app_ctx_t*ctx,int x,int y,bool*handled){
     *handled=false;
     if(s_view!=READING||s_clear_confirm)return APP_REDRAW_NONE;
@@ -105,6 +129,34 @@ static app_redraw_t rc_panel_action(app_ctx_t*ctx,int x,int y,bool*handled){
         }
         return APP_REDRAW_NONE;
     }
+    if (s_reader_panel == READER_PANEL_HEADING_SETTINGS) {
+        *handled = true;
+        if (rc_heading_back_hit(x,y))
+            return rc_to_root(ctx,0);
+        for (unsigned plus = 0; plus < 2; ++plus) {
+            if (!ui_rect_hit(rc_heading_size_rect(plus),x,y)) continue;
+            unsigned size = app_settings_book_heading_size();
+            if (plus ? size >= APP_BOOK_HEADING_SIZE_MAX : size <= APP_BOOK_HEADING_SIZE_MIN)
+                return APP_REDRAW_NONE;
+            size = plus ? size + APP_BOOK_HEADING_SIZE_STEP : size - APP_BOOK_HEADING_SIZE_STEP;
+            return rc_change_heading_size(ctx,size);
+        }
+        for (int i = 0; i < APP_BOOK_HEADING_ALIGN_COUNT; ++i) {
+            if (!ui_rect_hit(rc_heading_align_rect(i),x,y)) continue;
+            if (i == (int)app_settings_book_heading_align()) return APP_REDRAW_NONE;
+            if (!app_settings_set_book_heading_align(i)) rc_notice(ctx,"保存失败，请重试");
+            else invalidate_prep();
+            return APP_REDRAW_PAGE;
+        }
+        for (int i = 0; i < APP_BOOK_HEADING_COUNT; ++i) {
+            if (!ui_rect_hit(rc_heading_style_rect(i),x,y)) continue;
+            if (i == (int)app_settings_book_heading_style()) return APP_REDRAW_NONE;
+            if (!app_settings_set_book_heading_style(i)) rc_notice(ctx,"保存失败，请重试");
+            else invalidate_prep();
+            return APP_REDRAW_PAGE;
+        }
+        return APP_REDRAW_NONE;
+    }
     if(s_reader_panel==READER_PANEL_FONT_SETTINGS&&
        (ui_rect_hit(rc_done_rect(),x,y)||ui_rect_hit((EpdRect){32,reader_font_top()+25,64,64},x,y))){
         *handled=true;return s_rc_font_root?rc_to_root(ctx,0):rc_open(ctx,READER_PANEL_NONE);
@@ -118,11 +170,12 @@ static app_redraw_t rc_panel_action(app_ctx_t*ctx,int x,int y,bool*handled){
     if(y<rc_root_top()||ui_rect_hit(rc_done_rect(),x,y))return rc_open(ctx,READER_PANEL_NONE);
     for(int i=0;i<3;++i)if(ui_rect_hit(rc_tab_rect(i),x,y)){s_rc_tab=i;return APP_REDRAW_PAGE;}
     if(s_rc_tab==0){
+        if (ui_rect_hit(rc_heading_link_rect(),x,y)) return rc_open(ctx,READER_PANEL_HEADING_SETTINGS);
         for(int i=0;i<4;++i)if(ui_rect_hit(rc_grid_rect(i),x,y)){
             const reader_panel_t panels[]={READER_PANEL_FONT_SETTINGS,READER_PANEL_LAYOUT_SETTINGS,READER_PANEL_READING_DISPLAY,READER_PANEL_RULE_SETTINGS};
             s_rc_font_root=true;return rc_open(ctx,panels[i]);}
     }else if(s_rc_tab==1){
-        for(int i=0;i<3;++i)if(ui_rect_hit(rc_effect_rect(i),x,y)){app_settings_set_reader_turn_effect(i);s_turns=0;rc_invalidate();return APP_REDRAW_PAGE;}
+        for(int i=0;i<3;++i)if(ui_rect_hit(rc_effect_rect(i),x,y)){app_settings_set_reader_turn_effect(i);s_turns=0;invalidate_prep();return APP_REDRAW_PAGE;}
         if(ui_rect_hit(rc_refresh_rect(),x,y)){
             static const uint8_t values[]={0,5,10,15,
 #if KIIKO_BOARD_METALIO47
@@ -179,7 +232,7 @@ static app_redraw_t rc_bottom_swipe(app_ctx_t*ctx,const ui_gesture_event_t*ev,bo
     app_redraw_t redraw=rc_execute(ctx,app_settings_reader_controls()->actions[slot]);
     return redraw==APP_REDRAW_NONE?APP_REDRAW_PAGE:redraw;
 }
-static bool rc_custom_modal(void){return s_view==READING&&(s_reader_panel==READER_PANEL_REFRESH_SETTINGS||s_reader_panel==READER_PANEL_READING_DISPLAY||s_reader_panel==READER_PANEL_TOUCH_SETTINGS||s_reader_panel==READER_PANEL_TOUCH_MORE||s_reader_panel==READER_PANEL_READING_LIGHT);}
+static bool rc_custom_modal(void){return s_view==READING&&(s_reader_panel==READER_PANEL_REFRESH_SETTINGS||s_reader_panel==READER_PANEL_READING_DISPLAY||s_reader_panel==READER_PANEL_HEADING_SETTINGS||s_reader_panel==READER_PANEL_TOUCH_SETTINGS||s_reader_panel==READER_PANEL_TOUCH_MORE||s_reader_panel==READER_PANEL_READING_LIGHT);}
 static int rc_hit_target(int x,int y){
     if(s_rc_menu_slot>=0){EpdRect r=rc_menu_rect();if(!ui_rect_hit(r,x,y))return 999;
         bool side=s_rc_menu_slot>=RC_SLOT_COUNT;if(!side&&y<r.y+52)return 400+(x>=r.x+r.width/2);
@@ -200,11 +253,24 @@ static int rc_hit_target(int x,int y){
         for(int i=0;i<4;++i)if(ui_rect_hit(rc_display_rect(i),x,y))return 100+i;
         return -1;
     }
+    if (s_reader_panel == READER_PANEL_HEADING_SETTINGS) {
+        if (rc_heading_back_hit(x,y)) return 999;
+        for (unsigned plus = 0; plus < 2; ++plus)
+            if (ui_rect_hit(rc_heading_size_rect(plus),x,y)) return 20+(int)plus;
+        for (int i = 0; i < APP_BOOK_HEADING_ALIGN_COUNT; ++i)
+            if (ui_rect_hit(rc_heading_align_rect(i),x,y)) return 10+i;
+        for (int i = 0; i < APP_BOOK_HEADING_COUNT; ++i)
+            if (ui_rect_hit(rc_heading_style_rect(i),x,y)) return 100+i;
+        return -1;
+    }
     if(s_reader_panel==READER_PANEL_READING_LIGHT){if(y<876||ui_rect_hit(rc_done_rect(),x,y))return 999;return -1;}
     if(s_reader_panel==READER_PANEL_REFRESH_SETTINGS){
         if(y<rc_root_top()||ui_rect_hit(rc_done_rect(),x,y))return 999;
         for(int i=0;i<3;++i)if(ui_rect_hit(rc_tab_rect(i),x,y))return 10+i;
-        if(s_rc_tab==0){for(int i=0;i<4;++i)if(ui_rect_hit(rc_grid_rect(i),x,y))return 100+i;}
+        if(s_rc_tab==0){
+            if (ui_rect_hit(rc_heading_link_rect(),x,y)) return 104;
+            for(int i=0;i<4;++i)if(ui_rect_hit(rc_grid_rect(i),x,y))return 100+i;
+        }
         if(s_rc_tab==1){for(int i=0;i<3;++i)if(ui_rect_hit(rc_effect_rect(i),x,y))return 100+i;
             if(ui_rect_hit(rc_refresh_rect(),x,y))return 110;
             if(ui_rect_hit(rc_auto_card(0),x,y))return 111;

@@ -67,7 +67,7 @@ void get_buffer_params(
     *pixels_per_byte = width_divider;
 }
 
-void IRAM_ATTR prepare_context_for_next_frame(RenderContext_t* ctx) {
+void IRAM_ATTR prepare_context_phase_lut(RenderContext_t* ctx) {
     int frame_time = DEFAULT_FRAME_TIME;
     if (ctx->phase_times != NULL) {
         frame_time = ctx->phase_times[ctx->current_frame];
@@ -83,7 +83,10 @@ void IRAM_ATTR prepare_context_for_next_frame(RenderContext_t* ctx) {
 
     assert(ctx->lut_build_func != NULL);
     ctx->lut_build_func(ctx->conversion_lut, phases, ctx->current_frame);
+}
 
+void IRAM_ATTR prepare_context_for_next_frame(RenderContext_t* ctx) {
+    prepare_context_phase_lut(ctx);
     ctx->lines_prepared = 0;
     ctx->lines_consumed = 0;
     if (ctx->line_ready) memset(ctx->line_ready, 0, ctx->lines_total);

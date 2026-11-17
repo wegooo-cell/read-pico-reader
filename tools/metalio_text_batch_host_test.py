@@ -44,7 +44,7 @@ typedef struct{
  const int8_t*line_phase;const int*col_band_x0,*col_band_x1;const int8_t*col_band_phase;int col_band_n;
  int lines_prepared,lines_consumed,lines_total,display_width,display_height,current_frame,cycle_frames;
  const int*phase_times;size_t conversion_lut_size;uint8_t*conversion_lut,*line_mask,*line_ready,*line_threads;
- int frame_time;
+ int frame_time;bool phase_prefill_requested;
 }RenderContext_t;
 static RenderContext_t render_context={.conversion_lut_size=1024,.conversion_lut=lut,.line_mask=mask,
  .display_width=W,.display_height=H,.line_ready=ready,.line_threads=threads};
@@ -53,7 +53,7 @@ static const int*s_col_band_x0,*s_col_band_x1;static const int8_t*s_col_band_pha
 static bool s_scan_active,s_leading_skip_enabled;static int s_last_leading_skip;static const uint8_t*s_present_for;
 static enum EpdRotation rotation;static int calls,scans,fail_at,mask_calls,first_seen,auto_skip;
 static unsigned phase_hits[64];static int64_t now;
-static bool expect_staged;static const uint8_t*staged_test_luts[1];static int8_t staged_test_lines[H];
+static bool expect_prefill,expect_staged;static const uint8_t*staged_test_luts[1];static int8_t staged_test_lines[H];
 int water_test_alloc_fail=1;
 int epd_width(void){return W;}int epd_height(void){return H;}
 enum EpdRotation epd_get_rotation(void){return rotation;}
@@ -75,6 +75,7 @@ static void lcd_do_update(RenderContext_t*ctx);
 for name,path in [
  ('epd_build_1ppB_lut_1k','boards/metalio47/src/components/epdiy/src/output_common/lut.c'),
  ('epd_populate_line_mask','boards/metalio47/src/components/epdiy/src/output_common/render_context.c'),
+ ('prepare_context_phase_lut','boards/metalio47/src/components/epdiy/src/output_common/render_context.c'),
  ('prepare_context_for_next_frame','boards/metalio47/src/components/epdiy/src/output_common/render_context.c'),
  ('waveform_temp_range_index','boards/metalio47/src/components/epdiy/src/render.c'),
  ('get_waveform_index','boards/metalio47/src/components/epdiy/src/render.c'),
@@ -95,7 +96,7 @@ EpdRect epd_difference_image_cropped(const uint8_t*to,const uint8_t*from,EpdRect
  return a;
 }
 static void lcd_do_update(RenderContext_t*ctx){
- ++calls;assert(s_scan_active);
+ ++calls;assert(s_scan_active&&ctx->phase_prefill_requested==expect_prefill);
  if(expect_staged){
   assert(ctx->phase_luts==staged_test_luts&&ctx->line_phase==staged_test_lines);
   assert(ctx->current_frame==0&&ctx->cycle_frames==1&&!ctx->col_band_n);
@@ -145,6 +146,11 @@ int main(void){
   assert(calls==1&&first_seen==skip&&scans==p->phases-skip&&!memcmp(front,back,BYTES)&&!s_scan_active);
   for(int phase=0;phase<p->phases;++phase){assert(phase_hits[phase]==(unsigned)(phase>=skip));if(phase<skip)assert(!e0470_phase_action(p,phase,to,from));}
  }
+ expect_prefill=true;reset();
+ memset(front,0x56,BYTES);memset(back,0xff,BYTES);
+ assert(e0470_text_turn_with_prefill(&hl,logical(),&E0470_TEXTTURN_WAVEFORM)==EPD_DRAW_SUCCESS);
+ assert(calls==1&&scans==p->phases-first_seen&&!memcmp(front,back,BYTES));
+ expect_prefill=false;
  for(int rot=0;rot<4;++rot){
   rotation=rot;
   for(int fail=1;fail<=p->phases;++fail){

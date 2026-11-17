@@ -102,7 +102,13 @@ const EpdWaveform* metalio_text_ripple_clean_waveform(void) {
     for(int f=drive;f<source->phases;++f)for(int to=0;to<16;++to)for(int from=0;from<16;++from)
         if(e0470_phase_action(source,f,to,from))return NULL;
     memcpy(data,source->luts,(size_t)drive*64);
-    for(int f=drive;f<drive+EXTRA;++f)memset(data[f][15],0xaa,4);
+    // 每带的白底与新字同时驱动，已在退白的旧字保留原有的尾段擦白。
+    // Drive blank white during the band's text pulse; retain the erase tail for changed whites.
+    for (int i = 0; i < EXTRA; ++i) {
+        data[i][15][3] |= 2; // White to white occupies the lowest two bits.
+        memset(data[drive + i][15], 0xaa, 4);
+        data[drive + i][15][3] &= 0xfc;
+    }
     memcpy(data+drive+EXTRA,source->luts+(size_t)drive*64,HOLD*64);
     wave=*original;wave.num_modes=1;wave.mode_data=modes;ready=true;return &wave;
 }

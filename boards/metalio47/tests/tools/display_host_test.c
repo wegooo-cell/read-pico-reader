@@ -39,6 +39,7 @@ const EpdWaveform* display_main_gray_waveform(void) {return &E0470_WAVEFORM;}
 static const EpdWaveform panel37_wave={7};
 static bool panel37_available;
 const EpdWaveform* display_reader_panel37_waveform(void){return panel37_available?&panel37_wave:NULL;}
+const EpdWaveform* display_ui37_waveform(void){return panel37_available?&panel37_wave:NULL;}
 static bool fast_panels;
 static const EpdWaveform panel4_wave={8},panel4_entry_wave={9};
 bool display_reader_fast_panels_enabled(void){return fast_panels;}
@@ -51,6 +52,7 @@ static const EpdWaveform reader_soft = {5};
 static const EpdWaveform quiet_nav = {6};
 const EpdWaveform* display_main_navigation_waveform(void){return &quiet_nav;}
 const EpdWaveform* display_reader_soft_turn_waveform(void){return &reader_soft;}
+const EpdWaveform* display_reader_ordinary_turn_waveform(void){return &reader_soft;}
 const EpdWaveform* display_reader_text_turn_waveform(void){return &reader_soft;}
 const EpdWaveform* display_reader_text_waveform(void) {return &reader_soft;}
 static enum EpdDrawError draw(EpdiyHighlevelState*,enum EpdDrawMode,int,bool);
@@ -61,6 +63,10 @@ enum EpdDrawError e0470_text_turn_with_waveform(EpdiyHighlevelState* hl,EpdRect 
     (void)area;++panel_entry_batches;epd_hl_waveform(hl,waveform);
     return draw(hl,MODE_GL16,25,true);
 }
+enum EpdDrawError e0470_text_turn_with_prefill(EpdiyHighlevelState* hl,EpdRect area,
+    const EpdWaveform* waveform){
+    (void)hl;(void)area;(void)waveform;assert(false);return EPD_DRAW_SUCCESS;
+}
 
 const EpdWaveform* display_main_water_waveform(void) {return &soft_gray;}
 const EpdWaveform* display_main_normal_waveform(void) { return display_main_water_waveform(); }
@@ -69,6 +75,7 @@ const EpdWaveform* display_main_shelf_soft_waveform(void){return &soft_gray;}
 const EpdWaveform* display_main_shelf37_waveform(bool art){(void)art;return NULL;}
 const EpdWaveform* display_du14_white_waveform(void){return NULL;}
 const EpdWaveform* display_main_clean_waveform_with_phases(const EpdWaveform* wave,enum EpdDrawMode mode,unsigned white){(void)mode;assert(white==0||white==6||white==8);return wave;}
+const EpdWaveform* display_main_fast_background_waveform_with_phases(const EpdWaveform* wave,enum EpdDrawMode mode,unsigned white){return display_main_clean_waveform_with_phases(wave,mode,white);}
 const EpdWaveform* display_main_background_waveform_with_phases(const EpdWaveform* wave,enum EpdDrawMode mode,unsigned white){return display_main_clean_waveform_with_phases(wave,mode,white);}
 const EpdWaveform* display_main_switch_waveform(const EpdWaveform *wave,enum EpdDrawMode mode){(void)mode;return wave;}
 const EpdWaveform* display_main_shelf_waveform(enum EpdDrawMode mode){(void)mode;return &E0470_WAVEFORM;}
@@ -192,6 +199,10 @@ enum EpdDrawError epd_hl_update_area(EpdiyHighlevelState* hl, enum EpdDrawMode m
     (void)area;
     return draw(hl, mode, temperature, false);
 }
+enum EpdDrawError epd_hl_update_area_diff_exact(EpdiyHighlevelState* hl, enum EpdDrawMode mode, int temperature, EpdRect area) {
+    last_area = area;
+    return draw(hl, mode, temperature, false);
+}
 enum EpdDrawError epd_hl_update_area_full(EpdiyHighlevelState* hl, enum EpdDrawMode mode, int temperature, EpdRect area) {
     last_area = area;
     return draw(hl, mode, temperature, true);
@@ -257,6 +268,24 @@ int main(void) {
     assert(update_display_fast_page(&hl) == EPD_DRAW_SUCCESS);
     assert(last_mode == MODE_GC16 && waveform_at_draw == &E0470_FULL_WAVEFORM && last_scan == READ_PICO_EPD_SCAN_FULL && full_draws > 0);
 
+    now_us += APP_UI_GC16_MIN_INTERVAL_US;
+    panel37_available = true;
+    for (int i = 0; i < APP_UI_GC16_EVERY - 1; ++i) {
+        front[0] ^= 1; target[0] = front[0];
+        int prior_full = full_draws;
+        assert(update_display_toc_page(&hl) == EPD_DRAW_SUCCESS);
+        assert(last_mode == MODE_GL16 && waveform_at_draw == &panel37_wave && full_draws == prior_full);
+        assert(last_area.x == 0 && last_area.y == 0 && last_area.width == 684 && last_area.height == 1216);
+        assert(hl.waveform == &E0470_WAVEFORM);
+    }
+    front[0] ^= 1; target[0] = front[0];
+    assert(update_display_toc_page(&hl) == EPD_DRAW_SUCCESS);
+    assert(last_mode == MODE_GC16 && waveform_at_draw == &E0470_FULL_WAVEFORM);
+    panel37_available = false;
+    front[0] ^= 1; target[0] = front[0];
+    assert(update_display_toc_page(&hl) == EPD_DRAW_SUCCESS);
+    assert(last_mode == MODE_GL16 && waveform_at_draw == &soft_gray);
+
     // Image pages clear the optical state and use the full grayscale waveform.
     memcpy(front, target, FB_BYTES);
     memset(back, 0x55, FB_BYTES);
@@ -308,6 +337,7 @@ int main(void) {
         int prior_full=full_draws;
         assert(update_display_reader_panel_fast(&hl,panel_area)==EPD_DRAW_SUCCESS);
         assert(last_mode==MODE_GL16&&waveform_at_draw==&panel37_wave&&full_draws==prior_full);
+        assert(last_area.y==panel_area.y&&last_area.height==panel_area.height);
         assert(last_scan==READ_PICO_EPD_SCAN_FULL&&correct_target_at_draw&&!memcmp(front,target,FB_BYTES));
         assert(display_system_binary_set(false)==(bool)binary&&display_system_navigation_set(false)==(bool)nav);
     }

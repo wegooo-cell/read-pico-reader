@@ -161,6 +161,9 @@ enum EpdDrawError update_display_gray_transition(EpdiyHighlevelState* hl, EpdRec
 #endif
 
 #if KIIKO_BOARD_METALIO47
+/// 目录内翻页与分卷展开走 GL37 精确差分，沿用整页清残影计数。
+/// TOC paging and volume expansion use exact GL37 differences with the existing page cleanup cadence.
+enum EpdDrawError update_display_toc_page(EpdiyHighlevelState* hl);
 /// 已验证未变正文上的面板：保留原厂GL48及完整目标灰阶，一次区域定稿；不借文字22相或速读黑白。
 /// Panels over verified unchanged text retain vendorGL48/full target grays in one regional settle, independent of text22-phase/FastBW.
 enum EpdDrawError update_display_reader_panel(EpdiyHighlevelState* hl,EpdRect area);

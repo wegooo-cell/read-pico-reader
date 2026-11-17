@@ -72,6 +72,11 @@ static const char *app_settings_book_background_path(void){return background?"wa
 static void display_main_transition_cancel(void){}
 static void render(app_ctx_t *ctx,uint8_t *fb){(void)ctx;(void)fb;++rendered;}
 static void prepare_covers(app_ctx_t *ctx){(void)ctx;assert(s_view!=READING);}
+static void cancel_shelf_open(void) {}
+static void ui_image_bw_rect(uint8_t *fb, EpdRect area) {
+    (void)fb;
+    assert(area.x == 0 && area.y == 0 && area.width == UI_LOCK_WIDTH && area.height == UI_LOCK_HEIGHT);
+}
 static void gather_cover_entry(app_ctx_t *ctx){(void)ctx;assert(s_view!=READING);}
 static void prepare_inline_image(void){++prepares;}
 static bool ui_reader_background_prepare(const char *p){(void)p;return true;}

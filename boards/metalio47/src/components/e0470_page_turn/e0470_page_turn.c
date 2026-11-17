@@ -463,9 +463,8 @@ enum EpdDrawError e0470_reader_ripple_with_waveform(EpdiyHighlevelState* hl, Epd
     return page_turn_run(hl, area, dir, waveform, band_count, true, false, true);
 }
 
-enum EpdDrawError e0470_text_turn_with_waveform(EpdiyHighlevelState* hl, EpdRect area,
-    e0470_turn_dir_t dir, const EpdWaveform* waveform) {
-    (void)dir;
+static enum EpdDrawError text_turn(EpdiyHighlevelState* hl, EpdRect area,
+    const EpdWaveform* waveform, bool prefill) {
     if(!hl)return EPD_DRAW_NO_PHASES_AVAILABLE;
     const EpdWaveformPhases* phases=e0470_waveform_phases(waveform,MODE_GL16);
     if(!phases||!phases->luts||phases->phases<=0||phases->phases>TURN_PHASE_CAP||phases->phase_times)
@@ -491,14 +490,27 @@ enum EpdDrawError e0470_text_turn_with_waveform(EpdiyHighlevelState* hl, EpdRect
     epd_clear_phase_luts();epd_poweron();
     // 一次调用复用LCD多相循环与内部1KiB LUT，避免逐相配置及64KiB外部相位表。
     // Reuse the LCD multi-phase loop and internal1KiB LUT in one call, avoiding per-phase setup and a64KiB external phase cache.
+    enum EpdDrawMode mode = MODE_PACKING_1PPB_DIFFERENCE | MODE_GL16;
+    if (prefill) mode |= MODE_PHASE_PREFILL;
     enum EpdDrawError result=epd_draw_base_from_phase(epd_full_screen(),hl->difference_fb,
-        epd_full_screen(),MODE_PACKING_1PPB_DIFFERENCE|MODE_GL16,25,
+        epd_full_screen(),mode,25,
         hl->dirty_lines,hl->dirty_columns,waveform,first);
     if(result==EPD_DRAW_SUCCESS)copy_front_to_back(hl,phys);
     ESP_LOGI(TAG,"text batch phases=%d hold_skip=%d gen=%dms draw=%dms err=%d",
         phases->phases-first,first,(int)((generated-start)/1000),
         (int)((esp_timer_get_time()-generated)/1000),(int)result);
     return result;
+}
+
+enum EpdDrawError e0470_text_turn_with_waveform(EpdiyHighlevelState* hl, EpdRect area,
+    e0470_turn_dir_t dir, const EpdWaveform* waveform) {
+    (void)dir;
+    return text_turn(hl, area, waveform, false);
+}
+
+enum EpdDrawError e0470_text_turn_with_prefill(EpdiyHighlevelState* hl, EpdRect area,
+    const EpdWaveform* waveform) {
+    return text_turn(hl, area, waveform, true);
 }
 
 enum EpdDrawError e0470_update_regions(EpdiyHighlevelState* hl, EpdRect area,

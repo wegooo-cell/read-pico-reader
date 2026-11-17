@@ -99,9 +99,83 @@ int main(void){int values[]={900,1200,3000,4000};for(unsigned i=0;i<4;i++){tps_o
  tps_on=false;tps_prepared=false;writes=off=0;assert(!metalio_tps_prepare()&&!writes);metalio_tps_cancel_prepare();assert(off==1&&!tps_prepared&&!tps_on);metalio_tps_cancel_prepare();assert(off==1);
  puts("PASS: actual TPS65185 runtime VCOM register encoding 900/1200/3000/4000, no OTP command, PG/write faults shut rails off");}
 '''
+# Exercise the real idle verification and shutdown retry against a failed pin read.
+display = r / 'boards/metalio47/src/main/display.c'
+display_text = display.read_text()
+rails = display_text[display_text.index('enum { READER_RAILS_VERIFY_DELAY_MS'):
+                     display_text.index('// 20 相完整/原厂 DU')]
+off = r'''
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+typedef int esp_err_t;
+#define ESP_OK 0
+#define ESP_FAIL -1
+#define ESP_ERR_INVALID_STATE -2
+#define ESP_ERR_TIMEOUT -3
+#define ESP_ERR_NOT_FINISHED -4
+#define pdMS_TO_TICKS(ms) (ms)
+#define pdTRUE 1
+#define ESP_LOGI(...) ((void)0)
+#define ESP_LOGW(...) (++warnings)
+
+static int64_t now_ms;
+static bool tps_on, tps_prepared, busy;
+static unsigned locks, samples, offs, releases, warnings;
+static int device;
+static void *ioe = &device, *mutex = &device;
+static uint8_t pins;
+static esp_err_t io_error;
+static int64_t esp_timer_get_time(void){return now_ms*1000;}
+static bool pico_online_display_begin(void){++locks;return true;}
+static void pico_online_display_end(bool held){assert(held&&locks);--locks;}
+static bool read_pico_epd_release_drive(void){assert(locks);++releases;return true;}
+static void epd_poweroff(void){assert(locks);++offs;tps_on=tps_prepared=false;}
+static int xSemaphoreTake(void *m,int ms){assert(m==mutex&&ms==100);return !busy;}
+static void xSemaphoreGive(void *m){assert(m==mutex&&!busy);}
+static esp_err_t fca9555_read_input(void *dev,int port,uint8_t *value){
+ assert(dev==ioe&&port==0);
+ ++samples;
+ *value=pins;
+ return io_error;
+}
+'''+function('metalio_tps_verify_off',r/'components/metalio_hw/metalio_hw.c')+rails+r'''
+static void check_at(int64_t ms){now_ms=ms;rails_idle_check(ms);assert(!locks);}
+int main(void){
+ for(unsigned bit=0;bit<8;++bit){
+  pins=1u<<bit;
+  assert(metalio_tps_verify_off()==((pins&0x87)?ESP_ERR_NOT_FINISHED:ESP_OK));
+ }
+ pins=0;busy=true;assert(metalio_tps_verify_off()==ESP_ERR_TIMEOUT);busy=false;
+ io_error=ESP_ERR_INVALID_STATE;assert(metalio_tps_verify_off()==ESP_FAIL);io_error=ESP_OK;
+ samples=0;now_ms=1000;rails_keepalive();reader_rails_schedule_check();
+ check_at(1049);assert(!samples&&offs==1);
+ check_at(1050);assert(samples==1&&offs==1&&releases==1);
+ check_at(5000);assert(samples==1&&offs==1);
+
+ rails_keepalive();reader_rails_schedule_check();pins=0x80;
+ check_at(5050);assert(samples==2&&offs==3);
+ pins=0;check_at(5100);assert(samples==3&&offs==3&&!warnings);
+
+ rails_keepalive();reader_rails_schedule_check();io_error=ESP_ERR_TIMEOUT;
+ check_at(5150);check_at(5200);check_at(5250);check_at(5300);
+ assert(samples==6&&offs==6&&releases==6&&warnings==1);
+
+ io_error=ESP_OK;rails_keepalive();reader_rails_schedule_check();
+ tps_prepared=true;check_at(5350);assert(samples==6&&offs==7);
+ check_at(9000);assert(tps_prepared&&samples==6&&offs==7);
+
+ rails_keepalive();reader_rails_schedule_check();check_at(9020);rails_keepalive();
+ check_at(9050);assert(samples==6);
+ check_at(9070);assert(samples==7&&offs==9);
+ puts("PASS: TPS pin readback, read errors, delayed verification, two off retries, active power and later refreshes");
+}
+'''
+
 with tempfile.TemporaryDirectory() as d:
  d=Path(d)
- for name,src in [('nvs',u),('tps',t)]:
+ for name,src in [('nvs',u),('tps',t),('off',off)]:
   (d/(name+'.c')).write_text(src)
   subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',str(d/(name+'.c')),'-o',str(d/name)],check=True)
   subprocess.run([str(d/name)],check=True)

@@ -19,7 +19,7 @@ typedef struct {int x,y,width,height;} EpdRect;
 typedef struct {void *hl;uint8_t *fb;int64_t now_ms;bool request_app;} app_ctx_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL,APP_REDRAW_DONE} app_redraw_t;
 enum EpdDrawError {EPD_DRAW_SUCCESS,EPD_DRAW_OTHER_ERROR};
-enum {READING,SHELF,MANAGE,BULK,EDIT,SEARCH,READER_PANEL_NONE,READER_PANEL_BACKGROUND_PREVIEW,READER_PANEL_FONT_SETTINGS,READER_PANEL_ONLINE_FONTS};
+enum {READING,SHELF,MANAGE,BULK,EDIT,SEARCH,TOC,READER_PANEL_NONE,READER_PANEL_BACKGROUND_PREVIEW,READER_PANEL_FONT_SETTINGS,READER_PANEL_ONLINE_FONTS};
 enum {MODE_DU,MODE_GL16,MODE_GC16,APP_PAGE_REFRESH_MODE=MODE_GL16};
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
@@ -48,6 +48,8 @@ static bool s_reader_image_refresh_pending,s_reader_cleanup,s_reader_turn_pendin
 static bool s_reader_image_frame,s_reader_image_exit_pending,hide_images;
 static int64_t s_reader_footer_due_ms;
 static bool s_toolbar,s_shelf_key_paint_pending,test_panel_short;
+static bool test_toolbar_transition,test_toolbar_crop,test_custom_modal;
+static bool s_toc_content_changed;
 static bool reader_indent_present(app_ctx_t*c,app_redraw_t d){(void)c;(void)d;return false;}
 static int s_view=READING,s_reader_panel,s_mode=MODE_GL16,s_presented_view=READING,s_water_turn_dir,s_page,s_du_count;
 static unsigned s_cover_dirty_mask,s_cover_present_mask;
@@ -74,6 +76,7 @@ static bool kick_prep(void){return false;}
 static const char *app_settings_book_background_path(void){return background?"wallpaper":"";}
 static void display_main_transition_cancel(void){}
 static void render(app_ctx_t *ctx,uint8_t *fb){(void)ctx;(void)fb;++rendered;}
+static void ui_image_bw_rect(uint8_t *fb,EpdRect area){(void)fb;assert(area.height==1216);}
 static void prepare_covers(app_ctx_t *ctx){(void)ctx;assert(s_view!=READING);}
 static void gather_cover_entry(app_ctx_t *ctx){(void)ctx;assert(s_view!=READING);}
 static void prepare_inline_image(void){++prepares;}
@@ -107,14 +110,16 @@ static void assert_text_area(void){
  assert(last_text_area.x==0&&last_text_area.y==0&&last_text_area.width==684&&last_text_area.height==1216);
 }
 #define update_display_reader_panel(...) push(21)
-#define update_display_reader_panel_fast(...) push(21)
+#define update_display_reader_panel_fast(...) push(test_toolbar_transition?25:21)
 #define update_display_reader_panel_gray4(...) push(21)
 #define update_display_fast_page(...) push(19)
+#define update_display_toc_page(...) push(26)
 static EpdRect reader_fast_panel_rect(void){return(EpdRect){0};}
 static bool reader_slider_feedback_present(app_ctx_t *ctx,app_redraw_t redraw){(void)ctx;(void)redraw;return false;}
 '''
-unit+='enum {READER_PANEL_TOUCH_SETTINGS=90,READER_PANEL_TOUCH_MORE=91};\nstatic bool s_rc_full_was_visible,s_rc_double_pending;\nstatic bool rc_custom_modal(void){return false;}\nstatic void rc_pause_auto(void){}\nstatic void rc_stop_auto(void){}\nstatic void rc_cancel_side(void){}\n'
+unit+='enum {READER_PANEL_TOUCH_SETTINGS=90,READER_PANEL_TOUCH_MORE=91};\nstatic bool s_rc_full_was_visible,s_rc_double_pending;\nstatic bool rc_custom_modal(void){return test_custom_modal;}\nstatic void rc_pause_auto(void){}\nstatic void rc_stop_auto(void){}\nstatic void rc_cancel_side(void){}\n'
 unit+='static bool reader_panel_short_ready(app_redraw_t r){return test_panel_short&&r==APP_REDRAW_PAGE;}\nstatic bool reader_panel_fast_present(app_ctx_t *ctx,app_redraw_t redraw){(void)ctx;(void)redraw;return false;}\nstatic void reader_panel_record(enum EpdDrawError err){(void)err;}\nstatic bool display_page_prepare_begin(void){return false;}\nstatic void display_page_prepare_end(bool held){(void)held;}\n'
+unit+='static bool reader_toolbar_transition(app_ctx_t *ctx,app_redraw_t r){(void)ctx;return test_toolbar_transition&&r==APP_REDRAW_PAGE;}\nstatic bool reader_toolbar_dirty_area(void *hl,EpdRect *r){(void)hl;*r=(EpdRect){0,576,684,640};return test_toolbar_crop;}\n'
 unit+='\n'.join(line for line in (root/'main/ui/ui_reader_layout.h').read_text().splitlines() if not line.startswith(('#include','#pragma'))) + '\n'
 for name in ('reader_area','reader_fullscreen_progress_area','progress_rect'):
  unit+=function(name,root/'main/apps/app_book.c')+'\n'
@@ -126,6 +131,8 @@ unit+=r'''
 static void reset(void){
  memset(&last_text_area,0,sizeof(last_text_area));
  calls=selected=rendered=prepares=fail=images=tick=0;background=test_panel_short=hide_images=immersive=false;s_view=s_presented_view=READING;
+ test_toolbar_transition=test_toolbar_crop=test_custom_modal=false;
+ s_toc_content_changed=false;
  s_reader_image_frame=s_reader_image_exit_pending=false;
  s_reader_panel=READER_PANEL_NONE;s_mode=MODE_GL16;s_reader_fullscreen=true;
  s_reader_footer_pending=true;s_reader_cleanup=false;s_water_turn_pending=false;s_reader_turn_pending=true;
@@ -133,9 +140,16 @@ static void reset(void){
 }
 int main(void){
  app_ctx_t ctx={0};
+ reset();s_view=s_presented_view=TOC;s_toc_content_changed=true;
+ present(&ctx,APP_REDRAW_PAGE);assert(calls==1&&selected==26&&rendered==1&&!s_toc_content_changed);
+ present(&ctx,APP_REDRAW_PAGE);assert(calls==2&&selected==19);
+ reset();s_view=TOC;s_toc_content_changed=true;
+ present(&ctx,APP_REDRAW_PAGE);assert(calls==1&&selected==19&&!s_toc_content_changed);
+ reset();s_view=s_presented_view=TOC;s_toc_content_changed=true;
+ present(&ctx,APP_REDRAW_FULL);assert(calls==1&&selected==12&&!s_toc_content_changed);
  for(unsigned entry=0;entry<2;++entry)for(unsigned img=0;img<2;++img){
   reset();s_presented_view=entry?SEARCH:SHELF;images=img;background=img;s_turns=9;
-  present(&ctx,APP_REDRAW_PAGE);assert(calls==1&&selected==22&&s_turns==0&&s_presented_view==READING);
+  present(&ctx,APP_REDRAW_PAGE);assert(calls==1&&selected==(entry?22:14)&&s_turns==0&&s_presented_view==READING);
   assert(last_gray_wave==&E0470_FULL_WAVEFORM&&last_gray_mode==MODE_GC16&&last_gray_area.height==1216);
  }
  reset();s_presented_view=SEARCH;fail=1;s_turns=9;
@@ -165,6 +179,11 @@ int main(void){
  reset();s_reader_turn_pending=false;present(&ctx,APP_REDRAW_PAGE);assert(calls==1&&selected==17&&rendered==1);
  reset();s_reader_panel=READER_PANEL_BACKGROUND_PREVIEW;s_reader_turn_pending=s_reader_footer_pending=false;
  present(&ctx,APP_REDRAW_PAGE);assert(calls==1&&selected==13&&rendered==1); // UI does not count as whole-body cleanup
+ for(int crop=0;crop<2;++crop){
+  reset();s_reader_panel=READER_PANEL_FONT_SETTINGS;s_reader_turn_pending=false;
+  test_toolbar_transition=test_custom_modal=true;test_toolbar_crop=crop;
+  assert(present(&ctx,APP_REDRAW_PAGE)&&calls==1&&rendered==1&&(selected==(crop?25:19)));
+ }
  reset();s_reader_panel=READER_PANEL_FONT_SETTINGS;s_reader_turn_pending=s_reader_footer_pending=false;test_panel_short=true;
  present(&ctx,APP_REDRAW_PAGE);assert(calls==1&&selected==21&&rendered==1);
  reset();s_reader_panel=READER_PANEL_FONT_SETTINGS;s_reader_turn_pending=s_reader_footer_pending=false;test_panel_short=true;

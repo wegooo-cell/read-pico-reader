@@ -36,6 +36,7 @@ typedef struct {
     bool volumes_incomplete; ///< 卷表不足时保留平铺目录且不缓存残缺结果 / Flat fallback without caching incomplete volume metadata
     size_t nav_count;
     size_t mapped_chapter, mapped_begin, mapped_end;
+    size_t mapped_title; ///< 旧版标题在当前分段内的 UTF-8 位置 / Legacy title's UTF-8 position in this segment
     bool mapped; ///< 当前正文分段的目录UTF8定位已就绪 / Current body segment has UTF8 navigation positions
     bool nav_incomplete; ///< 资源不足时保留旧目录，稍后可重建 / Retain legacy navigation on resource exhaustion
     size_t count; ///< 目录条数 / Entry count
@@ -58,6 +59,7 @@ size_t book_txt_nav_source_offset(const book_txt_t *book, size_t position);
 esp_err_t book_txt_title(book_txt_t *book, size_t i, bool navigation, char *buf, size_t cap);
 esp_err_t book_txt_load_target(book_txt_t *book, size_t i, size_t source_offset,
                                size_t *text_offset, char **utf8, size_t *len);
+void book_txt_heading_blocks(const book_txt_t *book, html_text_t *text);
 size_t book_txt_nav_position(const book_txt_t *book,size_t chapter,size_t text_offset);
 
 /// 只读与文件身份匹配的已有索引；未知/过期/损坏返回0，不打开或解析书籍。

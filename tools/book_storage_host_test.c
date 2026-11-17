@@ -78,6 +78,69 @@ static bool record_list_visit(const char* path,const book_progress_t* progress,v
     if(listed<8)snprintf(listed_paths[listed],BOOK_STORE_PATH_MAX,"%s",path);
     ++listed;return ctx==NULL;
 }
+#ifdef ESP_PLATFORM
+static bool flash_ready;
+static size_t available_entries = 128;
+esp_err_t nvs_get_stats(const char *partition, nvs_stats_t *stats) {
+    assert(!partition);
+    stats->available_entries = available_entries;
+    return ESP_OK;
+}
+esp_err_t book_store_prepare_flash(void) { return flash_ready ? ESP_OK : ESP_FAIL; }
+bool book_store_flash_ready(void) { return flash_ready; }
+
+int main(void) {
+    const char *path = "/sdcard/books/legacy.epub";
+    unsigned char legacy[512] = {'R','P','B',2,12,0,0,0,9,0,5,0,0,0,48,73,20};
+    uint32_t hash = UINT32_C(2166136261);
+    for (const unsigned char *c = (const unsigned char *)path; *c; ++c)
+        hash = (hash ^ *c) * UINT32_C(16777619);
+    char key[11];
+    snprintf(key, sizeof(key), "b_%08x", (unsigned)hash);
+    legacy[22] = (unsigned char)(strlen(path) + 1);
+    strcpy((char *)legacy + 24, path);
+    assert(nvs_set_blob(1, key, legacy, 24 + legacy[22]) == ESP_OK);
+    assert(nvs_set_u32(1, "seq", 20) == ESP_OK);
+    assert(book_progress_set_last_path(path) == ESP_OK);
+    book_progress_t progress;
+    book_progress_prepare();
+    assert(record(key, false) && book_progress_load(path, 12, &progress));
+    assert(progress.chapter == 9 && progress.pct == 73 && progress.last_open_s == 20);
+
+    flash_ready = true;
+    erase_failure = ESP_FAIL;
+    book_progress_prepare();
+    listed = 0;
+    assert(record(key, false) && book_progress_list(record_list_visit, NULL) == ESP_OK && listed == 1);
+    erase_failure = 0;
+    book_progress_prepare_at_boot();
+    assert(record(key, false));
+    available_entries = 5;
+    book_progress_prepare_at_boot();
+    assert(!record(key, false) && !strcmp(last, path));
+    assert(book_progress_load(path, 12, &progress) && progress.last_open_s == 20);
+
+    blob_failure = ESP_ERR_NVS_NOT_ENOUGH_SPACE;
+    progress.byte_off = 9;
+    assert(book_progress_save(path, &progress) == ESP_OK && !record(key, false));
+    assert(book_progress_load(path, 12, &progress) && progress.byte_off == 9 && progress.last_open_s == 21);
+    // A torn update of the newer copy falls back to the committed older position.
+    char slot[256];
+    snprintf(slot, sizeof(slot), BOOK_PROGRESS_DIR "/%s.1", key + 2);
+    FILE *file = fopen(slot, "wb");
+    assert(file && fputs("incomplete", file) >= 0 && fclose(file) == 0);
+    assert(book_progress_load(path, 12, &progress) && progress.byte_off == 5 && progress.last_open_s == 20);
+    read_open_failure = ESP_FAIL;
+    assert(book_progress_load(path, 12, &progress));
+    book_progress_query_t query = {.path = path, .file_size = 12};
+    assert(book_progress_load_batch(&query, 1) && query.found && query.progress.last_open_s == 20);
+    read_open_failure = 0;
+    assert(book_progress_forget(path) == ESP_OK && !book_progress_load(path, 12, &progress));
+    listed = 0;
+    assert(book_progress_list(record_list_visit, NULL) == ESP_OK && !listed && !last[0]);
+    puts("PASS: legacy progress retained through mount and NVS erase failures; verified migration, no new NVS blobs, torn write recovery and per-book forget");
+}
+#else
 int main(void){
     const char*sd="/sdcard/books/同名.txt",*flash="/flash/books/同名.txt";
     book_progress_watch_t* watch_a=book_progress_watch_create(sd);
@@ -179,3 +242,4 @@ int main(void){
     }
     puts("book progress: v1/v2, sequence, collision, two roots, NVS-full, partial forget and retry passed");
 }
+#endif

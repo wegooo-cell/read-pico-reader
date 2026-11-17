@@ -112,6 +112,16 @@ bool book_weread_cover_metadata(const char *path, char *title, size_t title_cap,
     return true;
 }
 
+uint64_t book_weread_cover_stamp(const char *path) {
+    cover_record_t record;
+    FILE *file = open_record(path, &record);
+    if (!file) return 0;
+    struct stat st;
+    uint64_t stamp = fstat(fileno(file), &st) == 0 ? (uint64_t)st.st_mtime : 0;
+    fclose(file);
+    return stamp | (UINT64_C(1) << 63);
+}
+
 bool book_weread_cover_read(const char *path, uint8_t *out, unsigned width, unsigned height) {
     if (!out || !width || !height || width > BOOK_COVER_W || height > BOOK_COVER_H) return false;
     cover_record_t record;

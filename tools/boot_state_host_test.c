@@ -93,7 +93,13 @@ int main(void) {
     assert(s_recovery_reasons==BOOT_RECOVERY_OPENING);
     assert(pico_boot_interrupted_book(interrupted, sizeof(interrupted)) && !strcmp(interrupted, "/sdcard/books/large.epub"));
     assert(!pico_boot_interrupted_book(interrupted, 8));
-    pico_boot_ready(); pico_boot_init(false); pico_boot_ready();
+    pico_boot_ready();
+    pico_boot_leave_book_recovery();
+    assert(!pico_boot_recovery() && !pico_boot_interrupted_book(interrupted, sizeof(interrupted)));
+    assert(!pico_boot_asset_allowed("/sdcard/books/large.epub") && pico_boot_asset_allowed(resume.path));
+    assert(pico_boot_book_begin(resume.path) == ESP_OK);
+    pico_boot_book_end(true);
+    pico_boot_init(false); pico_boot_ready();
     assert(!pico_boot_recovery() && !pico_boot_asset_allowed("/sdcard/books/large.epub") && pico_boot_asset_allowed(resume.path));
     // 密码取消/深睡再次开机不能丢失恢复，但实际开书前必须消费。
     // PIN cancellation and another deep boot retain resume; actual opening still consumes it.

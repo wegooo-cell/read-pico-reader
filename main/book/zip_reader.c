@@ -106,13 +106,12 @@ static bool extras_valid(zip_reader_t* z, uint32_t pos, uint16_t len, bool local
     return true;
 }
 
-static uint32_t zip_crc32(const uint8_t* data, size_t len) {
-    uint32_t crc = UINT32_MAX;
+static uint32_t zip_crc_update(uint32_t crc, const uint8_t* data, size_t len) {
     while (len--) {
         crc ^= *data++;
         for (int i = 0; i < 8; ++i) crc = (crc >> 1) ^ (UINT32_C(0xedb88320) & (0U - (crc & 1U)));
     }
-    return ~crc;
+    return crc;
 }
 
 static bool trailing_whitespace(const uint8_t* data, size_t len) {
@@ -296,19 +295,7 @@ size_t zip_entry_size(const zip_reader_t* z, int index) {
     return z && index >= 0 && index < z->count ? z->entries[index].unpacked : 0;
 }
 
-static esp_err_t extract_impl(zip_reader_t* z, int index, void* dst, size_t cap, bool prefix) {
-    if (!z || index < 0 || index >= z->count) return ESP_ERR_INVALID_ARG;
-#if KIIKO_BOARD_METALIO47
-    if(z->prefetch_ready) {
-        struct stat now;
-        if(!z->file||fstat(fileno(z->file),&now)||now.st_size!=z->prefetch_stat.st_size||
-           now.st_mtime!=z->prefetch_stat.st_mtime)zip_prefetch_clear(z);
-    }
-#else
-#endif
-    const zip_entry_t* entry = &z->entries[index];
-    if ((!prefix && (entry->unpacked > ZIP_OUTPUT_MAX || entry->packed > ZIP_INPUT_MAX)) ||
-        (!prefix && cap < entry->unpacked) || (prefix && (!cap || cap > 65536)) || (!dst && entry->unpacked)) return ESP_ERR_INVALID_SIZE;
+static esp_err_t entry_data_offset(zip_reader_t *z, const zip_entry_t *entry, uint32_t *data_pos) {
     uint8_t h[30];
     if (!read_at(z, entry->offset, h, sizeof(h)) || u32(h) != UINT32_C(0x04034b50) ||
         u16(h + 6) != entry->flags || u16(h + 8) != entry->method ||
@@ -328,7 +315,26 @@ static esp_err_t extract_impl(zip_reader_t* z, int index, void* dst, size_t cap,
                    extras_valid(z, entry->offset + 30 + name_len, extra_len, !(entry->flags & 8));
     free(name);
     if (!name_ok) return ESP_ERR_INVALID_SIZE;
-    uint32_t data_pos = entry->offset + header_size;
+    *data_pos = entry->offset + header_size;
+    return ESP_OK;
+}
+
+static esp_err_t extract_impl(zip_reader_t* z, int index, void* dst, size_t cap, bool prefix) {
+    if (!z || index < 0 || index >= z->count) return ESP_ERR_INVALID_ARG;
+#if KIIKO_BOARD_METALIO47
+    if(z->prefetch_ready) {
+        struct stat now;
+        if(!z->file||fstat(fileno(z->file),&now)||now.st_size!=z->prefetch_stat.st_size||
+           now.st_mtime!=z->prefetch_stat.st_mtime)zip_prefetch_clear(z);
+    }
+#else
+#endif
+    const zip_entry_t* entry = &z->entries[index];
+    if ((!prefix && (entry->unpacked > ZIP_OUTPUT_MAX || entry->packed > ZIP_INPUT_MAX)) ||
+        (!prefix && cap < entry->unpacked) || (prefix && (!cap || cap > 65536)) || (!dst && entry->unpacked)) return ESP_ERR_INVALID_SIZE;
+    uint32_t data_pos;
+    esp_err_t err = entry_data_offset(z, entry, &data_pos);
+    if (err != ESP_OK) return err;
     size_t target = prefix && cap < entry->unpacked ? cap : entry->unpacked;
     uint8_t empty_output;
     uint8_t* output = dst ? dst : &empty_output;
@@ -388,11 +394,108 @@ static esp_err_t extract_impl(zip_reader_t* z, int index, void* dst, size_t cap,
         if (!ok) return ESP_ERR_INVALID_SIZE;
     }
     if (prefix && target < entry->unpacked) return ESP_OK;
-    return zip_crc32(output, entry->unpacked) == entry->crc ? ESP_OK : ESP_ERR_INVALID_CRC;
+    return (~zip_crc_update(UINT32_MAX, output, entry->unpacked)) == entry->crc ? ESP_OK : ESP_ERR_INVALID_CRC;
 }
 
 esp_err_t zip_extract(zip_reader_t *z, int index, void *dst, size_t cap) { return extract_impl(z, index, dst, cap, false); }
 esp_err_t zip_extract_prefix(zip_reader_t *z, int index, void *dst, size_t cap) { return extract_impl(z, index, dst, cap, true); }
+#define ZIP_STREAM_WINDOW 32768u
+#define ZIP_STREAM_INPUT 4096u
+
+struct zip_stream {
+    zip_reader_t *reader;
+    const zip_entry_t *entry;
+    uint32_t data, packed, crc;
+    size_t in_at, in_len, produced, out_at, out_len;
+    bool done, failed;
+    tinfl_decompressor inflate;
+    uint8_t input[ZIP_STREAM_INPUT], window[ZIP_STREAM_WINDOW];
+};
+
+esp_err_t zip_stream_open(zip_reader_t *z, int index, zip_stream_t **out) {
+    if (!out) return ESP_ERR_INVALID_ARG;
+    *out = NULL;
+    if (!z || index < 0 || index >= z->count) return ESP_ERR_INVALID_ARG;
+    const zip_entry_t *entry = &z->entries[index];
+    if (entry->packed > ZIP_INPUT_MAX || entry->unpacked > ZIP_OUTPUT_MAX) return ESP_ERR_INVALID_SIZE;
+    uint32_t data;
+    esp_err_t err = entry_data_offset(z, entry, &data);
+    if (err != ESP_OK) return err;
+    zip_stream_t *stream = heap_caps_calloc(1, sizeof(*stream), PSRAM);
+    if (!stream) return ESP_ERR_NO_MEM;
+    stream->reader = z;
+    stream->entry = entry;
+    stream->data = data;
+    stream->crc = UINT32_MAX;
+    tinfl_init(&stream->inflate);
+    *out = stream;
+    return ESP_OK;
+}
+
+void zip_stream_close(zip_stream_t *stream) { free(stream); }
+
+static esp_err_t stream_fill(zip_stream_t *s) {
+    s->out_at = s->out_len = 0;
+    if (s->entry->method == 0) {
+        size_t n = s->entry->unpacked - s->produced;
+        if (n > sizeof(s->window)) n = sizeof(s->window);
+        if (!read_at(s->reader, s->data + s->produced, s->window, n)) return ESP_FAIL;
+        s->out_len = n;
+        s->done = s->produced + n == s->entry->unpacked;
+    } else {
+        // Keep the preceding 32 KiB dictionary in the wrapping inflate window.
+        while (s->out_len < sizeof(s->window) && !s->done) {
+            if (s->in_at == s->in_len && s->packed < s->entry->packed) {
+                size_t n = s->entry->packed - s->packed;
+                if (n > sizeof(s->input)) n = sizeof(s->input);
+                if (!read_at(s->reader, s->data + s->packed, s->input, n)) return ESP_FAIL;
+                s->packed += n;
+                s->in_at = 0;
+                s->in_len = n;
+            }
+            size_t consumed = s->in_len - s->in_at;
+            size_t generated = sizeof(s->window) - s->out_len;
+            tinfl_status status = tinfl_decompress(&s->inflate, s->input + s->in_at, &consumed,
+                s->window, s->window + s->out_len, &generated,
+                s->packed < s->entry->packed ? TINFL_FLAG_HAS_MORE_INPUT : 0);
+            s->in_at += consumed;
+            s->out_len += generated;
+            if (status == TINFL_STATUS_DONE) {
+                if (s->in_at != s->in_len || s->packed != s->entry->packed) return ESP_ERR_INVALID_SIZE;
+                s->done = true;
+            } else if (status < 0 || (!consumed && !generated)) return ESP_ERR_INVALID_SIZE;
+        }
+    }
+    if (s->out_len > s->entry->unpacked - s->produced) return ESP_ERR_INVALID_SIZE;
+    s->crc = zip_crc_update(s->crc, s->window, s->out_len);
+    s->produced += s->out_len;
+    if (s->done && s->produced != s->entry->unpacked) return ESP_ERR_INVALID_SIZE;
+    if (s->done && ~s->crc != s->entry->crc) return ESP_ERR_INVALID_CRC;
+    return ESP_OK;
+}
+
+esp_err_t zip_stream_read(zip_stream_t *s, void *dst, size_t cap, size_t *received) {
+    if (!s || !dst || !received || s->failed) return ESP_ERR_INVALID_ARG;
+    *received = 0;
+    while (*received < cap) {
+        if (s->out_at == s->out_len) {
+            if (s->done) break;
+            esp_err_t err = stream_fill(s);
+            if (err != ESP_OK) { s->failed = true; return err; }
+        }
+        size_t n = s->out_len - s->out_at;
+        if (n > cap - *received) n = cap - *received;
+        memcpy((uint8_t *)dst + *received, s->window + s->out_at, n);
+        s->out_at += n;
+        *received += n;
+    }
+    if (!s->done && s->produced == s->entry->unpacked && s->out_at == s->out_len) {
+        esp_err_t err = stream_fill(s);
+        if (err != ESP_OK) { s->failed = true; return err; }
+    }
+    return ESP_OK;
+}
+
 #if KIIKO_BOARD_METALIO47
 
 void zip_prefetch_clear(zip_reader_t *z) {

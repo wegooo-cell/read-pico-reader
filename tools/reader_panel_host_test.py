@@ -16,6 +16,7 @@ unit=r'''
 #include <stdlib.h>
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
+#define UI_READER_STANDARD_TOP 176
 #define UI_GRAY_WHITE 255
 #define BYTES (684*1216/2)
 #define ESP_LOGI(...) ((void)0)
@@ -24,15 +25,18 @@ typedef struct{int x,y,width,height;}EpdRect;
 typedef enum{APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL}app_redraw_t;
 enum EpdDrawError{EPD_DRAW_SUCCESS,EPD_DRAW_OTHER_ERROR};
 enum{READING,SHELF,MODE_GL16};
-typedef enum{READER_PANEL_NONE,READER_PANEL_TOOLS,READER_PANEL_FONT_SETTINGS,READER_PANEL_REFRESH_SETTINGS,READER_PANEL_STATS,READER_PANEL_BACKGROUND,READER_PANEL_BACKGROUND_PREVIEW,READER_PANEL_LAYOUT_SETTINGS,READER_PANEL_FONT_PICKER}reader_panel_t;
-typedef struct{uint8_t*back_fb;}hl_t;
+typedef enum{READER_PANEL_NONE,READER_PANEL_TOOLS,READER_PANEL_FONT_SETTINGS,READER_PANEL_REFRESH_SETTINGS,READER_PANEL_STATS,READER_PANEL_BACKGROUND,READER_PANEL_BACKGROUND_PREVIEW,READER_PANEL_LAYOUT_SETTINGS,READER_PANEL_FONT_PICKER,READER_PANEL_FONT_RECOVERY,READER_PANEL_TOUCH_SETTINGS,READER_PANEL_TOUCH_MORE,READER_PANEL_READING_DISPLAY,READER_PANEL_HEADING_SETTINGS}reader_panel_t;
+enum EpdRotation{EPD_ROT_LANDSCAPE,EPD_ROT_PORTRAIT,EPD_ROT_INVERTED_LANDSCAPE,EPD_ROT_INVERTED_PORTRAIT};
+typedef struct{uint8_t*front_fb,*back_fb;}EpdiyHighlevelState;
+typedef EpdiyHighlevelState hl_t;
 typedef struct{uint8_t*fb;hl_t*hl;bool request_app;}app_ctx_t;
 static uint8_t front[BYTES],back[BYTES],original[BYTES],cached_body[BYTES];
-static hl_t hl={back};static app_ctx_t ctx={front,&hl,false};
+static hl_t hl={front,back};static app_ctx_t ctx={front,&hl,false};
 static int s_view=READING,s_mode,s_du_count,s_presented_view;
 static const char*s_text="book";static size_t s_page=2,s_chapter=3;
 static bool s_clear_confirm,s_reader_fullscreen=true,s_reader_text_frame,s_fonts_reload_pending;
 static bool s_reader_cleanup,s_reader_turn_pending,s_water_turn_pending,s_reader_footer_pending;
+static bool s_reader_image_exit_pending;
 static char s_reader_notice[20];static reader_panel_t s_reader_panel;
 static int images,rotation=3,draws,pushes,errors,prepared,ended,full_draws,outer_draws,stores,cancels,invalidates;
 static uint32_t generation=9;static bool background,draw_lock,failed,cache_ready,cache_oom;
@@ -62,6 +66,9 @@ static size_t fb_bytes(void){return BYTES;}
 static unsigned book_layout_page_image_count(size_t page){assert(page==s_page);return images;}
 static uint32_t book_layout_generation(void){return generation;}
 static int epd_get_rotation(void){return rotation;}
+static int epd_width(void){return UI_LOCK_HEIGHT;}
+static int epd_height(void){return UI_LOCK_WIDTH;}
+static bool reader_tools_visible(void){return !s_reader_fullscreen&&(s_reader_panel==READER_PANEL_NONE||s_reader_panel==READER_PANEL_TOOLS);}
 static const char*app_settings_book_background_path(void){return background?"wallpaper":"";}
 static int reader_font_top(void){return font_top;}
 static int reading_settings_top(void){return settings_top;}
@@ -98,7 +105,7 @@ static void invalidate_prep(void){++invalidates;}
 '''
 a=source.rindex('static struct {',0,source.index('static void reader_panel_record('));b=source.index('} s_reader_panel_frame;',a)+len('} s_reader_panel_frame;')
 unit+=source[a:b]+'\n'
-for name in ['reader_fast_panel_rect','reader_panel_record','reader_panel_short_ready','reader_panel_fast_present','reader_slider_overlay_ready','reader_slider_feedback_present','reader_slider_value','reader_slider_feedback','reader_slider_commit','draw_reader_cached','pause_reader_prep']:unit+=function(name,book)+'\n'
+for name in ['reader_fast_panel_rect','reader_panel_record','reader_panel_short_ready','reader_toolbar_panel','reader_toolbar_transition','reader_toolbar_dirty_area','reader_panel_fast_present','reader_slider_overlay_ready','reader_slider_feedback_present','reader_slider_value','reader_slider_feedback','reader_slider_commit','draw_reader_cached','pause_reader_prep']:unit+=function(name,book)+'\n'
 start=source.index('    if (s_view == READING &&\n        (s_reader_panel == READER_PANEL_FONT_SETTINGS',source.index('static app_redraw_t gesture_event('))
 at=source.index('{',start)+1;depth=1
 while depth:
@@ -107,9 +114,10 @@ unit+='static app_redraw_t slider_gesture(app_ctx_t*ctx,const ui_gesture_event_t
 unit+=r'''
 static void reset(reader_panel_t prior){
  fast_panels=false;four_pushes=entry_pushes=0;erased_underlay=false;
- s_view=READING;s_text="book";s_page=2;s_chapter=3;generation=9;rotation=3;s_reader_fullscreen=true;
+ s_view=s_presented_view=READING;s_text="book";s_page=2;s_chapter=3;generation=9;rotation=3;s_reader_fullscreen=true;
  images=0;background=false;s_clear_confirm=false;s_reader_notice[0]=0;s_reader_panel=prior;
  s_reader_cleanup=s_reader_turn_pending=s_water_turn_pending=s_reader_footer_pending=false;
+ s_reader_image_exit_pending=false;
  draws=pushes=errors=prepared=ended=0;failed=false;draw_lock=false;s_fonts_reload_pending=false;
  for(unsigned i=0;i<BYTES;i++)front[i]=(uint8_t)(i*13+7);
  memcpy(back,front,BYTES);memcpy(original,front,BYTES);ctx=(app_ctx_t){front,&hl,false};hl.back_fb=back;
@@ -117,6 +125,28 @@ static void reset(reader_panel_t prior){
 }
 int main(void){
  (void)invalidate_prep;
+ // Both orientations preserve the header and include old sheet pixels exposed when a sheet closes.
+ const int stride=UI_LOCK_HEIGHT/2;
+ for(int rotated=0;rotated<2;++rotated){
+  reset(READER_PANEL_REFRESH_SETTINGS);s_reader_fullscreen=false;
+  rotation=rotated?EPD_ROT_PORTRAIT:EPD_ROT_INVERTED_PORTRAIT;
+  reader_panel_record(EPD_DRAW_SUCCESS);
+  s_reader_panel=READER_PANEL_READING_DISPLAY;s_reader_footer_pending=true;
+  assert(reader_toolbar_transition(&ctx,APP_REDRAW_PAGE));
+  EpdRect changed;
+  assert(reader_toolbar_dirty_area(&hl,&changed)&&!changed.height);
+  front[12*stride+(rotated?stride-1-580/2:580/2)]^=0x01;
+  front[600*stride+(rotated?stride-1-1200/2:1200/2)]^=0x80;
+  assert(reader_toolbar_dirty_area(&hl,&changed));
+  assert(changed.y==580&&changed.height==622&&changed.width==UI_LOCK_WIDTH);
+  s_reader_panel=READER_PANEL_NONE;assert(reader_toolbar_transition(&ctx,APP_REDRAW_PAGE));
+  front[rotated?stride-1:0]^=1;assert(!reader_toolbar_dirty_area(&hl,&changed));
+  generation++;assert(!reader_toolbar_transition(&ctx,APP_REDRAW_PAGE));generation--;
+  s_reader_panel=READER_PANEL_TOUCH_SETTINGS;assert(!reader_toolbar_transition(&ctx,APP_REDRAW_PAGE));
+ }
+ reset(READER_PANEL_NONE);s_reader_fullscreen=false;reader_panel_record(EPD_DRAW_SUCCESS);
+ assert(reader_toolbar_transition(&ctx,APP_REDRAW_PAGE));
+ assert(!reader_toolbar_transition(&ctx,APP_REDRAW_FULL)&&!reader_toolbar_transition(&ctx,APP_REDRAW_AREA));
  for(int large=0;large<2;large++){
   font_top=large?468:580;settings_top=large?376:580;
   const reader_panel_t targets[]={READER_PANEL_TOOLS,READER_PANEL_FONT_SETTINGS,READER_PANEL_REFRESH_SETTINGS,READER_PANEL_STATS};

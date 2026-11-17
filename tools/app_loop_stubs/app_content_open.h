@@ -10,6 +10,7 @@ static inline void app_book_ticket_sample(int64_t now_ms, bool exposed) { (void)
 static inline bool app_book_reader_body_visible(void) { return false; }
 extern bool test_reader_open;
 static inline bool app_book_reader_open(void) { return test_reader_open; }
+static inline bool app_book_reading_active(void) { return test_reader_open; }
 
 #include <stddef.h>
 bool app_book_resume_context(char *path, size_t capacity, bool *fullscreen);

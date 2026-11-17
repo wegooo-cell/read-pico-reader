@@ -262,6 +262,7 @@ int main(void) {
     const EpdWaveformPhases* cp=e0470_waveform_phases(clean,MODE_GL16);assert(cp&&cp->phases==28);
     for(int f=0;f<28;++f)for(int to=0;to<16;++to)for(int from=0;from<16;++from){
         int want=f<18?e0470_phase_action(p,f,to,from):f<24?(to==15?2:0):0;
+        if (to == 15 && from == 15) want = f < 6 ? 2 : 0;
         assert(e0470_phase_action(cp,f,to,from)==want);
     }
     reader_tail_test(&hl,clean,28);

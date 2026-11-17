@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include "esp_err.h"
 typedef int nvs_handle_t;
+typedef struct { size_t available_entries; } nvs_stats_t;
+esp_err_t nvs_get_stats(const char *, nvs_stats_t *);
 #define NVS_READONLY 0
 #define NVS_READWRITE 1
 esp_err_t nvs_open(const char*, int, nvs_handle_t*);

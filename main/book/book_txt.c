@@ -18,7 +18,7 @@
 #define READ_BLOCK (BOOK_TXT_PROBE_BYTES - 3u)
 #define PART_TARGET (48 * 1024)
 // 两板缓存只重建定位表，不迁移原进度、书签或TXT。/ Rebuild locations on both boards without migrating progress, bookmarks or source TXT.
-#define TXT_CACHE_VERSION 5u
+#define TXT_CACHE_VERSION 6u
 #define TXT_LINE_BYTES 192u
 #define TXT_TITLE_BYTES 160u
 #define NAV_STRONG 1u
@@ -169,7 +169,7 @@ typedef struct {
     unsigned last_number, front_lines;
     size_t front_strong;
     uint32_t front_offset;
-    bool separator, blank, have_number, seen_content, front, front_titles;
+    bool separator, blank, have_number, seen_content, front, front_titles, explicit_heading;
 } nav_scan_t;
 
 static txt_nav_t *nav_at(const book_txt_t *b, size_t i) {
@@ -431,11 +431,16 @@ static void volumes_finish(book_txt_t *b) {
     if(b->volume_count)b->volumes[b->volume_count-1].end=(uint16_t)b->nav_count;
 }
 static bool numeric_heading(const char *s, unsigned *number) {
-    if(!isdigit((unsigned char)*s))return false;
     unsigned value=0;
-    while(isdigit((unsigned char)*s)){
-        if(value>100000)return false;
-        value=value*10+(unsigned)(*s++-'0');
+    if (isdigit((unsigned char)*s)) {
+        while(isdigit((unsigned char)*s)){
+            if(value>100000)return false;
+            value=value*10+(unsigned)(*s++-'0');
+        }
+    } else {
+        const char *begin = s;
+        value = heading_ordinal(&s);
+        if (s == begin) return false;
     }
     s=skip_space(s);
     if(*s && strncmp(s,"、",3) && *s!='.' && *s!=')' && strncmp(s,"）",3))return false;
@@ -466,6 +471,7 @@ static void nav_observe(book_txt_t *b,nav_scan_t *scan,uint32_t offset,char *lin
     bool numeric=!overflow && scan->blank && numeric_heading(s,&number);
     unsigned flags=(strong?NAV_STRONG:0)|(scan->separator?NAV_SEPARATOR:0)|(numeric?NAV_NUMBER:0);
     if(strong)flags|=navigation_numbering(s);
+    if (strong && !scan->front && (flags & (NAV_CHAPTER | NAV_VOLUME))) scan->explicit_heading = true;
     if(scan->front && flags){flags|=NAV_FRONT;scan->front_titles=true;if(strong)++scan->front_strong;}
     if(strong){++scan->strong;if(scan->separator)++scan->separated_strong;}
     if(numeric){
@@ -478,7 +484,7 @@ static void nav_observe(book_txt_t *b,nav_scan_t *scan,uint32_t offset,char *lin
 }
 static void nav_finish(book_txt_t *b,const nav_scan_t *scan) {
     unsigned mode=scan->separated_strong>=2 && scan->separated_strong*4>=scan->strong*3 ? NAV_SEPARATOR :
-        scan->strong>=2?NAV_STRONG:
+        scan->strong>=2||scan->explicit_heading?NAV_STRONG:
         scan->numeric>=3 && (scan->consecutive+1)*4>=scan->numeric*3 ? NAV_NUMBER:0;
     size_t count=0;
     // 只有正文另有足够章节时，才排除卷首清单，避免空目录误伤只有前置列表的文件。
@@ -809,8 +815,11 @@ esp_err_t book_txt_load_target(book_txt_t *b, size_t i, size_t source_offset,
     size_t begin=0,hi=b->nav_count;
     while(begin<hi){size_t mid=begin+(hi-begin)/2;if(nav_at(b,mid)->offset<start)begin=mid+1;else hi=mid;}
     size_t navigation=begin;
+    size_t title_offset = SIZE_MAX;
+    uint32_t title_source = b->entries[i].title_offset;
     if (!err) while (r->offset < end) {
         if(text_offset && target!=UINT32_MAX && r->offset>=target){*text_offset=used;target=UINT32_MAX;}
+        if (!b->nav_count && r->offset == title_source) title_offset = used;
         while(navigation<b->nav_count && nav_at(b,navigation)->offset<=r->offset && nav_at(b,navigation)->offset<end)
             nav_at(b,navigation++)->text_offset=(uint32_t)used;
         if(!next(r,&cp))break;
@@ -824,9 +833,28 @@ esp_err_t book_txt_load_target(book_txt_t *b, size_t i, size_t source_offset,
     free(r);
     if (err) { free(out); return err; }
     b->mapped=true;b->mapped_chapter=i;b->mapped_begin=begin;b->mapped_end=navigation;
+    b->mapped_title=title_offset;
     out[used] = 0; *utf8 = out; *len = used; return ESP_OK;
 }
 
 esp_err_t book_txt_load(book_txt_t *b,size_t i,char **utf8,size_t *len) {
     return book_txt_load_target(b,i,SIZE_MAX,NULL,utf8,len);
+}
+
+void book_txt_heading_blocks(const book_txt_t *b, html_text_t *text) {
+    size_t count = b->nav_count ? b->mapped_end - b->mapped_begin : b->mapped_title != SIZE_MAX;
+    if (!count) return;
+    blk_t *blocks = heap_caps_malloc(count * sizeof(*blocks), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!blocks) return;
+    for (size_t i = 0; i < count; ++i) {
+        size_t offset = b->nav_count ? nav_at(b, b->mapped_begin + i)->text_offset : b->mapped_title;
+        size_t end = offset;
+        while (end < text->len && text->utf8[end] != '\r' && text->utf8[end] != '\n') ++end;
+        if (end <= offset || end - offset > TXT_LINE_BYTES) continue;
+        // 短标题不改变原文或进度的 UTF-8 字节位置。/ Mark headings without changing text or saved byte positions.
+        blocks[text->count++] = (blk_t){.offset=offset, .len=end-offset, .heading=true,
+                                       .image=-1, .reader_heading=BOOK_HEADING_TXT};
+    }
+    if (text->count) text->blocks = blocks;
+    else free(blocks);
 }

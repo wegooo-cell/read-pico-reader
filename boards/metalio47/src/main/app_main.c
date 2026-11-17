@@ -25,6 +25,7 @@ extern const app_desc_t app_onboarding;
 #include "lock_pin.h"
 #include "ttf_font.h"
 #include "book_store.h"
+#include "book_progress.h"
 #include "esp_system.h"
 #include "read_pico_sd.h"
 #include "freertos/FreeRTOS.h"
@@ -164,6 +165,7 @@ void app_main(void) {
     const esp_reset_reason_t reset = esp_reset_reason();
     ESP_LOGI(TAG, "startup reset=%d stack=%u", (int)reset, (unsigned)uxTaskGetStackHighWaterMark(NULL));
     app_settings_init();
+    book_progress_prepare_at_boot();
     // 大缓冲/字体之前读取凭据；失败不缓存，后续入口仍可重试。/ Read credentials before large buffers/fonts; retry failed reads later.
     (void)lock_pin_enabled();
     pico_boot_init(reset == ESP_RST_PANIC || reset == ESP_RST_INT_WDT ||
@@ -251,8 +253,9 @@ void app_main(void) {
     char interrupted[PICO_BOOT_PATH_MAX];
     if (pico_boot_interrupted_book(interrupted, sizeof(interrupted))) first = &app_boot_recovery;
     if(resuming && !lock_pin_enabled()) {
-        if(first==app_at(1) && resume.reader)app_font_activate_reading();
-        else app_font_activate_system();
+        const bool resume_reader = first == app_at(1) && resume.reader;
+        if (!resume_reader || app_settings_system_font_path()[0]) app_font_activate_system();
+        if (resume_reader) app_font_activate_reading();
     }
     rp_boot_mark("resume");
     // 首次引导服从现有密码/异常启动门禁，老配置不会重新触发。/ Setup retains PIN/crash gates and never reopens for legacy profiles.

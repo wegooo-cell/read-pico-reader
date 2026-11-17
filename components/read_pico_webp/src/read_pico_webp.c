@@ -45,15 +45,16 @@ bool read_pico_webp_rgb565(const uint8_t *data, size_t size, size_t max_pixels,
     if (!out || !width || !height) return false;
     *out = NULL;
     *width = *height = 0;
-    read_pico_webp_info_t info;
-    if (!read_pico_webp_info(data, size, &info)) return false;
+    WebPBitstreamFeatures features;
+    if (!read_pico_webp_is(data, size) || WebPGetFeatures(data, size, &features) != VP8_STATUS_OK ||
+        features.width <= 0 || features.height <= 0) return false;
     // 动画一帧的尺寸和画布不一定相等，整段解码又不在这一层的预算里；交给占位提示。
     // An animation frame need not match the canvas and whole-stream decoding is outside this
     // layer's budget, so the caller falls back to its placeholder.
-    if (info.has_animation) return false;
+    if (features.has_animation) return false;
 
     if (!max_pixels) max_pixels = READ_PICO_WEBP_DEFAULT_MAX_PIXELS;
-    unsigned source_width = info.width, source_height = info.height;
+    unsigned source_width = features.width, source_height = features.height;
     unsigned scaled_width = source_width, scaled_height = source_height;
     bool scaled = false;
     if ((size_t)source_width * source_height > max_pixels) {
@@ -71,6 +72,14 @@ bool read_pico_webp_rgb565(const uint8_t *data, size_t size, size_t max_pixels,
 
     const size_t pixels = (size_t)scaled_width * scaled_height;
     if (pixels > SIZE_MAX / 2) return false;
+#ifdef ESP_PLATFORM
+    // Scaling only bounds the output plane. Lossless and alpha decoding can also keep
+    // a source-sized plane, so budget for that separately.
+    size_t source_pixels = (size_t)source_width * source_height;
+    size_t scratch = source_pixels * (features.format == 2 ? 5u : features.has_alpha ? 2u : 0u);
+    size_t available = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (scratch + pixels * 2 + 512u * 1024u > available) return false;
+#endif
     uint8_t *plane = heap_caps_malloc(pixels * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!plane) return false;
 

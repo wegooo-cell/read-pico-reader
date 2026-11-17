@@ -55,8 +55,9 @@ void book_excerpt_offer(const char *source,uint32_t chapter,const html_text_t *t
     excerpt_t value={.chapter=chapter};
     if (book_excerpt_load(source,chapter,value.text)) return;
     size_t budget=32768;
-    if (!text->count) sentence(text->utf8,text->len<budget?text->len:budget,value.text);
-    for (size_t i=0; i<text->count&&budget&&!value.text[0]; ++i) {
+    bool plain = !text->count || text->blocks[0].reader_heading == BOOK_HEADING_TXT;
+    if (plain) sentence(text->utf8,text->len<budget?text->len:budget,value.text);
+    for (size_t i=0; !plain&&i<text->count&&budget&&!value.text[0]; ++i) {
         const blk_t *b=&text->blocks[i];
         if (b->heading||b->auxiliary||b->linked||b->image>=0||b->offset>=text->len) continue;
         size_t n=b->len;

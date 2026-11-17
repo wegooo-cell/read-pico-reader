@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include "esp_err.h"
 #include "html_text.h"
+#include "book_volume.h"
 
 typedef struct book_epub book_epub_t;
 /// 打开 EPUB；失败时 out 置空，成功后由 close 释放。/ Open EPUB; clear out on failure, close owns successful cleanup.
@@ -27,23 +28,32 @@ void book_epub_close(book_epub_t *book);
 void book_epub_set_fonts_enabled(book_epub_t *book, bool on);
 /// 返回 spine 章节数，上限 8192。/ Return the spine chapter count, at most 8192.
 size_t book_epub_chapter_count(const book_epub_t *book);
-/// 优先列可识别的正文编号章节；识别不完整时使用书内导航，并略过书前资料；不改变 spine 进度。
-/// Prefer numbered body chapters; use authored navigation and omit front matter when detection is incomplete; keep spine progress.
+/// 保留已核对的书内导航，缺少可靠目录时用正文题头补全；目录位置映射到原 spine。
+/// Keep corroborated authored navigation and recover weak indexes from body headings; retain spine positions.
 size_t book_epub_navigation_count(book_epub_t *book);
 size_t book_epub_navigation_chapter(book_epub_t *book, size_t position);
 esp_err_t book_epub_navigation_title(book_epub_t *book, size_t position, char *buf, size_t cap);
 const char *book_epub_navigation_anchor(book_epub_t *book, size_t position);
 size_t book_epub_navigation_source_offset(book_epub_t *book, size_t position);
+size_t book_epub_navigation_volume_count(book_epub_t *book);
+bool book_epub_navigation_volume(book_epub_t *book, size_t index, book_volume_t *out);
 /// 复制 UTF-8 标题，容量不足报错而不截断。/ Copy a UTF-8 title; report insufficient capacity instead of truncating.
 esp_err_t book_epub_chapter_title(book_epub_t *book, size_t index, char *buf, size_t cap);
 /// 加载 UTF-8 与标题/段落块；调用方 html_text_free。/ Load UTF-8 and heading/paragraph blocks; caller uses html_text_free.
 esp_err_t book_epub_load(book_epub_t *book, size_t index, html_text_t *out);
 esp_err_t book_epub_load_anchor(book_epub_t *book, size_t index, const char *anchor,
                                  size_t *anchor_offset, html_text_t *out);
+esp_err_t book_epub_load_part(book_epub_t *book, size_t index, size_t offset, bool last,
+                              const char *anchor, size_t source_offset, size_t *local_offset,
+                              html_text_t *out);
+esp_err_t book_epub_image_info(book_epub_t *book, size_t chapter, const char *src,
+                             unsigned *width, unsigned *height, size_t *bytes);
 esp_err_t book_epub_load_target(book_epub_t *book, size_t index, const char *anchor,
                                  size_t source_offset, size_t *text_offset, html_text_t *out);
 /// 加载章内 JPEG/PNG/WebP；仅允许 ZIP 内相对路径，调用方释放数据。/ Load an in-book JPEG/PNG/WebP from a relative path; caller frees data.
 esp_err_t book_epub_image(book_epub_t *book, size_t chapter, const char *src, uint8_t **data, size_t *size, bool *png);
+esp_err_t book_epub_image_bounded(book_epub_t *book, size_t chapter, const char *src,
+                                 uint8_t **data, size_t *size, bool *png, size_t budget);
 /// spine 原始 HTML 未压缩字节总量，不等于 EPUB 文件大小。/ Total uncompressed source HTML bytes in the spine, not EPUB file size.
 uint32_t book_epub_total_bytes(const book_epub_t *book);
 /// 该章之前所有 spine 原始 HTML 字节累计值。/ Sum of source HTML bytes preceding this chapter in the spine.

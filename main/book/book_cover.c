@@ -57,6 +57,15 @@ static void decode_yield(unsigned at) {
 static void *cover_alloc(size_t n) {
     return heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
+static size_t image_work_budget(size_t limit) {
+#ifdef ESP_PLATFORM
+    const size_t reserve = 512u * 1024u;
+    size_t free_bytes = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    size_t room = free_bytes > reserve ? free_bytes - reserve : 0;
+    if (limit > room) return room;
+#endif
+    return limit;
+}
 static uint8_t luminance(uint8_t r, uint8_t g, uint8_t b) {
     return (uint8_t)(((unsigned)r * 77 + (unsigned)g * 150 + (unsigned)b * 29) >> 8);
 }
@@ -229,12 +238,15 @@ static bool jpegdec_gray_fallback(const uint8_t *data, size_t size, unsigned fra
     unsigned divisor = 1;
     while (divisor < 8 && frame_width / (divisor * 2) >= out_width &&
            frame_height / (divisor * 2) >= out_height) divisor *= 2;
-    jpegdec_plane_t plane = {
-        .stride = (frame_width + divisor - 1) / divisor,
-        .height = (frame_height + divisor - 1) / divisor,
-    };
-    if (plane.stride > 4096 || plane.height > 4096) return false;
-    plane.plane = cover_alloc((size_t)plane.stride * plane.height);
+    jpegdec_plane_t plane = {0};
+    const size_t budget = image_work_budget(4u * 1024u * 1024u);
+    for (; divisor <= 8; divisor *= 2) {
+        plane.stride = (frame_width + divisor - 1) / divisor;
+        plane.height = (frame_height + divisor - 1) / divisor;
+        if (plane.stride > 4096 || plane.height > 4096) continue;
+        size_t bytes = (size_t)plane.stride * plane.height;
+        if (bytes <= budget && (plane.plane = cover_alloc(bytes))) break;
+    }
     if (!plane.plane) return false;
     memset(plane.plane, 0xFF, (size_t)plane.stride * plane.height);
     const bool decoded = jpegdec_gray_ram(data, (int)size, (int)divisor, jpegdec_collect, &plane,
@@ -258,7 +270,8 @@ static bool jpegdec_gray(const uint8_t *data, size_t size, unsigned frame_width,
         .stride = (frame_width + 7) / 8,
         .height = (frame_height + 7) / 8,
     };
-    if (plane.stride > 4096 || plane.height > 4096) return false;
+    if (plane.stride > 4096 || plane.height > 4096 ||
+        (size_t)plane.stride * plane.height > image_work_budget(4u * 1024u * 1024u)) return false;
     plane.plane = cover_alloc((size_t)plane.stride * plane.height);
     if (!plane.plane) return false;
     memset(plane.plane, 0xFF, (size_t)plane.stride * plane.height);
@@ -407,9 +420,8 @@ static bool lowzag_gray(const uint8_t *data, size_t size, unsigned out_width, un
     int source_w = 0, source_h = 0;
     if (lowzag_probe(data, size, &source_w, &source_h) != LOWZAG_OK) return false;
     if (source_w <= 0 || source_h <= 0) return false;
-    const size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    const size_t reserve = 64u * 1024u;  // 页面位图与缓存的余量 / headroom for page bitmaps and caches
-    if (free_psram <= reserve + 512u * 1024u) return false;
+    const size_t budget = image_work_budget(6u * 1024u * 1024u);
+    if (budget <= 512u * 1024u) return false;
 
     lowzag_cfg_t cfg = LOWZAG_CFG_INIT;
     lowzag_mem_input_t input = {data, size, 0};
@@ -438,12 +450,12 @@ static bool lowzag_gray(const uint8_t *data, size_t size, unsigned out_width, un
             // 输出平面改成逐行直写，不再占一块比系数还大的中间图；预算几乎全给 lowzag。
             // The output plane is streamed row by row now, so nearly the whole budget goes to
             // lowzag instead of to a middle plane larger than the coefficients.
-            cfg.mem_limit = free_psram - reserve;
+            cfg.mem_limit = budget;
             cfg.force_scale = d;
             lowzag_estimate_t est = LOWZAG_ESTIMATE_INIT;
             if (lowzag_estimate(&cfg, data, size, &est) != LOWZAG_OK) continue;
             if (!est.out_w || !est.out_h) continue;
-            if (est.alloc_bytes + reserve > free_psram) continue;
+            if (est.alloc_bytes > budget) continue;
             chosen_scale = d;
             chosen_w = est.out_w;
             chosen_h = est.out_h;
@@ -526,8 +538,8 @@ static bool jpeg_gray(const uint8_t *data, size_t size, unsigned out_width,
     esp_jpeg_image_cfg_t cfg = { .indata = (uint8_t *)data, .indata_size = (uint32_t)size,
                                  .out_format = JPEG_IMAGE_FORMAT_RGB565 };
     esp_jpeg_image_output_t info = {0};
-    size_t limit = out_width <= BOOK_COVER_W && out_height <= BOOK_COVER_H
-        ? 3u * 1024u * 1024u : 6u * 1024u * 1024u;
+    size_t limit = image_work_budget(out_width <= BOOK_COVER_W && out_height <= BOOK_COVER_H
+        ? 3u * 1024u * 1024u : 6u * 1024u * 1024u);
     bool decoded = false;
     for (int scale = JPEG_IMAGE_SCALE_0; scale <= JPEG_IMAGE_SCALE_1_8; ++scale) {
         cfg.out_scale = scale;
@@ -558,11 +570,12 @@ static bool webp_gray(const uint8_t *data, size_t size, unsigned out_width, unsi
                       uint8_t *out) {
     // 与 jpeg_gray 同一预算：封面尺寸 3 MiB，其余 6 MiB；RGB565 两字节一像素。
     // Same budget as jpeg_gray: 3 MiB for cover-sized output, 6 MiB otherwise; two bytes per pixel.
-    const size_t limit = out_width <= BOOK_COVER_W && out_height <= BOOK_COVER_H
-        ? 3u * 1024u * 1024u : 6u * 1024u * 1024u;
+    const size_t limit = image_work_budget(out_width <= BOOK_COVER_W && out_height <= BOOK_COVER_H
+        ? 3u * 1024u * 1024u : 6u * 1024u * 1024u);
     uint8_t *plane = NULL;
     unsigned source_width = 0, source_height = 0;
-    if (!read_pico_webp_rgb565(data, size, limit / 2, &plane, &source_width, &source_height)) return false;
+    if (limit < 4 || !read_pico_webp_rgb565(data, size, limit / 4, &plane, &source_width, &source_height))
+        return false;
     const bool ok = rgb565_plane_gray(plane, source_width, source_height, out_width, out_height, out);
     free(plane);
     return ok;
@@ -711,7 +724,9 @@ static bool gif_gray(const uint8_t *data, size_t size, unsigned out_width, unsig
             at += (size_t)lsize * 3;
         }
         if (!pal || !pal_size || !fw || !fh || fw > 2048 || fh > 2048) return false;
-        if ((size_t)fw * fh > 4u * 1024u * 1024u || at >= size) return false;
+        const size_t frame_bytes = (size_t)fw * fh;
+        if (frame_bytes + screen_bytes + 32u * 1024u > image_work_budget(8u * 1024u * 1024u) ||
+            at >= size) return false;
         const int min_code = data[at++];
         uint8_t *idx = cover_alloc((size_t)fw * fh);
         if (!idx) return false;
@@ -787,6 +802,11 @@ static bool png_gray_rows(const uint8_t *data, size_t size, FILE *file, unsigned
     bool ok = false;
     const bool keep_alpha = alpha != NULL || sink != NULL;
     if (setjmp(png_jmpbuf(png))) goto done;
+#if defined(ESP_PLATFORM) && defined(PNG_SET_USER_LIMITS_SUPPORTED)
+    png_set_user_limits(png, 8192, 8192);
+    png_set_chunk_malloc_max(png, 256u * 1024u);
+    png_set_chunk_cache_max(png, 32);
+#endif
     png_set_read_fn(png, &input, png_read_mem);
     png_read_info(png, info);
     png_uint_32 width = png_get_image_width(png, info), height = png_get_image_height(png, info);

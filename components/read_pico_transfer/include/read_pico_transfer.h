@@ -59,6 +59,7 @@ typedef struct {
     char url[64]; ///< 可访问地址，未联网为空 / Reachable address, empty when offline
     char wifi_ssid[33]; ///< 已保存网络名称，不含密码 / Saved network name, never a password
     bool wifi_configured; ///< 存在有效凭据 / Valid credentials saved
+    bool wifi_enabled; ///< 已启用连接或热点会话 / Station or hotspot session enabled
     bool network_ready; ///< 已取得可用网络地址 / Usable network address acquired
     bool cover_lookup; ///< Active station was configured for cover lookup.
     unsigned sta_count; ///< 连接数 / Station count
@@ -88,6 +89,8 @@ bool read_pico_transfer_radio_busy(void);
 #endif
 /// 控制任务每500ms驱动有界连接重试与15秒超时。/ Owner task polls every 500 ms for bounded retries and a 15 s timeout.
 void read_pico_transfer_service_poll(void);
+/// 主循环检查两分钟空闲，in_use 表示仍有页面联网任务。/ Main-loop idle check; in_use protects outbound jobs.
+void read_pico_transfer_idle_poll(bool in_use);
 /// 只读已保存SSID；未配置仍返回ESP_OK。/ Read only the saved SSID; unconfigured still returns ESP_OK.
 esp_err_t read_pico_transfer_get_saved_wifi(char ssid[33], bool *configured);
 /// 选择已确认网络并复用私有密码；遵守停服与配网互斥。/ Select a confirmed profile privately under existing stopped/config gates.

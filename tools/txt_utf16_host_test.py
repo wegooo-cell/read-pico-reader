@@ -33,7 +33,7 @@ void *heap_caps_malloc(size_t bytes,int caps){
 // Redirect the cache shell into the fixture directory; production code handles TXT payloads/version requests.
 bool book_index_cache_prepare(const char *source,const char *tag,uint32_t version,
  char *path,size_t cap,book_index_cache_header_t *key){
- if(disable_cache)return false;assert(!strcmp(tag,"txt")&&version==5);
+ if(disable_cache)return false;assert(!strcmp(tag,"txt")&&version==6);
  struct stat st;assert(!stat(source,&st));
  *key=(book_index_cache_header_t){.magic=123,.version=version,.source_size=(uint32_t)st.st_size,.modified=st.st_mtime,.path_hash=456};
  return snprintf(path,cap,"%s.idx",source)>0;

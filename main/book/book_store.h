@@ -40,6 +40,8 @@ size_t book_store_file_limit(const book_store_root_t* root);
 uint64_t book_store_free_bytes(const book_store_root_t* root);
 /// 仅查询内置分区是否已挂载，不触发挂载。/ Inspect flash mount state without mounting.
 bool book_store_flash_ready(void);
+/// 挂载用于书籍和阅读历史的内置文件系统。/ Mount internal storage for books and reading history.
+esp_err_t book_store_prepare_flash(void);
 /// 删除已挂载根（书目录、TF 卡或内置 storage）内的普通 TXT/EPUB 书籍，然后清对应进度及 last。
 /// Delete a regular TXT/EPUB book under a mounted root — a book directory, the SD card or internal
 /// storage — then forget its progress and last path. Nested paths are accepted because the shelf

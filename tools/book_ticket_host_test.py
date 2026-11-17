@@ -23,8 +23,7 @@ enum {UI_GRAY_BLACK=0,UI_GRAY_WHITE=255,UI_GRAY_LIGHT=192,EPD_DRAW_ALIGN_LEFT,EP
 #define UI_LOCK_HEIGHT 1216
 #define MALLOC_CAP_SPIRAM 1
 #define MALLOC_CAP_8BIT 2
-static bool oom;static unsigned allocations,reads,list_reads,grid_reads,source_case,generated;
-static bool generate_ok=true;
+static bool oom, downloaded;static unsigned allocations,reads,list_reads,grid_reads,source_case,download_reads;
 static unsigned system_scale=100,advance_factor=1;
 static void *heap_caps_malloc(size_t n,int caps){assert(n==176*240&&caps==3);if(oom)return NULL;void *p=malloc(n);if(p)++allocations;return p;}
 static bool book_cover_load_gray(const char*p,const char*t,const char*a,uint8_t*out,bool decode,bool*pending){
@@ -35,11 +34,13 @@ static bool book_cover_load_list_gray(const char*p,const char*t,const char*a,uin
  (void)p;(void)t;assert(!decode&&!pending);++reads;++list_reads;
  if((source_case==1&&!strcmp(a,""))||source_case==3){*w=source_case==3?1:166;*h=240;for(unsigned y=0;y<*h;++y)for(unsigned x=0;x<*w;++x)out[y**w+x]=(x*13+y*7)&255;return true;}return false;
 }
-static bool book_auto_cover_render(const char *title,const char *author,unsigned w,unsigned h,uint8_t *out){
- assert(!strcmp(title,"自定义书名")&&!strcmp(author,"作者")&&w==176&&h==240);
- ++generated;
- if(!generate_ok)return false;
- memset(out,51,w*h);out[11*w+9]=255;return true;
+static bool book_weread_cover_is_txt(const char *path) {
+ const char *dot=strrchr(path,'.');return dot&&!strcasecmp(dot,".txt");
+}
+static bool book_weread_cover_read(const char *path,uint8_t *pixels,unsigned w,unsigned h){
+ assert(book_weread_cover_is_txt(path)&&w==176&&h==240);++download_reads;
+ if(!downloaded)return false;
+ memset(pixels,51,w*h);pixels[11*w+9]=255;return true;
 }
 static uint8_t ui_contrast_gray(uint8_t g){return g;}
 static int ui_text_effective_px(int px){return px*system_scale/100;}
@@ -117,16 +118,16 @@ int main(void){
   free(gray);
  }
  reads=0;oom=true;unsigned w=0,h=0;assert(!cover_load("book.epub",title,"余华",&w,&h)&&!reads);oom=false;
- source_case=0;
+ source_case=0;reads=0;
+ assert(!cover_load("book.txt","自定义书名","作者",&w,&h));
+ assert(!pico_cover_load("book.txt","自定义书名","作者")&&download_reads==2&&!reads);
+ downloaded=true;
  uint8_t *txt=cover_load("book.TXT","自定义书名","作者",&w,&h);
- assert(txt&&w==176&&h==240&&txt[0]==51&&txt[11*w+9]==255&&generated==1);
+ assert(txt&&w==176&&h==240&&txt[0]==51&&txt[11*w+9]==255&&download_reads==3&&!reads);
  free(txt);
  txt=pico_cover_load("book.TXT","自定义书名","作者");
- assert(txt&&txt[0]==51&&generated==2);free(txt);
- generate_ok=false;
- assert(!cover_load("book.txt","自定义书名","作者",&w,&h));
- assert(!pico_cover_load("book.txt","自定义书名","作者")&&generated==4);
- assert(!pico_cover_load("book.epub",title,"余华")&&generated==4);
+ assert(txt&&txt[0]==51&&download_reads==4&&!reads);free(txt);
+ assert(!pico_cover_load("book.epub",title,"余华")&&download_reads==4);
  cover_background_draw(pixels,NULL,0,0);cover_draw(pixels,NULL,0,0,title);
  app_ctx_t ctx={.now_ms=799};warm_reader_ticket_cover(&ctx);assert(!submits);
  ctx.now_ms=800;media_ready=false;warm_reader_ticket_cover(&ctx);assert(!submits);media_ready=true;

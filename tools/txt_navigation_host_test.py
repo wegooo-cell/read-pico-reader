@@ -45,9 +45,14 @@ static void tracked_free(void *p){
 void html_text_free(html_text_t *text){(void)text;assert(!"TXT test entered EPUB cleanup");}
 bool book_index_cache_prepare(const char *source,const char *tag,uint32_t version,char *path,size_t cap,book_index_cache_header_t *key){
  if(disable_cache)return false;
- assert(!strcmp(tag,"txt")&&version==5);struct stat st;assert(!stat(source,&st));
+ assert(!strcmp(tag,"txt")&&version==6);struct stat st;assert(!stat(source,&st));
  *key=(book_index_cache_header_t){.magic=123,.version=version,.source_size=(uint32_t)st.st_size,.modified=st.st_mtime,.path_hash=456};
  return (size_t)snprintf(path,cap,"%s.idx",source)<cap;
+}
+bool book_index_cache_prepare_file(const char *source,const char *tag,uint32_t version,
+ uint64_t size,int64_t modified,char *path,size_t cap,book_index_cache_header_t *key){
+ return !strcmp(tag,"txt")&&book_index_cache_prepare(source,tag,version,path,cap,key)&&
+        key->source_size==size&&key->modified==modified;
 }
 FILE *book_index_cache_open_read(const char *path,const book_index_cache_header_t *key){
  FILE *f=fopen(path,"rb");if(!f)return NULL;book_index_cache_header_t found;
@@ -84,6 +89,11 @@ static void verify(const char *path,const char *expected){
    const char *at=skip_space(text.utf8+target);
    size_t prefix=bytes<40?bytes:40;
    assert((size_t)(text.utf8+text.len-at)>=prefix&&!memcmp(at,title,prefix));
+   bool found=false;
+   for(size_t j=0;j<text.count;++j)
+    if(text.blocks[j].offset==target&&text.blocks[j].reader_heading==BOOK_HEADING_TXT)found=true;
+   if(strcspn(text.utf8+target,"\r\n")<=TXT_LINE_BYTES)assert(found);
+   free(text.blocks);
    free(text.utf8);
   }
  }
@@ -212,6 +222,8 @@ with tempfile.TemporaryDirectory(prefix='kiiko-txt-nav-') as folder:
         ('front-list', 'Contents\n\nChapter I Beginning\nChapter II End\n\nChapter I Beginning\nactual body\nChapter II End\nactual body\n',
          {'Chapter I Beginning','Chapter II End'},len('Contents\n\nChapter I Beginning\nChapter II End\n\n'.encode())),
         ('list-only', '目录\n第一章 开始\n第二章 结束\n', {'第一章 开始','第二章 结束'},0),
+        ('single-chapter', '序言里的文字。\r\n\r\n第一章 唯一的一章\r\n正文。\r\n', {'第一章 唯一的一章'},0),
+        ('chinese-numbers', '一、启程\n正文\n\n二、过桥\n正文\n\n三、归来\n正文\n', {'一、启程','二、过桥','三、归来'},0),
     ]
     for name,text,titles,minimum in extra_cases:
         p=t/(name+'.txt');p.write_bytes(text.encode());e=expected_file(p,text,'utf-8',b'',titles,min_offset=minimum);rows.append((p,e))
@@ -236,7 +248,7 @@ with tempfile.TemporaryDirectory(prefix='kiiko-txt-nav-') as folder:
         assert hashlib.sha256(source.read_bytes()).hexdigest()==digest
     header=(ROOT/'main/book/book_epub.h').read_text()
     stubs=[]
-    for m in re.finditer(r'^(?:const char\s*\*|size_t|uint32_t|bool|void|int|esp_err_t)\s*book_epub_\w+\([^;]*\);',header,re.M):
+    for m in re.finditer(r'^(?:const char\s*\*|size_t|uint32_t|uint16_t|bool|void|int|esp_err_t)\s*book_epub_\w+\([^;]*\);',header,re.M):
         proto=m.group()[:-1];ret=proto.split('book_epub_')[0].strip()
         stubs.append(proto+' {'+('' if ret=='void' else 'return 0;')+'}')
     c=t/'test.c';c.write_text(UNIT+'\n'+'\n'.join(stubs))

@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "book_source.h"
+#include "book_chapter_label.h"
 #include "ui_kit.h"
 #include "ui_nav.h"
 
@@ -24,7 +25,7 @@ static bool s_volume_picker;
 static int s_picker_return_page;
 
 static size_t volume_body_begin(const book_volume_t *v) {
-    return v->begin+(v->title==v->begin);
+    return v->begin+(!v->include_title && v->title==v->begin);
 }
 static size_t volume_body_count(size_t group) {
     book_volume_t v;
@@ -58,7 +59,7 @@ int book_toc_open(size_t current) {
     book_volume_t v;
     if(!book_navigation_volume(s_open_volume,&v))return current==SIZE_MAX?0:(int)(current/BOOK_TOC_ROWS);
     size_t row=s_open_volume;
-    if(current!=v.title)row+=1+current-volume_body_begin(&v);
+    if(current>=volume_body_begin(&v))row+=1+current-volume_body_begin(&v);
     return (int)(row/BOOK_TOC_ROWS);
 }
 bool book_toc_toggle(int target,int *page) {
@@ -230,6 +231,7 @@ void book_toc_render(uint8_t *fb, const char *book_title, size_t chapters,
     toc_title(fb, (EpdRect){TOC_LEFT,160,420,48}, 23, title, 0xe0);
     char total[48];
     size_t volumes=book_navigation_volume_count();
+    bool epub=book_kind()==BOOK_KIND_EPUB;
     book_volume_t first_volume;
     bool front=book_navigation_volume(0,&first_volume)&&first_volume.number==0;
     if(volumes)snprintf(total,sizeof(total),"%u 卷",(unsigned)(volumes-front));
@@ -274,20 +276,28 @@ void book_toc_render(uint8_t *fb, const char *book_title, size_t chapters,
             bool selected = index == current;
             ui_fill_round_rect(fb, r, 20, selected ? 0xc0 : UI_GRAY_WHITE);
             toc_border(fb, r, 20, selected);
-            char number[16];
-            if(volumes)snprintf(number,sizeof(number),"·");
-            else snprintf(number, sizeof(number), "%02u", (unsigned)index + 1);
-            ui_text_box(fb,(EpdRect){r.x+14,r.y+11,58,72},21,number,EPD_DRAW_ALIGN_LEFT,false);
             char raw[160] = "", label[160];
             if (book_navigation_title(index, raw, sizeof(raw)) != ESP_OK || !raw[0])
                 snprintf(raw, sizeof(raw), "第 %u 节", (unsigned)index + 1);
             char spine_default[32];
             snprintf(spine_default, sizeof(spine_default), "第 %u 节", (unsigned)source_index + 1);
-            if (strcmp(raw, spine_default) == 0)
+            if (!epub && strcmp(raw, spine_default) == 0)
                 snprintf(raw, sizeof(raw), "第 %u 节", (unsigned)index + 1);
+            book_volume_t volume;
+            if (epub && volumes && book_navigation_volume(s_open_volume,&volume) &&
+                volume.include_title && index==volume.title)
+                snprintf(raw,sizeof(raw),"卷首");
             one_line(label, sizeof(label), raw);
             if (!label[0]) snprintf(label, sizeof(label), "第 %u 节", (unsigned)index + 1);
-            toc_title(fb, (EpdRect){r.x+79,r.y+9,selected?420:495,76}, 30, label,
+            bool show_number=volumes || !epub || !chapter_label_parse(label,true).kind;
+            if (show_number) {
+                char number[16];
+                if (volumes) snprintf(number,sizeof(number),"·");
+                else snprintf(number,sizeof(number),"%02u",(unsigned)index+1);
+                ui_text_box(fb,(EpdRect){r.x+14,r.y+11,58,72},21,number,EPD_DRAW_ALIGN_LEFT,false);
+            }
+            int inset=show_number?79:25;
+            toc_title(fb, (EpdRect){r.x+inset,r.y+9,(selected?499:574)-inset,76}, 30, label,
                        selected ? 0xc0 : UI_GRAY_WHITE);
             if (selected)
                 ui_text_box(fb,(EpdRect){r.x+r.width-93,r.y+11,71,72},24,"当前",EPD_DRAW_ALIGN_RIGHT,false);

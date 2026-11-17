@@ -16,16 +16,18 @@ unit = r'''
 #include <stdlib.h>
 #include <string.h>
 #include "ui_reader_layout.h"
+#include "book_chapter_lead.h"
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
 #define UI_GRAY_WHITE 255
+#define UI_GRAY_BLACK 0
 #define UI_NAV_BACKGROUND_GRAY 0xe0
 #define UI_GRAY_LIGHT 192
 #define READER_TOOL_ICON_PX 40
 #define UI_CLICK_BACK_SMALL 77
 #define UI_ICON_ANIMATE_CIRCLE_CHEVRON_LEFT 78
-#define EPD_DRAW_ALIGN_CENTER 0
-#define EPD_DRAW_ALIGN_LEFT 1
+enum EpdFontFlags {EPD_DRAW_ALIGN_CENTER, EPD_DRAW_ALIGN_LEFT};
+#define TTF_FONT_SLOT_SYSTEM 0
 #define UI_ICON_BOOK_BOOKMARK 1
 #define UI_ICON_BOOK 2
 #define UI_ICON_EXPAND 3
@@ -41,6 +43,12 @@ static bool s_reader_fullscreen,immersive,vertical,s_reader_favorite,s_zoom_acti
 static size_t s_page=1;
 static int s_reader_panel,s_px=48,s_margin=24,s_chapter_lead_height,s_chapter_lead_width;
 static char s_book_title[128]="Title",s_title[128]="Title",s_chapter_heading_title[128],s_chapter_heading_label[128],s_reader_notice[128];
+static app_book_heading_style_t heading_style;
+static app_book_heading_align_t heading_align;
+static unsigned heading_size=100;
+static unsigned app_settings_book_heading_size(void){return heading_size;}
+static app_book_heading_align_t app_settings_book_heading_align(void){return heading_align;}
+static app_book_heading_style_t app_settings_book_heading_style(void){return heading_style;}
 static bool app_settings_reader_immersive(void){return immersive;}
 static bool app_settings_book_vertical(void){return vertical;}
 static int app_settings_book_tracking(void){return 0;}
@@ -52,19 +60,60 @@ static void ui_text_set_system_scale(bool enabled){(void)enabled;}
 static void ui_clear_page(uint8_t *fb){memset(fb,255,684*1216);}
 static void ui_nav_status(uint8_t *fb){fb[40*684+342]=0;}
 static void ui_click_feedback_register(uint8_t *fb,EpdRect r,int kind,int icon){(void)fb;(void)r;(void)kind;(void)icon;}
-static void copy_text(char *to,size_t cap,const char *from){snprintf(to,cap,"%s",from);}
-static int ui_text_title_fit(char *text,int px,int width,const char *sample){(void)text;(void)width;(void)sample;return px;}
-static int ui_text_title_width_px(int px,const char*t,const char*s){(void)px;(void)t;(void)s;return 24;}
-static void ui_text_title_vc(uint8_t *fb,int x,int y,int px,const char *text,const char *sample,int align){(void)px;(void)text;(void)sample;(void)align;fb[y*684+x]=0;}
+static int ui_text_title_width_px(int px,const char*t,const char*s){
+ (void)s;
+ int half_cells=0;
+ for (const unsigned char *p=(const unsigned char *)t;*p;++p) {
+  if (*p<0x80) ++half_cells;
+  else if ((*p&0xc0)!=0x80) half_cells+=2;
+ }
+ return px*half_cells/2;
+}
+static int ui_text_title_fit(char *text,int px,int width,const char *sample){
+ while (*text&&ui_text_title_width_px(px,text,sample)>width) {
+  size_t end=strlen(text)-1;
+  while (end&&((unsigned char)text[end]&0xc0)==0x80) --end;
+  text[end]=0;
+ }
+ return px;
+}
+static int chapter_number_x, chapter_number_px, chapter_title_x, chapter_title_px;
+static bool record_heading;
+static char heading_texts[2][128];
+static unsigned heading_count;
+static int first_heading_y;
+static void capture_heading_text(const char *text,int y) {
+ if (!record_heading) return;
+ if (!heading_count) first_heading_y=y;
+ assert(heading_count<2);
+ snprintf(heading_texts[heading_count++],sizeof(heading_texts[0]),"%s",text);
+}
+static void ui_text_title_vc(uint8_t *fb,int x,int y,int px,const char *text,const char *sample,int align){
+ (void)sample;(void)align;
+ if(!*text)return;
+ capture_heading_text(text,y);
+ if(!strcmp(text,"12")){chapter_number_x=x;chapter_number_px=px;}
+ if(!strcmp(text,"Title")){chapter_title_x=x;chapter_title_px=px;}
+ ui_fill_rect_fast((EpdRect){x,y,1,1},0,fb);
+}
 static void ui_draw_icon(uint8_t *fb,int x,int y,int px,int icon,int gray){(void)px;(void)icon;(void)gray;fb[y*684+x]=0;}
-static void ui_hairline(uint8_t *fb,int y,int x,int width,int gray){ui_fill_rect_fast((EpdRect){x,y,width,1},gray,fb);}
-static int ui_content_width(void){return 612;}
-static void draw_vertical_heading(uint8_t *fb,EpdRect r){ui_fill_rect_fast(r,71,fb);}
+static EpdRect last_hairline;
+static void ui_hairline(uint8_t *fb,int y,int x,int width,int gray){
+ last_hairline=(EpdRect){x,y,width,1};ui_fill_rect_fast(last_hairline,gray,fb);
+}
+static void ttf_font_select(int slot){assert(slot==TTF_FONT_SLOT_SYSTEM);}
+static int ttf_vertical_text_height_px(int px,const char *text,int track){(void)track;return px*(int)strlen(text);}
+static void ttf_draw_text_px_vertical(uint8_t *fb,int x,int y,int px,const char *text,int track,int ink,int paper){
+ (void)track;(void)ink;(void)paper;
+ capture_heading_text(text,y);
+ if(!strcmp(text,"12"))chapter_number_px=px;
+ if(!strcmp(text,"Title"))chapter_title_px=px;
+ ui_fill_rect_fast((EpdRect){x,y,1,1},0,fb);
+}
 static void ui_reader_background_paint(uint8_t *fb,EpdRect r,bool overlay){(void)fb;(void)r;assert(overlay);}
-static void draw_reader_images(uint8_t *fb,size_t page,EpdRect r){(void)page;ui_fill_rect_fast(r,85,fb);}
+static void draw_reader_images(uint8_t *fb,size_t page,EpdRect r){if(page)ui_fill_rect_fast(r,85,fb);}
 static char note_text[601];static const char *s_text=note_text;static size_t s_text_len=600,s_note_count=1;
 static int s_footnote_note=-1;static EpdRect s_footnote_marker,note_card;
-typedef struct{size_t text_start,text_len;char *owned_text;} html_note_t;
 static html_note_t note={.text_start=0,.text_len=600},*s_notes=&note;
 static int note_lines,note_x[24],note_y[24];
 static int ttf_text_width_px(int px,const char *text){(void)text;return px/2;}
@@ -76,6 +125,7 @@ static void ttf_draw_text_px(uint8_t *fb,int x,int y,int px,const char *text,int
 }
 static void draw_reader_metadata(uint8_t *fb,size_t page){(void)page;ui_fill_rect_fast(ui_reader_footer_for(s_reader_fullscreen,immersive),238,fb);}
 static void ui_fill_round_rect(uint8_t *fb,EpdRect r,int radius,int color){if(radius==16)note_card=r;ui_fill_rect_fast(r,color,fb);}
+static void ui_draw_round_rect(uint8_t *fb,EpdRect r,int radius,int color){(void)fb;(void)r;(void)radius;(void)color;}
 static void ui_text_vc(uint8_t *fb,int x,int y,int px,const char *text,int align,bool inverse){(void)fb;(void)x;(void)y;(void)px;(void)text;(void)align;(void)inverse;}
 static bool reader_chapter_undo_visible(void){return false;}
 static EpdRect reader_chapter_undo_rect(void){return(EpdRect){0,0,20,20};}
@@ -87,9 +137,21 @@ static void draw_reader_panel(uint8_t *fb){
 }
 typedef struct {uint8_t *gray;int width,height;} reader_image_t;
 static const reader_image_t *reader_zoom_image(void);
+static EpdRect body_rect(void);
+static int chapter_view_height,chapter_view_padding;
+static void book_layout_set_chapter_viewport(int height,int padding){
+ chapter_view_height=height;chapter_view_padding=padding;
+}
+static int book_layout_page_content_height(size_t page){assert(!page);return chapter_view_height;}
+static int book_layout_page_top_padding(size_t page){assert(!page);return chapter_view_padding;}
 static void book_layout_draw_page(uint8_t *fb,size_t page,EpdRect r,int px){(void)page;(void)px;ui_fill_rect_fast(r,17,fb);}
 '''
-for name in ('reader_area', 'body_rect_for_tracking', 'body_rect', 'draw_reader_header', 'draw_reader_footnote_card', 'draw_reader_outer', 'draw_reader'):
+header=(root / 'main/settings.h').read_text()
+start=header.rindex('typedef enum {',0,header.index('    APP_BOOK_HEADING_RULE,'))
+end=header.index('app_book_heading_style_t app_settings_book_heading_style(void);',start)
+unit=header[start:end]+unit
+unit += (book.parent / 'book_reader_heading.inc').read_text() + '\n'
+for name in ('reader_area', 'body_rect_for_tracking', 'body_rect', 'draw_reader_header', 'draw_reader_footnote_card', 'draw_vertical_heading', 'draw_reader_outer', 'draw_reader'):
     unit += function(name, book) + '\n'
 unit += r'''
 static uint8_t pixel,zoom_buffer;static reader_image_t picture={&pixel,16,16};
@@ -116,6 +178,139 @@ unit += function('zoom_frame', book) + '\n'
 unit += r'''
 int main(void){
  static uint8_t fb[684*1216],original[sizeof(fb)],standard[sizeof(fb)];app_ctx_t ctx={.fb=fb};
+ static uint8_t heading_frame[APP_BOOK_HEADING_COUNT][sizeof(fb)];
+ for(int v=0;v<2;++v)for(int has_label=0;has_label<2;++has_label){
+  vertical=v;s_reader_fullscreen=true;EpdRect body=body_rect();
+  strcpy(s_chapter_heading_title,has_label?"Homeward":"12");
+  strcpy(s_chapter_heading_label,has_label?"Chapter 12":"");
+  s_chapter_lead_height=v?0:214;
+  s_chapter_lead_width=v?reader_heading_metrics(s_chapter_heading_title,s_chapter_heading_label,body).width:0;
+  for(int style=0;style<APP_BOOK_HEADING_COUNT;++style){
+   heading_style=style;
+   ui_clear_page(fb);
+   const char *inline_heading=has_label?"Chapter 12: Homeward":"12";
+   draw_reader_flow_heading(fb,body,inline_heading,strlen(inline_heading),v);
+   for(int y=body.y;y<body.y+body.height;++y)for(int x=body.x;x<body.x+body.width;++x){
+    if(fb[y*684+x]==UI_GRAY_WHITE)continue;
+    assert(fb[y*684+x]==UI_GRAY_BLACK);
+    if(v)assert(x>=body.x+body.width-s_chapter_lead_width);
+    else assert(y<body.y+(int)s_chapter_lead_height);
+   }
+   for(int prior=0;prior<style;++prior)assert(memcmp(fb,heading_frame[prior],sizeof(fb)));
+   memcpy(heading_frame[style],fb,sizeof(fb));
+  }
+ }
+ EpdRect preview={246,756,377,104};
+ for(int style=0;style<APP_BOOK_HEADING_COUNT;++style){
+  ui_clear_page(fb);
+  draw_horizontal_heading_text(fb,preview,"Homeward","Chapter 12",style,APP_BOOK_HEADING_ALIGN_CENTER);
+  int ink=0;
+  for(int y=0;y<1216;++y)for(int x=0;x<684;++x){
+   if(fb[y*684+x]==UI_GRAY_WHITE)continue;
+   ++ink;assert(fb[y*684+x]==UI_GRAY_BLACK&&x>=preview.x&&x<preview.x+preview.width&&
+                y>=preview.y&&y<preview.y+preview.height);
+  }
+  assert(ink>30);
+  for(int prior=0;prior<style;++prior)assert(memcmp(fb,heading_frame[prior],sizeof(fb)));
+  memcpy(heading_frame[style],fb,sizeof(fb));
+ }
+ s_chapter_heading_title[0]=s_chapter_heading_label[0]=0;
+ s_chapter_lead_height=s_chapter_lead_width=0;
+ EpdRect rule_band={120,300,440,184};
+ for(int align=0;align<APP_BOOK_HEADING_ALIGN_COUNT;++align){
+  heading_align=align;
+  ui_clear_page(fb);
+  draw_horizontal_heading_text(fb,rule_band,"Title","12",APP_BOOK_HEADING_RULE,align);
+  assert(chapter_number_px==chapter_title_px*4/5);
+  int rail=-1;
+  for(int x=rule_band.x;x<rule_band.x+rule_band.width;++x){
+   if(fb[(rule_band.y+55)*684+x]==UI_GRAY_BLACK){rail=x;break;}
+  }
+  assert(rail>=0);
+  if(align==APP_BOOK_HEADING_ALIGN_RIGHT){
+   assert(rail==rule_band.x+rule_band.width-7);
+   assert(rail>chapter_number_x&&rail>chapter_title_x);
+  }else{
+   assert(rail<chapter_number_x&&rail<chapter_title_x);
+   if(align==APP_BOOK_HEADING_ALIGN_LEFT) assert(rail==rule_band.x);
+  }
+  draw_horizontal_heading_text(fb,rule_band,"Title","12",APP_BOOK_HEADING_FLYLEAF,align);
+  int measured=ui_text_title_width_px(chapter_title_px,"Title","Title");
+  assert(last_hairline.width==measured&&last_hairline.x==chapter_title_x);
+  assert(last_hairline.x==rule_band.x+heading_offset(align,rule_band.width-measured));
+  draw_horizontal_heading_text(fb,rule_band,"Title longer","12",APP_BOOK_HEADING_FLYLEAF,align);
+  assert(last_hairline.width>measured);
+ }
+ heading_align=APP_BOOK_HEADING_ALIGN_RIGHT;
+ for (int style=0;style<APP_BOOK_HEADING_COUNT;++style) {
+  heading_style=style;
+  int last_horizontal_px=0,last_preview_px=0,last_vertical_px=0;
+  for (heading_size=80;heading_size<=200;heading_size+=10) {
+   rule_band.height=reader_heading_band_height(heading_size);
+   ui_clear_page(fb);
+   draw_horizontal_heading_text(fb,rule_band,"Title","12",style,heading_align);
+   assert(chapter_title_px>last_horizontal_px);
+   int number_px=style==APP_BOOK_HEADING_RULE?chapter_title_px*4/5:chapter_title_px;
+   assert(chapter_number_px==number_px);
+   last_horizontal_px=chapter_title_px;
+   draw_horizontal_heading_text(fb,preview,"Title","12",style,heading_align);
+   assert(chapter_title_px>=last_preview_px);
+   last_preview_px=chapter_title_px;
+   EpdRect vertical_band={18,176,204,872};
+   reader_heading_t metrics=reader_heading_metrics("Title","12",vertical_band);
+   assert(metrics.width==28+2*metrics.px);
+   draw_vertical_heading_style(fb,vertical_band,metrics,"Title","12");
+   assert(chapter_title_px>last_vertical_px);
+   assert(chapter_title_px<=metrics.px);
+   last_vertical_px=chapter_title_px;
+  }
+ }
+ heading_size=100;
+ strcpy(s_book_title,"TXT Book Name");
+ const struct {
+  const char *line, *number, *title;
+ } txt_headings[]={
+  {"第53章 公主的朋友","第53章","公主的朋友"},
+  {"第 53 章公主的朋友","第 53 章","公主的朋友"},
+  {"53. 公主的朋友","53","公主的朋友"},
+  {"第53章",NULL,"第53章"},
+  {"53",NULL,"53"},
+  {"序章",NULL,"序章"},
+ };
+ record_heading=true;
+ for (int v=0;v<2;++v) {
+  EpdRect band={36,200,v?112:612,v?870:184};
+  for (int style=0;style<APP_BOOK_HEADING_COUNT;++style) {
+   heading_style=style;
+   for (size_t i=0;i<sizeof(txt_headings)/sizeof(txt_headings[0]);++i) {
+    heading_count=0;
+    draw_reader_flow_heading(fb,band,txt_headings[i].line,strlen(txt_headings[i].line),v);
+    assert(heading_count==(txt_headings[i].number?2u:1u));
+    assert(first_heading_y>=band.y && first_heading_y<=band.y+(v?27:33));
+    if (txt_headings[i].number) assert(!strcmp(heading_texts[0],txt_headings[i].number));
+    assert(!strcmp(heading_texts[heading_count-1],txt_headings[i].title));
+   }
+  }
+ }
+ record_heading=false;
+ // EPUB opening leads stay visible below reader chrome at their own top edge, for every style.
+ strcpy(s_chapter_heading_title,"Homeward");
+ for(int v=0;v<2;++v)for(int full=0;full<2;++full)for(int style=0;style<APP_BOOK_HEADING_COUNT;++style){
+  vertical=v;s_reader_fullscreen=full;heading_style=style;heading_align=APP_BOOK_HEADING_ALIGN_RIGHT;
+  s_chapter_lead_height=v?0:214;s_chapter_lead_width=v?64:0;
+  reader_heading_viewport();
+  ui_clear_page(fb);draw_reader_outer(fb,0);
+  int top=full?body_rect().y:UI_READER_STANDARD_TOP;
+  int ink_row=-1;
+  for(int y=top;ink_row<0&&y<top+100;++y)for(int x=24;x<660;++x)
+   if(fb[y*684+x]==UI_GRAY_BLACK){ink_row=y;break;}
+  assert(ink_row>=top&&ink_row<=top+(v?27:33));
+ }
+ s_chapter_heading_title[0]=0;s_chapter_lead_height=s_chapter_lead_width=0;
+ strcpy(s_book_title,"Title");
+ puts("PASS: four distinct headings, reserved horizontal and vertical bands, and mirrored right alignment");
+ puts("PASS: heading sizes from 80 to 200 percent in previews and both reading orientations");
+ puts("PASS: TXT renders actual chapter names and number-only headings in all four styles, horizontally and vertically");
  for(int style=0;style<2;++style)for(int v=0;v<2;++v){
   immersive=style;vertical=v;s_reader_panel=READER_PANEL_NONE;s_reader_fullscreen=true;
   draw_reader(fb,s_page);memcpy(original,fb,sizeof(fb));EpdRect body=body_rect();
@@ -162,7 +357,8 @@ int main(void){
 with tempfile.TemporaryDirectory(prefix='reader-overlay-') as temporary:
     p = Path(temporary)
     (p / 'epdiy.h').write_text('#pragma once\ntypedef struct{int x,y,width,height;}EpdRect;\n')
+    (p / 'esp_err.h').write_text('#pragma once\ntypedef int esp_err_t;\n')
     (p / 'test.c').write_text(unit)
     subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',
-                    '-I'+str(p),'-I'+str(root/'main/ui'),str(p/'test.c'),'-o',str(p/'test')],check=True)
+                    '-I'+str(p),'-I'+str(root/'main/ui'),'-I'+str(root/'main/book'),str(p/'test.c'),'-o',str(p/'test')],check=True)
     subprocess.run([str(p/'test')],check=True)

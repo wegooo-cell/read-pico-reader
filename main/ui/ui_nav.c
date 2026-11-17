@@ -8,8 +8,8 @@
  * User adds click feedback: register local hits for shared backs and navigation icons; the loop presents only that control on press and restoration.
  * 用户修订：所有模式把内容扫描截止到分隔线之间的8行固定为白色留白；滚动不能把列表画进这条扫描保护带。
  * User revision: every mode keeps the eight rows between content scans and the divider blank white; scrolling must not paint list content into this guard.
- * 用户修订：状态栏签名按系统字体和内建界面字体的共同安全宽度截断，阅读页复用小型字宽表，不重载系统字体。
- * User revision: fit status signatures to widths safe for the system and built-in UI faces; reading reuses a small metrics table without reloading the system font.
+ * 用户修订：状态栏签名按系统字体和内建界面字体的共同安全宽度截断，阅读页复用字宽和字形缓存。
+ * User revision: fit status signatures to widths safe for the system and built-in UI faces; reading reuses cached metrics and glyphs.
  */
 #ifdef ESP_PLATFORM
 #include "ui_locale_format.h"
@@ -42,6 +42,11 @@
 #define UI_STATUS_PERCENT_PX 28
 #define UI_STATUS_SIGNATURE_PX 26
 
+// Pico's 4 MiB application slots leave little room for repeated status paint code.
+#if !KIIKO_BOARD_METALIO47 && defined(__GNUC__) && !defined(__clang__)
+#pragma GCC push_options
+#pragma GCC optimize("Os")
+#endif
 static bool s_status_reading;
 static struct {
     bool ready;
@@ -49,7 +54,7 @@ static struct {
     uint16_t widths[96], digits[10], colon, percent, dash;
 } s_status_metrics;
 _Static_assert(UI_STATUS_TIME_PX == UI_STATUS_PERCENT_PX, "status numbers share one native metrics cache");
-_Static_assert(sizeof(s_status_metrics) <= 1024, "status metrics never retain a second font or bitmap");
+_Static_assert(sizeof(s_status_metrics) <= 1024, "status width metadata fits in 1 KiB");
 
 static int status_safe_width(int px, const char *text, const char *sample) {
     int active = ui_text_fixed_context_width_px(px, text, sample);
@@ -81,6 +86,9 @@ static void status_prepare_metrics(void) {
     s_status_metrics.colon = status_safe_width(UI_STATUS_TIME_PX, ":", "0123456789:%-");
     s_status_metrics.percent = status_safe_width(UI_STATUS_PERCENT_PX, "%", "0123456789:%-");
     s_status_metrics.dash = status_safe_width(UI_STATUS_PERCENT_PX, "-", "0123456789:%-");
+    ttf_status_capture(chosen[0] && !strcmp(face, chosen) && !ttf_font_is_builtin()
+                        ? s_status_metrics.signature : NULL,
+                       UI_STATUS_TIME_PX, UI_STATUS_SIGNATURE_PX);
     s_status_metrics.ready = true;
 }
 
@@ -109,19 +117,33 @@ static void status_fit_signature(char *text, int width) {
     }
 }
 
+static void status_text(uint8_t *fb, int x, int y, int px, const char *text,
+                        enum EpdFontFlags align) {
+    if (!s_status_reading || !ttf_status_draw(fb, x, y, px, text, align))
+        ui_text_fixed_vc(fb, x, y, px, text, align, false);
+}
+
+#if !KIIKO_BOARD_METALIO47 && defined(__GNUC__) && !defined(__clang__)
+#pragma GCC pop_options
+#endif
+
 static const char *const labels[] = {"首页", "书架", "文件管理", "设置"};
 static int s_power_signature=-1000;
-static int power_signature(void) {
+static unsigned status_radios(void) {
+    read_pico_transfer_status_t network;
+    read_pico_transfer_get_status(&network);
+    return (network.wifi_enabled ? 1u : 0u) | (app_settings_ble_turner() ? 2u : 0u);
+}
+static int power_signature(unsigned radios) {
     const pmu_snapshot_t *pmu=read_pico_pmu_get();
-    return (pmu_battery_percent(pmu)+1)*2+(pmu_battery_charging(pmu)?1:0);
+    return (pmu_battery_percent(pmu)+1)*8+(pmu_battery_charging(pmu)?4:0)+(int)radios;
 }
 
 EpdRect ui_nav_status_area(void) { return (EpdRect){0,12,UI_LOCK_WIDTH,56}; }
 
 bool ui_nav_refresh_power(uint8_t *fb) {
-    if (!ui_status_visible(fb) || s_power_signature==power_signature()) return false;
-    // 非全屏阅读已画浅灰底；电量更新沿用它，其他状态栏保留原白底。
-    // Retain an already-drawn gray reader header on power changes; other headers keep white.
+    if (!ui_status_visible(fb) || s_power_signature==power_signature(status_radios())) return false;
+    // 局刷沿用当前状态栏的浅灰或白底。/ Keep the current gray or white status-bar background.
     uint8_t background=ui_read_pixel(fb,0,0)==(UI_NAV_BACKGROUND_GRAY>>4)?UI_NAV_BACKGROUND_GRAY:UI_GRAY_WHITE;
     epd_fill_rect(ui_nav_status_area(),background,fb);
     ui_nav_status(fb);
@@ -200,11 +222,10 @@ void ui_nav_status(uint8_t *fb) {
     const int status_center_y = 40;
     // 固定状态栏字号，让系统字体缩放时文字仍与图标共用中心线。
     // Keep status type fixed so text and glyphs share one centerline at every system font scale.
-    ui_text_fixed_vc(fb, 36, status_center_y, UI_STATUS_TIME_PX, clock, EPD_DRAW_ALIGN_LEFT, false);
-    read_pico_transfer_status_t network = {0};
-    read_pico_transfer_get_status(&network);
-    const bool wifi_visible = network.network_ready && network.mode == READ_PICO_TRANSFER_MODE_STA;
-    const bool bluetooth_visible = app_settings_ble_turner();
+    status_text(fb, 36, status_center_y, UI_STATUS_TIME_PX, clock, EPD_DRAW_ALIGN_LEFT);
+    const unsigned radios = status_radios();
+    const bool wifi_visible = radios & 1u;
+    const bool bluetooth_visible = radios & 2u;
     char percent[8] = "--%";
     int gauge_percent = pmu_battery_percent(pmu);
     if (gauge_percent >= 0) snprintf(percent, sizeof(percent), "%u%%", (unsigned)gauge_percent);
@@ -227,8 +248,8 @@ void ui_nav_status(uint8_t *fb) {
     char signature[96];
     snprintf(signature, sizeof(signature), "%s", app_settings_status_signature());
     status_fit_signature(signature, signature_width);
-    if (signature[0]) ui_text_fixed_vc(fb, UI_LOCK_WIDTH / 2, status_center_y, UI_STATUS_SIGNATURE_PX,
-                                      signature, EPD_DRAW_ALIGN_CENTER, false);
+    if (signature[0]) status_text(fb, UI_LOCK_WIDTH / 2, status_center_y, UI_STATUS_SIGNATURE_PX,
+                                  signature, EPD_DRAW_ALIGN_CENTER);
     if (wifi_visible) ui_nav_wifi_icon(fb, wifi_center, status_center_y, UI_NAV_NETWORK_ICON_PX, UI_GRAY_BLACK);
     if (bluetooth_visible)
         ui_draw_icon(fb, bluetooth_center, status_center_y, UI_NAV_NETWORK_ICON_PX,
@@ -248,9 +269,9 @@ void ui_nav_status(uint8_t *fb) {
         ui_draw_icon(fb, 627, status_center_y, 22, UI_ICON_ZAP, UI_GRAY_WHITE);
 
     }
-    ui_text_fixed_vc(fb, 595, status_center_y, UI_STATUS_PERCENT_PX, percent, EPD_DRAW_ALIGN_RIGHT, false);
+    status_text(fb, 595, status_center_y, UI_STATUS_PERCENT_PX, percent, EPD_DRAW_ALIGN_RIGHT);
     ui_status_mark_visible(fb);
-    s_power_signature=power_signature();
+    s_power_signature=power_signature(radios);
 }
 
 int ui_nav_hit(uint16_t x, uint16_t y) {

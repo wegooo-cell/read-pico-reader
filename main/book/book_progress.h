@@ -2,8 +2,8 @@
  * SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
  *
- * 按书籍路径保存 NVS 进度，不依赖 UI 或 SD。
- * Per-path NVS reading progress, independent of UI and SD.
+ * 按书籍路径保存进度，不依赖 UI 或 SD。
+ * Per-path reading progress, independent of UI and SD.
  *
  * 冻结：文件大小不同不恢复；失败返回调用方并告警，不擦除其他记录。
  * 为无 RTC 的最近阅读排序，v2 使用持久序号；v1 保留续读但排序置零。
@@ -23,6 +23,18 @@
 /// RAM change serial for UI caches; no persistent format change.
 uint32_t book_progress_revision(void);
 void book_progress_notify_changed(void);
+/// 首次使用迁移旧 NVS 逐本进度，校验内置存储副本后再移除旧条目。
+/// On first use, migrate legacy per-book progress and remove NVS entries only after read-back verification.
+void book_progress_prepare(void);
+/// Recover space ahead of the boot checkpoint on devices with nearly full NVS.
+void book_progress_prepare_at_boot(void);
+
+typedef esp_err_t (*book_progress_record_fn)(const char *key, const uint8_t *data, size_t len, void *ctx);
+esp_err_t book_progress_records(book_progress_record_fn visit, void *ctx);
+#ifdef ESP_PLATFORM
+esp_err_t book_progress_restore_record(const char *key, const uint8_t *data, size_t len);
+esp_err_t book_progress_clear_records(void);
+#endif
 
 typedef struct book_progress_watch book_progress_watch_t;
 /// 为待保存进度创建路径监视；内存不足返回 NULL。注册/注销仅在 HTTP 停止并 join 后调用。

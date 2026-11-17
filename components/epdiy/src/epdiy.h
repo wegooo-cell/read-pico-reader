@@ -112,6 +112,10 @@ enum EpdDrawMode {
     /// Enforce NOT using S3 Vector extensions.
     /// USed for testing.
     MODE_FORCE_NO_PIE = 0x800,
+#if KIIKO_BOARD_METALIO47
+    /// Prefill the following phase during the current scan on S31 LCD text updates.
+    MODE_PHASE_PREFILL = 0x1000,
+#endif
 };
 
 /** Display software rotation.

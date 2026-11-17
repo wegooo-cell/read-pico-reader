@@ -8,6 +8,7 @@
 #include "book_source_internal.h"
 #include "book_epub.h"
 #include "book_index_cache.h"
+#include "esp_heap_caps.h"
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <string.h>
@@ -109,17 +110,27 @@ size_t book_navigation_source_offset(size_t position) {
 size_t book_navigation_position(size_t chapter,size_t text_offset) {
     return s_epub?SIZE_MAX:book_txt_nav_position(&s_book,chapter,text_offset);
 }
-size_t book_navigation_volume_count(void) { return s_epub?0:s_book.volume_count; }
+size_t book_navigation_volume_count(void) {
+    return s_epub ? book_epub_navigation_volume_count(s_epub) : s_book.volume_count;
+}
 bool book_navigation_volume(size_t index,book_volume_t *out) {
-    if(s_epub || !out || index>=s_book.volume_count)return false;
+    if (s_epub) return book_epub_navigation_volume(s_epub, index, out);
+    if(!out || index>=s_book.volume_count)return false;
     const book_txt_volume_t *v=&s_book.volumes[index];
-    *out=(book_volume_t){v->begin,v->end,v->title==UINT16_MAX?SIZE_MAX:v->title,v->number};
+    *out=(book_volume_t){.begin=v->begin,.end=v->end,
+                         .title=v->title==UINT16_MAX?SIZE_MAX:v->title,.number=v->number};
     return true;
 }
 size_t book_navigation_volume_for(size_t position) {
-    if(s_epub || !s_book.volume_count || position>=s_book.nav_count)return SIZE_MAX;
-    size_t lo=0,hi=s_book.volume_count;
-    while(lo+1<hi){size_t mid=lo+(hi-lo)/2;if(s_book.volumes[mid].begin<=position)lo=mid;else hi=mid;}
+    size_t lo=0,hi=book_navigation_volume_count();
+    if (!hi || position>=book_navigation_count()) return SIZE_MAX;
+    while (lo+1<hi) {
+        size_t mid=lo+(hi-lo)/2;
+        book_volume_t v;
+        if (!book_navigation_volume(mid,&v)) return SIZE_MAX;
+        if (v.begin<=position) lo=mid;
+        else hi=mid;
+    }
     return lo;
 }
 esp_err_t book_navigation_volume_title(size_t index,char *buf,size_t cap) {
@@ -146,10 +157,7 @@ esp_err_t book_chapter_load(size_t i, char **utf8, size_t *len) {
     return book_txt_load(&s_book, i, utf8, len);
 }
 esp_err_t book_chapter_load_blocks(size_t i, html_text_t *out) {
-    if (!out) return ESP_ERR_INVALID_ARG;
-    memset(out, 0, sizeof(*out));
-    if (s_epub) return book_epub_load(s_epub, i, out);
-    return book_chapter_load(i, &out->utf8, &out->len);
+    return book_chapter_load_blocks_target(i, NULL, SIZE_MAX, NULL, out);
 }
 esp_err_t book_chapter_load_blocks_anchor(size_t i, const char *anchor,
                                            size_t *anchor_offset, html_text_t *out) {
@@ -158,12 +166,22 @@ esp_err_t book_chapter_load_blocks_anchor(size_t i, const char *anchor,
 esp_err_t book_chapter_load_blocks_target(size_t i, const char *anchor,
                                            size_t source_offset, size_t *text_offset,
                                            html_text_t *out) {
+    if(!out)return ESP_ERR_INVALID_ARG;
     if (text_offset) *text_offset = 0;
     if (s_epub) return book_epub_load_target(s_epub, i, anchor, source_offset, text_offset, out);
-    if(!out)return ESP_ERR_INVALID_ARG;
     memset(out,0,sizeof(*out));
-    return book_txt_load_target(&s_book,i,source_offset,text_offset,&out->utf8,&out->len);
+    esp_err_t err = book_txt_load_target(&s_book,i,source_offset,text_offset,&out->utf8,&out->len);
+    if (err == ESP_OK) book_txt_heading_blocks(&s_book,out);
+    return err;
 }
+esp_err_t book_chapter_load_part(size_t i, size_t offset, bool last, const char *anchor,
+                                size_t source_offset, size_t *local, html_text_t *out) {
+    if (s_epub) return book_epub_load_part(s_epub, i, offset, last, anchor, source_offset, local, out);
+    esp_err_t err = book_chapter_load_blocks_target(i, anchor, source_offset, local, out);
+    if (!anchor && source_offset == SIZE_MAX) *local = offset;
+    return err;
+}
+
 uint32_t book_total_bytes(void) { return s_epub ? book_epub_total_bytes(s_epub) : s_book.total; }
 uint32_t book_chapter_byte_offset(size_t i) {
     return s_epub ? book_epub_chapter_byte_offset(s_epub, i) : i < s_book.count ? s_book.entries[i].offset : 0;
@@ -176,7 +194,19 @@ int book_chapter_prefetch_step(size_t chapter) {
 #else
 #endif
 esp_err_t book_chapter_image(size_t chapter, const char *src, uint8_t **data, size_t *size, bool *png) {
-    return s_epub ? book_epub_image(s_epub, chapter, src, data, size, png) : ESP_ERR_NOT_SUPPORTED;
+    if (!s_epub) return ESP_ERR_NOT_SUPPORTED;
+    size_t budget = 4u * 1024u * 1024u;
+#ifdef ESP_PLATFORM
+    // Keep space for the page bitmap, decoder and ZIP workspace before extracting the asset.
+    const size_t reserve = 1536u * 1024u;
+    const unsigned caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+    size_t free_bytes = heap_caps_get_free_size(caps);
+    size_t room = free_bytes > reserve ? free_bytes - reserve : 0;
+    size_t contiguous = heap_caps_get_largest_free_block(caps);
+    if (budget > room) budget = room;
+    if (budget > contiguous) budget = contiguous;
+#endif
+    return book_epub_image_bounded(s_epub, chapter, src, data, size, png, budget);
 }
 
 esp_err_t book_chapter_image_dimensions(size_t chapter, const char *src, unsigned *width, unsigned *height) {

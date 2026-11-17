@@ -4,6 +4,7 @@ SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
 import subprocess,tempfile
+from board_source_view import select_source
 from home_cover_cache_host_test import function
 root=Path(__file__).resolve().parents[1];book=root/'main/apps/app_book.c'
 unit=r'''
@@ -86,10 +87,13 @@ static int book_layout_draw_slice(uint8_t *fb,size_t page,EpdRect area,int px,bo
 }
 static int s_px=48;
 '''
-for name in ['lock_draw','unlock_draw','invalidate_prep','reader_prefetch_step','reader_prefetch_buffer','prep_task','kick_prep','reader_prefetch_end','reader_prefetch_resume','reader_prefetch_idle']:
- unit+=function(name,book)+'\n'
-assert 'reader_prefetch_end(prep);' in function('present',book)
-assert 'reader_prefetch_resume(s_page)' in function('paint_reading',book)
+with tempfile.TemporaryDirectory() as view:
+ source=Path(view)/'app_book.c'
+ source.write_text(select_source(book.read_text(),'pico'))
+ for name in ['lock_draw','unlock_draw','invalidate_prep','reader_prefetch_step','reader_prefetch_buffer','prep_task','kick_prep','reader_prefetch_end','reader_prefetch_resume','reader_prefetch_idle']:
+  unit+=function(name,source)+'\n'
+ assert 'reader_prefetch_end(prep);' in function('present',source)
+ assert 'reader_prefetch_resume(s_page)' in function('paint_reading',source)
 unit+=r'''
 static void destroy_worker(void){if(s_prep_task){vTaskDelete(s_prep_task);s_prep_task=NULL;}if(s_prep_done){vSemaphoreDelete(s_prep_done);s_prep_done=NULL;}if(s_draw_lock){vSemaphoreDelete(s_draw_lock);s_draw_lock=NULL;}}
 static void wait_row(unsigned count){pthread_mutex_lock(&row_lock);while(row_entries<count)pthread_cond_wait(&row_cond,&row_lock);pthread_mutex_unlock(&row_lock);}

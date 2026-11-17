@@ -10,13 +10,11 @@
 #include "e0470_epaper_waveform.h"
 #include <stddef.h>
 #include <string.h>
-#if KIIKO_S31_FAST_READER_PANELS
 #ifdef ESP_PLATFORM
 #include "esp_attr.h"
-#define PANEL_LUT_ATTR EXT_RAM_BSS_ATTR
+#define READER_LUT_ATTR EXT_RAM_BSS_ATTR
 #else
-#define PANEL_LUT_ATTR
-#endif
+#define READER_LUT_ATTR
 #endif
 const EpdWaveform* display_reader_text_waveform(void) {
     const EpdWaveform* panel37=display_reader_panel37_waveform();
@@ -113,7 +111,7 @@ bool display_reader_fast_panels_enabled(void) {
 const EpdWaveform* display_reader_panel_gray4_waveform(bool erase_underlay) {
 #if KIIKO_S31_FAST_READER_PANELS
     enum{FAST_PHASES=16,ERASE_WHITE=18,ENTRY_PHASES=26};
-    static PANEL_LUT_ATTR uint8_t fast[FAST_PHASES][16][4],entry[ENTRY_PHASES][16][4];
+    static READER_LUT_ATTR uint8_t fast[FAST_PHASES][16][4],entry[ENTRY_PHASES][16][4];
     static const EpdWaveformPhases phases[]={
         {FAST_PHASES,(const uint8_t*)fast,NULL},{ENTRY_PHASES,(const uint8_t*)entry,NULL}};
     static const EpdWaveformPhases *ranges[][1]={{&phases[0]},{&phases[1]}};
@@ -291,3 +289,48 @@ static const EpdWaveform* turn_waveform(bool gray_from_white){
 
 const EpdWaveform* display_reader_soft_turn_waveform(void){ return turn_waveform(false); }
 const EpdWaveform* display_reader_text_turn_waveform(void){ return turn_waveform(true); }
+
+const EpdWaveform* display_reader_ordinary_turn_waveform(void) {
+    enum {
+        PANEL37_DRIVE = 34,
+        PANEL37_HOLD = 3,
+        WHITE_START = PANEL37_DRIVE - READER_SOFT_TURN_WHITE,
+        BLACK_TAIL = PANEL37_DRIVE + READER_SOFT_TURN_WHITE,
+        MERGED_PHASES = BLACK_TAIL + PANEL37_HOLD,
+        ORIGINAL_PHASES = MERGED_PHASES + READER_SOFT_TURN_BLACK,
+    };
+    static READER_LUT_ATTR uint8_t data[MERGED_PHASES][16][4];
+    static EpdWaveformPhases phases;
+    static const EpdWaveformPhases* ranges[] = {&phases};
+    static const EpdWaveformMode mode = {.type=MODE_GL16, .temp_ranges=1, .range_data=ranges};
+    static const EpdWaveformMode* modes[] = {&mode};
+    static EpdWaveform waveform;
+    if (phases.luts) return &waveform;
+
+    const EpdWaveform* base = display_reader_soft_turn_waveform();
+    const EpdWaveformPhases* original = e0470_waveform_phases(base, MODE_GL16);
+    if (!original || !original->luts || original->phase_times ||
+        original->phases != ORIGINAL_PHASES) return base;
+    for (int f = WHITE_START; f < PANEL37_DRIVE; ++f)
+        if (e0470_phase_action(original, f, 15, 15)) return base;
+
+    memcpy(data, original->luts, sizeof(data[0]) * BLACK_TAIL);
+    memcpy(data + BLACK_TAIL,
+           original->luts + sizeof(data[0]) * (BLACK_TAIL + READER_SOFT_TURN_BLACK),
+           sizeof(data[0]) * PANEL37_HOLD);
+    // 空白底的十二相补白与新字落墨重叠。保留原本退白的像素时序。
+    // Maintain blank white during text drive. Pixels changing to white keep their erase sequence.
+    for (int i = 0; i < READER_SOFT_TURN_WHITE; ++i) {
+        turn_set(data, WHITE_START + i, 15, 15, 2);
+        turn_set(data, PANEL37_DRIVE + i, 15, 15, 0);
+    }
+    // 补黑和退白作用于不同目标像素，可以在同一相扫描。
+    // The black re-drive and remaining erase address different targets in the same scan.
+    for (int i = 0; i < READER_SOFT_TURN_BLACK; ++i)
+        memset(data[PANEL37_DRIVE + i][0], 0x55, sizeof(data[0][0]));
+
+    waveform = *base;
+    waveform.mode_data = modes;
+    phases = (EpdWaveformPhases){MERGED_PHASES, (const uint8_t*)data, NULL};
+    return &waveform;
+}

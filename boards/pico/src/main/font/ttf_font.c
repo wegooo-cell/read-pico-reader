@@ -2705,9 +2705,28 @@ static void ttf_cover_lut_init(void) {
     ready = true;
 }
 
-static uint8_t mix_ink(uint8_t alpha, uint8_t fg, uint8_t bg) {
-    if (!s_antialias) return alpha >= 128 ? fg : bg;
+static inline uint8_t mix_ink_aa(uint8_t alpha, uint8_t fg, uint8_t bg, bool antialias) {
+    if (!antialias) return alpha >= 128 ? fg : bg;
     return (uint8_t)(bg + s_cover[alpha] * ((int)fg - (int)bg) / 255);
+}
+
+static uint8_t mix_ink(uint8_t alpha, uint8_t fg, uint8_t bg) {
+    return mix_ink_aa(alpha, fg, bg, s_antialias);
+}
+
+// 正立落字形：pen_x 是字身框左边缘，baseline 是框内基线。
+// Blit an upright glyph: pen_x is the em box's left edge and baseline its baseline inside it.
+static void blit_upright(uint8_t* framebuffer, int pen_x, int baseline,
+                         const glyph_entry_t* glyph, uint8_t fg, uint8_t bg, bool antialias) {
+    if (glyph->bitmap == NULL) return;
+    for (int gy = 0; gy < glyph->height; gy++) {
+        int yy = baseline - glyph->top + gy;
+        for (int gx = 0; gx < glyph->width; gx++) {
+            uint8_t alpha = glyph->bitmap[gy * glyph->width + gx];
+            if (alpha == 0) continue;
+            epd_draw_pixel(pen_x + glyph->left + gx, yy, mix_ink_aa(alpha, fg, bg, antialias) << 4, framebuffer);
+        }
+    }
 }
 
 void ttf_draw_text(
@@ -2740,21 +2759,19 @@ void ttf_draw_text_px(
         const glyph_entry_t* glyph = get_glyph(cp, pixel_height);
         if (glyph == NULL) continue;
 
-        if (glyph->bitmap != NULL) {
-            for (int gy = 0; gy < glyph->height; gy++) {
-                int yy = y - glyph->top + gy;
-                for (int gx = 0; gx < glyph->width; gx++) {
-                    uint8_t alpha = glyph->bitmap[gy * glyph->width + gx];
-                    if (alpha == 0) continue;
-                    epd_draw_pixel(
-                        cursor_x + glyph->left + gx, yy, mix_ink(alpha, fg, bg) << 4, framebuffer
-                    );
-                }
-            }
-        }
+        blit_upright(framebuffer, cursor_x, y, glyph, fg, bg, s_antialias);
         cursor_x += glyph->advance_x;
     }
 }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC push_options
+#pragma GCC optimize("Os")
+#endif
+#include "ttf_font_status.inc"
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC pop_options
+#endif
 
 bool ttf_text_mask_px(uint8_t *mask, unsigned width, unsigned height, int x,
                       int baseline, int pixel_height, const char *text) {
@@ -2937,21 +2954,6 @@ static const glyph_entry_t* vertical_glyph_for(uint32_t cp, int pixel_height, ui
     return glyph;
 }
 
-// 正立落字形：pen_x 是字身框左边缘，baseline 是框内基线。
-// Blit an upright glyph: pen_x is the em box's left edge and baseline its baseline inside it.
-static void blit_upright(uint8_t* framebuffer, int pen_x, int baseline,
-                         const glyph_entry_t* glyph, uint8_t fg, uint8_t bg) {
-    if (glyph->bitmap == NULL) return;
-    for (int gy = 0; gy < glyph->height; gy++) {
-        int yy = baseline - glyph->top + gy;
-        for (int gx = 0; gx < glyph->width; gx++) {
-            uint8_t alpha = glyph->bitmap[gy * glyph->width + gx];
-            if (alpha == 0) continue;
-            epd_draw_pixel(pen_x + glyph->left + gx, yy, mix_ink(alpha, fg, bg) << 4, framebuffer);
-        }
-    }
-}
-
 // 旋转落字形：先在字身框里按横排基线落位，再把整个方框顺时针转 90°：(u, v) -> (px-1-v, u)。
 // 字的顶端因此朝右，和 OpenType 竖排对拉丁文的默认旋转一致。
 // Blit a rotated glyph: lay it on the horizontal baseline inside the em box, then turn the box
@@ -3068,7 +3070,7 @@ int ttf_draw_text_px_vertical(
                 int dx = 0, dy = 0;
                 if (vertical_corner_cp(cp)) { dx = cell_px / 2; dy = -cell_px / 2; }
                 else if (centered) dx = run_dx;
-                blit_upright(framebuffer, x + dx, y + cell + baseline + dy, glyph, fg, bg);
+                blit_upright(framebuffer, x + dx, y + cell + baseline + dy, glyph, fg, bg, s_antialias);
             }
         }
         cell += glyph->advance_x;

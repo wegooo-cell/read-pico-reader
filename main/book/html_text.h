@@ -34,13 +34,19 @@ typedef struct {
     void* ctx; ///< 回调上下文 / Callback context
 } html_font_map_t;
 
+enum { BOOK_HEADING_NATIVE, BOOK_HEADING_EPUB, BOOK_HEADING_TXT };
+enum { HTML_BREAK_BEFORE = 1, HTML_BREAK_AFTER = 2 };
+
 typedef struct {
     size_t offset; ///< UTF-8 字节起点 / UTF-8 byte start
     size_t len; ///< 不含段间换行的字节数 / Bytes excluding the block separator
     bool heading; ///< h1–h3 标题块 / h1-h3 heading block
-    bool chapter_start; ///< 已核实的正文章首，另起一页 / Verified body chapter start, begins a new page
+    bool chapter_start; ///< 已核实的正文章首 / Verified body chapter start
     bool linked; ///< 全段为链接文字，不能仅凭书名当正文题头 / Entire block is linked text, not a body heading by label alone
     bool auxiliary; ///< 目录及书前信息容器内的文字 / Text inside navigation or front-matter containers
+    uint8_t reader_heading; ///< 由阅读器排版的 EPUB/TXT 章首 / EPUB or TXT chapter heading styled by the reader
+    bool authored_style; ///< 明确指定了题头排版 / Explicitly authored heading styling
+    bool authored_heading_layout; ///< 书内指定了对齐、段距或字族 / Authored heading alignment, spacing or font family
     int image; ///< 图片序号，文字为 -1 / Image index, -1 for text
     uint32_t image_width, image_height; ///< 有界头部探测，未知为零 / Probed dimensions, zero when unknown
     uint8_t align; ///< 0 左/两端，1 居中，2 右 / 0 left/justify, 1 center, 2 right
@@ -49,6 +55,10 @@ typedef struct {
     uint8_t margin_after_percent; ///< 段后距，相对字号百分比 / Trailing margin as a percentage of font size
     uint8_t heading_level; ///< 原文 h1–h6 层级，普通文字为零 / Original h1-h6 level, zero for ordinary text
     bool line_break_after; ///< 段内换行，下一块前不加段后距 / In-paragraph break, without a paragraph gap before the next block
+    bool repeated_heading; ///< 章首重复题头，保留偏移但不排版 / Repeated heading, retain offsets without drawing
+    uint8_t font_percent; ///< CSS 字号比率，0 为默认 / Relative CSS font size, 0 for default
+    uint8_t font_weight; ///< CSS 字重的百位，0 为默认 / CSS weight in hundreds, 0 for default
+    uint8_t page_break; ///< 原书指定的块前/块后分页 / Authored before/after page breaks
     size_t run_first; ///< 本块第一个 run 的下标 / Index of this block's first run
     size_t run_count; ///< 本块的 run 数；零表示整块用系统字体 / Runs owned by this block; zero means the system face throughout
 } blk_t;
@@ -86,6 +96,9 @@ typedef struct {
     size_t run_count; ///< run 总数 / Total run count
     html_note_t* notes; ///< 模块分配的脚注表 / Owned footnote table
     size_t note_count; ///< 脚注数 / Footnote count
+    // Reader windows report chapter-relative offsets. Ordinary parsers leave them zero.
+    size_t part_base, source_begin, source_end;
+    bool part_more, target_found;
 } html_text_t;
 
 /// 输出须为空；成功交出所有权，失败清空输出；空输入成功且零块。/ Output must be empty; success transfers ownership, failure clears output; empty input succeeds with zero blocks.

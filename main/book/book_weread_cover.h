@@ -42,6 +42,8 @@ typedef struct {
 bool book_weread_cover_is_txt(const char *path);
 bool book_weread_cover_metadata(const char *path, char *title, size_t title_cap,
                                 char *author, size_t author_cap);
+/// Persistent identity of a valid downloaded thumbnail, or zero when unavailable.
+uint64_t book_weread_cover_stamp(const char *path);
 bool book_weread_cover_read(const char *path, uint8_t *out, unsigned width, unsigned height);
 
 /// 成功时接管由调用方分配的路径表。/ Take ownership of the caller's path array on success.

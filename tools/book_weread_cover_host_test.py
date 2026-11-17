@@ -48,8 +48,7 @@ with tempfile.TemporaryDirectory() as directory:
 #define TITLE_CAP 192
 #define AUTHOR_CAP 128
 enum { MATCH_TYPO = 50, MATCH_SUBTITLE = 60, MATCH_SERIES = 70, MATCH_EXACT = 90 };
-enum { ESP_ERR_INVALID_RESPONSE=10, ESP_ERR_NOT_FOUND=11, ESP_ERR_NO_MEM=12,
-       ESP_ERR_INVALID_SIZE=13, ESP_ERR_NOT_FINISHED=14 };
+enum { ESP_ERR_INVALID_RESPONSE=10, ESP_ERR_NOT_FOUND=11, ESP_ERR_NO_MEM=12 };
 typedef enum { COVER_FETCH_JSON, COVER_FETCH_IMAGE, COVER_FETCH_ZLIB_SEARCH } cover_fetch_t;
 typedef struct { char title[TITLE_CAP], author[AUTHOR_CAP]; } book_name_t;
 typedef struct {
@@ -72,7 +71,7 @@ bool book_title_get(const char *path, char *title, size_t cap) {
     unit += function("book_cover_crop", ROOT / "main/book/book_cover.c")
     for name in (
         "book_weread_cover_is_txt", "identity", "record_path", "open_record",
-        "book_weread_cover_metadata", "book_weread_cover_read", "save_record",
+        "book_weread_cover_metadata", "book_weread_cover_stamp", "book_weread_cover_read", "save_record",
         "noise", "trim", "strip_promotion", "strip_filename_tags", "enclosed", "bounded_copy", "credit",
         "header_name", "extract_name", "normalized", "character_width", "character_count",
         "subtitle_separator", "different_work", "normalize_main_title", "one_title_edit",
@@ -377,7 +376,10 @@ int main(int argc, char **argv) {
     cancel = true;
     assert(!save_record(TEST_BOOK, &st, &input, pixels));
     cancel = false;
+    assert(book_weread_cover_stamp(TEST_BOOK) == 0);
     assert(save_record(TEST_BOOK, &st, &input, pixels));
+    uint64_t stamp = book_weread_cover_stamp(TEST_BOOK);
+    assert(stamp && book_weread_cover_stamp(TEST_BOOK) == stamp);
     char title[64], author[64];
     assert(book_weread_cover_metadata(TEST_BOOK, title, sizeof(title), author, sizeof(author)));
     assert(!strcmp(title, "活着") && !strcmp(author, "余华"));
@@ -388,11 +390,13 @@ int main(int argc, char **argv) {
     assert(book_weread_cover_metadata(TEST_BOOK, title, sizeof(title), NULL, 0));
     assert(!strcmp(title, "自定义"));
     tf_ready = false;
+    assert(book_weread_cover_stamp(TEST_BOOK) == 0);
     assert(!book_weread_cover_read(TEST_BOOK, loaded, BOOK_COVER_W, BOOK_COVER_H));
     tf_ready = true;
     assert(book_weread_cover_read(TEST_BOOK, loaded, BOOK_COVER_W, BOOK_COVER_H));
     book = fopen(TEST_BOOK, "ab");
     assert(book && fputs("changed", book) >= 0 && !fclose(book));
+    assert(book_weread_cover_stamp(TEST_BOOK) == 0);
     assert(!book_weread_cover_read(TEST_BOOK, loaded, BOOK_COVER_W, BOOK_COVER_H));
 
     for (int i = 1; i + 1 < argc; i += 2) {

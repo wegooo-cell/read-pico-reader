@@ -3,7 +3,18 @@
 static int rc_root_top(void) { return 576; }
 static EpdRect rc_done_rect(void){return(EpdRect){36,1141,612,58};}
 static EpdRect rc_tab_rect(int i){return(EpdRect){40+i*202,rc_root_top()+100,200,46};}
-static EpdRect rc_grid_rect(int i) { return (EpdRect){36+(i%2)*314,746+(i/2)*198,298,176}; }
+static EpdRect rc_grid_rect(int i) { return (EpdRect){36+(i%2)*314,746+(i/2)*152,298,138}; }
+static EpdRect rc_heading_link_rect(void) { return (EpdRect){36,1048,612,78}; }
+enum { RC_HEADING_TOP = 576 };
+static EpdRect rc_heading_align_rect(int i) { return (EpdRect){36+i*208,680,196,54}; }
+static EpdRect rc_heading_size_rect(unsigned plus) { return (EpdRect){plus ? 576 : 360,747,62,48}; }
+static EpdRect rc_heading_style_rect(int i) { return (EpdRect){36+(i%2)*314,809+(i/2)*160,298,150}; }
+static bool rc_heading_back_hit(int x, int y) {
+    return y < RC_HEADING_TOP || ui_rect_hit((EpdRect){32,RC_HEADING_TOP+25,64,64},x,y) ||
+           ui_rect_hit(rc_done_rect(),x,y);
+}
+static const char *const rc_heading_styles[APP_BOOK_HEADING_COUNT] = {"粗竖线","扉页横线","阶梯题头","章号侧栏"};
+static const char *const rc_heading_aligns[APP_BOOK_HEADING_ALIGN_COUNT] = {"居中","左对齐","右对齐"};
 static EpdRect rc_effect_rect(int i) { return (EpdRect){36+i*208,786,196,68}; }
 static EpdRect rc_refresh_rect(void) { return (EpdRect){36,882,612,84}; }
 static EpdRect rc_auto_card(int column) { return (EpdRect){36+column*314,994,298,126}; }
@@ -32,6 +43,11 @@ static const char *rc_side_name(unsigned side){
     static const char*const names[]={"关闭","亮度","色温","字号","行间距"};return names[side<RC_SIDE_COUNT?side:0];
 }
 static void rc_text(uint8_t*fb,EpdRect r,int px,const char*text,bool center,bool inverse){ui_text_box(fb,r,px,text,center?EPD_DRAW_ALIGN_CENTER:EPD_DRAW_ALIGN_LEFT,inverse);}
+static void rc_step_button(uint8_t *fb, EpdRect r, bool plus, bool enabled) {
+    ui_fill_round_rect(fb,r,12,enabled ? 0xe8 : 0xf6);
+    ui_draw_control_frame(fb,r,12,enabled ? 0x60 : 0xc0);
+    rc_text(fb,r,30,plus ? "+" : "−",true,false);
+}
 static void rc_card(uint8_t*fb,EpdRect r){ui_fill_round_rect(fb,r,20,UI_GRAY_WHITE);ui_draw_control_frame(fb,r,20,0x68);}
 static void rc_done(uint8_t*fb,const char*label){EpdRect r=rc_done_rect();ui_fill_round_rect(fb,r,20,UI_GRAY_BLACK);rc_text(fb,(EpdRect){50,1146,584,48},26,label,true,true);}
 static void rc_link(uint8_t*fb,EpdRect r,const char*title,const char*value){
@@ -60,6 +76,7 @@ static void rc_draw_settings(uint8_t*fb){
         const char*const titles[]={"文字设置","排版设置","阅读显示","阅读线"};
         const char*const values[]={"字号 · 字体 · 字重","边距 · 行距 · 缩进","全屏 · 图片 · 竖排","样式 · 范围 · 位置"};
         for(int i=0;i<4;++i)rc_link(fb,rc_grid_rect(i),titles[i],values[i]);
+        rc_link(fb,rc_heading_link_rect(),"章节题头",rc_heading_styles[app_settings_book_heading_style()]);
     }else if(s_rc_tab==1){
         rc_text(fb,(EpdRect){42,746,590,30},21,"翻页效果",false,false);
         const char*const effects[]={"普通","水波纹","速读黑白"};
@@ -77,9 +94,7 @@ static void rc_draw_settings(uint8_t*fb){
         for (unsigned i=0; i<2; ++i) {
             EpdRect r = rc_interval_rect(i);
             bool enabled = i ? seconds < READER_AUTO_MAX_SECONDS : seconds > READER_AUTO_MIN_SECONDS;
-            ui_fill_round_rect(fb,r,12,enabled?0xe8:0xf6);
-            ui_draw_control_frame(fb,r,12,enabled?0x60:0xc0);
-            rc_text(fb,r,30,i?"+":"−",true,false);
+            rc_step_button(fb,r,i,enabled);
         }
     }else{
         rc_link(fb,(EpdRect){36,746,612,110},"触摸操作","全屏示意 · 点按 · 长按 · 滑动");
@@ -98,6 +113,37 @@ static void rc_draw_display(uint8_t*fb){
     rc_toggle_card(fb,rc_display_rect(1),"全屏沉浸",app_settings_reader_immersive());
     rc_toggle_card(fb,rc_display_rect(2),"显示书内图片",!app_settings_reader_hide_images());
     rc_toggle_card(fb,rc_display_rect(3),"竖排（右至左）",app_settings_book_vertical());
+    rc_done(fb,"返回排版");ui_text_set_system_scale(false);
+}
+static void rc_draw_heading_settings(uint8_t *fb) {
+    ui_text_set_system_scale(true);
+    draw_sheet(fb,RC_HEADING_TOP,"章节题头");draw_sheet_back(fb,RC_HEADING_TOP);
+    app_book_heading_style_t style = app_settings_book_heading_style();
+    app_book_heading_align_t align = app_settings_book_heading_align();
+    for (int i = 0; i < APP_BOOK_HEADING_ALIGN_COUNT; ++i) {
+        EpdRect r = rc_heading_align_rect(i);
+        bool selected = (int)align == i;
+        ui_fill_round_rect(fb,r,15,selected ? UI_GRAY_BLACK : 0xe8);
+        rc_text(fb,r,25,rc_heading_aligns[i],true,selected);
+    }
+    unsigned size = app_settings_book_heading_size();
+    char value[8];
+    snprintf(value,sizeof(value),"%u%%",size);
+    rc_text(fb,(EpdRect){54,747,290,48},24,"题头字号",false,false);
+    rc_text(fb,(EpdRect){422,747,154,48},26,value,true,false);
+    rc_step_button(fb,rc_heading_size_rect(0),false,size > APP_BOOK_HEADING_SIZE_MIN);
+    rc_step_button(fb,rc_heading_size_rect(1),true,size < APP_BOOK_HEADING_SIZE_MAX);
+    for (int i = 0; i < APP_BOOK_HEADING_COUNT; ++i) {
+        EpdRect r = rc_heading_style_rect(i);
+        bool selected = (int)style == i;
+        rc_card(fb,r);
+        if (selected) ui_draw_round_rect(fb,r,20,UI_GRAY_BLACK);
+        rc_text(fb,(EpdRect){r.x+18,r.y+4,r.width-60,37},24,rc_heading_styles[i],false,false);
+        if (selected) ui_fill_round_rect(fb,(EpdRect){r.x+r.width-34,r.y+15,14,14},7,UI_GRAY_BLACK);
+        ui_text_set_system_scale(false);
+        draw_horizontal_heading_text(fb,(EpdRect){r.x+18,r.y+41,r.width-36,104},"公主的朋友","第53章",i,align);
+        ui_text_set_system_scale(true);
+    }
     rc_done(fb,"返回排版");ui_text_set_system_scale(false);
 }
 static void rc_badge(uint8_t*fb,EpdRect r,const char*label,bool fixed,bool white){
@@ -191,6 +237,7 @@ static bool rc_draw_current(uint8_t*fb){
     switch(s_reader_panel){
     case READER_PANEL_REFRESH_SETTINGS:rc_draw_settings(fb);return true;
     case READER_PANEL_READING_DISPLAY:rc_draw_display(fb);return true;
+    case READER_PANEL_HEADING_SETTINGS:rc_draw_heading_settings(fb);return true;
     case READER_PANEL_TOUCH_SETTINGS:rc_draw_touch(fb);return true;
     case READER_PANEL_TOUCH_MORE:rc_draw_touch_more(fb);return true;
     case READER_PANEL_READING_LIGHT:rc_draw_light(fb);return true;

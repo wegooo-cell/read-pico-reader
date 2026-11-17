@@ -234,6 +234,31 @@ void app_settings_set_book_reading_line(uint8_t style);
 /// 阅读线范围，false 跟随文字，true 整行/整列；提交成功才生效。/ Guide span, applied after commit.
 bool app_settings_book_reading_line_full(void);
 bool app_settings_set_book_reading_line_full(bool full);
+typedef enum {
+    APP_BOOK_HEADING_RULE,
+    APP_BOOK_HEADING_FLYLEAF,
+    APP_BOOK_HEADING_STAIR,
+    APP_BOOK_HEADING_SIDE,
+    APP_BOOK_HEADING_COUNT,
+} app_book_heading_style_t;
+typedef enum {
+    APP_BOOK_HEADING_ALIGN_CENTER,
+    APP_BOOK_HEADING_ALIGN_LEFT,
+    APP_BOOK_HEADING_ALIGN_RIGHT,
+    APP_BOOK_HEADING_ALIGN_COUNT,
+} app_book_heading_align_t;
+app_book_heading_style_t app_settings_book_heading_style(void);
+bool app_settings_set_book_heading_style(app_book_heading_style_t style);
+app_book_heading_align_t app_settings_book_heading_align(void);
+bool app_settings_set_book_heading_align(app_book_heading_align_t align);
+enum {
+    APP_BOOK_HEADING_SIZE_MIN = 80,
+    APP_BOOK_HEADING_SIZE_MAX = 200,
+    APP_BOOK_HEADING_SIZE_DEFAULT = 150,
+    APP_BOOK_HEADING_SIZE_STEP = 10,
+};
+unsigned app_settings_book_heading_size(void);
+bool app_settings_set_book_heading_size(unsigned percent);
 /// 阅读线相对默认位置 -8..+8 像素，2 像素一步，默认 0。/ Guide offset in 2 px steps.
 int8_t app_settings_book_reading_line_offset(void);
 void app_settings_set_book_reading_line_offset(int8_t offset_px);

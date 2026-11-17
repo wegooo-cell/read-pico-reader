@@ -33,7 +33,7 @@ enum {UI_GESTURE_TAP,UI_GESTURE_MOVE};
 static char s_path[288],s_message[128],recorded_path[288]="/sdcard/books/bad.epub";
 static bool s_confirm,s_removed,recorded=true,card_ready=true,flash_ready=true;
 static bool exists=true,backup_exists=true,regular=true,backup_regular=true,unlink_fail,stat_fail,progress_fail;
-static unsigned deletes,backup_deletes,forgets,changes;
+static unsigned deletes,backup_deletes,forgets,changes,leaves;
 static int home;
 static const void *app_home_page(void){return &home;}
 static int ui_nav_hit(int x,int y){(void)x;return y>1096?0:-1;}
@@ -41,6 +41,7 @@ static void ui_nav_request(app_ctx_t *ctx,int tab){assert(tab==0);ctx->request_a
 static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&y>=r.y&&x<r.x+r.width&&y<r.y+r.height;}
 static bool pico_boot_interrupted_book(char *out,size_t cap){if(!recorded||strlen(recorded_path)>=cap)return false;strcpy(out,recorded_path);return true;}
 static void pico_boot_forget_interrupted_book(void){recorded=false;}
+static void pico_boot_leave_book_recovery(void){++leaves;}
 static esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *sd){sd->present=sd->mounted=card_ready;return card_ready?ESP_OK:ESP_ERR_INVALID_STATE;}
 static bool book_store_flash_ready(void){return flash_ready;}
 static esp_err_t book_store_roots(book_store_root_t *out,int *n){(void)out;*n=0;return ESP_FAIL;}
@@ -51,7 +52,7 @@ static int test_unlink(const char *path){if(unlink_fail){errno=EIO;return -1;}if
 #define lstat test_stat
 #define unlink test_unlink
 '''
-for name in ('delete_book','on_enter','on_gesture','on_key'):
+for name in ('delete_book','on_enter','recovery_on_exit','on_gesture','on_key'):
     unit += function(name,page)+'\n'
 unit += r'''
 static void reset(app_ctx_t *ctx){recorded=card_ready=flash_ready=exists=backup_exists=regular=backup_regular=true;unlink_fail=stat_fail=progress_fail=false;deletes=backup_deletes=forgets=changes=0;ctx->request_app=NULL;strcpy(recorded_path,"/sdcard/books/bad.epub");on_enter(ctx);}
@@ -60,7 +61,8 @@ int main(void){
     app_ctx_t ctx={0};reset(&ctx);assert(!s_confirm&&!s_removed&&!deletes&&!strcmp(s_path,recorded_path));
     tap(&ctx,340,850);assert(s_confirm&&!deletes&&!backup_deletes);
     tap(&ctx,340,750);assert(!s_confirm&&!deletes&&!ctx.request_app);
-    tap(&ctx,340,750);assert(ctx.request_app==&home);
+    tap(&ctx,340,750);assert(ctx.request_app==&home&&!leaves);
+    recovery_on_exit(&ctx);assert(leaves==1&&recorded);
     reset(&ctx);tap(&ctx,340,850);tap(&ctx,340,850);assert(s_removed&&!s_confirm&&deletes==1&&backup_deletes==1&&forgets==1&&changes==1&&!recorded);
     tap(&ctx,340,850);assert(deletes==1);on_key(&ctx,1);assert(ctx.request_app==&home);
     reset(&ctx);card_ready=false;tap(&ctx,340,850);tap(&ctx,340,850);assert(!s_removed&&s_confirm&&!deletes&&recorded);card_ready=true;tap(&ctx,340,850);assert(s_removed&&deletes==1);

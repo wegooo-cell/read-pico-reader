@@ -43,6 +43,13 @@ static const blk_t block={.offset=0,.len=3,.image=0};
 static int painted,baseline;
 static size_t skip_image_spacing(size_t off){return off;}
 static const blk_t *block_at(size_t off){return off==0?&block:NULL;}
+static int heading_extent(const blk_t *b,size_t off,EpdRect rect){(void)b;(void)off;(void)rect;return 0;}
+static size_t heading_end(const blk_t *b){(void)b;assert(false);return 0;}
+static void draw_flow_heading(uint8_t *fb,EpdRect r,int used,int extent,const blk_t *b){
+ (void)fb;(void)r;(void)used;(void)extent;(void)b;assert(false);
+}
+static int begin_heading_weight(const blk_t *b){(void)b;return 0;}
+static void ttf_set_weight(int weight){(void)weight;assert(false);}
 int book_layout_page_image(size_t page){(void)page;return -1;}
 int book_layout_page_image_count(size_t page){(void)page;return s_page_img_start[1]-s_page_img_start[0];}
 static bool take_line(size_t off,int available,int origin,size_t *next,bool *end,int *px,bool *heading,int *width,int *indent,uint8_t *align,int *before,int *after){
@@ -50,8 +57,9 @@ static bool take_line(size_t off,int available,int origin,size_t *next,bool *end
 }
 static int line_height_for(int px){return px;}
 static int line_fit_height(int px,int pitch){(void)px;return pitch;}
-static int line_page_height(int px,int pitch,size_t off,int64_t top){(void)off;(void)top;return line_fit_height(px,pitch);}
+static int line_page_height(int px,int pitch,size_t off,int64_t top,int height_limit){(void)off;(void)top;(void)height_limit;return line_fit_height(px,pitch);}
 int book_layout_page_top_padding(size_t page){(void)page;return 0;}
+int book_layout_page_content_height(size_t page){(void)page;return s_rect.height;}
 static int gap_for(int height,bool heading){(void)height;(void)heading;return 0;}
 static int ttf_ascender_px(int px){return px;}
 int test_guide_segments,test_guide_first_x,test_guide_first_y,test_guide_second_y,test_guide_last_y,test_guide_height;

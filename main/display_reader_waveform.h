@@ -19,6 +19,8 @@ const EpdWaveform* display_reader_fast_text_waveform(void);
 /// Ordinary uses board-native profiles: Pico holds equal grays and adds four changed-white phases; S31 retains Moku GL37 plus six white-target phases.
 const EpdWaveform* display_reader_soft_turn_waveform(void);
 #if KIIKO_BOARD_METALIO47
+/// S31普通纯文字整页翻页：白底随新字同步补白。 / S31 full-page ordinary text turns maintain blank white during text drive.
+const EpdWaveform* display_reader_ordinary_turn_waveform(void);
 /// S31纯文字翻页：白→中灰改为白侧直接推黑（0.40标定），灰边与黑白端点同段出现。
 /// S31 text-only turn: white-origin midgrays push dark directly from white (0.40 calibration),
 /// so gray edges appear with the black/white endpoints instead of the vendor tail.

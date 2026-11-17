@@ -103,10 +103,10 @@
 #include "metalio_hw.h"
 #include "ui_ai_menu.h"
 #include "book/book_source.h"
-#include "online_font.h"
 #else
 #endif
 #include "local_latency_probe.h"
+#include "app_network_idle.inc"
 
 #define TAG "app_loop"
 
@@ -168,11 +168,11 @@ static void main_lock_boundary(void) {
 static unsigned quick_status(void) {
     read_pico_transfer_status_t status;
     read_pico_transfer_get_status(&status);
-    bool wifi = status.mode == READ_PICO_TRANSFER_MODE_STA && status.state != READ_PICO_TRANSFER_STOPPED;
+    bool wifi = status.wifi_enabled;
 #if KIIKO_BOARD_METALIO47
-    return (wifi ? 1u : 0u) | (app_settings_ble_turner() ? 2u : 0u) | (status.network_ready ? 4u : 0u) | (metalio_frontlight_enabled()?8u:0u);
+    return (wifi ? 1u : 0u) | (app_settings_ble_turner() ? 2u : 0u) | (metalio_frontlight_enabled()?8u:0u);
 #else
-    return (wifi ? 1u : 0u) | (app_settings_ble_turner() ? 2u : 0u) | (status.network_ready ? 4u : 0u);
+    return (wifi ? 1u : 0u) | (app_settings_ble_turner() ? 2u : 0u);
 #endif
 }
 
@@ -324,8 +324,7 @@ static void quick_buttons_present(app_ctx_t *ctx,const app_desc_t *current) {
         if(band.height){ui_quick_menu_draw_slider(ctx->fb,i!=0,value);dirty=quick_join(dirty,band);}
         s_quick_slider_drawn[i]=value;
 #else
-    bool network_changed=(status&5u)==5u,was_network=(s_quick_status&5u)==5u;
-    if(error==EPD_DRAW_SUCCESS&&(((status^s_quick_status)&2u)||network_changed!=was_network)){
+    if(error==EPD_DRAW_SUCCESS&&((status^s_quick_status)&3u)){
         ui_quick_menu_draw_status(ctx->fb);
         error=update_display_area_diff_with(ctx->hl,&E0470_WAVEFORM,MODE_GL16,(EpdRect){0,0,UI_LOCK_WIDTH,76});
         guard_draw_result(ctx->hl,error);
@@ -336,8 +335,7 @@ static void quick_buttons_present(app_ctx_t *ctx,const app_desc_t *current) {
     enum EpdDrawError error=EPD_DRAW_SUCCESS;
     if(dirty.height){error=update_display_area_diff_with(ctx->hl,&E0470_FOLLOW_WAVEFORM,MODE_DU,dirty);
         guard_draw_result(ctx->hl,error);}
-    bool network=(status&5u)==5u,was_network=(s_quick_status&5u)==5u;
-    if(error==EPD_DRAW_SUCCESS&&(((status^s_quick_status)&2u)||network!=was_network)){
+    if(error==EPD_DRAW_SUCCESS&&((status^s_quick_status)&3u)){
         // 状态栏与Pico一样单独走灰阶，不让它把滑块局刷扩展到整个玻璃层。
         // Like Pico, refresh status separately in grayscale without expanding slider feedback over the glass layer.
         ui_quick_menu_draw_status(ctx->fb);
@@ -356,7 +354,7 @@ static void quick_buttons_present(app_ctx_t *ctx,const app_desc_t *current) {
 static void quick_toggle_wifi(void) {
     read_pico_transfer_status_t status;
     read_pico_transfer_get_status(&status);
-    if (status.state != READ_PICO_TRANSFER_STOPPED) {
+    if (status.wifi_enabled) {
         // 上传期间拒绝断开，复用存储任务已有的原子准入保护。
         // Refuse disconnecting during upload using the storage owner's atomic admission guard.
         (void)read_pico_transfer_try_stop_if_idle();
@@ -744,6 +742,7 @@ static void switch_to(
     app_ctx_t* ctx, const app_desc_t** current, const app_desc_t* next
 ) {
     if (!next || (next==*current && (!next->persistent_navigation || main_page_ready(ctx,next)))) return;
+    const bool reader_to_home = *current==&app_book && next==app_at(0) && app_book_reading_active();
 #if defined(KIIKO_LOCAL_LATENCY) || KIIKO_BOARD_METALIO47
     const int64_t probe_start=esp_timer_get_time();
     const int probe_from=app_index_of(*current);
@@ -768,7 +767,7 @@ static void switch_to(
     const int64_t probe_enter=esp_timer_get_time();
 #endif
     if (main_source && navigation_page_ready(ctx, next)) display_main_transition_arm(next, shelf_source, true);
-    app_present(ctx, next, next->enter_full ? APP_REDRAW_FULL : APP_REDRAW_PAGE);
+    app_present(ctx, next, (reader_to_home || next->enter_full) ? APP_REDRAW_FULL : APP_REDRAW_PAGE);
     display_main_transition_disarm();
 #ifdef KIIKO_LOCAL_LATENCY
     if(local_probe_contact_start_us){
@@ -1157,6 +1156,7 @@ void app_loop_run(const app_loop_config_t* config) {
         if (ctx.now_ms - last_network_poll_ms >= 500) {
             last_network_poll_ms = ctx.now_ms;
             read_pico_transfer_service_poll();
+            poll_wifi_idle();
             app_time_service_poll(!touch.touched &&
                 (ctx.now_ms-last_input_ms>=10000||(current->setup_flow&&app_time_service_online_sync_pending())) &&
 #if KIIKO_BOARD_METALIO47
@@ -1762,7 +1762,7 @@ void app_loop_run(const app_loop_config_t* config) {
         // WiFi runs on C6 and BLE on S3; both consume S3 internal memory, so network leases pause BLE and release it afterwards.
         read_pico_transfer_status_t transfer;
         read_pico_transfer_get_status(&transfer);
-        const bool wifi_busy = transfer.state != READ_PICO_TRANSFER_STOPPED ||
+        const bool wifi_busy = transfer.wifi_enabled ||
             pico_online_busy();
 #if KIIKO_BOARD_METALIO47
         ble_pt_sync(app_settings_ble_turner());

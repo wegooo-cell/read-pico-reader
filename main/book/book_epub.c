@@ -25,6 +25,7 @@
 #include <strings.h>
 #include <stdio.h>
 #include <ctype.h>
+#include "book_chapter_lead.h"
 
 #define EPUB_MANIFEST_MAX 8192
 #define EPUB_CHAPTER_MAX 8192
@@ -34,12 +35,13 @@
 #define EPUB_ID_CAP 128
 #define EPUB_TITLE_CAP 160
 #define EPUB_ENTRY_MAX (4u * 1024u * 1024u)
+#define EPUB_PART_THRESHOLD (128u * 1024u)
 // 索引载荷格式随标题/锚点池化而变：旧缓存里的定长字段读不出指针，必须整体失效。
 // The index payload changed with the title/anchor pooling: fixed fields in an old cache cannot be
 // turned back into pointers, so every older cache has to lapse.
-// 14：无名页不再缓存「第 N 节」占位标题，旧缓存会把这些名字带回来。
-// 14: unnamed pages no longer cache an invented label, so caches holding one must lapse.
-#define EPUB_CACHE_VERSION 14u
+// 16：重建曾以正文题头替换正式目录的索引。/ 16: rebuild indexes that replaced authored navigation with body headings.
+// 17：保留已核实篇名下的分节顺序。/ 17: preserve verified named entries above numbered sections.
+#define EPUB_CACHE_VERSION 17u
 #define EPUB_META_CACHE_VERSION 1u
 #define EPUB_CSS_MAX (256u * 1024u)
 #define EPUB_CSS_FILE_MAX (128u * 1024u)
@@ -91,8 +93,12 @@ typedef struct {
     const char* title;
     const char* anchor;
 } nav_entry_t;
+typedef struct epub_parts epub_parts_t;
+static void epub_parts_close(epub_parts_t *parts);
+
 struct book_epub {
     zip_reader_t *zip; ///< ZIP 所有权 / ZIP ownership
+    epub_parts_t *parts;
     chapter_t *chapters; ///< 按实际章节数分配的 PSRAM 表 / PSRAM table sized to actual spine
     size_t count; ///< 章节数 / Chapter count
     size_t chapter_capacity;
@@ -103,6 +109,9 @@ struct book_epub {
     size_t navigation_count; ///< 可见目录条数 / Visible navigation entries
     nav_entry_t *navigation; ///< 独立于 spine 的 NCX/NAV 目录 / Authored TOC, independent of spine
     uint16_t *visible_index; ///< 可见目录位置直接映射 / Direct index for visible navigation
+    uint16_t *volume_starts; ///< 可见目录中的卷首 / Volume starts in the visible TOC
+    size_t volume_count;
+    bool volumes_ready, volume_front_matter;
     size_t authored_count;
     size_t navigation_capacity;
     bool body_scanned; ///< 正文编号标题已检查并缓存 / Numbered body headings already indexed
@@ -1057,13 +1066,14 @@ esp_err_t book_epub_open(const char *path, book_epub_t **out) {
 }
 void book_epub_close(book_epub_t *book) {
     if (!book) return;
+    epub_parts_close(book->parts);
     if (book->headings_dirty && book->source_path[0]) epub_cache_save(book->source_path, book);
     // 书内字体装在全局槽里，关书必须还回去，否则下一本书会读到上一本的字形。
     // Embedded faces live in global slots: closing the book must hand them back, or the next
     // book would read the previous one's glyphs.
     if (book->face_count) ttf_font_close_embedded();
     text_pool_free(book);
-    zip_close(book->zip); free(book->visible_index); free(book->navigation);
+    zip_close(book->zip); free(book->visible_index); free(book->navigation); free(book->volume_starts);
     free(book->chapters); free(book->faces); free(book);
 }
 // 书内字体装在全局字体槽里，换书由阅读页自己收尾；缺省的 close 也还回去。
@@ -1079,9 +1089,17 @@ static void chapter_heading(book_epub_t *book, size_t i) {
     chapter_t *chapter = &book->chapters[i];
     if (chapter->titled || chapter->heading_checked) return;
     chapter->heading_checked = true;
-    char *html = NULL; size_t len = 0;
-    if (load_entry(book, chapter->zip_index, &html, &len) != ESP_OK) return;
-    const char *end = html + (len < 65536 ? len : 65536);
+    size_t len = zip_entry_size(book->zip, chapter->zip_index);
+    if (len > 16384) len = 16384;
+    if (!len) return;
+    char *html = psram(len + 1);
+    if (!html) return;
+    if (zip_extract_prefix(book->zip, chapter->zip_index, html, len) != ESP_OK) {
+        free(html);
+        return;
+    }
+    html[len] = 0;
+    const char *end = html + len;
     const char *at = html;
     while (at < end && *at) {
         const char *open = memchr(at, '<', (size_t)(end - at));
@@ -1151,9 +1169,7 @@ static bool front_matter_path(const char *path) {
 }
 
 static bool numbered_chapter_title(const char *title) {
-    if (!strncasecmp(title, "Chapter", 7)) return true;
-    return !strncmp(title, "第", strlen("第")) &&
-           (strstr(title, "章") || strstr(title, "节"));
+    return chapter_label_parse(title, true).kind != CHAPTER_LABEL_NONE;
 }
 
 typedef struct {
@@ -1164,67 +1180,6 @@ typedef struct {
     // released with the table.
     text_block_t *text_blocks, *text_last;
 } body_headings_t;
-
-static bool chinese_number(uint32_t cp) {
-    if ((cp >= '0' && cp <= '9') || (cp >= 0xff10 && cp <= 0xff19)) return true;
-    switch (cp) {
-        case 0x3007: case 0x96f6: case 0x4e00: case 0x4e8c: case 0x4e09:
-        case 0x56db: case 0x4e94: case 0x516d: case 0x4e03: case 0x516b:
-        case 0x4e5d: case 0x5341: case 0x767e: case 0x5343: case 0x4e07:
-        case 0x4e24: case 0x58f9: case 0x8d30: case 0x53c1: case 0x8086:
-        case 0x4f0d: case 0x9646: case 0x67d2: case 0x634c: case 0x7396:
-        case 0x62fe: case 0x4f70: case 0x4edf: return true;
-        default: return false;
-    }
-}
-
-static bool explicit_chapter_title(const char *title, bool heading_tag) {
-    const char *p = title;
-    while (*p == ' ' || *p == '\t' || !strncmp(p, "　", 3))
-        p += *p == ' ' || *p == '\t' ? 1 : 3;
-    if (strncmp(p, "第", 3)) return false;
-    p += 3;
-    while (*p == ' ' || *p == '\t' || !strncmp(p, "　", 3))
-        p += *p == ' ' || *p == '\t' ? 1 : 3;
-    unsigned digits = 0;
-    while (*p && digits < 12) {
-        uint32_t cp; size_t n = utf8_read(p, strlen(p), &cp);
-        if (!n || !chinese_number(cp)) break;
-        p += n; ++digits;
-    }
-    if (!digits) return false;
-    while (*p == ' ' || *p == '\t' || !strncmp(p, "　", 3))
-        p += *p == ' ' || *p == '\t' ? 1 : 3;
-    uint32_t unit; size_t n = utf8_read(p, strlen(p), &unit);
-    if (!n || (unit != 0x7ae0 && unit != 0x8282 && unit != 0x5377 &&
-               unit != 0x56de && unit != 0x7bc7 && unit != 0x90e8 && unit != 0x96c6)) return false;
-    p += n;
-    size_t length = strlen(title);
-    if (length > (heading_tag ? EPUB_TITLE_CAP - 1 : 96)) return false;
-    // 普通段落必须像独立标题，防止“第一章说到……”被误作目录。
-    // Plain paragraphs need a heading separator or a standalone chapter number.
-    return heading_tag || !*p || *p == ' ' || *p == '\t' || *p == ':' ||
-           !strncmp(p, "　", 3) || !strncmp(p, "：", 3) ||
-           !strncmp(p, "、", 3) || *p == '-';
-}
-
-static bool pagination_numbered_title(const char *title, bool heading_tag) {
-    if (explicit_chapter_title(title, heading_tag)) return true;
-    const char *p = title;
-    while (*p == ' ' || *p == '\t') ++p;
-    if (!strncasecmp(p, "chapter", 7) && (p[7] == ' ' || p[7] == '\t')) {
-        p += 7;
-        while (*p == ' ' || *p == '\t') ++p;
-        unsigned digits = 0;
-        while (*p && ((*p >= '0' && *p <= '9') || strchr("IVXLCDMivxlcdm", *p))) {
-            if (++digits > 12) break;
-            ++p;
-        }
-        return digits && digits <= 12 && strlen(title) < (heading_tag ? EPUB_TITLE_CAP : 97) &&
-            (!*p || *p == ' ' || *p == '\t' || *p == ':' || *p == '-' || *p == '.');
-    }
-    return false;
-}
 
 static bool block_title(const html_text_t *text, size_t i, char title[EPUB_TITLE_CAP]) {
     const blk_t *block = &text->blocks[i];
@@ -1239,22 +1194,29 @@ static bool authored_body_title(const book_epub_t *book, size_t chapter, const c
     for (size_t i = first; i < last; ++i) {
         const nav_entry_t *entry = &book->navigation[i];
         if (entry->valid && entry->chapter == chapter && !front_matter_title(entry->title) &&
-            !strcmp(entry->title, title)) return true;
+            epub_chapter_name_equal(entry->title, title)) return true;
     }
     return false;
 }
 
 // 连续的目录条目没有正文；副题可以紧跟章名，图片也可以位于正文开头。
 // A list of TOC labels has no following body; allow a subtitle or illustration before chapter text.
-static bool body_follows(const html_text_t *text, size_t i) {
+static bool body_follows(const html_text_t *text, size_t i, const char *original) {
+    bool consecutive = true;
     for (size_t j = i + 1; j < text->count && j - i <= 32; ++j) {
         const blk_t *block = &text->blocks[j];
         if (block->auxiliary || block->linked) return false;
-        if (block->image >= 0) continue;
+        if (block->image >= 0) { consecutive = false; continue; }
         char title[EPUB_TITLE_CAP];
         bool short_text = block_title(text, j, title);
-        if (short_text && (front_matter_title(title) ||
-            pagination_numbered_title(title, block->heading_level != 0))) return false;
+        if (consecutive && short_text && chapter_label_repeats(original, title, block->heading))
+            continue;
+        consecutive = false;
+        if (short_text && front_matter_title(title)) return false;
+        if (short_text) {
+            chapter_label_t candidate = chapter_label_parse(title, block->heading);
+            if (candidate.kind && (candidate.kind != CHAPTER_LABEL_BARE || block->heading)) return false;
+        }
         if (block->heading_level) continue;
         // 空白段不算正文；其余长度不作限制，兼容短诗及很短的章节。
         // Ignore whitespace-only blocks without imposing a minimum prose length.
@@ -1276,18 +1238,28 @@ static void chapter_breaks_prepare(book_epub_t *book, size_t chapter, html_text_
     }
     uint8_t main_level = 0;
     for (size_t i = 0; i < text->count; ++i) {
-        const blk_t *block = &text->blocks[i]; char title[EPUB_TITLE_CAP];
+        blk_t *block = &text->blocks[i];
+        // Disabling the book's fonts also allows reader styling on chapter headings.
+        // CSS metrics remain available for the rest of the book.
+        if (!book->fonts_enabled) block->authored_heading_layout = false;
+        char title[EPUB_TITLE_CAP];
         if (block->linked || block->auxiliary || !block->heading_level || block->heading_level > 2 ||
-            !block_title(text, i, title) || front_matter_title(title) || !body_follows(text, i)) continue;
+            !block_title(text, i, title) || front_matter_title(title) || !body_follows(text, i, title)) continue;
         if (!main_level || block->heading_level < main_level) main_level = block->heading_level;
     }
-    bool auxiliary_section = false;
+    bool auxiliary_section = false, seen_prose = false;
     for (size_t i = 0; i < text->count; ++i) {
         blk_t *block = &text->blocks[i]; char title[EPUB_TITLE_CAP];
-        if (!block_title(text, i, title)) continue;
+        if (block->repeated_heading || block->auxiliary || block->linked || block->image >= 0) continue;
+        if (!block_title(text, i, title)) { seen_prose = true; continue; }
         if (block->heading_level && !block->auxiliary && front_matter_title(title)) auxiliary_section = true;
-        if (block->linked || block->auxiliary || front_matter_title(title) || !body_follows(text, i)) continue;
-        bool numbered = pagination_numbered_title(title, block->heading_level != 0);
+        if (front_matter_title(title)) continue;
+        chapter_label_t label = chapter_label_parse(title, block->heading);
+        bool bare_in_prose = label.kind == CHAPTER_LABEL_BARE && !block->heading &&
+                             block->align != 1 && seen_prose;
+        bool numbered = label.kind && !bare_in_prose;
+        if (!block->heading && !numbered) seen_prose = true;
+        if (!body_follows(text, i, title)) continue;
         bool primary = main_level && block->heading_level == main_level;
         // 介绍/目录后的普通编号列表不能仅靠文字脱离书前区；正式正文题头可开始新章。
         // A numbered list after front matter cannot escape it by label alone; a body heading can.
@@ -1295,10 +1267,23 @@ static void chapter_breaks_prepare(book_epub_t *book, size_t chapter, html_text_
         bool authored = !numbered && authored_body_title(book, chapter, title, first, last);
         // 章号和章名分成相邻两块时只在章号前分页，避免把题头拆成两页。
         // A chapter number followed by its title needs one break, not two title-only pages.
-        if (!numbered && i && text->blocks[i - 1].chapter_start) continue;
+        if (i && text->blocks[i - 1].chapter_start && (!numbered || label.kind == CHAPTER_LABEL_BARE)) continue;
         if (numbered || authored || (primary && !last)) {
             block->chapter_start = true;
+            const bool styled_subtitle = numbered && i + 1 < text->count && text->blocks[i + 1].heading_level &&
+                text->blocks[i + 1].authored_heading_layout;
+            const bool opening_art = book->fonts_enabled && !seen_prose && i &&
+                text->blocks[i - 1].image >= 0 && !text->blocks[i - 1].auxiliary;
+            if (!block->authored_heading_layout && !styled_subtitle && !opening_art)
+                block->reader_heading = BOOK_HEADING_EPUB;
             auxiliary_section = false;
+            for (size_t j = i + 1; j < text->count && j - i <= 4; ++j) {
+                blk_t *next = &text->blocks[j];
+                char candidate[EPUB_TITLE_CAP];
+                if (next->linked || next->auxiliary || !block_title(text, j, candidate) ||
+                    !chapter_label_repeats(title, candidate, next->heading)) break;
+                next->repeated_heading = true;
+            }
         }
     }
 }
@@ -1359,7 +1344,7 @@ static bool body_headings_scan(book_epub_t *book, body_headings_t *found) {
         xml_reader(&xml, html, length);
         size_t skipped = 0, candidate = 0, source_offset = 0;
         bool strong = false, label_ok = true, auxiliary_section = false, pending_strong = false;
-        bool plain_text = false;
+        bool plain_text = false, seen_prose = false;
         size_t pending_offset = 0, link_depth = 0;
         char pending_title[EPUB_TITLE_CAP] = "";
         char title[EPUB_TITLE_CAP] = "";
@@ -1397,18 +1382,33 @@ static bool body_headings_scan(book_epub_t *book, body_headings_t *found) {
                     auxiliary_section = true;
                     pending_title[0] = 0;
                 }
-                bool numbered = label_ok && explicit_chapter_title(title, strong);
+                chapter_label_t label = label_ok ? chapter_label_parse(title, strong) : (chapter_label_t){0};
+                const chapter_t *spine = &book->chapters[chapter];
+                if (strong && label_ok && !label.kind && spine->nav_titled &&
+                    epub_chapter_name_equal(spine->title, title))
+                    seen_prose = true;
+                bool numbered = label.kind && (strong || strlen(title) <= 96) &&
+                    (label.kind != CHAPTER_LABEL_BARE || strong || !seen_prose);
                 // 编号列表本身不够：等到随后出现正文才收录，连续编号目录项不会互相作证。
                 // Wait for following prose; consecutive numbered TOC labels cannot validate each other.
-                if (numbered) {
+                if (pending_title[0] && label_ok && chapter_label_repeats(pending_title, title, strong)) {
+                    pending_strong |= strong;
+                } else if (numbered) {
+                    chapter_label_t pending = chapter_label_parse(pending_title, pending_strong);
+                    if (pending.kind == CHAPTER_LABEL_VOLUME && pending_strong &&
+                        label.kind != CHAPTER_LABEL_VOLUME && strong && !auxiliary_section &&
+                        !body_heading_add(found, chapter, pending_offset, pending_title)) {
+                        free(html); return false;
+                    }
                     pending_title[0] = 0;
                     if (strong || !auxiliary_section) {
                         strcpy(pending_title, title);
                         pending_offset = source_offset;
                         pending_strong = strong;
                     }
-                } else if (!strong && plain_text && !front_matter_title(title) && pending_title[0]) {
-                    if (!auxiliary_section || pending_strong) {
+                } else if (!strong && plain_text && !front_matter_title(title)) {
+                    seen_prose = true;
+                    if (pending_title[0] && (!auxiliary_section || pending_strong)) {
                         if (!body_heading_add(found, chapter, pending_offset, pending_title)) {
                             free(html); return false;
                         }
@@ -1432,36 +1432,53 @@ static void body_headings_prepare(book_epub_t *book) {
     // 大书已有正式目录时不在第一次绘制阅读页前解压数千章；当前章节仍按需加载。
     // With a large authored TOC, do not inflate thousands of chapters before the first page.
     if (book->count > 256 && book->authored_count) return;
+    for (size_t i = 0; i < book->count; ++i)
+        if (zip_entry_size(book->zip, book->chapters[i].zip_index) > EPUB_PART_THRESHOLD) return;
     body_headings_t found = {0};
     if (!body_headings_scan(book, &found)) {
         free(found.items);
         text_blocks_free(&found.text_blocks, &found.text_last);
         return;
     }
+    size_t authored_visible = 0;
+    size_t matched = 0, matched_numbers = 0, cursor = 0;
+    bool authored_volumes = false;
+    for (size_t i = 0; i < book->authored_count; ++i) {
+        const nav_entry_t *entry = &book->navigation[i];
+        if (!entry->valid || front_matter_title(entry->title)) continue;
+        ++authored_visible;
+        chapter_label_t label = chapter_label_parse(entry->title, true);
+        if (label.kind == CHAPTER_LABEL_VOLUME) authored_volumes = true;
+        while (cursor < found.count && found.items[cursor].chapter < entry->chapter) ++cursor;
+        for (size_t j = cursor; j < found.count && found.items[j].chapter == entry->chapter; ++j) {
+            const char *body = found.items[j].title;
+            if (chapter_label_repeats(entry->title, body, true) ||
+                chapter_label_repeats(body, entry->title, true)) {
+                ++matched;
+                if (label.kind) ++matched_numbers;
+                cursor = j + 1;
+                break;
+            }
+        }
+    }
+    // 正文扫描只采编号题头，原目录还可能含后记或附录。编号与目标已互相印证时保留原目录。
+    // The body scan only collects numbered headings. Once corroborated, retain authored links and extra entries.
+    bool keep_authored = authored_volumes ||
+        (authored_visible && (matched == found.count ||
+         (matched_numbers >= 2 && found.count <= authored_visible && matched * 4 >= found.count * 3)));
     for (size_t i = 0; i < found.count; ++i) {
         nav_entry_t *entry = &found.items[i];
         chapter_t *chapter = &book->chapters[entry->chapter];
-        if (i && found.items[i - 1].chapter == entry->chapter) continue;
+        if ((keep_authored && chapter->nav_titled) || (i && found.items[i - 1].chapter == entry->chapter))
+            continue;
         chapter->title = text_intern_cap(book, entry->title, EPUB_TITLE_CAP);
         chapter->titled = true;
         chapter->heading_checked = true;
     }
-    size_t authored_visible = 0;
-    for (size_t i = 0; i < book->authored_count; ++i)
-        if (book->navigation[i].valid && !front_matter_title(book->navigation[i].title)) ++authored_visible;
-    bool authored_matches_body = authored_visible == found.count && authored_visible != 0;
-    size_t matched = 0;
-    for (size_t i = 0; authored_matches_body && i < book->authored_count; ++i) {
-        const nav_entry_t *entry = &book->navigation[i];
-        if (!entry->valid || front_matter_title(entry->title)) continue;
-        authored_matches_body = entry->chapter == found.items[matched].chapter &&
-                                !strcmp(entry->title, found.items[matched].title);
-        ++matched;
-    }
     size_t reference = authored_visible ? authored_visible : book->count;
-    bool prefer_body = found.count &&
+    bool prefer_body = !keep_authored && found.count &&
         (found.count >= 2 || reference <= 1) &&
-        found.count * 4 >= reference * 3 && !authored_matches_body;
+        found.count >= authored_visible && found.count * 4 >= reference * 3;
     if (prefer_body) {
         free(book->navigation);
         book->navigation = found.items;
@@ -1478,7 +1495,7 @@ static void body_headings_prepare(book_epub_t *book) {
             found.text_blocks = NULL;
             found.text_last = NULL;
         }
-    } else if (book->authored_count && found.count) {
+    } else if (!keep_authored && book->authored_count && found.count) {
         unsigned char used[EPUB_NAV_MAX / 8] = {0};
         for (size_t j = 0; j < found.count; ++j) {
             for (size_t i = 0; i < book->authored_count; ++i) {
@@ -1568,6 +1585,52 @@ static nav_entry_t *navigation_entry(book_epub_t *book, size_t position) {
     return NULL;
 }
 
+static const char *known_navigation_title(book_epub_t *book, size_t position) {
+    nav_entry_t *entry = navigation_entry(book, position);
+    if (entry) return entry->title;
+    const size_t chapter = book_epub_navigation_chapter(book, position);
+    return chapter < book->count && book->chapters[chapter].titled ? book->chapters[chapter].title : NULL;
+}
+
+size_t book_epub_navigation_volume_count(book_epub_t *book) {
+    if (!book) return 0;
+    navigation_prepare(book);
+    if (!book->volumes_ready) {
+        book->volumes_ready = true;
+        // Without the positional index, keep a flat TOC rather than rescan it for every row.
+        // 缺少位置索引时保持平铺，避免逐行重复扫描。
+        if (!book->visible_index) return 0;
+        size_t count = 0, first = 0;
+        for (size_t i = 0; i < book->navigation_count; ++i) {
+            if (chapter_label_parse(known_navigation_title(book, i), true).kind != CHAPTER_LABEL_VOLUME)
+                continue;
+            if (!count) first = i;
+            ++count;
+        }
+        if (!count) return 0;
+        book->volume_front_matter = first != 0;
+        book->volume_starts = psram((count + book->volume_front_matter) * sizeof(*book->volume_starts));
+        if (!book->volume_starts) return 0;
+        if (book->volume_front_matter) book->volume_starts[book->volume_count++] = 0;
+        for (size_t i = first; i < book->navigation_count; ++i) {
+            if (chapter_label_parse(known_navigation_title(book, i), true).kind == CHAPTER_LABEL_VOLUME)
+                book->volume_starts[book->volume_count++] = (uint16_t)i;
+        }
+    }
+    return book->volume_count;
+}
+
+bool book_epub_navigation_volume(book_epub_t *book, size_t index, book_volume_t *out) {
+    if (!out || index >= book_epub_navigation_volume_count(book)) return false;
+    size_t begin = book->volume_starts[index];
+    size_t end = index + 1 < book->volume_count ? book->volume_starts[index + 1] : book->navigation_count;
+    bool front = index == 0 && book->volume_front_matter;
+    *out = (book_volume_t){.begin = begin, .end = end, .title = front ? SIZE_MAX : begin,
+                           .number = front ? 0 : (unsigned)(index + !book->volume_front_matter),
+                           .include_title = !front};
+    return true;
+}
+
 esp_err_t book_epub_navigation_title(book_epub_t *book, size_t position, char *buf, size_t cap) {
     if (!buf || !cap) return ESP_ERR_INVALID_ARG;
     nav_entry_t *entry = navigation_entry(book, position);
@@ -1577,7 +1640,7 @@ esp_err_t book_epub_navigation_title(book_epub_t *book, size_t position, char *b
         esp_err_t err = book_epub_chapter_title(book, chapter, buf, cap);
         // 只有按 spine 生成的备用目录需要一行标签；正文、题头和书签不给无名页编名。
         // Only the spine-generated TOC needs a row label; pages, headings and bookmarks stay unnamed.
-        if (err == ESP_OK && !buf[0]) snprintf(buf, cap, "第 %u 节", (unsigned)chapter + 1);
+        if (err == ESP_OK && !buf[0]) snprintf(buf, cap, "第 %u 节", (unsigned)position + 1);
         return err;
     }
     size_t n = strlen(entry->title);
@@ -2022,7 +2085,8 @@ static size_t epub_collect_ext_notes(book_epub_t* book, const char* chapter_path
                                  resolve_path(chapter_path, file, target));
                 int index = duplicate || !resolved ? -1 : zip_find(book->zip, target);
                 size_t n = index >= 0 ? zip_entry_size(book->zip, index) : 0;
-                if (!duplicate && n > 0 && n <= EPUB_NOTE_FILE_MAX) {
+                if (!duplicate && n > 0 && n <= EPUB_NOTE_FILE_MAX &&
+                    (n <= EPUB_PART_THRESHOLD || strcmp(chapter_path, target))) {
                     char* page = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                     if (page && zip_extract(book->zip, index, page, n) == ESP_OK) {
                         size_t text_len = 0;
@@ -2048,14 +2112,9 @@ static size_t epub_collect_ext_notes(book_epub_t* book, const char* chapter_path
     return count;
 }
 
-esp_err_t book_epub_load_target(book_epub_t *book, size_t i, const char *anchor,
-                                size_t source_offset, size_t *anchor_offset, html_text_t *out) {
-    if (!out) return ESP_ERR_INVALID_ARG;
-    memset(out, 0, sizeof(*out)); if (!book || i >= book->count) return ESP_ERR_INVALID_ARG;
-    char *text; size_t len; esp_err_t err = load_entry(book, book->chapters[i].zip_index, &text, &len);
-    if (err != ESP_OK) return err;
-    size_t css_len = 0;
-    char *css = chapter_css(book, zip_entry_name(book->zip, book->chapters[i].zip_index), text, len, &css_len);
+static esp_err_t parse_chapter_html(book_epub_t *book, size_t i, const char *text, size_t len,
+                                    const char *css, size_t css_len, const char *anchor,
+                                    size_t source_offset, size_t *anchor_offset, html_text_t *out) {
     // 先装字体再解析：装载挂在解析回调上，inflate 会压在 html_text 的解析器帧之上，
     // 主任务栈就是那样被顶穿的。内联 style 里的写法仍由回调兜底。
     // Load the faces before parsing: driven from the parse callback the inflate sits on top of
@@ -2070,22 +2129,47 @@ esp_err_t book_epub_load_target(book_epub_t *book, size_t i, const char *anchor,
     // 跨文件脚注：先把注释文本抽出来，解析器按原样 href 命中后复制进脚注表。
     // Cross-file notes: extract the texts first; the parser matches the verbatim href and copies
     // them into its note table.
-    epub_ext_note_t ext[EPUB_NOTE_MAX];
-    memset(ext, 0, sizeof(ext));
-    size_t ext_count = epub_collect_ext_notes(book, zip_entry_name(book->zip, book->chapters[i].zip_index),
-                                              text, len, ext, EPUB_NOTE_MAX);
+    // Keep the optional note workspace off the main task stack. When PSRAM is
+    // scarce the chapter can still be read without preloaded cross-file notes.
+    epub_ext_note_t *ext = psram(EPUB_NOTE_MAX * sizeof(*ext));
+    size_t ext_count = 0;
+    if (ext) {
+        memset(ext, 0, EPUB_NOTE_MAX * sizeof(*ext));
+        ext_count = epub_collect_ext_notes(book, zip_entry_name(book->zip, book->chapters[i].zip_index),
+                                           text, len, ext, EPUB_NOTE_MAX);
+    }
     html_ext_note_t ext_map[EPUB_NOTE_MAX];
     for (size_t k = 0; k < ext_count; ++k)
         ext_map[k] = (html_ext_note_t){ext[k].href, ext[k].text, ext[k].len};
-    err = html_to_blocks_with_css_notes(text, len, css, css_len,
+    esp_err_t err = html_to_blocks_with_css_notes(text, len, css, css_len,
                                          fonts.resolve ? &fonts : NULL,
                                          anchor, source_offset,
                                          ext_count ? ext_map : NULL, ext_count,
                                          anchor_offset, out);
     for (size_t k = 0; k < ext_count; ++k) free(ext[k].text);
+    free(ext);
     if (err == ESP_OK) chapter_breaks_prepare(book, i, out);
-    free(css); free(text); return err;
+    return err;
 }
+
+esp_err_t book_epub_load_target(book_epub_t *book, size_t i, const char *anchor,
+                                size_t source_offset, size_t *anchor_offset, html_text_t *out) {
+    if (!out) return ESP_ERR_INVALID_ARG;
+    memset(out, 0, sizeof(*out));
+    if (!book || i >= book->count) return ESP_ERR_INVALID_ARG;
+    char *text;
+    size_t len, css_len;
+    esp_err_t err = load_entry(book, book->chapters[i].zip_index, &text, &len);
+    if (err != ESP_OK) return err;
+    char *css = chapter_css(book, zip_entry_name(book->zip, book->chapters[i].zip_index), text, len, &css_len);
+    err = parse_chapter_html(book, i, text, len, css, css_len, anchor, source_offset, anchor_offset, out);
+    free(css);
+    free(text);
+    return err;
+}
+
+#include "book_epub_parts.inc"
+
 esp_err_t book_epub_load_anchor(book_epub_t *book, size_t i, const char *anchor,
                                 size_t *anchor_offset, html_text_t *out) {
     return book_epub_load_target(book, i, anchor, SIZE_MAX, anchor_offset, out);
@@ -2100,8 +2184,28 @@ int book_epub_prefetch_step(book_epub_t *book,size_t chapter) {
 }
 #else
 #endif
-esp_err_t book_epub_image(book_epub_t *book, size_t chapter, const char *src,
-                          uint8_t **data, size_t *size, bool *png) {
+static int svg_image_entry(book_epub_t *book, const char *path, const uint8_t *image, size_t n) {
+    char nested[EPUB_PATH_CAP] = {0};
+    for (size_t i = 0; i + 4 < n && !nested[0]; ++i) {
+        if (strncasecmp((const char *)image + i, "href", 4)) continue;
+        size_t p = i + 4;
+        while (p < n && (image[p] == ' ' || image[p] == '\t' || image[p] == '\r' || image[p] == '\n')) ++p;
+        if (p >= n || image[p++] != '=') continue;
+        while (p < n && (image[p] == ' ' || image[p] == '\t' || image[p] == '\r' || image[p] == '\n')) ++p;
+        if (p >= n || (image[p] != '\'' && image[p] != '"')) continue;
+        uint8_t quote = image[p++]; size_t start = p;
+        while (p < n && image[p] != quote) ++p;
+        size_t length = p - start;
+        if (!length || length >= sizeof(nested)) continue;
+        char href[EPUB_PATH_CAP] = {0};
+        if (!decode((span_t){(const char *)image + start, length}, href, sizeof(href), false, false) ||
+            !resolve_path(path, href, nested)) nested[0] = 0;
+    }
+    return nested[0] ? zip_find(book->zip, nested) : -1;
+}
+
+esp_err_t book_epub_image_bounded(book_epub_t *book, size_t chapter, const char *src,
+                                 uint8_t **data, size_t *size, bool *png, size_t budget) {
     if (!book || chapter >= book->count || !src || !data || !size || !png) return ESP_ERR_INVALID_ARG;
     *data = NULL; *size = 0; *png = false;
     char path[EPUB_PATH_CAP];
@@ -2110,6 +2214,7 @@ esp_err_t book_epub_image(book_epub_t *book, size_t chapter, const char *src,
     if (entry < 0) return ESP_ERR_NOT_FOUND;
     size_t n = zip_entry_size(book->zip, entry);
     if (!n || n > ZIP_OUTPUT_MAX) return ESP_ERR_INVALID_SIZE;
+    if (n > budget) return ESP_ERR_NO_MEM;
     uint8_t *image = psram(n);
     if (!image) return ESP_ERR_NO_MEM;
     esp_err_t err = zip_extract(book->zip, entry, image, n);
@@ -2121,28 +2226,12 @@ esp_err_t book_epub_image(book_epub_t *book, size_t chapter, const char *src,
     if (!is_png && !is_jpeg && !is_webp && !is_gif) {
         // 许多中文 EPUB 用 SVG 只包一张 JPEG/PNG。解析这一层引用即可复用现有低内存解码器。
         // Many Chinese EPUBs wrap one JPEG/PNG in SVG. Resolve that one reference and reuse the bounded decoder.
-        char nested[EPUB_PATH_CAP] = {0};
-        for (size_t i = 0; i + 4 < n && !nested[0]; ++i) {
-            if (strncasecmp((const char *)image + i, "href", 4)) continue;
-            size_t p = i + 4;
-            while (p < n && (image[p] == ' ' || image[p] == '\t' || image[p] == '\r' || image[p] == '\n')) ++p;
-            if (p >= n || image[p++] != '=') continue;
-            while (p < n && (image[p] == ' ' || image[p] == '\t' || image[p] == '\r' || image[p] == '\n')) ++p;
-            if (p >= n || (image[p] != '\'' && image[p] != '"')) continue;
-            uint8_t quote = image[p++]; size_t start = p;
-            while (p < n && image[p] != quote) ++p;
-            size_t length = p - start;
-            if (!length || length >= sizeof(nested)) continue;
-            char href[EPUB_PATH_CAP] = {0};
-            if (!decode((span_t){(const char *)image + start, length}, href, sizeof(href), false, false) ||
-                !resolve_path(path, href, nested)) nested[0] = 0;
-        }
+        entry = svg_image_entry(book, path, image, n);
         free(image); image = NULL;
-        if (!nested[0]) return ESP_ERR_NOT_SUPPORTED;
-        entry = zip_find(book->zip, nested);
         n = entry >= 0 ? zip_entry_size(book->zip, entry) : 0;
         if (entry < 0) return ESP_ERR_NOT_FOUND;
         if (!n || n > ZIP_OUTPUT_MAX) return ESP_ERR_INVALID_SIZE;
+        if (n > budget) return ESP_ERR_NO_MEM;
         image = psram(n);
         if (!image) return ESP_ERR_NO_MEM;
         err = zip_extract(book->zip, entry, image, n);
@@ -2155,6 +2244,10 @@ esp_err_t book_epub_image(book_epub_t *book, size_t chapter, const char *src,
     }
     *data = image; *size = n; *png = is_png;
     return ESP_OK;
+}
+esp_err_t book_epub_image(book_epub_t *book, size_t chapter, const char *src,
+                          uint8_t **data, size_t *size, bool *png) {
+    return book_epub_image_bounded(book, chapter, src, data, size, png, ZIP_OUTPUT_MAX);
 }
 uint32_t book_epub_total_bytes(const book_epub_t *book) { return book ? book->total : 0; }
 uint32_t book_epub_chapter_byte_offset(const book_epub_t *book, size_t i) { return book && i < book->count ? book->chapters[i].offset : 0; }
@@ -2339,15 +2432,30 @@ esp_err_t book_epub_cover(const char *path, uint8_t **data, size_t *size, bool *
     return book_epub_cover_bounded(path, data, size, is_png, ZIP_OUTPUT_MAX);
 }
 
-esp_err_t book_epub_image_dimensions(book_epub_t *book, size_t chapter, const char *src, unsigned *width, unsigned *height) {
+esp_err_t book_epub_image_info(book_epub_t *book, size_t chapter, const char *src,
+                             unsigned *width, unsigned *height, size_t *bytes) {
     if (!book || chapter >= book->count || !src || !width || !height) return ESP_ERR_INVALID_ARG;
     *width = *height = 0;
+    if (bytes) *bytes = 0;
     char path[EPUB_PATH_CAP];
     if (!resolve_path(zip_entry_name(book->zip, book->chapters[chapter].zip_index), src, path)) return ESP_ERR_INVALID_ARG;
     int entry = zip_find(book->zip, path);
     if (entry < 0) return ESP_ERR_NOT_FOUND;
+    const char *ext = strrchr(path, '.');
+    if (ext && !strcasecmp(ext, ".svg")) {
+        size_t size = zip_entry_size(book->zip, entry);
+        if (size > 8192) size = 8192;
+        uint8_t *markup = size ? psram(size) : NULL;
+        if (!markup) return ESP_ERR_NO_MEM;
+        esp_err_t err = zip_extract_prefix(book->zip, entry, markup, size);
+        if (err == ESP_OK) entry = svg_image_entry(book, path, markup, size);
+        free(markup);
+        if (err != ESP_OK) return err;
+        if (entry < 0) return ESP_ERR_NOT_SUPPORTED;
+    }
     size_t resource_size = zip_entry_size(book->zip, entry);
-    if (!resource_size) return ESP_ERR_INVALID_SIZE;
+    if (bytes) *bytes = resource_size;
+    if (!resource_size || resource_size > ZIP_OUTPUT_MAX) return ESP_ERR_INVALID_SIZE;
     // PNG的尺寸在前24字节；不要为每幅漫画读64KiB或完整图片。
     // PNG dimensions fit in the first24 bytes; do not read64KiB or the full comic page for each probe.
     uint8_t first[32];
@@ -2371,18 +2479,23 @@ esp_err_t book_epub_image_dimensions(book_epub_t *book, size_t chapter, const ch
             if (found) return ESP_OK;
         }
     }
-    err = ESP_ERR_NOT_SUPPORTED;
-    if (err == ESP_ERR_NOT_SUPPORTED) {
-        // 头部不足或 SVG 包装时，复用插图读取路径；缓存到块中，避免每页重复读取。
-        // For a late frame header or SVG wrapper, reuse image loading; callers cache dimensions in blocks.
-        uint8_t *image = NULL; size_t bytes = 0; bool png = false;
-        err = book_epub_image(book, chapter, src, &image, &bytes, &png);
-        if (err == ESP_OK && !book_image_dimensions(image, bytes, png, width, height))
-            err = ESP_ERR_NOT_SUPPORTED;
-        free(image);
+    // Retain compatibility with small JPEGs whose metadata pushes the frame past 64 KiB.
+    if (resource_size <= 256u * 1024u && size < resource_size && first[0] == 0xff) {
+        uint8_t *header = psram(resource_size);
+        if (!header) return ESP_ERR_NO_MEM;
+        err = zip_extract(book->zip, entry, header, resource_size);
+        bool found = err == ESP_OK && book_image_dimensions(header, resource_size, false, width, height);
+        free(header);
+        if (err != ESP_OK) return err;
+        if (found) return ESP_OK;
     }
-    return err;
+    return ESP_ERR_NOT_SUPPORTED;
 }
+esp_err_t book_epub_image_dimensions(book_epub_t *book, size_t chapter, const char *src,
+                                     unsigned *width, unsigned *height) {
+    return book_epub_image_info(book, chapter, src, width, height, NULL);
+}
+
 #if KIIKO_BOARD_METALIO47
 
 esp_err_t book_epub_suspend_io(book_epub_t *book) {

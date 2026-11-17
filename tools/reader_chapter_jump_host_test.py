@@ -50,6 +50,8 @@ static void save_progress(void){assert(!locked);++saves;}
 static void flush_ticket_stats(void){++flushes;}
 static bool book_ticket_recent_days(int *days){(void)days;return true;}
 static unsigned bookmark_count(void){return 3;}
+static size_t s_part_base;
+static bool s_part_more;
 static unsigned percent(size_t page){return (unsigned)(page*100/(book_layout_page_count()?book_layout_page_count():1));}
 static void copy_text(char *dst,size_t cap,const char *src){snprintf(dst,cap,"%s",src);}
 static bool ui_rect_hit(EpdRect r,int x,int y){return r.width>0&&r.height>0&&x>=r.x&&y>=r.y&&x<r.x+r.width&&y<r.y+r.height;}

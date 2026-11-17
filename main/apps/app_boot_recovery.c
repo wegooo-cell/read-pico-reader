@@ -105,6 +105,10 @@ static void on_enter(app_ctx_t *ctx) {
     s_message[0] = 0;
     if (!pico_boot_interrupted_book(s_path, sizeof(s_path))) s_path[0] = 0;
 }
+static void recovery_on_exit(app_ctx_t *ctx) {
+    (void)ctx;
+    pico_boot_leave_book_recovery();
+}
 static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if (ev->type != UI_GESTURE_TAP) return APP_REDRAW_NONE;
     int tab = ui_nav_hit(ev->x0, ev->y0);
@@ -129,5 +133,5 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
 }
 const app_desc_t app_boot_recovery = {
     .title = "启动恢复", .detail = "中断图书恢复", .owns_keys = true,
-    .on_enter = on_enter, .render = render, .on_gesture = on_gesture, .on_key = on_key,
+    .on_enter = on_enter, .on_exit = recovery_on_exit, .render = render, .on_gesture = on_gesture, .on_key = on_key,
 };

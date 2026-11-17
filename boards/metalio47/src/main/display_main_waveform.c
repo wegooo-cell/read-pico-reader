@@ -463,10 +463,9 @@ const EpdWaveform* display_main_page_bw_waveform(void) {
 #endif
 }
 
-// 仅面板实验借用官方11/5/0/3裁剪，保留灰阶尾和三相保持；原48相数组不动。
-// Panel experiments alone use vendor11/5/0/3 trimming, retaining gray tails/three holds and untouched48-phase arrays.
-const EpdWaveform* display_reader_panel37_waveform(void) {
-#if KIIKO_S31_READER_PANEL37
+// 目录和面板共用官方11/5/0/3裁剪，保留灰阶尾和三相保持；原48相数组不动。
+// The TOC and panels share vendor11/5/0/3 trimming, retaining gray tails/three holds and untouched48-phase arrays.
+const EpdWaveform* display_ui37_waveform(void) {
     static bool attempted;
     static EpdWaveformPhases phases;
     static const EpdWaveformPhases *ranges[]={&phases};
@@ -491,6 +490,11 @@ const EpdWaveform* display_reader_panel37_waveform(void) {
     phases=(EpdWaveformPhases){count,(const uint8_t*)data,NULL};
     wave.temp_intervals=E0470_FULL_WAVEFORM.temp_intervals;
     return &wave;
+}
+
+const EpdWaveform* display_reader_panel37_waveform(void) {
+#if KIIKO_S31_READER_PANEL37
+    return display_ui37_waveform();
 #else
     return NULL;
 #endif

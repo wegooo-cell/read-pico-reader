@@ -44,6 +44,8 @@ int main(int argc,char **argv){
  unsigned char saved[48*64];assert(raw&&raw->phases==48);memcpy(saved,raw->luts,sizeof(saved));
  const EpdWaveform *normal=display_reader_soft_turn_waveform();
  const EpdWaveformPhases *n=e0470_waveform_phases(normal,MODE_GL16);
+ const EpdWaveformPhases *direct=e0470_waveform_phases(display_reader_text_turn_waveform(),MODE_GL16);
+ assert(direct&&n&&direct->phases==n->phases);
  const EpdWaveform *panel_wave=display_reader_panel37_waveform();
  const EpdWaveform *base_wave=panel_wave?panel_wave:&E0470_WAVEFORM;
  const EpdWaveformPhases *base=e0470_waveform_phases(base_wave,MODE_GL16);
@@ -52,17 +54,51 @@ int main(int argc,char **argv){
   assert(normal==&E0470_WAVEFORM&&n==e0470_waveform_phases(&E0470_WAVEFORM,MODE_GL16));
  }else{
   assert(normal!=&E0470_WAVEFORM&&n&&n->phases==base->phases+16);
+  unsigned changed_white_targets=0;
   for(int to=0;to<16;++to)for(int from=0;from<16;++from){
+   bool changed=false;
    for(int f=0;f<drive;++f){int expected=e0470_phase_action(base,f,to,from);
     if(to==0&&from==0&&expected==2)expected=0;
     assert(e0470_phase_action(n,f,to,from)==expected);
+    if(e0470_phase_action(direct,f,to,from)!=expected){
+     assert(from==15&&to>0&&to<15);changed=true;
+    }
    }
+   changed_white_targets+=changed;
    for(int f=drive;f<drive+12;++f)assert(e0470_phase_action(n,f,to,from)==(to==15?2:0));
    for(int f=drive+12;f<drive+16;++f)assert(e0470_phase_action(n,f,to,from)==(to==0?1:0));
    for(int f=0;f<hold;++f)assert(e0470_phase_action(n,drive+16+f,to,from)==e0470_phase_action(base,drive+f,to,from));
+   for(int f=drive;f<n->phases;++f)assert(e0470_phase_action(n,f,to,from)==e0470_phase_action(direct,f,to,from));
   }
+  assert(changed_white_targets==14);
  }
  assert(display_reader_soft_turn_waveform()==normal);
+ const EpdWaveform *ordinary=display_reader_ordinary_turn_waveform();
+ assert(display_reader_ordinary_turn_waveform()==ordinary);
+ if(panel_wave){
+  const EpdWaveformPhases *merged=e0470_waveform_phases(ordinary,MODE_GL16);
+  assert(ordinary!=normal&&merged&&merged->phases==49&&trailing_holds(merged)==3);
+  for(int to=0;to<16;++to)for(int from=0;from<16;++from){
+   int old_whites=0,new_whites=0,old_blacks=0,new_blacks=0;
+   for(int f=0;f<n->phases;++f){
+    int action=e0470_phase_action(n,f,to,from);
+    old_whites+=action==2;
+    old_blacks+=action==1;
+   }
+   for(int f=0;f<merged->phases;++f){
+    int expected=e0470_phase_action(n,f<46?f:f+4,to,from);
+    if(to==15&&from==15)expected=f>=22&&f<34?2:0;
+    if(to==0&&f>=34&&f<38)expected=1;
+    int action=e0470_phase_action(merged,f,to,from);
+    assert(action==expected);
+    new_whites+=action==2;
+    new_blacks+=action==1;
+   }
+   assert(new_whites==old_whites&&new_blacks==old_blacks);
+  }
+ }else{
+  assert(ordinary==normal);
+ }
  assert(!memcmp(saved,raw->luts,sizeof(saved)));
  assert(allocations==(KIIKO_S31_READER_PANEL37?1:0));
  FILE *dump=fopen(argv[2],"wb");assert(dump&&fwrite(n->luts,64,n->phases,dump)==(size_t)n->phases&&fclose(dump)==0);
@@ -83,7 +119,8 @@ int main(int argc,char **argv){
   for(int f=0;f<hold;++f)assert(e0470_phase_action(b,drive+4+f,to,from)==e0470_phase_action(du,drive+f,to,from));
  }
  assert(!memcmp(old_du,du->luts,(size_t)du->phases*64)&&!memcmp(saved,raw->luts,sizeof(saved)));
- printf("PASS: panel37=%d OOM=%d normal=%d fast=%d; all256 pairs, vendor bytes, 12 white/4 black extras, original DU settling and bounded caches\n",KIIKO_S31_READER_PANEL37,oom,n->phases,b->phases);
+ printf("PASS: panel37=%d OOM=%d soft=%d ordinary=%d fast=%d; 256 pairs, overlapping white/black, preserved pulses and vendor bytes\n",
+        KIIKO_S31_READER_PANEL37,oom,n->phases,e0470_waveform_phases(ordinary,MODE_GL16)->phases,b->phases);
 }
 '''
 

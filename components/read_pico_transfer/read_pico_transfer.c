@@ -635,6 +635,9 @@ static bool s_stopping, s_upload_active;
 static bool s_config_busy;
 static bool s_profile_confirmed;
 static int64_t s_profile_confirm_after;
+static int64_t s_wifi_last_use_us;
+static bool s_http_active;
+static esp_err_t transfer_register_routes(httpd_handle_t http, const httpd_uri_t *routes, size_t count);
 // 对时独占 SNTP 与临时 WiFi；取消后等待清理完成，才允许拆网络或睡眠。
 // Time sync owns SNTP/temporary WiFi; wait for cleanup before network teardown or sleep.
 static bool s_time_active, s_time_automatic, s_time_cancel;
@@ -2195,6 +2198,7 @@ void read_pico_transfer_stop(void) {
     if (s_ble_network_reserved) { s_ble_network_reserved = false; ble_pt_network_release(); }
     portENTER_CRITICAL(&s_lock);
     s_status.state = READ_PICO_TRANSFER_STOPPED; s_status.sta_count = 0;
+    s_status.wifi_enabled = false;
     s_status.network_ready = false; s_status.url[0] = 0;
     s_upload_active = false;
     memset(&s_connection, 0, sizeof(s_connection));
@@ -2229,9 +2233,12 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
     if (cfg->root_dir) strcpy(s_root, cfg->root_dir);
     else s_root[0] = 0;
     s_cfg.root_dir = s_root;
+    const int64_t started_us = esp_timer_get_time();
     portENTER_CRITICAL(&s_lock);
     memset(&s_status, 0, sizeof(s_status)); s_status.state = READ_PICO_TRANSFER_STARTING;
-    s_stopping = s_upload_active = false;
+    s_stopping = s_upload_active = s_http_active = false;
+    s_wifi_last_use_us = started_us;
+    s_status.wifi_enabled = true;
     s_status.mode = cfg->mode;
     s_status.cover_lookup = cfg->cover_lookup;
     portEXIT_CRITICAL(&s_lock);
@@ -2372,7 +2379,7 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    const httpd_uri_t routes[] = {
+    static const httpd_uri_t routes[] = {
         { .uri = "/", .method = HTTP_GET, .handler = index_handler },
         { .uri = "/info", .method = HTTP_GET, .handler = info_handler },
         { .uri = "/upload", .method = HTTP_PUT, .handler = upload_handler },
@@ -2392,9 +2399,8 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
         { .uri = "/wifi", .method = HTTP_POST, .handler = wifi_handler },
         { .uri = "/wifi", .method = HTTP_DELETE, .handler = wifi_handler },
     };
-    for (size_t i = 0; i < sizeof(routes)/sizeof(*routes); ++i) {
-        err = httpd_register_uri_handler(s_http, &routes[i]); if (err != ESP_OK) goto fail;
-    }
+    err = transfer_register_routes(s_http, routes, sizeof(routes)/sizeof(*routes));
+    if (err != ESP_OK) goto fail;
     }
     ESP_LOGI("transfer", "wifi start internal free=%u largest=%u dma free=%u largest=%u",
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
@@ -2465,6 +2471,9 @@ static bool s_stopping, s_upload_active;
 static bool s_config_busy;
 static bool s_profile_confirmed;
 static int64_t s_profile_confirm_after;
+static int64_t s_wifi_last_use_us;
+static bool s_http_active;
+static esp_err_t transfer_register_routes(httpd_handle_t http, const httpd_uri_t *routes, size_t count);
 // 对时独占 SNTP 与临时 WiFi；取消后等待清理完成，才允许拆网络或睡眠。
 // Time sync owns SNTP/temporary WiFi; wait for cleanup before network teardown or sleep.
 static bool s_time_active, s_time_automatic, s_time_cancel;
@@ -3906,6 +3915,7 @@ void read_pico_transfer_stop(void) {
     if (s_ble_network_reserved) { s_ble_network_reserved = false; ble_pt_network_release(); }
     portENTER_CRITICAL(&s_lock);
     s_status.state = READ_PICO_TRANSFER_STOPPED; s_status.sta_count = 0;
+    s_status.wifi_enabled = false;
     s_status.network_ready = false; s_status.url[0] = 0;
     s_upload_active = false;
     memset(&s_connection, 0, sizeof(s_connection));
@@ -3929,9 +3939,12 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
     if (cfg->root_dir) strcpy(s_root, cfg->root_dir);
     else s_root[0] = 0;
     s_cfg.root_dir = s_root;
+    const int64_t started_us = esp_timer_get_time();
     portENTER_CRITICAL(&s_lock);
     memset(&s_status, 0, sizeof(s_status)); s_status.state = READ_PICO_TRANSFER_STARTING;
-    s_stopping = s_upload_active = false;
+    s_stopping = s_upload_active = s_http_active = false;
+    s_wifi_last_use_us = started_us;
+    s_status.wifi_enabled = true;
     s_status.mode = cfg->mode;
     s_status.cover_lookup = cfg->cover_lookup;
     portEXIT_CRITICAL(&s_lock);
@@ -4015,7 +4028,7 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    const httpd_uri_t routes[] = {
+    static const httpd_uri_t routes[] = {
         { .uri = "/", .method = HTTP_GET, .handler = index_handler },
         { .uri = "/info", .method = HTTP_GET, .handler = info_handler },
         { .uri = "/upload", .method = HTTP_PUT, .handler = upload_handler },
@@ -4035,9 +4048,8 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
         { .uri = "/wifi", .method = HTTP_POST, .handler = wifi_handler },
         { .uri = "/wifi", .method = HTTP_DELETE, .handler = wifi_handler },
     };
-    for (size_t i = 0; i < sizeof(routes)/sizeof(*routes); ++i) {
-        err = httpd_register_uri_handler(s_http, &routes[i]); if (err != ESP_OK) goto fail;
-    }
+    err = transfer_register_routes(s_http, routes, sizeof(routes)/sizeof(*routes));
+    if (err != ESP_OK) goto fail;
     }
     err = esp_wifi_start(); if (err != ESP_OK) goto fail;
     s_started = true;
@@ -4063,4 +4075,54 @@ fail:
     read_pico_transfer_stop(); release_config(); set_error(err); return err;
 }
 #endif
+#endif
+
+#ifndef READ_PICO_TRANSFER_HOST_TEST
+#define WIFI_IDLE_US INT64_C(120000000)
+
+// HTTP 服务串行派发请求。自动关 WiFi 与新请求共用准入锁。
+// The HTTP task dispatches serially; idle shutdown and new requests share the admission lock.
+static esp_err_t transfer_http_dispatch(httpd_req_t *req) {
+    const httpd_uri_t *route = req->user_ctx;
+    const bool activity = route->handler != info_handler;
+    portENTER_CRITICAL(&s_lock);
+    bool accepted = !s_stopping;
+    if (accepted) s_http_active = true;
+    portEXIT_CRITICAL(&s_lock);
+    if (!accepted) return ESP_FAIL;
+    esp_err_t result = route->handler(req);
+    int64_t now = esp_timer_get_time();
+    portENTER_CRITICAL(&s_lock);
+    // 状态轮询不延长空闲时间；其他请求结束后重新计时。/ Status polling does not renew the idle window.
+    if (activity) s_wifi_last_use_us = now;
+    s_http_active = false;
+    portEXIT_CRITICAL(&s_lock);
+    return result;
+}
+
+static esp_err_t transfer_register_routes(httpd_handle_t http, const httpd_uri_t *routes, size_t count) {
+    for (size_t i = 0; i < count; ++i) {
+        httpd_uri_t wrapped = routes[i];
+        wrapped.handler = transfer_http_dispatch;
+        wrapped.user_ctx = (void *)&routes[i];
+        esp_err_t err = httpd_register_uri_handler(http, &wrapped);
+        if (err != ESP_OK) return err;
+    }
+    return ESP_OK;
+}
+
+void read_pico_transfer_idle_poll(bool in_use) {
+    const int64_t now = esp_timer_get_time();
+    portENTER_CRITICAL(&s_lock);
+    bool expired = false;
+    if (s_status.wifi_enabled && !s_stopping) {
+        if (in_use || s_upload_active || s_time_active) s_wifi_last_use_us = now;
+        else if (!s_config_busy && !s_http_active && now - s_wifi_last_use_us >= WIFI_IDLE_US) {
+            s_stopping = true;
+            expired = true;
+        }
+    }
+    portEXIT_CRITICAL(&s_lock);
+    if (expired) read_pico_transfer_stop();
+}
 #endif

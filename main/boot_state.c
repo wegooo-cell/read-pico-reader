@@ -80,9 +80,12 @@ static uint32_t packed_checksum(const uint8_t *data,size_t size) {
 }
 static size_t pack_record(uint8_t data[BOOT_PACKED_MAX]) {
     boot_packed_header_t header={.magic=BOOT_PACKED_MAGIC,.starting=s_record.starting,
-        .resume_valid=s_record.resume_valid,.frame=s_record.reserved[0],.tab=s_record.resume.tab,
-        .reader=s_record.resume.reader,.fullscreen=s_record.resume.fullscreen};
-    const char *paths[]={s_record.resume.path,s_record.opening,s_record.blocked};
+        .resume_valid=s_record.resume_valid};
+    if (s_record.resume_valid) {
+        header.frame=s_record.reserved[0];header.tab=s_record.resume.tab;
+        header.reader=s_record.resume.reader;header.fullscreen=s_record.resume.fullscreen;
+    }
+    const char *paths[]={s_record.resume_valid ? s_record.resume.path : "",s_record.opening,s_record.blocked};
     size_t size=sizeof(header);
     for(unsigned i=0;i<3;++i){
         size_t length=strnlen(paths[i],PICO_BOOT_PATH_MAX);
@@ -229,7 +232,9 @@ esp_err_t pico_boot_book_begin(const char *path) {
     memset(s_record.opening, 0, sizeof(s_record.opening));
     memcpy(s_record.opening, path, strlen(path));
     s_record.resume_valid = 0;
-    return store();
+    esp_err_t err = store();
+    if (err != ESP_OK) s_record.opening[0] = 0;
+    return err;
 }
 void pico_boot_book_end(bool success) {
     if (success && !strcmp(s_record.blocked, s_record.opening)) s_record.blocked[0] = 0;
@@ -291,6 +296,12 @@ bool pico_boot_interrupted_book(char *path, size_t capacity) {
     if (!s_interrupted || !path || strlen(s_record.blocked) >= capacity) return false;
     memcpy(path, s_record.blocked, strlen(s_record.blocked) + 1);
     return true;
+}
+void pico_boot_leave_book_recovery(void) {
+    if (s_recovery_reasons & BOOT_RECOVERY_OPENING) {
+        s_recovery = false;
+        s_interrupted = false;
+    }
 }
 void pico_boot_forget_interrupted_book(void) {
     s_interrupted = false;

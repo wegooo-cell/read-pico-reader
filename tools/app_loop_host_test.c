@@ -15,13 +15,22 @@ void app_home_cover_mode_changed(void) {}
 esp_err_t pico_boot_save_resume(const pico_resume_t *resume) { (void)resume; return ESP_OK; }
 void pico_boot_clear_resume(void) {}
 bool app_book_resume_context(char *p,size_t c,bool *f) { (void)p;(void)c;(void)f;return false; }
+bool test_reader_open;
 #include "read_pico_transfer.h"
+#include "book/book_weread_cover.h"
+#include "book/book_xteink_sync.h"
 #include "ble_page_turner.h"
 #include "ui_nav_layout.h"
 #include <assert.h>
 #include <setjmp.h>
 #include <stdio.h>
 #include <string.h>
+
+#include "online_font.h"
+void online_font_status(online_font_status_t *s){*s=(online_font_status_t){0};}
+book_weread_cover_status_t book_weread_cover_status(void){return (book_weread_cover_status_t){0};}
+bool xteink_sync_busy(void){return false;}
+void read_pico_transfer_idle_poll(bool in_use){(void)in_use;}
 
 const app_desc_t app_book = {.title="book"};
 const app_desc_t app_transfer = {.title="transfer"};
@@ -140,8 +149,8 @@ bool ble_pt_pop_key(ble_pt_event_t *e) {(void)e;return false;}
 bool ble_pt_pop_raw(ble_pt_raw_t *e) {(void)e;return false;}
 void read_pico_transfer_get_status(read_pico_transfer_status_t *s) {*s=transfer_status;}
 int read_pico_transfer_get_saved_wifi(char *ssid,bool *configured) {strcpy(ssid,"saved");*configured=saved_wifi;return ESP_OK;}
-int read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {assert(cfg->mode==READ_PICO_TRANSFER_MODE_STA&&cfg->network_only);++wifi_starts;transfer_status.mode=cfg->mode;transfer_status.state=1;return ESP_OK;}
-bool read_pico_transfer_try_stop_if_idle(void) {if(upload_busy)return false;++wifi_stops;transfer_status.state=0;return true;}
+int read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {assert(cfg->mode==READ_PICO_TRANSFER_MODE_STA&&cfg->network_only);++wifi_starts;transfer_status.mode=cfg->mode;transfer_status.state=1;transfer_status.wifi_enabled=true;return ESP_OK;}
+bool read_pico_transfer_try_stop_if_idle(void) {if(upload_busy)return false;++wifi_stops;transfer_status.state=0;transfer_status.wifi_enabled=false;return true;}
 static int pulse_tab=-1,pulse_requests,pulse_draws;
 void ui_click_feedback_reset(void) {click_active=false;pulse_tab=-1;}
 void ui_click_feedback_begin(uint8_t *fb) {(void)fb;click_active=false;}
@@ -529,7 +538,7 @@ int main(void) {
     for(int guard=0;guard<3;++guard){
         reset();media_test=sd_font=auto_recovery_test=true;mounted_steps[0]=true;time_step=600000;
         for(int i=1;i<8;++i)present_steps[i]=true;first.on_media_lost=lost;
-        if(guard==0)online_busy=true;if(guard==1)transfer_status.state=READ_PICO_TRANSFER_UPLOADING;if(guard==2)test_usb_active=true;
+        if(guard==0)online_busy=true;if(guard==1){transfer_status.state=READ_PICO_TRANSFER_UPLOADING;transfer_status.wifi_enabled=true;}if(guard==2)test_usb_active=true;
         for(int i=0;i<8;++i)add(0,0,0,0);run();assert(!recovery_calls);
         if(guard==2)assert(!health_polls&&!media_lost);
     }
@@ -617,7 +626,7 @@ int main(void) {
     add(85,156,1,0);add(85,156,1,0);add(0,0,0,0);
     add(85,156,1,0);add(0,0,0,0);run();
     assert(wifi_starts==1&&wifi_stops==1&&quick_gl==1&&quick_du==4&&quick_draws==1&&base_renders==1&&quick_press_draws==2&&!touch_calls);
-    reset();upload_busy=true;transfer_status=(read_pico_transfer_status_t){.state=1,.mode=READ_PICO_TRANSFER_MODE_STA};
+    reset();upload_busy=true;transfer_status=(read_pico_transfer_status_t){.state=1,.mode=READ_PICO_TRANSFER_MODE_STA,.wifi_enabled=true};
     add(300,20,1,0);add(300,110,1,0);add(0,0,0,0);add(85,156,1,0);add(0,0,0,0);run();
     assert(!wifi_starts&&!wifi_stops&&transfer_status.state==1);
     reset();add(300,20,1,0);add(300,110,1,0);add(0,0,0,0);add(85,156,1,0);add(0,0,0,0);run();

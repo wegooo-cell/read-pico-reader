@@ -224,6 +224,17 @@ void metalio_tps_off(void) {
     vTaskDelay(pdMS_TO_TICKS(5));
     (void)metalio_io_set(2,false); tps_on=false;
 }
+esp_err_t metalio_tps_verify_off(void) {
+    if (tps_on || tps_prepared) return ESP_ERR_INVALID_STATE;
+    if (!ioe || !mutex) return ESP_FAIL;
+    if (xSemaphoreTake(mutex, pdMS_TO_TICKS(100)) != pdTRUE) return ESP_ERR_TIMEOUT;
+    uint8_t pins = 0;
+    esp_err_t err = fca9555_read_input(ioe, 0, &pins);
+    xSemaphoreGive(mutex);
+    if (err == ESP_ERR_INVALID_STATE) return ESP_FAIL;
+    if (err != ESP_OK) return err;
+    return (pins & 0x87) ? ESP_ERR_NOT_FINISHED : ESP_OK;
+}
 bool metalio_tps_ready(void) { return tps_on; }
 int metalio_tps_vcom_mv(void) {
     // VCOM1(0x03)=低 8 位、VCOM2(0x04) bit0=最高位，单位 10mV；读不回来返回 -1。

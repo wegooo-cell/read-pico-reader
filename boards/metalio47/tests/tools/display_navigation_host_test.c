@@ -27,6 +27,10 @@ static const EpdWaveform reader_soft = {10};
 static const EpdWaveform settings_soft={11},settings_lower={14};
 static const EpdWaveform shelf37_soft={12},shelf37_art={13};
 static bool shelf37_enabled;
+static const EpdWaveform water37={15};
+static bool water37_enabled;
+const EpdWaveform* display_reader_panel37_waveform(void){return water37_enabled?&water37:NULL;}
+const EpdWaveform* display_ui37_waveform(void){return water37_enabled?&water37:NULL;}
 static int shelf37_regions;
 const EpdWaveform* display_main_shelf37_waveform(bool art){return shelf37_enabled?(art?&shelf37_art:&shelf37_soft):NULL;}
 static unsigned switch_wave_calls;
@@ -41,6 +45,7 @@ const EpdWaveform* display_main_switch_waveform(const EpdWaveform* source,enum E
     assert(source&&(mode==MODE_DU||mode==MODE_GL16));++switch_wave_calls;return source;
 }
 const EpdWaveform* display_reader_soft_turn_waveform(void){return &reader_soft;}
+const EpdWaveform* display_reader_ordinary_turn_waveform(void){return &reader_soft;}
 const EpdWaveform* display_reader_text_turn_waveform(void){return &reader_soft;}
 const EpdWaveform* display_reader_text_waveform(void) {return &reader_soft;}
 static app_main_refresh_mode_t main_mode=APP_MAIN_REFRESH_FAST;
@@ -126,6 +131,7 @@ enum EpdDrawError e0470_page_turn(EpdiyHighlevelState* state, EpdRect area, e047
     return EPD_DRAW_SUCCESS;
 }
 enum EpdDrawError e0470_text_turn_with_waveform(EpdiyHighlevelState* h,EpdRect a,e0470_turn_dir_t d,const EpdWaveform* w){(void)h;(void)a;(void)d;(void)w;assert(false);return EPD_DRAW_SUCCESS;}
+enum EpdDrawError e0470_text_turn_with_prefill(EpdiyHighlevelState* h,EpdRect a,const EpdWaveform* w){(void)h;(void)a;(void)w;assert(false);return EPD_DRAW_SUCCESS;}
 static int turn_tick_us=21000;
 void e0470_page_turn_set_tick_us(int us){turn_tick_us=us;}
 int e0470_page_turn_tick_us(void){return turn_tick_us;}
@@ -136,7 +142,8 @@ enum EpdDrawError e0470_reader_ripple_with_waveform(EpdiyHighlevelState* hl,EpdR
 enum EpdDrawError e0470_page_turn_with_waveform_compact(EpdiyHighlevelState* state, EpdRect area,
     e0470_turn_dir_t dir, const EpdWaveform* waveform, unsigned bands) {
     assert(ota_display_depth);
-    assert(waveform==&main_water && bands==E0470_TURN_FAST_BANDS && turn_tick_us==E0470_TURN_FAST_TICK_US);
+    assert(waveform==(water37_enabled?&water37:&main_water) &&
+           bands==E0470_TURN_FAST_BANDS && turn_tick_us==E0470_TURN_FAST_TICK_US);
     return e0470_page_turn(state,area,dir);
 }
 
@@ -218,6 +225,9 @@ enum EpdDrawError epd_hl_update_screen_full(EpdiyHighlevelState* state, enum Epd
 enum EpdDrawError epd_hl_update_area(EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area) {
     assert(temperature == 25); return draw(state, mode, false, &area);
 }
+enum EpdDrawError epd_hl_update_area_diff_exact(EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area) {
+    return epd_hl_update_area(state, mode, temperature, area);
+}
 enum EpdDrawError epd_hl_update_area_full(EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area) {
     assert(temperature == 25); return draw(state, mode, true, &area);
 }
@@ -253,7 +263,7 @@ enum EpdDrawError e0470_update_native_area(EpdiyHighlevelState* state,EpdRect ar
     enum EpdDrawError result=draw(state,MODE_GC16,true,&area);exact_crop=false;return result;
 }
 static void reset(void) {
-    shelf37_enabled=false;shelf37_regions=0;
+    shelf37_enabled=water37_enabled=false;shelf37_regions=0;
     display_main_transition_cancel(); main_mode=APP_MAIN_REFRESH_FAST; exit_calls=water_calls=water_fails=0; failures = fail_after = 0;
     allocations = frees = complete_bw_calls = 0; alloc_fail = false; now_us = 1000000;
     region_calls=region_unavailable=ui_prefill_requests=native_list_calls=0;exact_crop=false;
@@ -836,6 +846,10 @@ int main(void) {
     assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS);assert_final();
     assert(water_calls==1&&!gray_calls&&last_water_area.y==0&&last_water_area.height==UI_NAV_MARKER_SCAN_END);
     assert(!clears&&!allocations&&!bw_calls&&!nav_draws);
+    reset();main_mode=APP_MAIN_REFRESH_WATER;water37_enabled=true;gray_target(2);
+    display_main_transition_arm(&owner_a,false,true);
+    assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS);assert_final();
+    assert(water_calls==1&&!gray_calls&&!clears);
     reset();main_mode=APP_MAIN_REFRESH_WATER;gray_target(2);water_fails=EPD_DRAW_OTHER_ERROR;
     display_main_transition_arm(&owner_a,false,true);assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS);assert_final();
     assert(water_calls==1 && gc_calls==1 && clears==1);
@@ -924,8 +938,8 @@ int main(void) {
     assert(switch_wave_calls>erase_before&&!clears&&!full_calls);
     assert(clean_wave_calls>system_clean_before);
     display_main_switch_erase_set(false);display_system_navigation_set(false);display_system_binary_set(prior);
-    // 仅显式封面标记启用37相；同轮软/强表必须一起换，保留失败恢复及原厂完整清理。
-    // Only explicit cover registration selects37; soft/art switch together, retaining fallback and factory cleanup.
+    // 主页切换和已选短封面路径的软/强表一起更新；保留失败恢复及原厂完整清理。
+    // Root transitions and opt-in cover updates share short soft/art tables, retaining fallback and factory cleanup.
     const EpdRect cover_art={0,192,H,800};
     for(int changing=0;changing<2;++changing)for(int problem=0;problem<4;++problem){
         reset();main_mode=APP_MAIN_REFRESH_NORMAL;shelf37_enabled=problem!=3;gray_target(3);
@@ -944,7 +958,10 @@ int main(void) {
     }
     reset();main_mode=APP_MAIN_REFRESH_NORMAL;shelf37_enabled=true;gray_target(4);
     display_main_transition_arm(&owner_a,false,true);display_main_transition_gray_bands(&cover_art,1);
-    assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS);assert_final();assert(!shelf37_regions);
+    assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS);assert_final();assert(shelf37_regions==1);
+    reset();main_mode=APP_MAIN_REFRESH_NORMAL;shelf37_enabled=true;gray_target(4);
+    display_main_transition_arm(&owner_a,false,true);
+    assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS);assert_final();assert(last_wave==&shelf37_soft);
     reset();main_mode=APP_MAIN_REFRESH_NORMAL;shelf37_enabled=true;gray_target(4);
     display_main_transition_arm(&owner_a,false,true);display_main_transition_cover_bands(&cover_art,1);
     assert(update_display_full(&hl)==EPD_DRAW_SUCCESS);assert_final();assert(!shelf37_regions&&last_mode==MODE_GC16);

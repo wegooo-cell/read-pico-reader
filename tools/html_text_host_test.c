@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "html_text.h"
+#include "book_chapter_lead.h"
 int html_test_fail_after = -1;
 // 宿主替身字体表：A 映射到槽 1、B 映射到槽 2，其余名字当作书里没有。
 // Host stand-in face table: A maps to slot 1, B to slot 2, every other name is absent.
@@ -101,6 +102,29 @@ int main(void) {
     assert(t.blocks[0].margin_before_percent == 50 && t.blocks[0].margin_after_percent == 50);
     assert(t.blocks[1].align == 2 && t.blocks[1].indent_percent == 200);
     assert(t.blocks[1].margin_after_percent == 25);
+    html_text_free(&t);
+    t = parse("<style>body{text-align:left} h2.own{font-size:160%;font-weight:bold;text-align:right}</style>"
+              "<h2 class='own'>Styled</h2><h2>Plain</h2><h2 align='center'>Center</h2>",
+              "Styled\nPlain\nCenter");
+    assert(t.blocks[0].authored_style && t.blocks[0].font_percent==160 &&
+           t.blocks[0].font_weight==7 && t.blocks[0].align==2);
+    assert(!t.blocks[1].authored_style && !t.blocks[1].font_percent);
+    assert(t.blocks[2].authored_style && t.blocks[2].align==1);
+    html_text_free(&t);
+    t = parse("<style>h1.title{font-size:1.5em;font-weight:bold;margin:1em 0}</style>"
+              "<h1 class='title'>合 欢 树</h1><p>正文</p>", "合 欢 树\n正文");
+    assert(t.blocks[0].authored_style && t.blocks[0].authored_heading_layout);
+    char heading[128], number[32];
+    assert(epub_chapter_lead(&t, "合欢树", heading, sizeof(heading), number, sizeof(number)) == 0);
+    assert(!heading[0] && !number[0]);
+    t.blocks[0].authored_heading_layout = false;
+    assert(epub_chapter_lead(&t, "合欢树", heading, sizeof(heading), number, sizeof(number)) == t.blocks[1].offset);
+    assert(!strcmp(heading,"合 欢 树") && !number[0]);
+    html_text_free(&t);
+    t = parse("<h1 style='text-align:left'>秋天的怀念</h1><p>正文</p>", "秋天的怀念\n正文");
+    assert(t.blocks[0].authored_heading_layout);
+    assert(epub_chapter_lead(&t, "秋天的怀念", heading, sizeof(heading), number, sizeof(number)) == 0);
+    assert(!heading[0] && !number[0]);
     html_text_free(&t);
     t = parse("<p>前</p><img src='data:image/png;base64,x' data-src='../图&amp;文.png'/>"
               "<svg:image xlink:href='../svg.png'/><object data='../obj.png'/>",

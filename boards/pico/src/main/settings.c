@@ -202,6 +202,9 @@ static uint8_t valid_book_px(uint8_t px) {
 
 void app_settings_init(void) {
     s_reader_controls_loaded=false;s_shelf_badges=true;
+    s_book_heading_style = BOOK_HEADING_DEFAULT_STYLE;
+    s_book_heading_align = BOOK_HEADING_DEFAULT_ALIGN;
+    s_book_heading_size = APP_BOOK_HEADING_SIZE_DEFAULT;
     // 缺省与读取失败采用新默认，随后仅由有效的已保存选择覆盖。
     // Use current defaults on missing/failed reads, then apply valid saved preferences.
     s_home_full_refresh = true;
@@ -363,6 +366,7 @@ void app_settings_init(void) {
     }
     if (nvs_get_u8(h, NVS_KEY_BOOK_RULE, &reading_line) == ESP_OK && reading_line <= 2)
         s_book_reading_line = reading_line;
+    book_heading_style_load(h);
     uint8_t rule_full = 0;
     s_book_rule_full = nvs_get_u8(h, NVS_KEY_BOOK_RULE_FULL, &rule_full) == ESP_OK && rule_full == 1;
     if (nvs_get_u8(h, NVS_KEY_BOOK_RULE_OFFSET, &rule_offset) == ESP_OK && rule_offset <= 8)

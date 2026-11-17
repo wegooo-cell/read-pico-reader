@@ -27,10 +27,18 @@ enum {
     CSS_BEFORE = 1u << 2,
     CSS_AFTER = 1u << 3,
     CSS_FAMILY = 1u << 4,
+    CSS_SIZE = 1u << 5,
+    CSS_WEIGHT = 1u << 6,
+    CSS_BREAK_BEFORE = 1u << 7,
+    CSS_BREAK_AFTER = 1u << 8,
+    CSS_AUTHORED = 1u << 9,
+    CSS_HEADING_LAYOUT = 1u << 10,
+    CSS_LOCAL_ALIGN = 1u << 11,
 };
 
 typedef struct {
-    uint8_t mask, align, indent, before, after, family;
+    uint16_t mask;
+    uint8_t align, indent, before, after, family, size, weight, page_break;
 } css_style_t;
 
 typedef struct {
@@ -73,6 +81,8 @@ typedef struct {
     // 内联标签也会换字体，按开标签深度逐层记下当前槽，闭标签回退上一层。
     // Inline tags switch faces too: record the slot per open depth and fall back on close.
     uint8_t family_at[CSS_ANCESTOR_MAX];
+    // 0 表示未设置，其余值为 align + 1。/ Zero means unset, otherwise align + 1.
+    uint8_t align_at[CSS_ANCESTOR_MAX + 1];
     bool family_rules;
     // 脚注：正文 <a href="#id"> 注号 + 同章带 id 的注释文本；跨文件注号由 ext_notes 预先给出文本。
     // Footnotes: body <a href="#id"> markers plus same-chapter id elements; cross-file markers get
@@ -123,6 +133,11 @@ static void css_apply(css_style_t* dst, const css_style_t* src) {
     if (src->mask & CSS_BEFORE) dst->before = src->before;
     if (src->mask & CSS_AFTER) dst->after = src->after;
     if (src->mask & CSS_FAMILY) dst->family = src->family;
+    if (src->mask & CSS_SIZE) dst->size = src->size;
+    if (src->mask & CSS_WEIGHT) dst->weight = src->weight;
+    unsigned breaks = (src->mask & CSS_BREAK_BEFORE ? HTML_BREAK_BEFORE : 0) |
+                      (src->mask & CSS_BREAK_AFTER ? HTML_BREAK_AFTER : 0);
+    dst->page_break = (uint8_t)((dst->page_break & ~breaks) | (src->page_break & breaks));
     dst->mask |= src->mask;
 }
 
@@ -166,6 +181,7 @@ static uint8_t css_length_percent(const char* value, size_t len) {
     size_t units = len - n;
     while (units && ascii_space((unsigned char)*unit)) { ++unit; --units; }
     if (units >= 2 && !strncasecmp(unit, "px", 2)) percent = amount * 100.0 / 16.0;
+    else if (units >= 2 && !strncasecmp(unit, "pt", 2)) percent = amount * 100.0 / 12.0;
     else if (units >= 1 && *unit == '%') percent = amount;
     if (percent < 0) percent = 0;
     if (percent > 250) percent = 250;
@@ -203,6 +219,27 @@ static void css_declarations(writer_t* w, const char* at, const char* end, css_s
             // Runs start only once a name really resolves; an unmatched family is not worth
             // recording span by span.
             if (style->family != 0) w->family_rules = true;
+        } else if (kn == 9 && !strncasecmp(key, "font-size", 9)) {
+            uint8_t size = css_length_percent(value, vn);
+            if (size) { style->size = size; style->mask |= CSS_SIZE; }
+        } else if (kn == 11 && !strncasecmp(key, "font-weight", 11)) {
+            uint8_t weight = 0;
+            if (vn == 4 && !strncasecmp(value, "bold", 4)) weight = 7;
+            else if (vn == 6 && !strncasecmp(value, "normal", 6)) weight = 4;
+            else if (vn == 3 && value[0] >= '1' && value[0] <= '9' &&
+                     value[1] == '0' && value[2] == '0') weight = value[0] - '0';
+            if (weight) { style->weight = weight; style->mask |= CSS_WEIGHT; }
+        } else {
+            if (kn > 5 && !strncasecmp(key, "page-", 5)) { key += 5; kn -= 5; }
+            unsigned flag = kn == 12 && !strncasecmp(key,"break-before",12) ? HTML_BREAK_BEFORE :
+                            kn == 11 && !strncasecmp(key,"break-after",11) ? HTML_BREAK_AFTER : 0;
+            if (!flag) continue;
+            size_t token = 0;
+            while (token < vn && !ascii_space((unsigned char)value[token]) && value[token]!='!') ++token;
+            const bool forced = (token==4 && !strncasecmp(value,"page",4)) ||
+                                (token==6 && !strncasecmp(value,"always",6));
+            style->mask |= flag==HTML_BREAK_BEFORE ? CSS_BREAK_BEFORE : CSS_BREAK_AFTER;
+            style->page_break = (uint8_t)((style->page_break & ~flag) | (forced ? flag : 0));
         }
     }
 }
@@ -384,7 +421,15 @@ static bool css_scope_match(const writer_t *w, const char *s, size_t len,
 }
 static css_style_t style_for(writer_t* w, const char* tag, const char* attrs, const char* attrs_end) {
     css_style_t out = {0};
-    unsigned priorities[5] = {0};
+    unsigned priorities[9] = {0};
+    const unsigned visual = CSS_ALIGN | CSS_BEFORE | CSS_AFTER | CSS_FAMILY | CSS_SIZE | CSS_WEIGHT;
+    const char *align = NULL; size_t align_len = 0;
+    const bool html_align = name_equal(tag, "center") || attr_value(attrs, attrs_end, "align", &align, &align_len);
+    if (html_align) {
+        out.align = !align || (align_len == 6 && !strncasecmp(align, "center", 6)) ? 1 :
+                    align_len == 5 && !strncasecmp(align, "right", 5) ? 2 : 0;
+        out.mask = CSS_ALIGN | CSS_AUTHORED | CSS_HEADING_LAYOUT | CSS_LOCAL_ALIGN;
+    }
     for (size_t i = 0; i < w->rule_count; ++i) {
         const css_rule_t *rule = &w->rules[i];
         bool body = rule->length == 4 && !strncasecmp(rule->selector, "body", 4);
@@ -393,20 +438,27 @@ static css_style_t style_for(writer_t* w, const char* tag, const char* attrs, co
                                                tag, attrs, attrs_end, w->depth ? w->depth - 1 : 0, 8, &work);
         if (!matches) continue;
         css_style_t chosen = rule->style;
+        if (body && html_align) chosen.mask &= ~CSS_ALIGN;
+        if (body && !name_equal(tag,"body")) chosen.mask &= ~(CSS_BREAK_BEFORE | CSS_BREAK_AFTER);
         unsigned specificity = body ? 0 : rule->specificity;
-        for (unsigned bit = 0; bit < 5; ++bit) {
+        for (unsigned bit = 0; bit < 9; ++bit) {
             if (!(chosen.mask & (1u << bit))) continue;
             if (specificity < priorities[bit]) chosen.mask &= ~(1u << bit);
             else priorities[bit] = specificity;
         }
+        if (!body && (chosen.mask & visual)) chosen.mask |= CSS_AUTHORED | CSS_HEADING_LAYOUT;
+        if (!body && (chosen.mask & CSS_ALIGN)) chosen.mask |= CSS_LOCAL_ALIGN;
         css_apply(&out, &chosen);
     }
     const char *inline_css = NULL; size_t inline_len = 0;
     if (attr_value(attrs, attrs_end, "style", &inline_css, &inline_len)) {
         css_style_t inline_style = {0};
         css_declarations(w, inline_css, inline_css + inline_len, &inline_style);
+        if (inline_style.mask & visual) inline_style.mask |= CSS_AUTHORED | CSS_HEADING_LAYOUT;
+        if (inline_style.mask & CSS_ALIGN) inline_style.mask |= CSS_LOCAL_ALIGN;
         css_apply(&out, &inline_style);
     }
+    if (out.page_break) out.mask |= CSS_HEADING_LAYOUT;
     return out;
 }
 
@@ -479,6 +531,7 @@ static esp_err_t finish_block(writer_t* w, bool line_break) {
             if (last->line_break_after) {
                 last->line_break_after = false;
                 last->margin_after_percent = w->current_style.after;
+                last->page_break |= w->current_style.page_break & HTML_BREAK_AFTER;
             }
         }
         return ESP_OK;
@@ -498,6 +551,11 @@ static esp_err_t finish_block(writer_t* w, bool line_break) {
         .offset = w->start, .len = w->text.len - w->start, .heading = w->block_heading, .image = -1,
         .heading_level = w->block_heading_level, .linked = w->block_linked,
         .auxiliary = w->block_auxiliary,
+        .authored_style = (w->block_style.mask & CSS_AUTHORED) != 0 || w->run_slot != 0,
+        .authored_heading_layout = (w->block_style.mask & CSS_HEADING_LAYOUT) != 0 || w->run_slot != 0,
+        .font_percent = w->block_style.size,
+        .font_weight = w->block_style.weight,
+        .page_break = w->block_style.page_break & (line_break ? HTML_BREAK_BEFORE : (HTML_BREAK_BEFORE|HTML_BREAK_AFTER)),
         .align = w->block_style.align,
         .indent_percent = w->block_style.indent,
         .margin_before_percent = w->block_style.before,
@@ -609,7 +667,7 @@ static size_t utf8(const char* s, size_t len, uint32_t* cp) {
 }
 
 static bool block_tag(const char* name) {
-    static const char* const tags[] = {"p", "div", "li", "tr", "br", "hr", "blockquote"};
+    static const char* const tags[] = {"p", "div", "li", "tr", "br", "hr", "blockquote", "center"};
     if (name[0] == 'h' && name[1] >= '1' && name[1] <= '6' && !name[2]) return true;
     for (size_t i = 0; i < sizeof(tags) / sizeof(tags[0]); i++) if (name_equal(name, tags[i])) return true;
     return false;
@@ -826,6 +884,7 @@ esp_err_t html_to_blocks_with_css_notes(const char* html, size_t len,
                 } else if (!self_closing && !void_tag(name) &&
                            !name_equal(name, "head") && !name_equal(name, "script") && !name_equal(name, "style")) {
                     ++w.depth;
+                    if (w.depth <= CSS_ANCESTOR_MAX) w.align_at[w.depth] = w.align_at[w.depth - 1];
                     // 内联标签也会换字体（<span class="num">），所以每层都算一次；本层没声明
                     // 就继承父层。没有 font-family 规则、标签也不带 style 时整段跳过，
                     // 正文一分钱不花；带 style 的标签只看属性、不跑整套选择器匹配。
@@ -916,10 +975,21 @@ esp_err_t html_to_blocks_with_css_notes(const char* html, size_t len,
                     // br 仅换行；整段结束时才加段后距，不重复段前距和首行缩进。
                     // A br continues alignment and defers the trailing margin until paragraph end.
                     if (line_break)
-                        w.current_style = (css_style_t){.mask = w.current_style.mask & (CSS_ALIGN | CSS_AFTER),
-                                                       .align = w.current_style.align,
-                                                       .after = w.current_style.after};
-                    else if (!closing && !self_closing) w.current_style = style_for(&w, name, html + at, html + end);
+                        w.current_style = (css_style_t){.mask = w.current_style.mask & (CSS_ALIGN | CSS_AFTER | CSS_SIZE | CSS_WEIGHT | CSS_AUTHORED | CSS_HEADING_LAYOUT | CSS_BREAK_AFTER),
+                                                       .align = w.current_style.align, .after = w.current_style.after,
+                                                       .size = w.current_style.size, .weight = w.current_style.weight,
+                                                       .page_break = w.current_style.page_break & HTML_BREAK_AFTER};
+                    else if (!closing && !self_closing) {
+                        w.current_style = style_for(&w, name, html + at, html + end);
+                        if (w.depth <= CSS_ANCESTOR_MAX) {
+                            if (w.current_style.mask & CSS_LOCAL_ALIGN) {
+                                w.align_at[w.depth] = w.current_style.align + 1;
+                            } else if (w.align_at[w.depth]) {
+                                w.current_style.align = w.align_at[w.depth] - 1;
+                                w.current_style.mask |= CSS_ALIGN | CSS_AUTHORED | CSS_HEADING_LAYOUT;
+                            }
+                        }
+                    }
                     else w.current_style = (css_style_t){0};
                     if (name[0] == 'h' && name[1] >= '1' && name[1] <= '3' && !name[2]) w.heading = !closing && !self_closing;
                     if (name[0] == 'h' && name[1] >= '1' && name[1] <= '6' && !name[2])
@@ -933,8 +1003,10 @@ esp_err_t html_to_blocks_with_css_notes(const char* html, size_t len,
                          attr_value(html + at, html + end, "xml:id", &value, &length) ||
                          attr_value(html + at, html + end, "name", &value, &length)) &&
                         length == strlen(anchor) && !memcmp(value, anchor, length)) matched = true;
-                    if (matched)
+                    if (matched) {
+                        w.text.target_found = true;
                         *text_offset = w.text.len + (!w.active && w.text.count ? 1 : 0);
+                    }
                 }
                 continue;
             }
