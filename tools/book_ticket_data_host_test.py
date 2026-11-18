@@ -57,8 +57,8 @@ static uint32_t s_session_read_ms, s_session_turns;
 static bool app_book_reader_body_visible(void) {return true;}
 #include "main/apps/book_ticket_reader.inc"
 
-typedef struct {size_t offset, len; bool chapter_start;} blk_t;
-static blk_t blocks[] = {{0, 7, true}, {7, 4, false}, {11, 8, true}};
+typedef struct {size_t offset, len; bool chapter_start,heading_subtitle;} blk_t;
+static blk_t blocks[] = {{.offset=0,.len=7,.chapter_start=true}, {.offset=7,.len=4}, {.offset=11,.len=8,.chapter_start=true}};
 static const blk_t *s_blocks = blocks;
 static const char *s_text = "ChapterbodyChapter2";
 static size_t s_page, s_chapter = 2, s_block_count = 3;
@@ -129,7 +129,7 @@ int main(void) {
     reader_current_chapter(label,sizeof(label)); assert(!strcmp(label,"第一章 漫长的章节"));
     txt = false;
     s_selected_toc = 1; s_selected_toc_offset = 8;
-    s_page = 7; reader_current_chapter(label,sizeof(label)); assert(!strcmp(label,"Chapter1"));
+    s_page = 7; reader_current_chapter(label,sizeof(label)); assert(!strcmp(label,"Chapter"));
     s_page = 8; reader_current_chapter(label,sizeof(label)); assert(!strcmp(label,"第一章 漫长的章节"));
     s_page = 11; reader_current_chapter(label,sizeof(label)); assert(!strcmp(label,"Chapter2"));
 

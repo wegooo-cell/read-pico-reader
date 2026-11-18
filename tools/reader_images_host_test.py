@@ -100,10 +100,10 @@ static uint32_t book_layout_generation(void){return generation;}
 static int book_layout_page_image_count(size_t page){return page==s_page?slot_count:0;}
 static int book_layout_page_image(size_t page){return page==s_page?whole_image:-1;}
 static void book_layout_set_image_dims(bool (*fn)(void*,int,int*,int*),void *ctx){dims_fn=fn;dims_ctx=ctx;}
-static void draw_reader_flow_heading(uint8_t *fb,EpdRect area,const char *text,size_t len,bool vertical){
- (void)fb;(void)area;(void)text;(void)len;(void)vertical;
+static void draw_reader_flow_heading(uint8_t *fb,EpdRect area,const char *text,size_t len,bool vertical,bool volume){
+ (void)fb;(void)area;(void)text;(void)len;(void)vertical;(void)volume;
 }
-static void book_layout_set_heading_draw(void (*draw)(uint8_t *,EpdRect,const char *,size_t,bool)){
+static void book_layout_set_heading_draw(void (*draw)(uint8_t *,EpdRect,const char *,size_t,bool,bool)){
  assert(draw==draw_reader_flow_heading);
 }
 static bool book_layout_page_image_at(size_t page,int i,int *image,int *y,int *w,int *h){

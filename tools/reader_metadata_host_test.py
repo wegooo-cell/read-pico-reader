@@ -77,23 +77,23 @@ static enum EpdDrawError reader_present_crop(void *hl,const int *wave,int mode,E
 }
 
 static void guard_draw_result(void *hl,enum EpdDrawError result){(void)hl;assert(result==error);++guards;}
+static size_t s_page=74;
+static void lock_draw(void){}
+static void unlock_draw(void){}
+static void ui_text_set_system_scale(bool scale){assert(!scale);}
 '''
 for name in ['draw_reader_header','progress_rect','reader_footer_progress']:
     unit += function(name, source)+'\n'
 if separate_footer:
     unit += r'''
-static size_t s_page=74;
 static int64_t test_now_ms;
 static int64_t esp_timer_get_time(void){return test_now_ms*1000;}
-static void lock_draw(void){}
-static void unlock_draw(void){}
-static void ui_text_set_system_scale(bool scale){assert(!scale);}
 // 这里隔离已单测的像素差分，只验证实际页脚绘制与提交状态机。
 // Isolate pixel differencing and exercise the actual footer paint/submission state machine.
 static EpdRect reader_footer_dirty(void *hl){(void)hl;return progress_rect();}
 static enum EpdDrawError update_display_reader_area(void *hl,const int *wave,int mode,EpdRect area,bool full){return reader_present_crop(hl,wave,mode,area,full);}
 '''
-    unit += function('draw_reader_footer', source)+'\n'
+unit += function('draw_reader_footer', source)+'\n'
 unit += function('draw_reader_metadata', source)+'\n'
 if separate_footer:
     unit += function('present_reader_footer', source)+'\n'
@@ -131,7 +131,11 @@ int main(void){
  }
  ctx.consumed=ctx.request_app=ctx.request_return=ctx.request_menu=touch.touched=s_toolbar=s_clear_confirm=false;
  s_reader_panel=READER_PANEL_NONE;
+ const int before_footer=text_calls;
+ expected_chapter="Next chapter";
  assert(reader_metadata_tick(&ctx)==APP_REDRAW_DONE&&calls==1&&guards==1&&!s_reader_footer_pending);
+ assert(text_calls==before_footer+(full?0:2));
+ expected_chapter="Chapter name";
  assert(reader_metadata_tick(&ctx)==APP_REDRAW_NONE&&calls==1);
  s_reader_footer_pending=true;error=EPD_DRAW_OTHER_ERROR;
 #ifdef TEST_SEPARATE_FOOTER

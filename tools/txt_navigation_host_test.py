@@ -45,7 +45,7 @@ static void tracked_free(void *p){
 void html_text_free(html_text_t *text){(void)text;assert(!"TXT test entered EPUB cleanup");}
 bool book_index_cache_prepare(const char *source,const char *tag,uint32_t version,char *path,size_t cap,book_index_cache_header_t *key){
  if(disable_cache)return false;
- assert(!strcmp(tag,"txt")&&version==6);struct stat st;assert(!stat(source,&st));
+ assert(!strcmp(tag,"txt")&&version==7);struct stat st;assert(!stat(source,&st));
  *key=(book_index_cache_header_t){.magic=123,.version=version,.source_size=(uint32_t)st.st_size,.modified=st.st_mtime,.path_hash=456};
  return (size_t)snprintf(path,cap,"%s.idx",source)<cap;
 }
@@ -92,7 +92,11 @@ static void verify(const char *path,const char *expected){
    bool found=false;
    for(size_t j=0;j<text.count;++j)
     if(text.blocks[j].offset==target&&text.blocks[j].reader_heading==BOOK_HEADING_TXT)found=true;
-   if(strcspn(text.utf8+target,"\r\n")<=TXT_LINE_BYTES)assert(found);
+   if(strcspn(text.utf8+target,"\r\n")<=TXT_LINE_BYTES){
+    bool information=strstr(path,"list-only")||!strcmp(title,"简介")||!strcmp(title,"前言")||!strcmp(title,"序言");
+    if(found==information)fprintf(stderr,"HEADING %s %s found=%d information=%d\n",path,title,found,information);
+    assert(found==!information);
+   }
    free(text.blocks);
    free(text.utf8);
   }
@@ -222,6 +226,8 @@ with tempfile.TemporaryDirectory(prefix='kiiko-txt-nav-') as folder:
         ('front-list', 'Contents\n\nChapter I Beginning\nChapter II End\n\nChapter I Beginning\nactual body\nChapter II End\nactual body\n',
          {'Chapter I Beginning','Chapter II End'},len('Contents\n\nChapter I Beginning\nChapter II End\n\n'.encode())),
         ('list-only', '目录\n第一章 开始\n第二章 结束\n', {'第一章 开始','第二章 结束'},0),
+        ('front-after-title', '作品书名\n作者名字\n目录\n第一章 开始\n第二章 结束\n\n第一章 开始\n实际正文。\n第二章 结束\n实际正文。\n',
+         {'第一章 开始','第二章 结束'},len('作品书名\n作者名字\n目录\n第一章 开始\n第二章 结束\n\n'.encode())),
         ('single-chapter', '序言里的文字。\r\n\r\n第一章 唯一的一章\r\n正文。\r\n', {'第一章 唯一的一章'},0),
         ('chinese-numbers', '一、启程\n正文\n\n二、过桥\n正文\n\n三、归来\n正文\n', {'一、启程','二、过桥','三、归来'},0),
     ]

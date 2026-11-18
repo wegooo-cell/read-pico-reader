@@ -10,6 +10,9 @@ Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Takin
 
 ## S31阅读GL16 / S31 reader GL16
 
+阅读器题头只用于核实的正文，目录/版权/序言等书前资料不套用。明确卷名独占页并在可见正文区居中，紧邻卷号/章号的副题合排；下一章新页，保留卷后引文和原文偏移。精排EPUB仍优先原书样式。两板页脚按当前正文位置找章名，只有章号时保留章号，不能剥成空文字。
+Reader headings apply only to verified body sections, not contents/copyright/preface material. Explicit reader-styled volumes center on their own page, paired subtitles compose with their numbers, and subsequent chapters start anew without dropping epigraphs or source offsets. Authored EPUB layouts retain priority. Both boards resolve footer names from the current text position and retain number-only labels.
+
 S31普通文字使用独立37相GL16，前移剥除擦白后留下空等的有效序列，保留脉冲顺序/数量和16灰。水波纹八带逐拍启动，纯文字及图文只扫描正文；背景29相、插图33相。状态栏/页脚和阅读工具栏/设置局刷，滑块区域定稿，收起面板37相归一。进入阅读、目录返回正文、阅读回主页正常路径各一次黑白全刷，不叠加盲清。默认VCOM为−1500mV，保留有效逐机标定；不写永久OTP/eFuse。主页切换、系统列表及PICO维持各自原有刷新。
 S31 ordinary text uses private37-phase GL16 with active sequences advanced past erase-stripped leading holds, retaining pulse order/counts and16 grays. Ripple launches eight compact bands and scans only the text/image body, with29-phase background and33-phase illustration derivatives. Status/footer and reader tools/settings update locally, sliders settle their rectangles, and dismissal normalizes in37 phases. Healthy reader entry, TOC return and exit to Home each use one black/white full refresh without blind preclears. Default VCOM is−1500mV with valid device calibration retained; never write permanent OTP/eFuses. Retain main switches, system lists and PICO refresh profiles.
 

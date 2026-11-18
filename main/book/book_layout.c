@@ -341,6 +341,11 @@ static bool chapter_page(size_t page) {
            ((!page && (s_lead_height || s_chapter_lead_width)) || reader_heading_at(s_pages[page]));
 }
 
+static bool volume_page(size_t page) {
+    const blk_t *block = page < s_count ? block_at(s_pages[page]) : NULL;
+    return block && block->reader_heading && block->volume_start;
+}
+
 static int line_height_for(int px) { return (int)((unsigned)px * s_line_percent / 100); }
 
 void book_layout_set_chapter_viewport(int height, int top_padding) {
@@ -358,6 +363,7 @@ static int chapter_row_padding(int height) {
 }
 
 int book_layout_page_content_height(size_t page) {
+    if (volume_page(page)) return s_rect.height;
     if (!chapter_page(page)) return s_rect.height;
     const int height = chapter_content_height();
     return height - chapter_row_padding(height);
@@ -365,6 +371,7 @@ int book_layout_page_content_height(size_t page) {
 
 void book_layout_set_vertical_balance(bool enabled) { s_vertical_balance=enabled; }
 int book_layout_page_top_padding(size_t page) {
+    if (volume_page(page)) return 0;
     if (chapter_page(page)) return s_chapter_top + chapter_row_padding(chapter_content_height());
     return s_page_y&&page<s_count?s_page_y[page]:0;
 }
@@ -415,12 +422,18 @@ void book_layout_set_heading_extent(int extent) { s_heading_extent = extent; }
 static int heading_extent(const blk_t *block, size_t off, EpdRect rect) {
     if (!s_heading_draw || !block || !block->reader_heading || block->offset != off || block->len > 192)
         return 0;
+    if (block->volume_start) return s_vertical ? rect.width : rect.height;
     int extent = s_heading_extent;
     return extent < (s_vertical ? rect.width : rect.height) ? extent : 0;
 }
 
+static size_t heading_text_end(const blk_t *block) {
+    if (block + 1 < s_blocks + s_block_count && block[1].heading_subtitle) ++block;
+    return block->offset + block->len;
+}
+
 static size_t heading_end(const blk_t *block) {
-    size_t next = block->offset + block->len;
+    size_t next = heading_text_end(block);
     if (next < s_len && s_text[next] == '\r') ++next;
     if (next < s_len && s_text[next] == '\n') ++next;
     return next;
@@ -434,7 +447,7 @@ static void draw_flow_heading(uint8_t *fb, EpdRect rect, int used, int extent, c
         rect.y += used;
         rect.height = extent;
     }
-    s_heading_draw(fb, rect, s_text + block->offset, block->len, s_vertical);
+    s_heading_draw(fb, rect, s_text + block->offset, heading_text_end(block) - block->offset, s_vertical, block->volume_start);
 }
 static int begin_heading_weight(const blk_t *block) {
     if (!block || !block->font_weight || !block->authored_style ||
@@ -1070,6 +1083,21 @@ static size_t skip_heading_spacing(size_t off, size_t *checked) {
     return off;
 }
 
+// 卷后只略去空行和已判定的重复题头，正文、引文和插图留到下一页。
+// Skip only blank lines and verified repeats after a volume; preserve prose, epigraphs and art on the next page.
+static size_t after_volume(size_t off) {
+    off = skip_image_spacing(off);
+    while (off < s_len) {
+        size_t next = visible_start(off, s_len);
+        if (next == s_len) return next;
+        if (s_text[next] != '\r' && s_text[next] != '\n') break;
+        off = next + 1;
+        if (s_text[next] == '\r' && off < s_len && s_text[off] == '\n') ++off;
+        off = skip_image_spacing(off);
+    }
+    return off;
+}
+
 
 /* ---- 竖排 / Vertical setting ---- */
 
@@ -1108,6 +1136,11 @@ static bool build_vertical(size_t len) {
         if (extent) {
             used += extent;
             off = heading_end(block);
+            if (block->volume_start) {
+                off = after_volume(off);
+                if (off < len && !append_page(off)) return false;
+                used = 0;
+            }
             continue;
         }
         if (block && block->image >= 0 && off == block->offset) {
@@ -1247,6 +1280,11 @@ bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks,
             s_page_text_bottom = used;
             s_last_line_x_end = 0;
             off = heading_end(block);
+            if (block->volume_start) {
+                off = after_volume(off);
+                if (off < len && !append_page(off)) goto fail;
+                used = 0;
+            }
             continue;
         }
         if (block && block->image >= 0 && off == block->offset) {
@@ -1498,7 +1536,7 @@ static void draw_vertical_page(uint8_t* fb, size_t page, EpdRect rect) {
         if (extent) {
             draw_flow_heading(fb, rect, (int)used, extent, image_block);
             used += extent;
-            off = heading_end(image_block);
+            off = image_block->volume_start ? end : heading_end(image_block);
             if (!s_idle_draw) continue;
             s_idle_draw->offset=off;s_idle_draw->used=used;s_idle_draw->image_at=img_at;
             s_idle_draw->started=true;s_idle_draw->complete=off>=end;
@@ -1625,7 +1663,7 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
         if (extent) {
             draw_flow_heading(fb, rect, (int)used, extent, image_block);
             used += extent;
-            off = heading_end(image_block);
+            off = image_block->volume_start ? end : heading_end(image_block);
             if (!s_idle_draw) continue;
             s_idle_draw->offset=off;s_idle_draw->used=used;s_idle_draw->image_at=img_at;
             s_idle_draw->started=true;s_idle_draw->complete=off>=end;

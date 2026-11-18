@@ -32,9 +32,11 @@ static int last_rotated_x, last_rotated_y;
 static int vertical_draws, first_vertical_x, last_vertical_x, first_vertical_y, last_vertical_y;
 static EpdRect flow_areas[2];
 static size_t flow_count;
-static void capture_heading(uint8_t *fb,EpdRect area,const char *text,size_t len,bool vertical) {
+static bool volume_flow;
+static void capture_heading(uint8_t *fb,EpdRect area,const char *text,size_t len,bool vertical,bool volume) {
     (void)fb;
-    assert(flow_count < 2 && (vertical ? area.width == 204 : area.height == 272));
+    assert(volume==volume_flow);
+    assert(flow_count < 2 && (volume_flow || (vertical ? area.width == 204 : area.height == 272)));
     flow_areas[flow_count++] = area;
     strncat(drawn,text,len);
 }
@@ -500,6 +502,36 @@ int main(void) {
     book_layout_set_vertical(false);
     book_layout_set_chapter_viewport(0,0);
     book_layout_set_vertical_balance(false);
+    const char volume_text[]="Volume\nName\nOne\nalpha\nTwo\nbeta";
+    blk_t volume_blocks[6];size_t volume_offset=0;
+    for(size_t i=0;i<6;++i){
+        const char *eol=strchr(volume_text+volume_offset,'\n');
+        size_t length=eol?(size_t)(eol-volume_text-volume_offset):strlen(volume_text+volume_offset);
+        volume_blocks[i]=(blk_t){.offset=volume_offset,.len=length,.image=-1};
+        volume_offset+=length+1;
+    }
+    volume_blocks[0].reader_heading=BOOK_HEADING_EPUB;volume_blocks[0].volume_start=true;
+    volume_blocks[1].heading_subtitle=true;
+    volume_blocks[2].reader_heading=volume_blocks[4].reader_heading=BOOK_HEADING_EPUB;
+    for(int v=0;v<2;++v){
+        book_layout_set_vertical(v);book_layout_set_heading_extent(v?204:272);
+        book_layout_set_chapter_viewport(460,80);
+        assert(book_layout_build_blocks(volume_text,strlen(volume_text),volume_blocks,6,txt_rect,10));
+        assert(book_layout_page_count()==3);
+        assert(book_layout_page_start_offset(0)==0&&book_layout_page_start_offset(1)==volume_blocks[2].offset&&
+               book_layout_page_start_offset(2)==volume_blocks[4].offset);
+        assert(book_layout_page_content_height(0)==600&&!book_layout_page_top_padding(0));
+        volume_flow=true;flow_count=0;drawn[0]=0;book_layout_draw_page(&fb,0,txt_rect,10);
+        assert(flow_count==1&&!strcmp(drawn,"Volume\nName")&&flow_areas[0].width==600&&flow_areas[0].height==600);
+        volume_flow=false;flow_count=0;drawn[0]=0;book_layout_draw_page(&fb,1,txt_rect,10);
+        assert(flow_count==1&&!strcmp(drawn,"Onealpha"));
+        // 仅卷名与尾部空行，不生成第二个空白页。/ A divider followed only by whitespace has no trailing blank page.
+        const char only_volume[]="Volume\r\n\r\n　\n";
+        blk_t only={.len=6,.image=-1,.reader_heading=BOOK_HEADING_TXT,.volume_start=true};
+        assert(book_layout_build_blocks(only_volume,strlen(only_volume),&only,1,txt_rect,10));
+        assert(book_layout_page_count()==1);
+    }
+    book_layout_set_vertical(false);book_layout_set_chapter_viewport(0,0);
     book_layout_set_heading_draw(NULL);
     const char illustrated[] = "IMG\nAA\nIMG\nBB";
     blk_t illustrated_blocks[] = {

@@ -42,6 +42,8 @@ typedef struct {
     size_t len; ///< 不含段间换行的字节数 / Bytes excluding the block separator
     bool heading; ///< h1–h3 标题块 / h1-h3 heading block
     bool chapter_start; ///< 已核实的正文章首 / Verified body chapter start
+    bool volume_start; ///< 明确卷名，阅读器排版时独占一页 / Explicit volume title, one page when reader-styled
+    bool heading_subtitle; ///< 紧邻章号或卷号的副题，随前块绘制 / Subtitle rendered with the preceding heading
     bool linked; ///< 全段为链接文字，不能仅凭书名当正文题头 / Entire block is linked text, not a body heading by label alone
     bool auxiliary; ///< 目录及书前信息容器内的文字 / Text inside navigation or front-matter containers
     uint8_t reader_heading; ///< 由阅读器排版的 EPUB/TXT 章首 / EPUB or TXT chapter heading styled by the reader

@@ -6,6 +6,13 @@
 #include <string.h>
 #include <strings.h>
 
+// PICO的4MiB应用槽只对目录/题头字符串识别按体积编译，不影响正文栅格与刷屏。
+// Size-optimize Pico's heading/TOC string helpers within its 4MiB slots, leaving glyph and display loops alone.
+#if defined(ESP_PLATFORM) && !KIIKO_BOARD_METALIO47 && defined(__GNUC__) && !defined(__clang__)
+#pragma GCC push_options
+#pragma GCC optimize("Os")
+#endif
+
 typedef enum {
     CHAPTER_LABEL_NONE, CHAPTER_LABEL_BARE, CHAPTER_LABEL_CHAPTER, CHAPTER_LABEL_VOLUME,
     CHAPTER_LABEL_SECTION, CHAPTER_LABEL_EPISODE, CHAPTER_LABEL_PART,
@@ -25,6 +32,35 @@ static inline const char *chapter_label_space(const char *p) {
         else break;
     }
     return p;
+}
+
+// 只排除完整的书前信息名称，不误伤“序章”或包含“目录”的正文章名。
+// Exclude complete front-matter labels, not prologues or body titles containing those words.
+static inline bool chapter_label_auxiliary(const char *text) {
+    if (!text) return false;
+    static const char *const labels[] = {
+        "目录", "目次", "总目录", "简目", "细目", "版权页", "版权信息", "简介", "内容简介", "作品简介",
+        "作者简介", "前言", "序言", "自序", "译序", "序", "前记", "导读", "引言", "绪论",
+        "献辞", "献词", "题献", "编者按", "编者的话", "写在前面", "出版说明", "编辑说明",
+        "阅读指南", "凡例", "contents", "tableofcontents", "preface", "foreword", "introduction",
+        "dedication", "acknowledgments", "acknowledgements",
+    };
+    char compact[96];
+    size_t used = 0;
+    for (const char *p = text; *p;) {
+        const char *next = chapter_label_space(p);
+        if (next != p) { p = next; continue; }
+        if (used + 1 == sizeof(compact)) return false;
+        unsigned char c = (unsigned char)*p++;
+        compact[used++] = c >= 'A' && c <= 'Z' ? c + 'a' - 'A' : c;
+    }
+    compact[used] = 0;
+    for (size_t i = 0; i < sizeof(labels) / sizeof(*labels); ++i) {
+        const size_t length = strlen(labels[i]);
+        if (!strncmp(compact, labels[i], length) &&
+            (!compact[length] || compact[length] == ':' || !strncmp(compact + length, "：", 3))) return true;
+    }
+    return false;
 }
 
 // Consume one heading separator, including full-width punctuation.
@@ -107,10 +143,11 @@ static inline bool chapter_label_roman(const char **at, unsigned *out) {
 // Ordinary paragraphs require a separator or an isolated number; real headings can omit a gap.
 // 普通段落须有分隔符或独立编号，正式题头可以连写章名。
 static inline chapter_label_t chapter_label_parse(const char *text, bool heading) {
-    static const char *const units[] = {"章", "卷", "节", "節", "回", "篇", "部", "集"};
+    static const char *const units[] = {"章", "卷", "节", "節", "回", "篇", "部", "集", "册", "冊"};
     static const chapter_label_kind_t kinds[] = {
         CHAPTER_LABEL_CHAPTER, CHAPTER_LABEL_VOLUME, CHAPTER_LABEL_SECTION, CHAPTER_LABEL_SECTION,
-        CHAPTER_LABEL_EPISODE, CHAPTER_LABEL_PART, CHAPTER_LABEL_PART, CHAPTER_LABEL_PART,
+        CHAPTER_LABEL_EPISODE, CHAPTER_LABEL_PART, CHAPTER_LABEL_VOLUME, CHAPTER_LABEL_PART,
+        CHAPTER_LABEL_VOLUME, CHAPTER_LABEL_VOLUME,
     };
     chapter_label_t label = {0};
     if (!text) return label;
@@ -119,7 +156,7 @@ static inline chapter_label_t chapter_label_parse(const char *text, bool heading
     bool ordinal = !strncmp(p, "第", 3);
     bool english = false;
     if (ordinal) p = chapter_label_space(p + 3);
-    else if (!strncmp(p, "卷", 3)) {
+    else if (!strncmp(p, "卷", 3) || !strncmp(p, "部", 3)) {
         label.kind = CHAPTER_LABEL_VOLUME;
         p = chapter_label_space(p + 3);
     } else if (!strncasecmp(p, "chapter", 7) && chapter_label_space(p + 7) != p + 7) {
@@ -129,6 +166,10 @@ static inline chapter_label_t chapter_label_parse(const char *text, bool heading
     } else if (!strncasecmp(p, "volume", 6) && chapter_label_space(p + 6) != p + 6) {
         label.kind = CHAPTER_LABEL_VOLUME;
         p = chapter_label_space(p + 6);
+        english = true;
+    } else if (!strncasecmp(p, "part", 4) && chapter_label_space(p + 4) != p + 4) {
+        label.kind = CHAPTER_LABEL_VOLUME;
+        p = chapter_label_space(p + 4);
         english = true;
     }
     const char *digits = p;
@@ -201,3 +242,7 @@ static inline bool chapter_label_repeats(const char *original, const char *candi
     return chapter_label_same_number(a, b) &&
         (!*b.subtitle || chapter_label_text_equal(a.subtitle, b.subtitle));
 }
+
+#if defined(ESP_PLATFORM) && !KIIKO_BOARD_METALIO47 && defined(__GNUC__) && !defined(__clang__)
+#pragma GCC pop_options
+#endif

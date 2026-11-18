@@ -35,6 +35,7 @@ typedef struct {
     size_t volume_count;
     bool volumes_incomplete; ///< 卷表不足时保留平铺目录且不缓存残缺结果 / Flat fallback without caching incomplete volume metadata
     size_t nav_count;
+    uint32_t contents_begin, contents_end; ///< 书前目录原文件范围，不占用可复用定位字段 / Source contents range, separate from reusable navigation positions
     size_t mapped_chapter, mapped_begin, mapped_end;
     size_t mapped_title; ///< 旧版标题在当前分段内的 UTF-8 位置 / Legacy title's UTF-8 position in this segment
     bool mapped; ///< 当前正文分段的目录UTF8定位已就绪 / Current body segment has UTF8 navigation positions

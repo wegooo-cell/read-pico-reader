@@ -59,11 +59,15 @@ static inline size_t epub_chapter_lead(const html_text_t *text, const char *toc,
     if (start == text->count) return 0;
     const blk_t *opening = &text->blocks[start];
     if (opening->image >= 0 || opening->auxiliary) return 0;
+    // 只复用已核实的正文题头；卷页由流式分页拥有，不能凭目录文字造题头。
+    // Reuse verified body headings only; volume pages belong to flow layout, never synthesize from a TOC label alone.
+    if (!opening->reader_heading || opening->volume_start || chapter_label_auxiliary(toc)) return 0;
     if (opening->authored_heading_layout && (opening->chapter_start || opening->heading_level)) return 0;
     const char *display = chapter_label_space(toc);
     size_t skip = start;
     bool opening_label = false;
     if (epub_lead_line(text, start, first, sizeof(first))) {
+        if (chapter_label_auxiliary(first)) return 0;
         const chapter_label_t body = chapter_label_parse(first, opening->heading);
         const chapter_label_t nav = chapter_label_parse(display, true);
         opening_label = opening->chapter_start || (opening->heading && body.kind) ||
@@ -77,7 +81,7 @@ static inline size_t epub_chapter_lead(const html_text_t *text, const char *toc,
             return 0;
         }
     }
-    if (!*display) return 0;
+    if (!opening_label || !*display) return 0;
     chapter_label_t parts = chapter_label_parse(display, true);
     const char *subtitle = parts.kind ? parts.subtitle : NULL;
     char split[160];

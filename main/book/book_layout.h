@@ -71,7 +71,8 @@ void book_layout_set_chapter_lead(size_t skip_bytes, unsigned height_px);
 /// ignores it. Call it with chapter_lead before each chapter layout.
 void book_layout_set_chapter_lead_width(unsigned width_px);
 /// 绘制正文中的章首。/ Draw a chapter heading that occurs within the text flow.
-typedef void (*book_heading_draw_fn)(uint8_t *fb, EpdRect area, const char *text, size_t len, bool vertical);
+/// volume来自已核实的块语义，绘制不再根据文本重新猜测分卷。/ Volume comes from verified block semantics, not another text guess in the renderer.
+typedef void (*book_heading_draw_fn)(uint8_t *fb, EpdRect area, const char *text, size_t len, bool vertical, bool volume);
 void book_layout_set_heading_draw(book_heading_draw_fn draw);
 /// Heading band height in horizontal layout, width in vertical layout. Set before building.
 void book_layout_set_heading_extent(int extent);

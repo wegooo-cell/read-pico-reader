@@ -203,12 +203,49 @@ static void draw_vertical_heading_style(uint8_t *fb, EpdRect body, reader_headin
     if (title_h) ttf_draw_text_px_vertical(fb, title_x, title_y, title_px, heading, 0, 0, 15);
 }
 
-static void draw_reader_flow_heading(uint8_t *fb, EpdRect body, const char *text, size_t len, bool vertical) {
+// 卷页不套章名的线条与对齐，按当前可见正文区域双向居中；横竖排均独占一页。
+// Volume dividers use no chapter decoration and center in the visible body, in either writing direction.
+static void draw_volume_heading(uint8_t *fb, EpdRect body, const char *title, const char *number, bool vertical) {
+    EpdRect visible = reader_area();
+    if (body.y < visible.y) { body.height -= visible.y - body.y; body.y = visible.y; }
+    if (body.y + body.height > visible.y + visible.height) body.height = visible.y + visible.height - body.y;
+    if (body.width < 32 || body.height < 32) return;
+    char name[128], label[32];
+    int px = 52 * (int)app_settings_book_heading_size() / 100;
+    if (vertical) {
+        int title_px = px, number_px = px * 4 / 5;
+        int height = fit_vertical_heading(name, sizeof(name), title, &title_px, body.height - 16);
+        int label_h = fit_vertical_heading(label, sizeof(label), number, &number_px, body.height - 16);
+        int gap = height && label_h ? px / 3 : 0;
+        int width = (height ? title_px : 0) + (label_h ? number_px : 0) + gap;
+        int x = body.x + (body.width - width) / 2;
+        if (height) ttf_draw_text_px_vertical(fb, x, body.y + (body.height - height) / 2, title_px, name, 0, 0, 15);
+        if (label_h) ttf_draw_text_px_vertical(fb, x + (height ? title_px + gap : 0),
+            body.y + (body.height - label_h) / 2, number_px, label, 0, 0, 15);
+    } else {
+        int limit = body.height / (title[0] && number[0] ? 3 : 2);
+        int title_px = fit_heading_line(name, sizeof(name), title, px, body.width - 16, limit);
+        int number_px = fit_heading_line(label, sizeof(label), number, px * 4 / 5, body.width - 16, limit);
+        int gap = name[0] && label[0] ? px / 3 : 0;
+        int height = (name[0] ? title_px : 0) + (label[0] ? number_px : 0) + gap;
+        int y = body.y + (body.height - height) / 2;
+        if (label[0]) {
+            ui_text_title_vc(fb, body.x + body.width / 2, y + number_px / 2, number_px, label, number, EPD_DRAW_ALIGN_CENTER);
+            y += number_px + gap;
+        }
+        if (name[0]) ui_text_title_vc(fb, body.x + body.width / 2, y + title_px / 2,
+            title_px, name, title, EPD_DRAW_ALIGN_CENTER);
+    }
+}
+
+static void draw_reader_flow_heading(uint8_t *fb, EpdRect body, const char *text, size_t len, bool vertical, bool volume) {
     char line[193], title[sizeof(s_chapter_heading_title)], label[sizeof(s_chapter_heading_label)];
     epub_lead_copy(line, sizeof(line), text, len);
     const chapter_label_t parts = chapter_label_parse(line, true);
     book_heading_parts(line, parts, parts.subtitle, title, sizeof(title), label, sizeof(label));
-    if (vertical) {
+    if (volume) {
+        draw_volume_heading(fb, body, title, label, vertical);
+    } else if (vertical) {
         reader_heading_t metrics = reader_heading_metrics(title, label, body);
         if (metrics.width) draw_vertical_heading_style(fb, body, metrics, title, label);
     } else {

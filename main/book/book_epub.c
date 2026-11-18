@@ -41,7 +41,8 @@
 // turned back into pointers, so every older cache has to lapse.
 // 16：重建曾以正文题头替换正式目录的索引。/ 16: rebuild indexes that replaced authored navigation with body headings.
 // 17：保留已核实篇名下的分节顺序。/ 17: preserve verified named entries above numbered sections.
-#define EPUB_CACHE_VERSION 17u
+// 18：书前信息与卷页识别共用正文规则。/ 18: align front-matter and volume-page recognition with the reader.
+#define EPUB_CACHE_VERSION 18u
 #define EPUB_META_CACHE_VERSION 1u
 #define EPUB_CSS_MAX (256u * 1024u)
 #define EPUB_CSS_FILE_MAX (128u * 1024u)
@@ -1136,6 +1137,7 @@ static bool front_matter_title(const char *title) {
     // 标题字段是指针：目录里没被写过的条目留的是空指针，这里先兜住。
     // The title field is a pointer now, and entries the parser never touched keep a null one.
     if (title == NULL) return false;
+    if (chapter_label_auxiliary(title)) return true;
     static const char *const chinese[] = {
         "封面", "扉页", "书名页", "版权", "出版信息", "出版社", "作者信息",
         "作者简介", "关于作者", "图书信息", "书籍信息", "制作信息", NULL
@@ -1161,7 +1163,8 @@ static bool front_matter_path(const char *path) {
     name = name ? name + 1 : path;
     static const char *const names[] = {
         "cover", "front", "titlepage", "copyright", "publisher", "imprint",
-        "colophon", "bookinfo", "authorinfo", "metadata", "toc.", "nav.", "contents.", NULL
+        "colophon", "bookinfo", "authorinfo", "metadata", "toc.", "nav.", "contents.",
+        "preface.", "foreword.", "dedication.", NULL
     };
     for (int i = 0; names[i]; ++i)
         if (!strncasecmp(name, names[i], strlen(names[i]))) return true;
@@ -1245,38 +1248,76 @@ static void chapter_breaks_prepare(book_epub_t *book, size_t chapter, html_text_
         char title[EPUB_TITLE_CAP];
         if (block->linked || block->auxiliary || !block->heading_level || block->heading_level > 2 ||
             !block_title(text, i, title) || front_matter_title(title) || !body_follows(text, i, title)) continue;
+        if (chapter_label_parse(title, true).kind == CHAPTER_LABEL_VOLUME) continue;
         if (!main_level || block->heading_level < main_level) main_level = block->heading_level;
     }
-    bool auxiliary_section = false, seen_prose = false;
+    uint8_t auxiliary_level = 0;
+    bool seen_prose = false;
     for (size_t i = 0; i < text->count; ++i) {
         blk_t *block = &text->blocks[i]; char title[EPUB_TITLE_CAP];
-        if (block->repeated_heading || block->auxiliary || block->linked || block->image >= 0) continue;
+        if (block->repeated_heading || block->heading_subtitle || block->auxiliary || block->linked || block->image >= 0) continue;
         if (!block_title(text, i, title)) { seen_prose = true; continue; }
-        if (block->heading_level && !block->auxiliary && front_matter_title(title)) auxiliary_section = true;
+        if (block->heading_level && !block->auxiliary && front_matter_title(title)) auxiliary_level = block->heading_level;
         if (front_matter_title(title)) continue;
         chapter_label_t label = chapter_label_parse(title, block->heading);
         bool bare_in_prose = label.kind == CHAPTER_LABEL_BARE && !block->heading &&
                              block->align != 1 && seen_prose;
         bool numbered = label.kind && !bare_in_prose;
         if (!block->heading && !numbered) seen_prose = true;
-        if (!body_follows(text, i, title)) continue;
+        const bool volume = label.kind == CHAPTER_LABEL_VOLUME &&
+            (block->heading || authored_body_title(book, chapter, title, first, last));
+        if (!volume && !body_follows(text, i, title)) continue;
         bool primary = main_level && block->heading_level == main_level;
         // 介绍/目录后的普通编号列表不能仅靠文字脱离书前区；正式正文题头可开始新章。
         // A numbered list after front matter cannot escape it by label alone; a body heading can.
-        if (auxiliary_section && !block->heading_level) continue;
-        bool authored = !numbered && authored_body_title(book, chapter, title, first, last);
+        const bool nav_title = authored_body_title(book, chapter, title, first, last);
+        // 正式章名下的数字/节号只是小节，不能再次套章首样式并强制分页。
+        // Bare-number/section headings below the main chapter level remain subsections without forced chapter pages.
+        if (main_level && block->heading_level > main_level &&
+            (label.kind == CHAPTER_LABEL_BARE || label.kind == CHAPTER_LABEL_SECTION)) continue;
+        if (auxiliary_level && block->heading_level > auxiliary_level && nav_title) {
+            bool repeated_later = false;
+            for (size_t j = i + 1; j < text->count; ++j) {
+                char later[EPUB_TITLE_CAP];
+                const blk_t *candidate = &text->blocks[j];
+                if (candidate->heading && !candidate->auxiliary && !candidate->linked &&
+                    block_title(text,j,later) && epub_chapter_name_equal(title,later)) {
+                    repeated_later = true;
+                    break;
+                }
+            }
+            // 目录/序言内的同名小节不能抢占后面正式章节的名字。
+            // A front-matter subsection cannot claim a later body chapter's matching title.
+            if (repeated_later) continue;
+        }
+        if (auxiliary_level && (!block->heading_level ||
+            (block->heading_level > auxiliary_level && !nav_title &&
+             (!numbered || label.kind == CHAPTER_LABEL_BARE)))) continue;
+        bool authored = !numbered && nav_title;
         // 章号和章名分成相邻两块时只在章号前分页，避免把题头拆成两页。
         // A chapter number followed by its title needs one break, not two title-only pages.
-        if (i && text->blocks[i - 1].chapter_start && (!numbered || label.kind == CHAPTER_LABEL_BARE)) continue;
+        if (i && text->blocks[i - 1].chapter_start && !text->blocks[i - 1].volume_start &&
+            (!numbered || label.kind == CHAPTER_LABEL_BARE)) continue;
         if (numbered || authored || (primary && !last)) {
             block->chapter_start = true;
-            const bool styled_subtitle = numbered && i + 1 < text->count && text->blocks[i + 1].heading_level &&
-                text->blocks[i + 1].authored_heading_layout;
+            block->volume_start = volume;
+            blk_t *next_title = i + 1 < text->count ? &text->blocks[i + 1] : NULL;
+            char subtitle[EPUB_TITLE_CAP];
+            const bool paired = numbered && !*label.subtitle && next_title && next_title->heading &&
+                !next_title->auxiliary && !next_title->linked &&
+                block_title(text, i + 1, subtitle) && !front_matter_title(subtitle) &&
+                !chapter_label_parse(subtitle, true).kind &&
+                !chapter_label_repeats(title, subtitle, next_title->heading);
+            const bool styled_subtitle = paired && next_title->authored_heading_layout;
             const bool opening_art = book->fonts_enabled && !seen_prose && i &&
                 text->blocks[i - 1].image >= 0 && !text->blocks[i - 1].auxiliary;
-            if (!block->authored_heading_layout && !styled_subtitle && !opening_art)
+            if (!block->authored_heading_layout && !styled_subtitle && !opening_art) {
                 block->reader_heading = BOOK_HEADING_EPUB;
-            auxiliary_section = false;
+                // 相邻章号/卷号与副题合排，不能留一份普通大字再重复显示。
+                // Compose an adjacent subtitle with its number instead of leaving another native heading behind.
+                if (paired) next_title->heading_subtitle = true;
+            }
+            auxiliary_level = 0;
             for (size_t j = i + 1; j < text->count && j - i <= 4; ++j) {
                 blk_t *next = &text->blocks[j];
                 char candidate[EPUB_TITLE_CAP];
@@ -1293,7 +1334,8 @@ static bool auxiliary_xml(token_t t) {
     char value[160];
     static const char *const attrs[] = {"epub:type", "type", "role", "id", "class"};
     static const char *const types[] = {"toc", "contents", "doc-toc", "copyright", "doc-copyright",
-        "titlepage", "cover", "frontmatter", "colophon", "imprint", "dedication", "abstract"};
+        "titlepage", "cover", "frontmatter", "colophon", "imprint", "dedication", "abstract",
+        "preface", "foreword", "introduction", "doc-preface", "doc-foreword", "doc-introduction"};
     for (size_t a = 0; a < sizeof(attrs) / sizeof(attrs[0]); ++a) {
         if (!attribute(t, attrs[a], value, sizeof(value))) continue;
         for (size_t i = 0; i < sizeof(types) / sizeof(types[0]); ++i)

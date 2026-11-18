@@ -227,6 +227,8 @@ jobs:
           python3 tools/webp_host_test.py
           python3 tools/gif_host_test.py
           python3 tools/reader_metadata_host_test.py
+          python3 tools/reader_footer_identity_host_test.py
+          python3 tools/book_ticket_data_host_test.py
           python3 tools/reader_header_host_test.py
           python3 tools/setup_state_host_test.py
           python3 tools/setup_navigation_host_test.py

@@ -359,7 +359,8 @@ static bool auxiliary_tag(const char* name, const char* at, const char* end) {
     if (name_equal(name, "nav")) return true;
     static const char* const attrs[] = {"epub:type", "type", "role", "id", "class"};
     static const char* const tokens[] = {"toc", "contents", "doc-toc", "copyright", "doc-copyright",
-        "titlepage", "cover", "frontmatter", "colophon", "imprint", "dedication", "abstract"};
+        "titlepage", "cover", "frontmatter", "colophon", "imprint", "dedication", "abstract",
+        "preface", "foreword", "introduction", "doc-preface", "doc-foreword", "doc-introduction"};
     for (size_t a = 0; a < sizeof(attrs) / sizeof(attrs[0]); ++a) {
         const char* value = NULL; size_t length = 0;
         if (!attr_value(at, end, attrs[a], &value, &length)) continue;

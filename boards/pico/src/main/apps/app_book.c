@@ -1816,7 +1816,7 @@ static void reader_footer_strip_number(char *dst, size_t cap, const char *source
             if (*after == ' ' || *after == '\t' || *after == ':' || *after == '-') ++after;
             else after += strlen("：");
         }
-        name = after;
+        if (*after) name = after;
     }
     // 无名页不给占位名：底栏只留页码与全书进度。
     // Unnamed pages get no placeholder label; the footer keeps only page and book progress.

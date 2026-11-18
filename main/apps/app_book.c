@@ -2167,7 +2167,7 @@ static void reader_footer_strip_number(char *dst, size_t cap, const char *source
             if (*after == ' ' || *after == '\t' || *after == ':' || *after == '-') ++after;
             else after += strlen("：");
         }
-        name = after;
+        if (*after) name = after;
     }
     // 无名页不给占位名：底栏只留页码与全书进度。
     // Unnamed pages get no placeholder label; the footer keeps only page and book progress.
@@ -4650,7 +4650,8 @@ static void reader_footer_progress(char *text,size_t cap,size_t page) {
 }
 // 独立绘制信息栏，先清理预读帧中的旧字形；物理刷新仍由正文/空闲局刷各自控制。
 // Paint independent metadata over clean cached bounds; body and idle updates control their own physical scans.
-static void draw_reader_metadata(uint8_t *fb,size_t page) {
+static void draw_reader_footer(uint8_t *fb,size_t page) {
+    ui_text_set_system_scale(false);
     EpdRect footer=progress_rect();
     ui_fill_rect_fast(footer,UI_GRAY_WHITE,fb);
     ui_reader_background_paint(fb,footer,true);
@@ -4660,11 +4661,6 @@ static void draw_reader_metadata(uint8_t *fb,size_t page) {
         track.width=track.width*(int)percent(page)/100;
         if(track.width)ui_fill_round_rect(fb,track,1,UI_GRAY_BLACK);
     } else {
-        if (s_reader_fullscreen) {
-            ui_fill_rect_fast(ui_reader_header(),UI_GRAY_WHITE,fb);
-            draw_reader_header(fb);
-            ui_reader_background_paint(fb,ui_reader_header(),true);
-        }
         char chapter[128];reader_footer_chapter_name(chapter,sizeof(chapter));
         char progress[48];reader_footer_progress(progress,sizeof(progress),page);
         char line[160];snprintf(line,sizeof(line),"%s%s",s_save_failed?"未保存 · ":"",chapter);
@@ -4675,6 +4671,14 @@ static void draw_reader_metadata(uint8_t *fb,size_t page) {
         track.width=track.width*(int)percent(page)/100;
         if(track.width)ui_fill_round_rect(fb,track,3,UI_GRAY_BLACK);
     }
+}
+static void draw_reader_metadata(uint8_t *fb,size_t page) {
+    if (s_reader_fullscreen && !app_settings_reader_immersive()) {
+        ui_fill_rect_fast(ui_reader_header(),UI_GRAY_WHITE,fb);
+        draw_reader_header(fb);
+        ui_reader_background_paint(fb,ui_reader_header(),true);
+    }
+    draw_reader_footer(fb,page);
 }
 static void draw_reader_outer(uint8_t *fb,size_t page) {
     ui_text_set_system_scale(false);
@@ -4994,6 +4998,9 @@ static app_redraw_t reader_metadata_tick(app_ctx_t *ctx) {
     if(!s_reader_footer_pending||s_reader_panel!=READER_PANEL_NONE||s_toolbar||s_clear_confirm||
        ctx->consumed||ctx->request_app||ctx->request_return||ctx->request_menu||
        (ctx->touch&&ctx->touch->touched)||ctx->now_ms<s_reader_footer_due_ms)return APP_REDRAW_NONE;
+    lock_draw();
+    draw_reader_footer(ctx->fb,s_page);
+    unlock_draw();
     enum EpdDrawError err=reader_present_crop(ctx->hl,&E0470_FOLLOW_WAVEFORM,MODE_DU,progress_rect(),false);
     guard_draw_result(ctx->hl,err);
     if(err==EPD_DRAW_SUCCESS)s_reader_footer_pending=false;

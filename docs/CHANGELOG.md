@@ -2,6 +2,11 @@
 
 ## 本地测试 / Local test — 2026-11-18
 
+- 两款机型不再给目录、版权、序言等书前资料套章节题头。阅读器生成的卷名居中独占一页，下一章新页；分开的卷号/章号与副题合排，保留原书精排、卷后正文和偏移。页脚在后续页继续显示实际章名，仅有章号时不再显示为空。
+- Both boards exclude front matter from reader heading styles. Reader-generated volume dividers center on a separate page, chapters start afresh, and adjacent number/subtitle blocks compose together while retaining authored layouts, intervening prose and offsets. Continuation-page footers resolve the current chapter and keep number-only labels.
+- 阅读设置里的「全屏沉浸」改名为「关闭上下状态栏」，保留原有开关行为。
+- Rename the reader's immersive toggle to “Hide top and bottom bars” without changing its behavior.
+
 - S31 普通翻页提前灰边的有效驱动，保留完整灰阶与脉冲数量；水波纹只扫描正文，状态栏与进度单独局刷。进入阅读和目录返回正文统一一次黑白全刷，保留首帧灰阶。默认 VCOM 改为 −1500 mV。
 - S31 ordinary turns advance gray-edge drive without reducing gray levels or pulse counts. Ripple scans only the body, with independent local status/progress updates. Reader entry and TOC return use one black/white full refresh with source grays retained. Default VCOM is −1500 mV.
 

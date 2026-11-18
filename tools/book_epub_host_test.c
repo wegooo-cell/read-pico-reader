@@ -27,6 +27,33 @@ int main(int argc, char **argv) {
             printf("epub rejection passed: %s\n", argv[a]); continue;
         }
         assert(book_epub_open(argv[a], &book) == ESP_OK && book);
+        if (strstr(argv[a], "good_heading_flow")) {
+            const bool native = strstr(argv[a], "native") != NULL;
+            const bool only = strstr(argv[a], "volume_only") != NULL;
+            const bool bare = strstr(argv[a], "bare") != NULL;
+            html_text_t text={0};
+            assert(book_epub_load(book,0,&text)==ESP_OK);
+            unsigned volumes=0,chapters=0,subtitles=0;
+            for(size_t i=0;i<text.count;++i){
+                const blk_t *block=&text.blocks[i];
+                char title[160];memcpy(title,text.utf8+block->offset,block->len);title[block->len]=0;
+                if(block->volume_start){
+                    assert(!strcmp(title,"第一卷"));++volumes;
+                    assert(block->reader_heading==(native?BOOK_HEADING_NATIVE:BOOK_HEADING_EPUB));
+                }else if(block->chapter_start){
+                    assert(!strcmp(title,bare?"1":"第一章 起点")||!strcmp(title,"第二章"));++chapters;
+                }
+                if(block->heading_subtitle){assert(!strcmp(title,"初见")||!strcmp(title,"归来"));++subtitles;}
+            }
+            if(!(volumes==1 && chapters==(only?0u:2u) && subtitles==(native?1u:only?1u:2u)))fprintf(stderr,"FLOW %s volumes=%u chapters=%u subtitles=%u\n",argv[a],volumes,chapters,subtitles);
+            assert(volumes==1 && chapters==(only?0u:2u) && subtitles==(native?1u:only?1u:2u));
+            char title[128],label[32];
+            assert(!epub_chapter_lead(&text,"目录",title,sizeof(title),label,sizeof(label)) && !title[0]);
+            assert(!epub_chapter_lead(&text,"第一卷 初见",title,sizeof(title),label,sizeof(label)) && !title[0]);
+            html_text_free(&text);book_epub_close(book);
+            puts("epub front matter, volume/subtitle, following chapters, native styling and no phantom TOC lead passed");
+            continue;
+        }
         if (strstr(argv[a], "good_ncx_numbered_with_extra_pages")) {
             const char *labels[] = {"11", "12", "17", "作家的话"};
             const size_t destinations[] = {0, 1, 3, 4};
@@ -71,8 +98,11 @@ int main(int argc, char **argv) {
                 assert(text.blocks[1].repeated_heading && !text.blocks[2].repeated_heading);
                 assert(!text.blocks[3].chapter_start && !text.blocks[3].repeated_heading);
                 size_t skip = epub_chapter_lead(&text, toc, title, sizeof(title), label, sizeof(label));
-                assert(skip == text.blocks[2].offset);
-                assert(!strncmp(text.utf8 + skip, "第一章说到的人", strlen("第一章说到的人")));
+                if(volumes && i%2==0)assert(!skip&&!title[0]&&text.blocks[0].volume_start);
+                else {
+                    assert(skip == text.blocks[2].offset);
+                    assert(!strncmp(text.utf8 + skip, "第一章说到的人", strlen("第一章说到的人")));
+                }
                 if (!volumes && i == 2) assert(!strcmp(title, "夜雨") && !strcmp(label, "第３章"));
                 if (!volumes && i == 0) assert(!strcmp(title, "1") && !label[0]);
                 if (volumes && i % 2 == 0) {

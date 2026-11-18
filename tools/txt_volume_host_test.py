@@ -22,6 +22,9 @@ def constant(path, name):
     raise ValueError(name)
 
 base = constant(ROOT/'tools/txt_navigation_host_test.py', 'UNIT').split('int main(int argc,char **argv){')[0]
+# UI章节类型可切换；真实书源的同名出口单独保留，避免测试桩覆盖实现。
+# Keep the real source kind outlet separate from the switchable UI fixture.
+base = base.replace('#include "book_source.c"', '#define book_kind source_book_kind\n#include "book_source.c"\n#undef book_kind')
 base = base.replace('static unsigned fail_allocation,cache_hits;', 'static unsigned fail_allocation,cache_hits; static bool fail_volumes;')
 base = base.replace('assert(caps==3);', 'assert(caps==3);if(fail_volumes&&n==2048)return NULL;')
 base = base.replace('assert(book_navigation_count()==count);', 'if(book_navigation_count()!=count){for(size_t g=0;g<book_navigation_volume_count();++g){char title[160];book_navigation_volume_title(g,title,sizeof(title));fprintf(stderr,"GROUP%zu: %s\\n",g,title);}}assert(book_navigation_count()==count);')
@@ -236,7 +239,7 @@ with tempfile.TemporaryDirectory(prefix='kiiko-volumes-') as tmp:
     cap=t/'cap.txt';cap.write_text(''.join(f'第{v}卷 远方\n正文\n\n'+''.join(f'第{i}章 标题\n正文\n\n' for i in range(1,4)) for v in range(1,258)))
     manifest=t/'manifest';manifest.write_text(''.join(f'{p} {e} {g}\n' for p,e,g in rows))
     header=(ROOT/'main/book/book_epub.h').read_text();stubs=[]
-    for m in re.finditer(r'^(?:const char\s*\*|size_t|uint32_t|bool|void|int|esp_err_t)\s*book_epub_\w+\([^;]*\);',header,re.M):
+    for m in re.finditer(r'^(?:const char\s*\*|size_t|uint32_t|uint16_t|bool|void|int|esp_err_t)\s*book_epub_\w+\([^;]*\);',header,re.M):
         proto=m.group()[:-1];ret=proto.split('book_epub_')[0].strip();stubs.append(proto+' {'+('' if ret=='void' else 'return 0;')+'}')
     c=t/'test.c';c.write_text(base+'\n'+ui+'\n'+HARNESS+'\n'+'\n'.join(stubs));exe=t/'test'
     subprocess.run(['cc','-std=c11','-D_DEFAULT_SOURCE','-DKIIKO_BOARD_METALIO47='+str(int('--s31' in sys.argv)),'-Wall','-Wextra','-Werror','-Wno-unused-parameter','-Wno-unused-function','-Wno-unused-variable','-g','-fsanitize=address,undefined','-fno-sanitize-recover=all',

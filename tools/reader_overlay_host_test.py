@@ -81,6 +81,7 @@ static int chapter_number_x, chapter_number_px, chapter_title_x, chapter_title_p
 static bool record_heading;
 static char heading_texts[2][128];
 static unsigned heading_count;
+static int heading_x[2],heading_y[2],heading_px[2],heading_alignment[2];
 static int first_heading_y;
 static void capture_heading_text(const char *text,int y) {
  if (!record_heading) return;
@@ -91,6 +92,7 @@ static void capture_heading_text(const char *text,int y) {
 static void ui_text_title_vc(uint8_t *fb,int x,int y,int px,const char *text,const char *sample,int align){
  (void)sample;(void)align;
  if(!*text)return;
+ if(record_heading){heading_x[heading_count]=x;heading_y[heading_count]=y;heading_px[heading_count]=px;heading_alignment[heading_count]=align;}
  capture_heading_text(text,y);
  if(!strcmp(text,"12")){chapter_number_x=x;chapter_number_px=px;}
  if(!strcmp(text,"Title")){chapter_title_x=x;chapter_title_px=px;}
@@ -105,6 +107,8 @@ static void ttf_font_select(int slot){assert(slot==TTF_FONT_SLOT_SYSTEM);}
 static int ttf_vertical_text_height_px(int px,const char *text,int track){(void)track;return px*(int)strlen(text);}
 static void ttf_draw_text_px_vertical(uint8_t *fb,int x,int y,int px,const char *text,int track,int ink,int paper){
  (void)track;(void)ink;(void)paper;
+ if(!*text)return;
+ if(record_heading){heading_x[heading_count]=x;heading_y[heading_count]=y;heading_px[heading_count]=px;}
  capture_heading_text(text,y);
  if(!strcmp(text,"12"))chapter_number_px=px;
  if(!strcmp(text,"Title"))chapter_title_px=px;
@@ -138,6 +142,7 @@ static void draw_reader_panel(uint8_t *fb){
 typedef struct {uint8_t *gray;int width,height;} reader_image_t;
 static const reader_image_t *reader_zoom_image(void);
 static EpdRect body_rect(void);
+static EpdRect reader_area(void);
 static int chapter_view_height,chapter_view_padding;
 static void book_layout_set_chapter_viewport(int height,int padding){
  chapter_view_height=height;chapter_view_padding=padding;
@@ -179,6 +184,29 @@ unit += r'''
 int main(void){
  static uint8_t fb[684*1216],original[sizeof(fb)],standard[sizeof(fb)];app_ctx_t ctx={.fb=fb};
  static uint8_t heading_frame[APP_BOOK_HEADING_COUNT][sizeof(fb)];
+ for(int v=0;v<2;++v)for(int full=0;full<2;++full)for(int im=0;im<2;++im){
+  vertical=v;s_reader_fullscreen=full;immersive=im;heading_size=150;
+  EpdRect body=body_rect(),visible=reader_area();
+  int top=body.y>visible.y?body.y:visible.y;
+  int bottom=body.y+body.height<visible.y+visible.height?body.y+body.height:visible.y+visible.height;
+  for(int style=0;style<APP_BOOK_HEADING_COUNT;++style)for(int align=0;align<3;++align){
+   heading_style=style;heading_align=align;heading_count=0;record_heading=true;ui_clear_page(fb);
+   const char *text="Volume I: Homeward";draw_reader_flow_heading(fb,body,text,strlen(text),v,true);
+   record_heading=false;assert(heading_count==2);
+   if(v){
+    for(int i=0;i<2;++i){int height=ttf_vertical_text_height_px(heading_px[i],heading_texts[i],0);
+     assert(abs(2*heading_y[i]+height-top-bottom)<=1);}
+    assert(abs(2*heading_x[0]+heading_px[0]+heading_px[1]+52*150/100/3-2*body.x-body.width)<=1);
+   }else{
+    assert(heading_x[0]==body.x+body.width/2&&heading_x[1]==heading_x[0]);
+    assert(heading_alignment[0]==EPD_DRAW_ALIGN_CENTER&&heading_alignment[1]==EPD_DRAW_ALIGN_CENTER);
+    assert(abs((heading_y[0]-heading_px[0]/2)+(heading_y[1]+heading_px[1]/2)-top-bottom)<=2);
+   }
+   if(!style&&!align)memcpy(original,fb,sizeof(fb));else assert(!memcmp(original,fb,sizeof(fb)));
+  }
+ }
+ puts("PASS: volume dividers center horizontally/vertically in every visible viewport, independently of chapter style/alignment");
+ vertical=false;immersive=false;heading_size=100;heading_align=APP_BOOK_HEADING_ALIGN_CENTER;
  for(int v=0;v<2;++v)for(int has_label=0;has_label<2;++has_label){
   vertical=v;s_reader_fullscreen=true;EpdRect body=body_rect();
   strcpy(s_chapter_heading_title,has_label?"Homeward":"12");
@@ -189,7 +217,7 @@ int main(void){
    heading_style=style;
    ui_clear_page(fb);
    const char *inline_heading=has_label?"Chapter 12: Homeward":"12";
-   draw_reader_flow_heading(fb,body,inline_heading,strlen(inline_heading),v);
+   draw_reader_flow_heading(fb,body,inline_heading,strlen(inline_heading),v,false);
    for(int y=body.y;y<body.y+body.height;++y)for(int x=body.x;x<body.x+body.width;++x){
     if(fb[y*684+x]==UI_GRAY_WHITE)continue;
     assert(fb[y*684+x]==UI_GRAY_BLACK);
@@ -284,7 +312,7 @@ int main(void){
    heading_style=style;
    for (size_t i=0;i<sizeof(txt_headings)/sizeof(txt_headings[0]);++i) {
     heading_count=0;
-    draw_reader_flow_heading(fb,band,txt_headings[i].line,strlen(txt_headings[i].line),v);
+    draw_reader_flow_heading(fb,band,txt_headings[i].line,strlen(txt_headings[i].line),v,false);
     assert(heading_count==(txt_headings[i].number?2u:1u));
     assert(first_heading_y>=band.y && first_heading_y<=band.y+(v?27:33));
     if (txt_headings[i].number) assert(!strcmp(heading_texts[0],txt_headings[i].number));

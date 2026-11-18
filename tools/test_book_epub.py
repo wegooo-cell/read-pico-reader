@@ -227,6 +227,32 @@ def main():
         case('good_chapter_breaks_fallback', lambda f: chapter_breaks(f, fallback=True))
         case('good_chapter_breaks_auxiliary', lambda f: chapter_breaks(f, auxiliary=True))
         case('good_chapter_breaks_long_body', lambda f: chapter_breaks(f, fallback=True, long_body=True))
+        def heading_flow(files, native=False, volume_only=False, bare=False):
+            files['OPS/pkg/book.opf'] = ('<package><manifest>'
+                '<item id="body" href="../text/combined.xhtml" media-type="application/xhtml+xml"/>'
+                '<item id="toc" href="../toc/book.ncx" media-type="application/x-dtbncx+xml"/>'
+                '</manifest><spine toc="toc"><itemref idref="body"/></spine></package>')
+            style = ' style="text-align:center;margin-top:2em"' if native else ''
+            first = '1' if bare else '第一章 起点'
+            opening = (f'<h1 id="volume"{style}>第一卷</h1><h2{style}>初见</h2>')
+            files['OPS/text/combined.xhtml'] = ('<html><body>' + ('' if volume_only else
+                '<h1>目　录 </h1><p><a href="#one">第一章 起点</a></p>'
+                '<h1>前言：阅读须知</h1><h2>1</h2><p>这是一段书前说明。</p>'
+                '<section epub:type="preface"><h1>第一章 并非正文</h1><p>编者资料。</p></section>') +
+                opening + ('' if volume_only else f'<h2 id="one">{first}</h2><p>正文甲。</p>'
+                '<h3>1</h3><p>编号小节正文仍在本章。</p>'
+                '<h3>第一节</h3><p>节号也不额外生成章首页。</p>'
+                '<h2 id="two">第二章</h2><h3>归来</h3><p>正文乙。</p>') + '</body></html>')
+            files['OPS/toc/book.ncx'] = ('<ncx><navMap>'
+                '<navPoint><navLabel><text>第一卷 初见</text></navLabel><content src="../text/combined.xhtml#volume"/>' +
+                ('' if volume_only else f'<navPoint><navLabel><text>{first}</text></navLabel><content src="../text/combined.xhtml#one"/></navPoint>'
+                '<navPoint><navLabel><text>第二章 归来</text></navLabel><content src="../text/combined.xhtml#two"/></navPoint>') +
+                '</navPoint></navMap></ncx>')
+            files.pop('OPS/toc/nav.xhtml')
+        case('good_heading_flow', heading_flow)
+        case('good_heading_flow_native', lambda f: heading_flow(f, native=True))
+        case('good_heading_flow_volume_only', lambda f: heading_flow(f, volume_only=True))
+        case('good_heading_flow_bare', lambda f: heading_flow(f, bare=True))
         def multianchor_nav(files):
             multianchor(files)
             files['OPS/pkg/book.opf'] = files['OPS/pkg/book.opf'].replace(

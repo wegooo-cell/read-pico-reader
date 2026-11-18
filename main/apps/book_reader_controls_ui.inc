@@ -110,7 +110,7 @@ static void rc_draw_settings(uint8_t*fb){
 static void rc_draw_display(uint8_t*fb){
     ui_text_set_system_scale(true);draw_sheet(fb,740,"阅读显示");draw_sheet_back(fb,740);
     rc_toggle_card(fb,rc_display_rect(0),"默认全屏",app_settings_reader_default_fullscreen());
-    rc_toggle_card(fb,rc_display_rect(1),"全屏沉浸",app_settings_reader_immersive());
+    rc_toggle_card(fb,rc_display_rect(1),"关闭上下状态栏",app_settings_reader_immersive());
     rc_toggle_card(fb,rc_display_rect(2),"显示书内图片",!app_settings_reader_hide_images());
     rc_toggle_card(fb,rc_display_rect(3),"竖排（右至左）",app_settings_book_vertical());
     rc_done(fb,"返回排版");ui_text_set_system_scale(false);
