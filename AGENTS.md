@@ -8,6 +8,14 @@ Agent entry for this tree. Humans can read it too. Product overview, hardware, p
 
 Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Taking over an in-flight task: read [docs/HANDOFF.md](docs/HANDOFF.md) first.
 
+## S31阅读GL16 / S31 reader GL16
+
+S31普通文字使用独立37相GL16，前移剥除擦白后留下空等的有效序列，保留脉冲顺序/数量和16灰。水波纹八带逐拍启动，纯文字及图文只扫描正文；背景29相、插图33相。状态栏/页脚和阅读工具栏/设置局刷，滑块区域定稿，收起面板37相归一。进入阅读、目录返回正文、阅读回主页正常路径各一次黑白全刷，不叠加盲清。默认VCOM为−1500mV，保留有效逐机标定；不写永久OTP/eFuse。主页切换、系统列表及PICO维持各自原有刷新。
+S31 ordinary text uses private37-phase GL16 with active sequences advanced past erase-stripped leading holds, retaining pulse order/counts and16 grays. Ripple launches eight compact bands and scans only the text/image body, with29-phase background and33-phase illustration derivatives. Status/footer and reader tools/settings update locally, sliders settle their rectangles, and dismissal normalizes in37 phases. Healthy reader entry, TOC return and exit to Home each use one black/white full refresh without blind preclears. Default VCOM is−1500mV with valid device calibration retained; never write permanent OTP/eFuses. Retain main switches, system lists and PICO refresh profiles.
+
+用户2026-11-18已授权将上述已验证本地修复同步到GitHub源码。本地S31版本沿用RC114；正式固件、官网与OTA发布另按发布流程处理。
+The user authorizes uploading these validated local fixes to GitHub source on2026-11-18. Local S31 builds remainRC114; formal firmware, website and OTA publication follow the separate release workflow.
+
 ## 双板正式发布 / Dual-board official publication
 
 用户2026-11-04明确要求推送Pico与S31在线刷机。本轮正式发布Pico rc105/S31 rc110：包括当前全部已验证本地功能，S31以8845为基准，Pico保留原灰阶字集与Moku波形。同步源码、GitHub Release、kiikoread.com刷机/TF下载及既有Pages OTA；归档原Pico rc104/S31 rc109并保留所有历史原字节。此授权取代此前对应仅本地、不上传/发布限制；不自动刷写设备、不修改供电/VCOM/分区。

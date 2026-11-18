@@ -10,8 +10,8 @@ root=Path(__file__).resolve().parents[1]
 source=(root/'main/apps/app_book.c').read_text()
 begin=source.index('    EpdRect start_rect = {0}, end_rect = {0};',source.index('static app_redraw_t gesture_event('))
 press=source.index('    if (ev->type == UI_GESTURE_LONG_PRESS',begin)
-tap=source.index('    if (ev->type == UI_GESTURE_TAP && !s_scan_pending)',press)
-end=source.index('    if (!s_clear_confirm && !s_scan_pending)',tap)
+tap=source.index('    if (ev->type == UI_GESTURE_TAP && !shelf_waiting_for_index())',press)
+end=source.index('    if (!s_clear_confirm && !shelf_waiting_for_index())',tap)
 if 'bool panel_entry=' not in source[begin:press]:
     print('SKIP: board retains existing toolbar press feedback')
     raise SystemExit(0)
@@ -20,18 +20,19 @@ unit=r'''
 #include <stdbool.h>
 #include <stdio.h>
 typedef struct{int x,y,width,height;}EpdRect;
-typedef struct{bool request_app,request_menu,request_return;}app_ctx_t;
+typedef struct{bool request_app,request_menu,request_return;int leaf;}app_ctx_t;
 typedef struct{int type,x0,y0,x,y;}ui_gesture_event_t;
 typedef enum{APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE}app_redraw_t;
 enum{READING,SHELF,READER_PANEL_TOOLS,READER_PANEL_NONE,READER_PANEL_FONT_SETTINGS,READER_PANEL_REFRESH_SETTINGS};
 enum{UI_GESTURE_PRESS,UI_GESTURE_TAP,UI_GESTURE_CANCEL};
 static int s_view,s_reader_panel,s_pressed_control,painted,actions;
-static bool s_scan_pending,s_clear_confirm,s_reader_fullscreen;
-static int metalio_haptic_click(void){return 0;}
+static bool s_scan_pending,s_clear_confirm,s_reader_fullscreen,s_shelf_page_pending;
+static int s_presented_view;
+static struct{bool removed;}s_shelf[1];
 static int control_at(app_ctx_t*c,int x,int y,EpdRect*r){(void)c;(void)y;*r=(EpdRect){x,100,50,70};return x;}
 static app_redraw_t paint_control(app_ctx_t*c,EpdRect r){(void)c;(void)r;++painted;return APP_REDRAW_AREA;}
-static int app_settings_shelf_style(void){return 0;}
 static int shelf_rows(void){return 0;}
+static bool shelf_waiting_for_index(void){return s_scan_pending;}
 static bool present(app_ctx_t*c,app_redraw_t r){(void)c;(void)r;assert(false);return false;}
 static app_redraw_t action_at(app_ctx_t*c,int x,int y){
  (void)c;(void)y;++actions;

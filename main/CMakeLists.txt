@@ -56,6 +56,7 @@ kiiko_board_sources(kiiko_selected_sources "${CMAKE_CURRENT_LIST_DIR}" "app_main
         "anti_fade.c"
         "display_main_waveform.c"
         "display_reader_waveform.c"
+        "display_reader_gl37.c"
         "metalio_text_ripple.c"
         "sleep.c"
         "time_service.c"

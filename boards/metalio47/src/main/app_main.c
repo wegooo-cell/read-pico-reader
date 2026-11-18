@@ -73,13 +73,13 @@ static void restore_time_from_pmu(void) {
 }
 
 
-// VCOM 从 NVS 读取（默认 3000，实测最优）。V1.5 没有 Pico PMU，标定值只存本机 NVS。
-// Load VCOM from NVS (3000 by default, the measured optimum). V1.5 has no Pico
+// VCOM 从 NVS 读取（默认 1500）。V1.5 没有 Pico PMU，标定值只存本机 NVS。
+// Load VCOM from NVS (1500 by default). V1.5 has no Pico
 // PMU, so the calibrated value lives in local NVS only.
 static bool resolve_vcom_at_boot(void) {
     const int mv = vcom_setup_load_mv();
     epd_set_vcom((uint16_t)mv);
-    ESP_LOGI(TAG,"Metalio V1.5 runtime VCOM=%dmV (NVS, default 3000)", mv);
+    ESP_LOGI(TAG,"Metalio V1.5 runtime VCOM=%dmV (NVS, default 1500)", mv);
     return true;
 }
 

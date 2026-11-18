@@ -221,6 +221,9 @@ def build_one(board, args):
     # Retain the published HTTPS trust behavior on both boards, including real certificate dates.
     from prepare_tls_bundle import prepare
     prepare(sdk)
+    if board == 'metalio47':
+        from prepare_s31_flash_guard import prepare as prepare_s31_flash_guard
+        prepare_s31_flash_guard(sdk)
     materialize(ROOT, source, board)
     path = work / 'sdkconfig'
     if path.exists():

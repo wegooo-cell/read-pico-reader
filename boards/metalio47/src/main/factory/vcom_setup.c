@@ -38,10 +38,9 @@
 // Calibration ceiling raised to 4000 mV (digits 400) so the sweep can find the
 // panel optimum; stop where black stops improving but white/ghosting worsens.
 #define VCOM_MAX_MV 4000
-// 实测最优 -3000mV：与对比机黑度完全一致（1200mV 时整屏偏淡）。NVS 无标定时用这个。
-// Measured optimum -3000 mV matches the comparison unit's black level (the old
-// 1200 mV default left the whole panel pale). Used when NVS has no calibration.
-#define VCOM_DEFAULT_MV 3000
+// 用户2026-11-18指定缺省-1500mV；已保存且有效的逐机标定仍优先，不写永久OTP。
+// User2026-11-18 selects a -1500mV default; valid saved per-device calibration retains priority, without permanent OTP writes.
+#define VCOM_DEFAULT_MV 1500
 #define VCOM_NVS_NAMESPACE "metalio_hw"
 #define VCOM_NVS_KEY "vcom_mv"
 #define VCOM_PAD_ROWS 4
@@ -292,7 +291,7 @@ static bool persist(int mv) {
         ESP_LOGE(TAG, "VCOM NVS save: %s", esp_err_to_name(err));
         return false;
     }
-    // 保存确认必须区分真实回读与默认值回退（3000mV）。
+    // 保存确认必须区分真实回读与默认值回退（1500mV）。
     // A failed read must not masquerade as a verified save of the default.
     uint16_t verified_mv = 0;
     err = nvs_open(VCOM_NVS_NAMESPACE, NVS_READONLY, &h);

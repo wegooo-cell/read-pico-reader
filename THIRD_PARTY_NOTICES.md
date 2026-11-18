@@ -33,6 +33,7 @@ remain in the source. This project is not an official MindReset release.
 | [pypinyin](https://github.com/mozillazg/python-pinyin) dictionary data used by offline book search | MIT | [pypinyin notice](components/read_pico_search/LICENSE.pypinyin) |
 | [CrossMux](https://github.com/0x1abin/crossmux) BLE report mapping and text-turn adaptations | MIT | [CrossMux notice](licenses/CrossMux-MIT.txt) |
 | FreeInk SDK text-turn waveform assembly, commit `96de1be6ce08eb732909e6e8149af8f892b9a2c5` | MIT | [FreeInk SDK notice](licenses/FreeInk-SDK-MIT.txt) |
+| [chopper1026/mogo-e4p v1.1.4](https://github.com/chopper1026/mogo-e4p/tree/22c625e85673d82b259e555979960ef755409239) — S31 reader GL16 derivation and normalization adapted from `main/display/display_reader_waveform.c`, `display_normalize.c` and `display_main_waveform.c` | Apache-2.0 (upstream file notices retained) | [Apache-2.0 license](licenses/Apache-2.0.txt); reader-only adaptations in `boards/metalio47/src/main/display_reader_gl37.c` |
 | [Metalio E-Ink4-Plus](https://github.com/CloudZao/Metalio-E-INK4-Plus) sample firmware — ESP32-S31 LCD/IOMUX output path, TPS65185 and 9555 board reference, C equivalents of the Xtensa SIMD pixel paths, the `s31_sleep` SDK compatibility module (source ad8edf4150a688737c0d7c00cae4413079b262ef), the BQ27220 voltage/SOC display policy re-expressed as C in `components/read_pico_pmu/metalio_soc_filter.c` (v2.0.77 source `874538eb54f7f7eb593cd40cd1ba6dc8497226e7`), and the CX25601N charge policy/initialization re-expressed as C in `components/metalio_hw/metalio_charger.c` (source e703fd35269324cd163f1deae0a2fb5f7cf5f710) | MIT | [Metalio notice](licenses/Metalio-MIT.txt) |
 | Embedded Noto Sans SC Medium subsets for Pico/S31, UI Han bitmaps and Pico body Han coverage | SIL OFL-1.1 | [Font license](main/assets/OFL-Noto.txt) |
 | [ESP Web Tools](https://github.com/esphome/esp-web-tools) browser flasher | Apache-2.0 | [Bundled web tool license](flash/vendor/LICENSE) |
@@ -55,6 +56,13 @@ The text-turn assembly is adapted from the pinned FreeInk source above,
 retaining its mindreset Apache-2.0 file notice and the complete FreeInk/CrossMux
 MIT notices linked above. Only ordinary text turns select it; vendor LUTs,
 scan timing and other screens are unchanged. Panel validation remains required.
+
+S31阅读专用GL16派生和归一参考上述固定版本中明确标注Apache-2.0的文件，保留其原始声明。
+本地适配只用于阅读路径，普通文字另将剥除擦白后留下的前导空相移至末尾，保留有效脉冲顺序与数量；原厂原始波形表不变。
+The S31 reader GL16 derivation and normalization adapt the explicitly Apache-2.0-marked
+files pinned above, retaining their original notices. Local reader-only changes advance
+ordinary text past erase-stripped leading holds while preserving active pulse order/counts;
+the raw vendor waveform tables remain unchanged.
 
 The firmware bundles the embedded Noto Sans SC subset, common-Han UI bitmaps and, on Pico, compressed body Han coverage from the same Medium source; users may supply
 their own fonts on a TF card. The repository and flashing site do not provide

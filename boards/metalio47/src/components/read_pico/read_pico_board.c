@@ -10,11 +10,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
-// 实测最优 VCOM -3000mV（批量标定：与对比机黑度一致）；NVS 有标定值时由
-// app_main 覆盖。只写 TPS65185 运行寄存器，不烧永久 OTP。
-// Measured optimum VCOM -3000 mV (matches the comparison unit's black level);
-// app_main overrides it when NVS holds a calibrated value. Runtime register only.
-static int vcom=3000;
+// 阅读GL16验证版缺省-1500mV，启动时仍优先读取本机有效标定。
+// Reader GL16 builds default to -1500mV; boot still prioritizes valid local calibration.
+static int vcom=1500;
 static read_pico_i2c_census_t census;
 void read_pico_epd_restore_lcd(void) {
     const int pins[]={18,19,35,37};

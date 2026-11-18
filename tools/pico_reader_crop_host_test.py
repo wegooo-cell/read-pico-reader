@@ -49,7 +49,7 @@ static enum EpdDrawError epd_draw_base(EpdRect a,const uint8_t*d,EpdRect crop,en
  return fail?EPD_DRAW_EMPTY_LINE_QUEUE:EPD_DRAW_SUCCESS;
 }
 '''
-unit += function('_inverse_rotated_area', highlevel)+'\n'+function('hl_update_area', highlevel)
+unit += function('_inverse_rotated_area', highlevel)+'\n'+function('reader_dilate_masks', highlevel)+'\n'+function('hl_update_area', highlevel)
 unit += r'''
 static void check(EpdRect logical){
  // Independent rotation oracle; no use of the production transform for expected bounds.
@@ -69,7 +69,7 @@ static void check(EpdRect logical){
  if(!same)front[expected.y*W/2+dirty_x/2]^=(uint8_t)(7u<<(4*(dirty_x&1)));
  memcpy(old,back,B);scans=0;
  EpdiyHighlevelState h={front,back,diff,rows,cols,NULL};
- assert(hl_update_area(&h,MODE_GL16,25,logical,full,exact)==(fail?EPD_DRAW_EMPTY_LINE_QUEUE:EPD_DRAW_SUCCESS));
+ assert(hl_update_area(&h,MODE_GL16,25,logical,full,exact,0,0)==(fail?EPD_DRAW_EMPTY_LINE_QUEUE:EPD_DRAW_SUCCESS));
  assert(scans==1);
  for(int y=0;y<H;++y)for(int x=0;x<W;++x){
   assert(pixel(back,x,y)==(!fail&&inside(x,y)?pixel(front,x,y):pixel(old,x,y)));
@@ -94,8 +94,8 @@ int main(void){
  // No-op/empty updates must not submit a scan or alter either framebuffer.
  EpdiyHighlevelState h={front,back,diff,rows,cols,NULL};
  rotation=0;scans=0;
- assert(hl_update_area(&h,MODE_GL16,25,(EpdRect){0,0,W,H},false,false)==EPD_DRAW_SUCCESS);
- assert(hl_update_area(&h,MODE_GL16,25,(EpdRect){0,0,0,3},true,false)==EPD_DRAW_SUCCESS);
+ assert(hl_update_area(&h,MODE_GL16,25,(EpdRect){0,0,W,H},false,false,0,0)==EPD_DRAW_SUCCESS);
+ assert(hl_update_area(&h,MODE_GL16,25,(EpdRect){0,0,0,3},true,false,0,0)==EPD_DRAW_SUCCESS);
  assert(!scans&&!memcmp(front,back,B));
  // Nonaligned reading body neighbors the first row of the real footer.
  // Body has one changed pixel in the same on-screen row as changed page digits.
@@ -106,11 +106,11 @@ int main(void){
  front[33*W/2+1057/2]=0x0f;
  memcpy(old,back,B);
  expected=(EpdRect){176,0,872,H};
- assert(hl_update_area(&h,MODE_GL16,25,(EpdRect){0,176,H,872},false,true)==EPD_DRAW_SUCCESS);
+ assert(hl_update_area(&h,MODE_GL16,25,(EpdRect){0,176,H,872},false,true,0,0)==EPD_DRAW_SUCCESS);
  assert(pixel(back,1045,33)==0&&pixel(back,1051,33)==15&&pixel(back,1057,33)==15);
  memcpy(old,back,B);
  expected=(EpdRect){1051,33,7,1};
- assert(hl_update_area(&h,MODE_DU,25,(EpdRect){H-34,1051,1,7},false,true)==EPD_DRAW_SUCCESS);
+ assert(hl_update_area(&h,MODE_DU,25,(EpdRect){H-34,1051,1,7},false,true,0,0)==EPD_DRAW_SUCCESS);
  assert(pixel(back,1051,33)==0&&pixel(back,1057,33)==0);
  puts("PASS: text and footer sharing a32-column group retain independent, exact physical history");
  puts("PASS: real Pico diff/highlevel 32-column scan masks and success-only commits; immersive/footer/standard crops,4 rotations,odd nibbles,narrow/aligned areas and failures");

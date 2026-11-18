@@ -17,6 +17,7 @@ unit=r'''
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
 #define UI_READER_STANDARD_TOP 176
+#define UI_READER_TOOLS_TOP 1096
 #define UI_GRAY_WHITE 255
 #define BYTES (684*1216/2)
 #define ESP_LOGI(...) ((void)0)
@@ -43,7 +44,9 @@ static uint32_t generation=9;static bool background,draw_lock,failed,cache_ready
 #define READER_STATS_TOP 586
 static int font_top=580,settings_top=580;
 static bool fast_panels;
+typedef enum{DISPLAY_READER_GRAY_PAGE,DISPLAY_READER_GRAY_BACKGROUND}display_reader_gray_profile_t;
 static int four_pushes,entry_pushes;static bool erased_underlay;
+static display_reader_gray_profile_t last_profile;static bool last_full;
 static bool display_reader_fast_panels_enabled(void){return fast_panels;}
 static int s_reader_slider=-1,s_px=40,s_margin=10,s_reader_preview_px=40,s_reader_preview_margin=10,s_reader_preview_line=120,s_reader_preview_para=110,s_reader_preview_tracking=2;
 static bool s_reader_slider_endpoint;
@@ -86,6 +89,7 @@ static enum EpdDrawError update_display_reader_panel_fast(hl_t*h,EpdRect a){
  assert(h==&hl&&!draw_lock);area=a;++pushes;
  if(!failed)memcpy(back,front,BYTES);return failed?EPD_DRAW_OTHER_ERROR:EPD_DRAW_SUCCESS;
 }
+static enum EpdDrawError update_display_reader_gray(hl_t*h,EpdRect a,display_reader_gray_profile_t p,bool full){last_profile=p;last_full=full;return update_display_reader_panel_fast(h,a);}
 static void guard_draw_result(hl_t*h,enum EpdDrawError err){assert(h==&hl);errors+=err!=EPD_DRAW_SUCCESS;}
 static enum EpdDrawError update_display_reader_panel_gray4(hl_t*h,EpdRect a,bool erase){erased_underlay=erase;entry_pushes+=erase;++four_pushes;return update_display_reader_panel_fast(h,a);}
 static size_t cached_page;static uint32_t cached_generation;
@@ -105,7 +109,7 @@ static void invalidate_prep(void){++invalidates;}
 '''
 a=source.rindex('static struct {',0,source.index('static void reader_panel_record('));b=source.index('} s_reader_panel_frame;',a)+len('} s_reader_panel_frame;')
 unit+=source[a:b]+'\n'
-for name in ['reader_fast_panel_rect','reader_panel_record','reader_panel_short_ready','reader_toolbar_panel','reader_toolbar_transition','reader_toolbar_dirty_area','reader_panel_fast_present','reader_slider_overlay_ready','reader_slider_feedback_present','reader_slider_value','reader_slider_feedback','reader_slider_commit','draw_reader_cached','pause_reader_prep']:unit+=function(name,book)+'\n'
+for name in ['reader_fast_panel_rect','reader_panel_record','reader_panel_short_ready','reader_toolbar_panel','reader_toolbar_transition','reader_sheet_profile','reader_closing_panel_to_text','reader_panel_fast_present','reader_slider_overlay_ready','reader_slider_feedback_present','reader_slider_value','reader_slider_feedback','reader_slider_commit','draw_reader_cached','pause_reader_prep']:unit+=function(name,book)+'\n'
 start=source.index('    if (s_view == READING &&\n        (s_reader_panel == READER_PANEL_FONT_SETTINGS',source.index('static app_redraw_t gesture_event('))
 at=source.index('{',start)+1;depth=1
 while depth:
@@ -125,27 +129,16 @@ static void reset(reader_panel_t prior){
 }
 int main(void){
  (void)invalidate_prep;
- // Both orientations preserve the header and include old sheet pixels exposed when a sheet closes.
- const int stride=UI_LOCK_HEIGHT/2;
+ // 收起只对无插图正文归一；重排允许最终整屏差分，不复用过期底页叠加。
+ // Normalize dismissal only for text; reflow admits final differences without stale-body overlays.
  for(int rotated=0;rotated<2;++rotated){
-  reset(READER_PANEL_REFRESH_SETTINGS);s_reader_fullscreen=false;
-  rotation=rotated?EPD_ROT_PORTRAIT:EPD_ROT_INVERTED_PORTRAIT;
-  reader_panel_record(EPD_DRAW_SUCCESS);
-  s_reader_panel=READER_PANEL_READING_DISPLAY;s_reader_footer_pending=true;
-  assert(reader_toolbar_transition(&ctx,APP_REDRAW_PAGE));
-  EpdRect changed;
-  assert(reader_toolbar_dirty_area(&hl,&changed)&&!changed.height);
-  front[12*stride+(rotated?stride-1-580/2:580/2)]^=0x01;
-  front[600*stride+(rotated?stride-1-1200/2:1200/2)]^=0x80;
-  assert(reader_toolbar_dirty_area(&hl,&changed));
-  assert(changed.y==580&&changed.height==622&&changed.width==UI_LOCK_WIDTH);
-  s_reader_panel=READER_PANEL_NONE;assert(reader_toolbar_transition(&ctx,APP_REDRAW_PAGE));
-  front[rotated?stride-1:0]^=1;assert(!reader_toolbar_dirty_area(&hl,&changed));
-  generation++;assert(!reader_toolbar_transition(&ctx,APP_REDRAW_PAGE));generation--;
+  reset(READER_PANEL_REFRESH_SETTINGS);rotation=rotated?1:3;reader_panel_record(EPD_DRAW_SUCCESS);
+  s_reader_panel=READER_PANEL_NONE;assert(reader_closing_panel_to_text());
+  images=1;assert(!reader_closing_panel_to_text());images=0;
+  s_reader_panel=READER_PANEL_READING_DISPLAY;assert(reader_toolbar_transition(&ctx,APP_REDRAW_PAGE));
   s_reader_panel=READER_PANEL_TOUCH_SETTINGS;assert(!reader_toolbar_transition(&ctx,APP_REDRAW_PAGE));
  }
- reset(READER_PANEL_NONE);s_reader_fullscreen=false;reader_panel_record(EPD_DRAW_SUCCESS);
- assert(reader_toolbar_transition(&ctx,APP_REDRAW_PAGE));
+ reset(READER_PANEL_NONE);assert(!reader_toolbar_transition(&ctx,APP_REDRAW_PAGE));
  assert(!reader_toolbar_transition(&ctx,APP_REDRAW_FULL)&&!reader_toolbar_transition(&ctx,APP_REDRAW_AREA));
  for(int large=0;large<2;large++){
   font_top=large?468:580;settings_top=large?376:580;
@@ -174,34 +167,22 @@ int main(void){
    case 21:ctx.hl=NULL;break;case 22:ctx.fb=NULL;break;case 23:hl.back_fb=NULL;break;case 24:s_view=SHELF;break;
    case 25:redraw=APP_REDRAW_AREA;break;case 26:s_text=NULL;break;case 27:s_fonts_reload_pending=true;break;
   }
-  assert(!reader_panel_fast_present(&ctx,redraw)&&!draws&&!pushes&&!prepared&&!ended);
+  if(risk==10)assert(reader_panel_fast_present(&ctx,redraw)&&last_profile==DISPLAY_READER_GRAY_BACKGROUND);
+  else assert(!reader_panel_fast_present(&ctx,redraw)&&!draws&&!pushes&&!prepared&&!ended);
  }
  reset(READER_PANEL_NONE);s_reader_panel=READER_PANEL_TOOLS;failed=true;
  assert(reader_panel_fast_present(&ctx,APP_REDRAW_PAGE)&&pushes==1&&errors==1&&!s_reader_panel_frame.valid);
- // 四灰仅用于两个主设置，图文底页保持；图片数变化不能复用旧页身份。
- // Four-gray belongs only to the two primary settings, preserving mixed underlays and rejecting changed image counts.
- for(int picture=0;picture<2;++picture)for(int which=0;which<2;++which){
-  reset(READER_PANEL_TOOLS);fast_panels=true;images=picture;reader_panel_record(EPD_DRAW_SUCCESS);
-  s_reader_panel=which?READER_PANEL_FONT_SETTINGS:READER_PANEL_REFRESH_SETTINGS;
-  assert(reader_panel_fast_present(&ctx,APP_REDRAW_PAGE)&&four_pushes==1&&pushes==1&&entry_pushes==1&&erased_underlay);
-  assert(!memcmp(front,original,(size_t)area.y*684/2));
-  assert(reader_panel_fast_present(&ctx,APP_REDRAW_PAGE)&&four_pushes==2&&entry_pushes==1&&!erased_underlay);
+ // 图文/背景底页可同样叠加37相面板，图像数变化仍拒绝复用。
+ // Image/background underlays also admit37-phase overlays while changed image counts reject reuse.
+ for(int picture=0;picture<2;++picture)for(int wall=0;wall<2;++wall){
+  reset(READER_PANEL_TOOLS);images=picture;background=wall;reader_panel_record(EPD_DRAW_SUCCESS);
+  s_reader_panel=READER_PANEL_FONT_SETTINGS;
+  assert(reader_panel_fast_present(&ctx,APP_REDRAW_PAGE)&&pushes==1&&!last_full);
+  assert(last_profile==(wall?DISPLAY_READER_GRAY_BACKGROUND:DISPLAY_READER_GRAY_PAGE));
   images++;assert(!reader_panel_fast_present(&ctx,APP_REDRAW_PAGE));
  }
- reset(READER_PANEL_TOOLS);fast_panels=true;s_reader_panel=READER_PANEL_STATS;
- assert(reader_panel_fast_present(&ctx,APP_REDRAW_PAGE)&&!four_pushes);
- reset(READER_PANEL_FONT_SETTINGS);fast_panels=true;s_reader_slider=0;
- s_area=reader_slider_refresh_rect(0);s_mode=MODE_GL16;
- assert(reader_slider_feedback_present(&ctx,APP_REDRAW_AREA)&&four_pushes==1&&!entry_pushes&&!erased_underlay);
- for(int large=0;large<2;++large){
-  font_top=large?468:580;settings_top=large?376:580;
-  reset(READER_PANEL_NONE);fast_panels=true;s_reader_panel=READER_PANEL_FONT_SETTINGS;
-  assert(reader_panel_fast_present(&ctx,APP_REDRAW_PAGE)&&four_pushes==1&&entry_pushes==1);
-  s_reader_panel=READER_PANEL_REFRESH_SETTINGS;
-  assert(reader_panel_fast_present(&ctx,APP_REDRAW_PAGE)&&four_pushes==2&&entry_pushes==2);
-  s_reader_panel=READER_PANEL_FONT_SETTINGS;
-  assert(reader_panel_fast_present(&ctx,APP_REDRAW_PAGE)==!large&&four_pushes==(large?2:3));
- }
+ reset(READER_PANEL_FONT_SETTINGS);s_reader_slider=0;s_area=reader_slider_refresh_rect(0);s_mode=MODE_GL16;
+ assert(reader_slider_feedback_present(&ctx,APP_REDRAW_AREA)&&pushes==1&&last_full);
  // 真实滑动手势去重；面板局部绘图/提交不碰正文，不变数值不输出，松手只提交一次。
  // Deduplicate actual gesture feedback; paint/present locally without body work and commit once on release.
  reset(READER_PANEL_FONT_SETTINGS);s_reader_slider=-1;full_draws=0;committed=0;
@@ -228,11 +209,11 @@ int main(void){
  assert(reader_panel_short_ready(APP_REDRAW_PAGE));generation++;s_page++;
  assert(reader_panel_short_ready(APP_REDRAW_PAGE)); // final reflowed text+UI is deliberately admitted
  assert(!reader_panel_short_ready(APP_REDRAW_FULL)&&!reader_panel_short_ready(APP_REDRAW_AREA));
- images=1;assert(!reader_panel_short_ready(APP_REDRAW_PAGE));images=0;
- background=true;assert(!reader_panel_short_ready(APP_REDRAW_PAGE));background=false;
+ images=1;assert(reader_panel_short_ready(APP_REDRAW_PAGE));images=0;
+ background=true;assert(reader_panel_short_ready(APP_REDRAW_PAGE));background=false;
  s_fonts_reload_pending=true;assert(!reader_panel_short_ready(APP_REDRAW_PAGE));s_fonts_reload_pending=false;
  s_reader_turn_pending=true;assert(!reader_panel_short_ready(APP_REDRAW_PAGE));s_reader_turn_pending=false;
- s_reader_panel=READER_PANEL_BACKGROUND_PREVIEW;assert(!reader_panel_short_ready(APP_REDRAW_PAGE));
+ s_reader_panel=READER_PANEL_BACKGROUND_PREVIEW;assert(reader_panel_short_ready(APP_REDRAW_PAGE));
  reset(READER_PANEL_NONE);s_reader_panel=READER_PANEL_NONE;assert(!reader_panel_short_ready(APP_REDRAW_PAGE));
  // Reuse completed body slots; overlay frames and notices never become cached body art.
  reset(READER_PANEL_NONE);cache_ready=false;stores=full_draws=outer_draws=0;
@@ -250,5 +231,5 @@ int main(void){
 '''
 with tempfile.TemporaryDirectory() as d:
  p=Path(d)/'test';p.with_suffix('.c').write_text(unit)
- subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-misleading-indentation','-fsanitize=address,undefined',str(p.with_suffix('.c')),'-o',str(p)],check=True)
+ subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-misleading-indentation','-Wno-unused-function','-Wno-unused-variable','-fsanitize=address,undefined',str(p.with_suffix('.c')),'-o',str(p)],check=True)
  subprocess.run([str(p)],check=True)

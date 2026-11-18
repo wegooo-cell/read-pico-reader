@@ -196,6 +196,15 @@ jobs:
           if [ "${{ matrix.board }}" = "metalio47" ]; then
             python3 tools/metalio_du14_host_test.py
             python3 tools/metalio_du14_white_host_test.py
+            python3 tools/reader_gl37_profiles_host_test.py
+            python3 tools/reader_dirty_padding_host_test.py
+            python3 tools/reader_single_full_host_test.py
+            python3 tools/s31_reader_ripple_crop_host_test.py
+            python3 tools/reader_panel_entry_host_test.py
+            python3 tools/reader_panel_host_test.py
+            python3 tools/metalio_text_ripple_routes_host_test.py
+            python3 tools/metalio_vcom_host_test.py
+            python3 tools/s31_flash_guard_host_test.py
           fi
           python3 tools/title_font_host_test.py
           python3 tools/reader_hanzi_fallback_host_test.py

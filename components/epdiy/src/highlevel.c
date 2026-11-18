@@ -185,8 +185,38 @@ EpdRect _inverse_rotated_area(uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
     return rotated;
 }
 
+// 可选脏区外扩只用于阅读GL16；零参数保持所有原出口不变。
+// Optional mask dilation is reserved for reader GL16; zero arguments preserve every existing route.
+static void reader_dilate_masks(EpdiyHighlevelState *state, EpdRect area, int pad_lines, int pad_cols) {
+    const int y0 = area.y < 0 ? 0 : area.y;
+    const int y1 = area.y + area.height > epd_height() ? epd_height() : area.y + area.height;
+    int x0, x1;
+    epd_difference_column_range(area, &x0, &x1);
+    const int c0 = x0 < 0 ? 0 : x0 / 2;
+    const int c1 = x1 > epd_width() ? epd_width() / 2 : x1 / 2;
+    // 当前调用仅外扩一行/一列字节；原位窗口保留前一原值，避免级联扩散或临时内存分配。
+    // Current callers expand one line/column-byte; retain the previous original value to avoid cascades or allocations.
+    if (pad_lines > 0) {
+        bool prior = false;
+        for (int y = y0; y < y1; ++y) {
+            bool current = state->dirty_lines[y];
+            state->dirty_lines[y] = prior || current || (y + 1 < y1 && state->dirty_lines[y + 1]);
+            prior = current;
+        }
+    }
+    if (pad_cols > 0) {
+        bool prior = false;
+        for (int c = c0; c < c1; ++c) {
+            bool current = state->dirty_columns[c] != 0;
+            if (prior || current || (c + 1 < c1 && state->dirty_columns[c + 1])) state->dirty_columns[c] = 0xff;
+            prior = current;
+        }
+    }
+}
+
 static enum EpdDrawError hl_update_area(
-    EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area, bool force_full, bool exact
+    EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area, bool force_full, bool exact,
+    int pad_lines, int pad_cols
 ) {
     assert(state != NULL);
     // Not right to rotate here since this copies part of buffer directly
@@ -210,6 +240,7 @@ static enum EpdDrawError hl_update_area(
         state->dirty_columns
     );
 
+    if (!force_full && (pad_lines || pad_cols)) reader_dilate_masks(state, area, pad_lines, pad_cols);
     int x_start, x_stop;
     epd_difference_column_range(area, &x_start, &x_stop);
     if (force_full) {
@@ -311,25 +342,31 @@ static enum EpdDrawError hl_update_area(
 enum EpdDrawError epd_hl_update_area(
     EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area
 ) {
-    return hl_update_area(state, mode, temperature, area, false, false);
+    return hl_update_area(state, mode, temperature, area, false, false, 0, 0);
 }
 
 enum EpdDrawError epd_hl_update_area_full(
     EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area
 ) {
-    return hl_update_area(state, mode, temperature, area, true, false);
+    return hl_update_area(state, mode, temperature, area, true, false, 0, 0);
 }
 
 enum EpdDrawError epd_hl_update_area_diff_exact(
     EpdiyHighlevelState *state, enum EpdDrawMode mode, int temperature, EpdRect area
 ) {
-    return hl_update_area(state, mode, temperature, area, false, true);
+    return hl_update_area(state, mode, temperature, area, false, true, 0, 0);
 }
 
 enum EpdDrawError epd_hl_update_area_full_exact(
     EpdiyHighlevelState *state, enum EpdDrawMode mode, int temperature, EpdRect area
 ) {
-    return hl_update_area(state, mode, temperature, area, true, true);
+    return hl_update_area(state, mode, temperature, area, true, true, 0, 0);
+}
+
+enum EpdDrawError epd_hl_update_area_padded(EpdiyHighlevelState *state, enum EpdDrawMode mode,
+    int temperature, EpdRect area, int pad_lines, int pad_cols) {
+    if (pad_lines < 0 || pad_lines > 1 || pad_cols < 0 || pad_cols > 1) return EPD_DRAW_INVALID_CROP;
+    return hl_update_area(state, mode, temperature, area, false, true, pad_lines, pad_cols);
 }
 
 void epd_hl_set_all_white(EpdiyHighlevelState* state) {

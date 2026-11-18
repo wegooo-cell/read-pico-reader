@@ -1,4 +1,6 @@
 /*
+ * 用户2026-11-18修订：阅读普通采用独立37相GL16差分，水波纹采用原厂前导擦除与八带逐拍启动；面板局刷、收起整屏归一。保留主页、列表、速读与关电确认。
+ * User2026-11-18: reader ordinary uses private 37-phase GL16 differences, ripple retains vendor leading erase and eight compact bands; sheets update locally and normalize on dismissal. Retain main pages, lists, FastBW and shutdown checks.
  * SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -930,48 +932,66 @@ static enum EpdDrawError update_display_area_full_with_unlocked(
     return result;
 }
 
+static enum EpdDrawError reader_gray_present_unlocked(EpdiyHighlevelState* hl, EpdRect area,
+    display_reader_gray_profile_t profile, bool full) {
+    enum EpdDrawError result;
+    if (main_before_update(hl, &result)) return result;
+    const EpdWaveform *wave = display_reader_gray_waveform(profile);
+    if (!wave) { wave = &E0470_WAVEFORM; full = true; }
+    epd_poweron();
+    use_scan_for(wave, MODE_GL16);
+    epd_hl_waveform(hl, wave);
+    result = full ? epd_hl_update_area_full_exact(hl, MODE_GL16, 25, area)
+                  : epd_hl_update_area_padded(hl, MODE_GL16, 25, area, 1, 1);
+    epd_hl_waveform(hl, &E0470_WAVEFORM);
+    rails_keepalive();
+    if (result == EPD_DRAW_SUCCESS) reader_rails_schedule_check();
+    return result;
+}
+
+static enum EpdDrawError reader_gl37_turn_unlocked(EpdiyHighlevelState* hl, EpdRect area,
+    e0470_turn_dir_t dir, unsigned bands, bool image) {
+    const bool background = app_settings_book_background_path()[0];
+    const display_reader_gray_profile_t profile = image ? DISPLAY_READER_GRAY_IMAGE
+        : background ? DISPLAY_READER_GRAY_BACKGROUND
+        : bands == 1 ? DISPLAY_READER_GRAY_TEXT : DISPLAY_READER_GRAY_WATER;
+    if (bands == 1) return reader_gray_present_unlocked(hl, area, profile, false);
+    const EpdWaveform *wave = display_reader_gray_waveform(profile);
+    if (!wave) return reader_gray_present_unlocked(hl, area, DISPLAY_READER_GRAY_PAGE, true);
+    read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FAST);
+    epd_lcd_set_prefill_lines(s_bulk_io ? 127 : 64);
+    epd_poweron();
+    // 八带逐拍启动；37相共44拍，保留全部16灰与原厂擦除，不合并尾带。
+    // Launch eight bands one per tick: 37 phases over44 ticks, with all16 grays and vendor erase, without paired tails.
+    enum EpdDrawError result = e0470_page_turn_with_waveform_compact(hl, area, dir, wave, bands);
+    use_scan_for(&E0470_WAVEFORM, MODE_GL16);
+    rails_keepalive();
+    if (result == EPD_DRAW_NO_PHASES_AVAILABLE)
+        return reader_gray_present_unlocked(hl, area, profile, false);
+    if (result == EPD_DRAW_SUCCESS) reader_rails_schedule_check();
+    return result;
+}
+
 static bool s_reader_phase_prefill_failed;
 static enum EpdDrawError update_display_reader_turn_unlocked(EpdiyHighlevelState* hl, EpdRect area,
-                                             e0470_turn_dir_t dir, unsigned bands, bool main_gray) {
+                                             e0470_turn_dir_t dir, unsigned bands, bool main_gray,
+                                             const EpdWaveform* image_waveform) {
     enum EpdDrawError intercepted;
     if (main_before_update(hl, &intercepted)) return intercepted;
     if(s_system_binary&&!main_gray)system_normalize(hl);
-    const bool ordinary_text = bands == 1 && !main_gray && !s_system_binary &&
-        app_settings_reader_turn_effect() == 0 && area.x == 0 && area.y == 0 &&
-        area.width == epd_rotated_display_width() && area.height == epd_rotated_display_height();
-    const EpdWaveform* turn_waveform = main_gray?display_main_water_waveform():s_system_binary
+    if (!main_gray && !s_system_binary && app_settings_reader_turn_effect() != 2)
+        return reader_gl37_turn_unlocked(hl, area, dir, bands, image_waveform != NULL);
+    const bool reader = !main_gray && !s_system_binary;
+    const EpdWaveform* turn_waveform = image_waveform ? image_waveform
+        : main_gray ? display_main_water_waveform() : s_system_binary
         ? (system_navigation_gray_changed(hl)?display_main_navigation_waveform():display_main_bw_turn_waveform())
-        : ordinary_text ? display_reader_ordinary_turn_waveform()
-        : (bands==1?display_reader_text_turn_waveform():display_reader_text_waveform());
-    // 普通文字整轮在差分生成前预唤醒TPS，实际驱动仍由引擎按原顺序上电。
-    // Pre-wake TPS before ordinary text differences; the engine still enables drive in the established sequence.
-    const bool prepared=bands==1&&!s_system_binary&&!main_gray&&epd_pipeline_enabled();
+        : display_reader_text_turn_waveform();
+    // 速读保留既有单带预唤醒与DU序列；普通/水波纹在上方独立分流。
+    // FastBW retains single-band prewake and DU phases; ordinary/ripple use the private route above.
+    const bool prepared=bands==1&&reader&&epd_pipeline_enabled();
     if(prepared)(void)metalio_tps_prepare();
-    if(!main_gray&&!s_system_binary&&bands==1&&app_settings_reader_turn_effect()==2&&
+    if(!image_waveform&&reader&&bands==1&&app_settings_reader_turn_effect()==2&&
         display_reader_fast_text_prepare(hl,area))turn_waveform=display_reader_fast_text_waveform();
-#if KIIKO_S31_TEXT_RIPPLE
-    // 试验波形只用于水波纹。普通翻页需要保留字形边缘完整的灰阶。
-    // Limit the experimental waveform to ripple; ordinary turns need all glyph-edge gray levels.
-    const bool experimental = !main_gray && !s_system_binary && bands > 1 &&
-        app_settings_reader_turn_effect() == 1 &&
-        metalio_text_ripple_prepare(hl, area);
-    if (experimental) {
-        turn_waveform = metalio_text_ripple_waveform();
-        if(bands>1)bands = METALIO_TEXT_RIPPLE_BANDS;
-    }
-#endif
-    // 阅读水波纹整页维护白底；系统侧滑和局部控件不进入此路径。
-    // Maintain the whole reader ripple background; system edge transitions and local controls stay outside this route.
-    const bool reader_ripple=!main_gray&&!s_system_binary&&bands>1&&
-        app_settings_reader_turn_effect()==1&&area.x==0&&area.y==0&&
-        area.width==epd_rotated_display_width()&&area.height==epd_rotated_display_height();
-    if(reader_ripple){
-        const EpdWaveform* clean=NULL;
-#if KIIKO_S31_TEXT_RIPPLE
-        if(experimental)clean=metalio_text_ripple_clean_waveform();
-#endif
-        turn_waveform=clean?clean:display_reader_soft_turn_waveform();
-    }
     if(s_system_binary||main_gray){
         turn_waveform=main_switch_waveform(turn_waveform,MODE_GL16);
         if(s_main_switch_erase)turn_waveform=main_switch_quality_waveform(turn_waveform,MODE_GL16);
@@ -985,7 +1005,7 @@ static enum EpdDrawError update_display_reader_turn_unlocked(EpdiyHighlevelState
     if(!prepared)epd_poweron();
     // 通用GL16连相同灰边也会重新压黑；S31文字序列保持等灰和官方相序，直接用于条带LUT。
     // Generic GL16 re-drives even equal gray edges; S31 text phases hold equal grays and retain vendor pulse order in the band LUT.
-    const bool prefill = ordinary_text && !s_reader_phase_prefill_failed;
+    const bool prefill = image_waveform && bands == 1 && !s_reader_phase_prefill_failed;
     enum EpdDrawError result = prefill
         ? e0470_text_turn_with_prefill(hl, area, turn_waveform)
         : bands == 1
@@ -997,13 +1017,10 @@ static enum EpdDrawError update_display_reader_turn_unlocked(EpdiyHighlevelState
     use_scan_for(&E0470_WAVEFORM, MODE_GL16);
     rails_keepalive();
     if (result == EPD_DRAW_SUCCESS) {
-        if (ordinary_text || reader_ripple) reader_rails_schedule_check();
+        if (reader) reader_rails_schedule_check();
         return result;
     }
     if (prefill) s_reader_phase_prefill_failed = true;
-#if KIIKO_S31_TEXT_RIPPLE
-    if (experimental) metalio_text_ripple_disable();
-#endif
     if (result == EPD_DRAW_NO_PHASES_AVAILABLE) {
         ESP_LOGW(TAG, "water turn phases unavailable; use regular GL16");
         return update_display_area_with(hl, &E0470_WAVEFORM, MODE_GL16, area);
@@ -1064,6 +1081,21 @@ int64_t local_display_elapsed_us;
 // 连续相位全部完成后，back已是真实黑白画面；不因尚未补灰阶而多做一次整屏GC16。
 // Once continuous phases finish, back is the real binary frame; pending gray restoration alone does not require full GC16.
 static bool display_needs_full(void) { return s_full_refresh_requested; }
+
+enum EpdDrawError update_display_reader_gray(EpdiyHighlevelState* hl, EpdRect area,
+    display_reader_gray_profile_t profile, bool full) {
+    LATENCY_DISPLAY_BEGIN();
+    const bool held = pico_online_display_begin();
+    const bool binary = s_system_binary;
+    s_system_binary = false;
+    enum EpdDrawError result = display_needs_full() ? update_display_full_unlocked(hl)
+        : reader_gray_present_unlocked(hl, area, profile, full);
+    s_system_binary = binary;
+    s_main_fault = result != EPD_DRAW_SUCCESS;
+    pico_online_display_end(held);
+    LATENCY_DISPLAY_END();
+    return result;
+}
 
 // 统一硬件出口，递归调用也必须覆盖整个扫描过程。/ Guard complete scans, including recursive fallback paths.
 enum EpdDrawError update_display_mode(
@@ -1348,7 +1380,7 @@ enum EpdDrawError update_display_water_turn(EpdiyHighlevelState* hl, EpdRect are
     LATENCY_DISPLAY_BEGIN();
     bool held = pico_online_display_begin();
     enum EpdDrawError result = display_needs_full()
-        ? update_display_full_unlocked(hl) : update_display_reader_turn_unlocked(hl, area, dir, E0470_TURN_FAST_BANDS, false);
+        ? update_display_full_unlocked(hl) : update_display_reader_turn_unlocked(hl, area, dir, E0470_TURN_FAST_BANDS, false, NULL);
     s_main_fault=result!=EPD_DRAW_SUCCESS;
     pico_online_display_end(held);
     LATENCY_DISPLAY_END();
@@ -1363,7 +1395,7 @@ enum EpdDrawError update_display_main_turn(EpdiyHighlevelState* hl,EpdRect area,
     const int prior_tick=e0470_page_turn_tick_us();
     e0470_page_turn_set_tick_us(E0470_TURN_FAST_TICK_US);
     enum EpdDrawError result=display_needs_full()?update_display_full_unlocked(hl):
-        update_display_reader_turn_unlocked(hl,area,dir,E0470_TURN_FAST_BANDS,true);
+        update_display_reader_turn_unlocked(hl,area,dir,E0470_TURN_FAST_BANDS,true,NULL);
     e0470_page_turn_set_tick_us(prior_tick);
     s_main_fault=result!=EPD_DRAW_SUCCESS;
     pico_online_display_end(held);
@@ -1380,9 +1412,31 @@ enum EpdDrawError update_display_text_turn(EpdiyHighlevelState* hl, EpdRect area
     int prior_tick=e0470_page_turn_tick_us();
     e0470_page_turn_set_tick_us(E0470_TURN_FAST_TICK_US);
     enum EpdDrawError result = display_needs_full()
-        ? update_display_full_unlocked(hl) : update_display_reader_turn_unlocked(hl, area, dir, 1, false);
+        ? update_display_full_unlocked(hl) : update_display_reader_turn_unlocked(hl, area, dir, 1, false, NULL);
     s_main_fault=result!=EPD_DRAW_SUCCESS;
     e0470_page_turn_set_tick_us(prior_tick);
+    pico_online_display_end(held);
+    LATENCY_DISPLAY_END();
+    return result;
+}
+
+enum EpdDrawError update_display_image_turn(EpdiyHighlevelState* hl, EpdRect area,
+                                           e0470_turn_dir_t dir, bool ripple) {
+    LATENCY_DISPLAY_BEGIN();
+    const bool held = pico_online_display_begin();
+    const bool binary = s_system_binary;
+    s_system_binary = false;
+    const int prior_tick = e0470_page_turn_tick_us();
+    e0470_page_turn_set_tick_us(E0470_TURN_FAST_TICK_US);
+    const EpdWaveform* waveform = display_ui37_waveform();
+    if (!waveform) waveform = &E0470_WAVEFORM;
+    enum EpdDrawError result = display_needs_full()
+        ? update_display_full_unlocked(hl)
+        : update_display_reader_turn_unlocked(hl, area, dir, ripple ? E0470_TURN_FAST_BANDS : 1,
+                                               false, waveform);
+    e0470_page_turn_set_tick_us(prior_tick);
+    s_system_binary = binary;
+    s_main_fault = result != EPD_DRAW_SUCCESS;
     pico_online_display_end(held);
     LATENCY_DISPLAY_END();
     return result;
