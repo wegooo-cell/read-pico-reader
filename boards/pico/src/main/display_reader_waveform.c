@@ -120,16 +120,17 @@ const EpdWaveform* display_reader_soft_turn_waveform(void) {
     const int drive = gl->phases - hold;
     const int extra = READER_SOFT_TURN_SETTLE_EXTRA;
     const int black = READER_SOFT_TURN_BLACK_EXTRA;
+    // 定稿保持相先走完，再整屏擦白，最后以重推黑收尾。
+    // Vendor settle holds first, then the whole-panel white erase, finishing on the black re-drive.
     memcpy(s_soft_data, gl->luts, (size_t)drive * 16 * 4);
-    memset(s_soft_data + drive, 0, (size_t)(extra + black) * 16 * 4);
-    memcpy(s_soft_data + drive + extra + black,
-           (const uint8_t*)gl->luts + (size_t)drive * 16 * 4, (size_t)hold * 16 * 4);
+    memcpy(s_soft_data + drive, (const uint8_t*)gl->luts + (size_t)drive * 16 * 4, (size_t)hold * 16 * 4);
+    memset(s_soft_data + drive + hold, 0, (size_t)(extra + black) * 16 * 4);
     for (int f = 0; f < gl->phases; ++f)
         if (e0470_phase_action(gl, f, 0, 0) == 2) soft_set_action(f, 0, 0, 0);
     for (int i = 0; i < extra; ++i)
-        for (int from = 0; from < 16; ++from) soft_set_action(drive + i, 15, from, 2);
+        for (int from = 0; from < 16; ++from) soft_set_action(drive + hold + i, 15, from, 2);
     for (int i = 0; i < black; ++i)
-        for (int from = 0; from < 16; ++from) soft_set_action(drive + extra + i, 0, from, 1);
+        for (int from = 0; from < 16; ++from) soft_set_action(drive + hold + extra + i, 0, from, 1);
     s_soft_phases = (EpdWaveformPhases){gl->phases + extra + black, (const uint8_t*)s_soft_data, NULL};
     s_soft_waveform.temp_intervals = E0470_WAVEFORM.temp_intervals;
     s_soft_ready = true;

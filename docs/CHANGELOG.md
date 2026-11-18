@@ -2,6 +2,9 @@
 
 ## 本地测试 / Local test — 2026-11-18
 
+- Pico 普通翻页改为整屏推白并重推黑：顶部状态栏、书名与底部章节/进度一起擦白；波形把厂商定稿保持挪到擦白之前，重推黑作为最后一段驱动，减少阳光下黑字发灰。
+- Pico ordinary turns push white and re-drive black across the whole panel, status bar and footer included; the waveform runs the vendor settle holds before the erase and ends on the black re-drive so blacks stay dense in sunlight.
+
 - 两款机型不再给目录、版权、序言等书前资料套章节题头。阅读器生成的卷名居中独占一页，下一章新页；分开的卷号/章号与副题合排，保留原书精排、卷后正文和偏移。页脚在后续页继续显示实际章名，仅有章号时不再显示为空。
 - Both boards exclude front matter from reader heading styles. Reader-generated volume dividers center on a separate page, chapters start afresh, and adjacent number/subtitle blocks compose together while retaining authored layouts, intervening prose and offsets. Continuation-page footers resolve the current chapter and keep number-only labels.
 - 阅读设置里的「全屏沉浸」改名为「关闭上下状态栏」，保留原有开关行为。
