@@ -137,6 +137,33 @@ const EpdWaveform* display_reader_soft_turn_waveform(void) {
     return &s_soft_waveform;
 }
 
+// 只驱白：所有目标为白的像素从任意状态再补白，其他目标完全保持，不动未变化的正文/文字。
+// White-only drive: push white targets from any state and hold everything else, without
+// re-driving unchanged text or graphics.
+#define READER_WHITE_PUSH_PHASES 4
+static uint8_t s_white_data[READER_WHITE_PUSH_PHASES][16][4];
+static const EpdWaveformPhases s_white_phases = {
+    READER_WHITE_PUSH_PHASES, (const uint8_t*)s_white_data, NULL
+};
+static const EpdWaveformPhases* s_white_ranges[] = {&s_white_phases};
+static const EpdWaveformMode s_white_mode = {MODE_GL16, 1, s_white_ranges};
+static const EpdWaveformMode* s_white_modes[] = {&s_white_mode};
+static EpdWaveform s_white_waveform = {
+    .num_modes=1, .num_temp_ranges=1, .mode_data=s_white_modes
+};
+static bool s_white_ready;
+
+const EpdWaveform* display_reader_white_push_waveform(void) {
+    if (s_white_ready) return &s_white_waveform;
+    memset(s_white_data, 0, sizeof(s_white_data));
+    for (int f = 0; f < READER_WHITE_PUSH_PHASES; ++f)
+        for (int from = 0; from < 16; ++from)
+            s_white_data[f][15][from / 4] |= (uint8_t)(2u << (6 - 2 * (from % 4)));
+    s_white_waveform.temp_intervals = E0470_WAVEFORM.temp_intervals;
+    s_white_ready = true;
+    return &s_white_waveform;
+}
+
 // 复用Pico原厂完整DU，含末尾保持相；不改表、不调脉宽或冒用其他板型的扫描。
 // Reuse Pico's complete vendor DU including trailing holds; retain tables, pulse widths and board scan timing.
 const EpdWaveform* display_reader_fast_text_waveform(void) {
