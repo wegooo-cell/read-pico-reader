@@ -43,10 +43,25 @@ int main(int argc,char **argv){
    if(i==DISPLAY_READER_GRAY_NORMALIZE_GRAY&&to==from&&to>0)assert(!a);
   }
  }
+ const EpdWaveformPhases *water=e0470_waveform_phases(display_reader_gray_waveform(DISPLAY_READER_GRAY_WATER),MODE_GL16);
+ const EpdWaveformPhases *tail=e0470_waveform_phases(display_reader_gray_waveform(DISPLAY_READER_GRAY_WATER_TAIL),MODE_GL16);
+ int white_ticks=0;
+ assert(tail->phases==37);
+ for(int to=0;to<16;++to)for(int from=0;from<16;++from)for(int phase=0;phase<37;++phase){
+  int action=e0470_phase_action(tail,phase,to,from);
+  if(to==15){
+   if(phase>=33&&phase<36)assert(action==2);
+   else assert(action==(from==15?0:e0470_phase_action(water,phase,to,from)));
+   if(from==15)white_ticks+=action==2;
+  }else if(to==from)assert(!action);
+  else assert(action==e0470_phase_action(water,phase,to,from));
+  if(phase>=34)assert(action==(phase<36&&to==15?2:0));
+ }
+ assert(white_ticks==3);
  assert(!display_reader_gray_waveform(-1)&&!display_reader_gray_waveform(DISPLAY_READER_GRAY_COUNT));
  assert(!memcmp(old_gl,gl->luts,gl->phases*64)&&!memcmp(old_gc,gc->luts,gc->phases*64)&&!memcmp(old_du,du->luts,du->phases*64));
  assert(!memcmp(raw,my_gl_25_0.luts,48*64)&&!memcmp(raw+48*64,my_gc_25_0.luts,48*64)&&!memcmp(raw+96*64,my_du_25_0.luts,20*64));
- puts("PASS: seven bounded profiles, all 256 transitions, stable reuse, normalization and unchanged shared/raw LUTs");
+ puts("PASS: eight bounded profiles, nonwhite changes preserved, equal ink held, all white targets reinforced at the tail, final phase held, unchanged original seven/shared/raw LUTs");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='reader-gl37-') as temporary:

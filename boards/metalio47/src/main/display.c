@@ -1,6 +1,6 @@
 /*
- * 用户2026-11-18修订：阅读普通采用独立37相GL16差分，水波纹采用原厂前导擦除与八带逐拍启动；面板局刷、收起整屏归一。保留主页、列表、速读与关电确认。
- * User2026-11-18: reader ordinary uses private 37-phase GL16 differences, ripple retains vendor leading erase and eight compact bands; sheets update locally and normalize on dismissal. Retain main pages, lists, FastBW and shutdown checks.
+ * 用户2026-11-19修订：阅读水波纹四带合尾，37相完整灰阶与正文局刷；纯文字等灰保持，白色目标尾部三拍补白、末相保持。普通、主页、列表、速读与关电确认保持。
+ * User2026-11-19: reader ripple uses four paired-tail bands,all37 gray phases and body crops; text holds equal grays,reinforces white targets in three tail phases and holds the last phase. Retain ordinary,main,lists,FastBW and shutdown checks.
  * SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -954,16 +954,16 @@ static enum EpdDrawError reader_gl37_turn_unlocked(EpdiyHighlevelState* hl, EpdR
     const bool background = app_settings_book_background_path()[0];
     const display_reader_gray_profile_t profile = image ? DISPLAY_READER_GRAY_IMAGE
         : background ? DISPLAY_READER_GRAY_BACKGROUND
-        : bands == 1 ? DISPLAY_READER_GRAY_TEXT : DISPLAY_READER_GRAY_WATER;
+        : bands == 1 ? DISPLAY_READER_GRAY_TEXT : DISPLAY_READER_GRAY_WATER_TAIL;
     if (bands == 1) return reader_gray_present_unlocked(hl, area, profile, false);
     const EpdWaveform *wave = display_reader_gray_waveform(profile);
     if (!wave) return reader_gray_present_unlocked(hl, area, DISPLAY_READER_GRAY_PAGE, true);
     read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FAST);
     epd_lcd_set_prefill_lines(s_bulk_io ? 127 : 64);
     epd_poweron();
-    // 八带逐拍启动；37相共44拍，保留全部16灰与原厂擦除，不合并尾带。
-    // Launch eight bands one per tick: 37 phases over44 ticks, with all16 grays and vendor erase, without paired tails.
-    enum EpdDrawError result = e0470_page_turn_with_waveform_compact(hl, area, dir, wave, bands);
+    // 阅读折中档：四带、尾两带同拍，37相共39拍；不改每像素波形、节拍或供屏时序。
+    // Reader compromise: four bands with a paired tail,37 phases over39 ticks; retain each pixel's waveform, pacing and scan timing.
+    enum EpdDrawError result = e0470_reader_ripple_with_waveform(hl, area, dir, wave, 4);
     use_scan_for(&E0470_WAVEFORM, MODE_GL16);
     rails_keepalive();
     if (result == EPD_DRAW_NO_PHASES_AVAILABLE)

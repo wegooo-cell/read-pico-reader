@@ -158,6 +158,7 @@ static bool s_book_fonts = true;
 static bool s_book_vertical;
 static uint8_t s_book_tracking = -APP_BOOK_TRACK_MIN, s_book_reading_line, s_book_rule_offset = 4;
 static bool s_book_rule_full;
+#include "settings_reading_line.inc"
 static uint8_t s_book_indent = 2;
 static uint8_t s_book_indent_adjust = 20;
 static uint8_t s_auto_lock_minutes;
@@ -372,6 +373,7 @@ void app_settings_init(void) {
     s_book_rule_full = nvs_get_u8(h, NVS_KEY_BOOK_RULE_FULL, &rule_full) == ESP_OK && rule_full == 1;
     if (nvs_get_u8(h, NVS_KEY_BOOK_RULE_OFFSET, &rule_offset) == ESP_OK && rule_offset <= 8)
         s_book_rule_offset = rule_offset;
+    book_rule_saved_load(h);
     if (nvs_get_u8(h, NVS_KEY_BOOK_INDENT, &indent) == ESP_OK && indent <= 3)
         s_book_indent = indent;
     s_book_indent_adjust = nvs_get_u8(h, NVS_KEY_BOOK_INDENT_ADJUST, &indent_adjust) == ESP_OK && indent_adjust <= 200
@@ -1021,6 +1023,11 @@ static bool backup_hold_valid(const settings_backup_hold_t *hold) {
     for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)hold->checksum[i] << (8 * i);
     return hold->action < APP_READER_KEY_COUNT && stored == backup_hold_checksum(hold);
 }
+// v26复用五字节校验块保存阅读线预设，不改变旧字段偏移。/ V26 seals the guide preset in five bytes without moving legacy fields.
+static bool backup_guide_valid(const settings_backup_hold_t *guide) {
+    uint32_t sum=0;for(unsigned i=0;i<4;++i)sum|=(uint32_t)guide->checksum[i]<<(8*i);
+    return book_rule_saved_valid(guide->action)&&sum==backup_hold_checksum(guide);
+}
 // v12 追加独立校验的微调块，保留旧字段偏移与旧备份读取。/ V12 appends a sealed adjustment block, preserving legacy fields and readers.
 typedef struct { uint8_t encoded, checksum[4]; } settings_backup_indent_adjust_t;
 static uint32_t backup_indent_adjust_checksum(const settings_backup_indent_adjust_t *adjust) {
@@ -1066,7 +1073,7 @@ static bool backup_home_valid(const settings_backup_home_t *v) {
 static unsigned backup_version(const settings_backup_v1_t *backup) {
     if (memcmp(backup->magic, "PICOSET", 7)) return 0;
     unsigned char c = backup->magic[7];
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : 0;
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1147,7 +1154,7 @@ static bool backup_card_ready(void) {
 // Write into a caller-owned stream so the card and memory exports share one byte layout.
 static esp_err_t backup_write_stream(FILE *file, bool rotate) {
     settings_backup_v1_t backup = {0};
-    memcpy(backup.magic, "PICOSETP", sizeof(backup.magic));
+    memcpy(backup.magic, "PICOSETQ", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -1249,6 +1256,10 @@ static esp_err_t backup_write_stream(FILE *file, bool rotate) {
     if(ok)ok=fwrite(&controls,1,sizeof(controls),file)==sizeof(controls);
     settings_backup_shelf_t shelf=backup_shelf_make(s_shelf_order,s_shelf_badges);
     if(ok)ok=fwrite(&shelf,1,sizeof(shelf),file)==sizeof(shelf);
+    settings_backup_hold_t guide={.action=s_book_rule_saved};
+    uint32_t guide_hash=backup_hold_checksum(&guide);
+    for(unsigned i=0;i<4;++i)guide.checksum[i]=guide_hash>>(8*i);
+    if(ok)ok=fwrite(&guide,1,sizeof(guide),file)==sizeof(guide);
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
     // memstream 没有文件描述符；只有卡上的文件需要 fsync。
@@ -1427,6 +1438,8 @@ static esp_err_t backup_apply_stream(FILE *file) {
     reader_controls_normalize(&controls);
     settings_backup_shelf_t shelf=backup_shelf_make((profile.home_full_refresh&4)?1:0,true);
     if(ok&&version>=25)ok=fread(&shelf,1,sizeof(shelf),file)==sizeof(shelf)&&backup_shelf_valid(&shelf);
+    settings_backup_hold_t guide={0};
+    if(ok&&version>=26)ok=fread(&guide,1,sizeof(guide),file)==sizeof(guide)&&backup_guide_valid(&guide);
     bool has_history = ok && version >= 6;
     if (has_history) {
         history_position = ftell(file);
@@ -1530,6 +1543,7 @@ static esp_err_t backup_apply_stream(FILE *file) {
 #undef BACKUP_SET_STR
     if(err==ESP_OK)err=nvs_set_blob(h,"rd_controls",&controls,sizeof(controls));
     if(err==ESP_OK)err=nvs_set_u8(h,"shelf_badges",shelf.badges);
+    if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_BOOK_RULE_SAVED,guide.action);
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
     if (err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); return err; }
@@ -1572,6 +1586,7 @@ static esp_err_t backup_apply_stream(FILE *file) {
     s_book_indent_adjust = adjust.encoded;
     s_book_reading_line = f[BK_READING_LINE] % 3;
     s_book_rule_full = version >= 21 && f[BK_READING_LINE] >= 3;
+    s_book_rule_saved=guide.action;
     s_book_rule_offset = rule_offset;
     s_book_line = f[BK_LINE_SPACING];
     s_book_margin = f[BK_MARGIN];

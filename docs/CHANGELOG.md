@@ -1,5 +1,29 @@
 # 版本变更 / Changelog
 
+## PICO 0.3.3-rc109 / S31 0.3.3-rc115 — 2026-11-19
+
+- 优化 TXT/EPUB 章节识别、题头样式、卷页与章节分页，修复章节首页和段落异常留白；精排 EPUB 优先保留自带格式。
+- 修复后续页章名显示和阅读线手势，新增「保存阅读线格式」。
+- 优化大书分段加载、插图内存管理、异常开书恢复及阅读进度存储。
+- 修复票根及拼贴锁屏的 TXT 封面，新增设备间设置与阅读资料同步。
+- S31 优化普通、水波纹、工具栏与目录刷新，减少重复全刷，修复启动循环重启。
+
+## 本地测试 / Local test — 2026-11-19
+
+- 两款机型修复章节首页提前截断正文、底部异常留白；全屏下使用完整正文区域，工具栏显隐保持分页及阅读位置。
+- Both boards fix prematurely shortened chapter-opening pages and unused space below the text. Chapter starts use the complete body, with pagination and source positions retained across toolbar visibility changes.
+- 两款机型修复触摸手势的阅读线开关；新增「保存阅读线格式」，一键恢复已保存的样式、范围和上下位置，支持重启、备份和设备同步。
+- Both boards fix reading-guide gesture toggles and add Save reading guide format. The saved style, span and position survive restarts, backups and device sync.
+
+- 两款机型的章节题头按实际高度加一行正文间距，不再按双行设计框整块留白；无书内样式的空白段不与阅读段距叠加，修正首段、第二段之间异常大空隙，保留原书明确样式。
+- Both boards reserve measured chapter headings plus one body row instead of a fixed two-row canvas. Unstyled source blanks no longer stack with reader paragraph spacing,fixing excessive gaps between opening paragraphs while preserving authored layouts.
+
+- S31阅读水波纹使用四带错相、尾两带合并，纯文字扫描由44拍减至39拍，保留37相GL16完整灰阶与正文局刷。插图40→35拍、背景36→31拍；普通翻页、主页、设置列表及PICO保持原样。
+- S31 reader ripple uses four staggered bands with a paired tail, reducing text scans from44 to39 ticks while retaining all37 GL16 phases and body-only crops. Art40→35,background36→31; ordinary turns,main pages,settings lists andPICO retain their profiles.
+
+- S31纯文字水波纹保持重合黑字和灰边，目标白色在尾部三拍补白、最后一拍保持，整理旧字残影与空白区域。继续37相GL16、39拍，非白目标及普通/插图/背景原表保持。残影与过渡观感待实机验收。
+- S31 text ripple holds overlapping black/grays,reinforces white targets in three tail phases and holds the final phase to settle erased text and blank areas. Keep37-phase GL16 over39 ticks,nonwhite transitions and ordinary/art/background tables; optical acceptance remains pending.
+
 ## 本地测试 / Local test — 2026-11-18
 
 - 两款机型不再给目录、版权、序言等书前资料套章节题头。阅读器生成的卷名居中独占一页，下一章新页；分开的卷号/章号与副题合排，保留原书精排、卷后正文和偏移。页脚在后续页继续显示实际章名，仅有章号时不再显示为空。

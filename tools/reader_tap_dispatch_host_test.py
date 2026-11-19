@@ -13,7 +13,7 @@ a=s.index('\n',s.index('if(header_handled)return header_redraw;'))+1
 b=s.index('\n    if (s_view == SHELF) {',a)
 block=s[a:b]
 a=s.index('        int tap = book_reader_tap_tick(')
-b=s.index('\n    }\n    track_ticket_stats(ctx);',a)
+b=s.index('\n    }',a)
 tick=s[a:b]
 header=(R/'main/book/book_reader_input.h').read_text()
 header='\n'.join(x for x in header.splitlines() if not x.startswith(('#include','#pragma')))

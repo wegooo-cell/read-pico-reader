@@ -40,7 +40,8 @@ int main(void){
  book_layout_set_reading_line(1);book_layout_set_reading_line_offset(8);assert(book_layout_build(text,40,rect,20));
  assert(book_layout_page_start_offset(1)==6);drawn[0]=0;captured_count=0;book_layout_draw_page(fb,0,rect,20);assert(test_guide_last_y+2<=rect.y+rect.height);
  book_layout_set_reading_line(0);book_layout_set_inline_images(NULL,0);book_layout_set_chapter_lead(0,20);
- assert(book_layout_build(text,40,rect,20)&&book_layout_page_top_padding(0)==0);
+ // 章节题头沿既定规则从第二行开始。/ Chapter headings retain their one-body-row top inset.
+ assert(book_layout_build(text,40,rect,20)&&book_layout_page_top_padding(0)==30);
  book_layout_set_chapter_lead(0,0);
  const char art[]="ABCD\nIMG\nEFGHIJ";blk_t blocks[]={
  {.offset=0,.len=4,.image=-1},{.offset=5,.len=3,.image=0,.image_width=80,.image_height=400},{.offset=9,.len=6,.image=-1}};

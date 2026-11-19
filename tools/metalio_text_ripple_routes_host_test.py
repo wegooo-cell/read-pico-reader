@@ -91,8 +91,8 @@ static bool epd_pipeline_enabled(void){return true;}
 static int metalio_tps_prepare(void){++tps_prepares;return 0;}
 static void metalio_tps_cancel_prepare(void){++tps_cancels;}
 static bool fast_available=true;
-static EpdWaveform native_fast={5},gray_profiles[7]={{10},{11},{12},{13},{14},{15},{16}};
-typedef enum{DISPLAY_READER_GRAY_PAGE,DISPLAY_READER_GRAY_TEXT,DISPLAY_READER_GRAY_WATER,DISPLAY_READER_GRAY_BACKGROUND,DISPLAY_READER_GRAY_IMAGE,DISPLAY_READER_GRAY_NORMALIZE,DISPLAY_READER_GRAY_NORMALIZE_GRAY}display_reader_gray_profile_t;
+static EpdWaveform native_fast={5},gray_profiles[8]={{10},{11},{12},{13},{14},{15},{16},{17}};
+typedef enum{DISPLAY_READER_GRAY_PAGE,DISPLAY_READER_GRAY_TEXT,DISPLAY_READER_GRAY_WATER,DISPLAY_READER_GRAY_BACKGROUND,DISPLAY_READER_GRAY_IMAGE,DISPLAY_READER_GRAY_NORMALIZE,DISPLAY_READER_GRAY_NORMALIZE_GRAY,DISPLAY_READER_GRAY_WATER_TAIL}display_reader_gray_profile_t;
 static bool background;
 static const char *app_settings_book_background_path(void){return background?"art":"";}
 static const EpdWaveform *display_reader_gray_waveform(display_reader_gray_profile_t p){return &gray_profiles[p];}
@@ -139,7 +139,7 @@ static void reader_rails_schedule_check(void){++rail_checks;}
 static void use_scan_for(const EpdWaveform*w,int mode){(void)w;(void)mode;}
 static enum EpdDrawError e0470_page_turn_with_waveform_compact(EpdiyHighlevelState*h,EpdRect a,int d,const EpdWaveform*w,unsigned b){(void)h;(void)a;(void)d;++compact_calls;prefill_at_scan=s_prefill_lines;last_wave=w;last_bands=b;return result;}
 static enum EpdDrawError e0470_reader_ripple_with_waveform(EpdiyHighlevelState*h,EpdRect a,int d,const EpdWaveform*w,unsigned b){
- (void)h;(void)a;(void)d;++reader_calls;last_wave=w;last_bands=b;return result;
+ (void)h;(void)a;(void)d;++reader_calls;prefill_at_scan=s_prefill_lines;last_wave=w;last_bands=b;return result;
 }
 static enum EpdDrawError e0470_text_turn_with_waveform(EpdiyHighlevelState*h,EpdRect a,int d,const EpdWaveform*w){return e0470_page_turn_with_waveform_compact(h,a,d,w,1);}
 static enum EpdDrawError update_display_area_with(EpdiyHighlevelState*h,const EpdWaveform*w,int mode,EpdRect a){(void)h;(void)a;assert(w==&E0470_WAVEFORM&&mode==MODE_GL16);++regular;return EPD_DRAW_SUCCESS;}
@@ -176,12 +176,12 @@ static enum EpdDrawError epd_hl_update_area_full_exact(EpdiyHighlevelState*h,int
 int main(void){
  EpdiyHighlevelState h={.gray=9};EpdRect a={0,0,684,1216};result=EPD_DRAW_SUCCESS;
  for(int kind=0;kind<2;++kind){
-  effect=kind;int old_compact=compact_calls,old_padded=padded_calls,old_checks=rail_checks;
+  effect=kind;int old_compact=compact_calls,old_reader=reader_calls,old_padded=padded_calls,old_checks=rail_checks;
   assert(update_display_reader_turn_unlocked(&h,a,0,kind?8:1,false,NULL)==EPD_DRAW_SUCCESS);
-  assert(last_wave==&gray_profiles[kind?DISPLAY_READER_GRAY_WATER:DISPLAY_READER_GRAY_TEXT]);
-  assert(compact_calls==old_compact+kind&&padded_calls==old_padded+!kind);
-  assert(!reader_calls&&!prepares&&!fast_prepares&&h.gray==9&&rail_checks==old_checks+1);
-  if(kind)assert(last_bands==8);
+  assert(last_wave==&gray_profiles[kind?DISPLAY_READER_GRAY_WATER_TAIL:DISPLAY_READER_GRAY_TEXT]);
+  assert(compact_calls==old_compact&&reader_calls==old_reader+kind&&padded_calls==old_padded+!kind);
+  assert(!prepares&&!fast_prepares&&h.gray==9&&rail_checks==old_checks+1);
+  if(kind)assert(last_bands==4);
  }
  background=true;effect=0;
  assert(update_display_reader_turn_unlocked(&h,a,0,1,false,NULL)==EPD_DRAW_SUCCESS&&last_wave==&gray_profiles[DISPLAY_READER_GRAY_BACKGROUND]);
@@ -195,7 +195,7 @@ int main(void){
  for(int system=0;system<2;++system){
   s_system_binary=system;effect=1;int old_compact=compact_calls,old_prepares=prepares,old_reader=reader_calls;
   assert(update_display_reader_turn_unlocked(&h,a,0,8,!system,NULL)==EPD_DRAW_SUCCESS);
-  assert(last_wave==&normal&&compact_calls==old_compact+system&&reader_calls==old_reader+!system&&prepares==old_prepares&&h.gray==9);
+  assert(last_wave==&normal&&compact_calls==old_compact+system&&reader_calls==old_reader+!system&&prepares==old_prepares&&h.gray==9&&last_bands==8);
  }
  s_system_binary=true;effect=0;int old_full=full_calls,old_padded=padded_calls;
  assert(update_display_reader_gray(&h,a,DISPLAY_READER_GRAY_NORMALIZE,true)==EPD_DRAW_SUCCESS);
@@ -211,7 +211,8 @@ int main(void){
   h.gray=g;int old_prepares=prepares,previous_fast=fast_prepares,old_reader=reader_calls;
   assert(update_display_image_turn(&h,a,0,effect==1)==EPD_DRAW_SUCCESS);
   assert(h.gray==g&&last_wave==(effect==2?&image:&gray_profiles[DISPLAY_READER_GRAY_IMAGE]));
-  assert(prepares==old_prepares&&fast_prepares==previous_fast&&reader_calls==old_reader);
+  assert(prepares==old_prepares&&fast_prepares==previous_fast&&reader_calls==old_reader+(effect==1));
+  if(effect==1)assert(last_bands==4);
   assert(s_system_binary&&current_tick==7777&&!online_depth&&!latency_depth&&!s_main_fault);
  }
  effect=1;s_system_binary=false;result=EPD_DRAW_NO_PHASES_AVAILABLE;old_padded=padded_calls;

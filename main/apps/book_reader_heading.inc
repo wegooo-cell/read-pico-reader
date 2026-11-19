@@ -3,14 +3,15 @@
 #pragma GCC push_options
 #pragma GCC optimize("Os")
 #endif
+// 排版事务先测候选字号，保存成功后绘制才读取已选字号。/ Layout measures a candidate size before drawing uses the committed preference.
+static unsigned s_heading_layout_size;
 static void reader_heading_viewport(void) {
-    const int y = body_rect().y;
-    const int padding = y < UI_READER_STANDARD_TOP ? UI_READER_STANDARD_TOP - y : 0;
-    book_layout_set_chapter_viewport(UI_READER_STANDARD_BOTTOM - y - padding,
-                                     s_reader_fullscreen ? 0 : padding);
+    // 章首页与续页使用同一个固定正文区，临时工具栏不能提前截断首段。
+    // Chapter starts use the same stable body as continuation pages; chrome only overlays it.
+    book_layout_set_chapter_viewport(body_rect().height, 0);
 }
 
-// Leave room for two rows at the selected size, with the same band for all four styles.
+// 绘制设计框与正文预留分开；正文按实际题头高度再空一行。/ Separate the design canvas from the measured heading plus one body row.
 static int reader_heading_band_height(unsigned size) {
     return size > 120 ? 184 + (int)(size - 120) * 11 / 10 : 184;
 }
@@ -36,13 +37,12 @@ static int fit_heading_line(char *line, size_t size, const char *text, int px, i
     return fitted > row_limit ? row_limit : fitted;
 }
 
-static void draw_horizontal_heading_text(uint8_t *fb, EpdRect body, const char *title, const char *number,
-                                         app_book_heading_style_t style, app_book_heading_align_t align) {
-    const unsigned size = app_settings_book_heading_size();
+static int horizontal_heading_at_size(uint8_t *fb, EpdRect body, const char *title, const char *number,
+                                      app_book_heading_style_t style, app_book_heading_align_t align, unsigned size) {
     const int band = reader_heading_band_height(size);
     const int height = body.height < band ? body.height : band;
     const int design_height = height < 184 ? height : 184;
-    if (height < 56 || body.width < 48) return;
+    if (height < 56 || body.width < 48) return 0;
 
     const bool right = align == APP_BOOK_HEADING_ALIGN_RIGHT;
     const bool sidebar = style == APP_BOOK_HEADING_SIDE;
@@ -67,7 +67,7 @@ static void draw_horizontal_heading_text(uint8_t *fb, EpdRect body, const char *
     const int title_px = fit_heading_line(heading, sizeof(heading), title, base_px,
         sidebar ? text_width - label_w : text_width, max_px);
     const int title_w = ui_text_title_width_px(title_px, heading, title);
-    if (!label_w && !title_w) return;
+    if (!label_w && !title_w) return 0;
 
     const int top = body.y + 3;
     const int row = label_w && label_px > title_px ? label_px : title_w ? title_px : label_px;
@@ -79,6 +79,7 @@ static void draw_horizontal_heading_text(uint8_t *fb, EpdRect body, const char *
     const int stack_w = label_w > title_w ? label_w : title_w;
 
     if (sidebar) {
+        if (!fb) return top + row - body.y;
         const int x = body.x + heading_offset(align, body.width - label_w - rule_slot - title_w);
         const int rule_x = x + label_w + (label_w ? rule_slot / 2 : 0);
         const int rule_height = row;
@@ -86,8 +87,13 @@ static void draw_horizontal_heading_text(uint8_t *fb, EpdRect body, const char *
                           UI_GRAY_BLACK, fb);
         ui_text_title_vc(fb, x, single_y, label_px, label, number, EPD_DRAW_ALIGN_LEFT);
         ui_text_title_vc(fb, x + label_w + rule_slot, single_y, title_px, heading, title, EPD_DRAW_ALIGN_LEFT);
-        return;
+        return top + row - body.y;
     }
+
+    int ink_bottom = bottom;
+    if (style == APP_BOOK_HEADING_STAIR) ink_bottom += design_height / 18 + rule_thickness;
+    if (style == APP_BOOK_HEADING_FLYLEAF && !stacked) ink_bottom += 4;
+    if (!fb) return ink_bottom - body.y;
 
     int width = stack_w;
     if (style == APP_BOOK_HEADING_RULE) width += rule_slot;
@@ -116,6 +122,12 @@ static void draw_horizontal_heading_text(uint8_t *fb, EpdRect body, const char *
 
     ui_text_title_vc(fb, label_x, label_y, label_px, label, number, EPD_DRAW_ALIGN_LEFT);
     ui_text_title_vc(fb, title_x, title_y, title_px, heading, title, EPD_DRAW_ALIGN_LEFT);
+    return ink_bottom - body.y;
+}
+
+static void draw_horizontal_heading_text(uint8_t *fb, EpdRect body, const char *title, const char *number,
+                                         app_book_heading_style_t style, app_book_heading_align_t align) {
+    (void)horizontal_heading_at_size(fb, body, title, number, style, align, app_settings_book_heading_size());
 }
 
 static void draw_horizontal_heading(uint8_t *fb, EpdRect body) {
@@ -249,9 +261,22 @@ static void draw_reader_flow_heading(uint8_t *fb, EpdRect body, const char *text
         reader_heading_t metrics = reader_heading_metrics(title, label, body);
         if (metrics.width) draw_vertical_heading_style(fb, body, metrics, title, label);
     } else {
+        body.height = reader_heading_band_height(app_settings_book_heading_size());
         draw_horizontal_heading_text(fb, body, title, label,
                                      app_settings_book_heading_style(), app_settings_book_heading_align());
     }
+}
+
+// 测量与绘制共用字形拟合和装饰边界，单行/双行及四款样式不会留下固定空框。
+// Measure with the same fitting and decoration bounds so single/paired headings never leave a fixed empty band.
+static int measure_reader_flow_heading(EpdRect body, const char *text, size_t len) {
+    char line[193], title[sizeof(s_chapter_heading_title)], label[sizeof(s_chapter_heading_label)];
+    epub_lead_copy(line, sizeof(line), text, len);
+    const chapter_label_t parts = chapter_label_parse(line, true);
+    book_heading_parts(line, parts, parts.subtitle, title, sizeof(title), label, sizeof(label));
+    return horizontal_heading_at_size(NULL, body, title, label,
+        app_settings_book_heading_style(), app_settings_book_heading_align(),
+        s_heading_layout_size ? s_heading_layout_size : app_settings_book_heading_size());
 }
 
 #if defined(ESP_PLATFORM) && !KIIKO_BOARD_METALIO47 && defined(__GNUC__) && !defined(__clang__)

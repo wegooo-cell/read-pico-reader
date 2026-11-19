@@ -515,7 +515,7 @@ static bool s_book_fonts_applied;
 // 字体开关改了之后要重排当前章，但那次重排不能在触摸回调里做：栈太深。
 // The font switch needs the current chapter re-typeset, but not from the touch callback: the
 // stack there is too deep.
-static bool s_fonts_reload_pending;
+static bool s_fonts_reload_pending, s_reader_rule_pending;
 // 只计用户主动换字体后的实际回退，每次选择最多记一次；预览和后台重试不计数。
 // Count actual fallbacks after explicit choices once each, excluding preview loads and background retries.
 // S31同次开书累计手动与运行时回退，正常恢复后再次回退视为新的一次。
@@ -3301,6 +3301,9 @@ static EpdRect rule_span_rect(int index) {
     return (EpdRect){244 + index * 208, 894, 196, 56};
 }
 
+static EpdRect rule_save_rect(void) { return (EpdRect){36,1086,612,46}; }
+static EpdRect rule_back_rect(void) { return (EpdRect){36,1141,612,58}; }
+
 static void draw_rule_settings(uint8_t *fb) {
     const int top = 580;
     draw_sheet(fb, top, "阅读线");
@@ -3342,10 +3345,13 @@ static void draw_rule_settings(uint8_t *fb) {
         reader_panel_text_vc(fb, controls[i].x + controls[i].width / 2,
                    controls[i].y + controls[i].height / 2, 22, labels[i], EPD_DRAW_ALIGN_CENTER, false);
     }
-    if (!selected) ui_text_box(fb, (EpdRect){42, 1080, 600, 28}, 18, "选择虚线或点线后可调整位置", EPD_DRAW_ALIGN_LEFT, false);
-    EpdRect done = {36, 1113, 612, 72};
+    EpdRect save = rule_save_rect(), done = rule_back_rect();
+    ui_fill_round_rect(fb, save, 16, selected ? 0xe0 : 0xf0);
+    ui_draw_control_frame(fb, save, 16, selected ? 0x60 : 0xa0);
+    ui_text_box(fb, (EpdRect){save.x+10,save.y+4,save.width-20,save.height-8},
+                22, "保存阅读线格式", EPD_DRAW_ALIGN_CENTER, false);
     ui_fill_round_rect(fb, done, 20, UI_GRAY_BLACK);
-    reader_panel_text_vc(fb, 342, 1149, 23, "返回字体设置", EPD_DRAW_ALIGN_CENTER, true);
+    reader_panel_text_vc(fb, 342, 1170, 23, "返回排版", EPD_DRAW_ALIGN_CENTER, true);
 }
 
 static EpdRect indent_adjust_rect(int index) {
@@ -4029,9 +4035,12 @@ static void draw_vertical_heading(uint8_t *fb, EpdRect body) {
 static void apply_chapter_lead_at_size(const char *title, const char *label, size_t skip,
                                        unsigned height, unsigned size) {
     reader_heading_viewport();
+    s_heading_layout_size = size;
     const bool vertical = app_settings_book_vertical();
     const int band = reader_heading_band_height(size);
     book_layout_set_heading_extent(vertical ? 2 * reader_heading_column_px(size) + 28 : band);
+    book_layout_set_heading_measure(measure_reader_flow_heading);
+    book_layout_set_reader_spacing(true);
     s_chapter_lead_skip = skip;
     if (book_kind() != BOOK_KIND_EPUB || title == NULL || title[0] == 0 || !height) {
         s_chapter_lead_height = s_chapter_lead_width = 0;
@@ -4046,7 +4055,8 @@ static void apply_chapter_lead_at_size(const char *title, const char *label, siz
         book_layout_set_chapter_lead_width(s_chapter_lead_width);
     } else {
         s_chapter_lead_width = 0;
-        s_chapter_lead_height = height + band - 184;
+        s_chapter_lead_height = (unsigned)horizontal_heading_at_size(NULL, body_rect(), title, label,
+            app_settings_book_heading_style(), app_settings_book_heading_align(), size);
         book_layout_set_chapter_lead(skip, s_chapter_lead_height);
         book_layout_set_chapter_lead_width(0);
     }
@@ -5527,6 +5537,7 @@ static bool reader_image_dims(void* ctx, int image, int* width, int* height) {
 }
 #include "book_ticket_reader.inc"
 static void free_book(void) {
+    s_reader_rule_pending = false;
     if (s_txt_opening) {
         s_txt_opening = false;
         pico_boot_book_end(false);
@@ -7822,6 +7833,8 @@ static app_redraw_t reader_chapter_jump_action(app_ctx_t *ctx,uint16_t x,uint16_
     s_chapter_jump_replace=false;s_chapter_jump_error=false;
     return APP_REDRAW_PAGE;
 }
+#include "apps/book_reader_rule.inc"
+
 static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) {
     bool rc_handled=false;app_redraw_t rc_result=rc_panel_action(ctx,x,y,&rc_handled);if(rc_handled)return rc_result;
     if (s_reader_panel == READER_PANEL_BACKGROUND || s_reader_panel == READER_PANEL_BACKGROUND_PREVIEW)
@@ -8094,23 +8107,26 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
         return APP_REDRAW_NONE;
     }
     if (s_reader_panel == READER_PANEL_RULE_SETTINGS) {
-        if (y < 729 || ui_rect_hit((EpdRect){36, 1113, 612, 72}, x, y)) {
+        if (y < 729 || ui_rect_hit(rule_back_rect(), x, y)) {
             s_reader_panel = READER_PANEL_FONT_SETTINGS;
+            return APP_REDRAW_PAGE;
+        }
+        if (ui_rect_hit(rule_save_rect(), x, y)) {
+            const char *text = !app_settings_book_reading_line() ? "请先选择虚线或点线" :
+                app_settings_save_book_reading_line() ? "阅读线格式已保存" : "保存失败，请重试";
+            copy_text(s_reader_notice, sizeof(s_reader_notice), text);
+            s_reader_notice_until = ctx->now_ms + 1800;
             return APP_REDRAW_PAGE;
         }
         for (int i = 0; i < 3; ++i) {
             if (!ui_rect_hit(rule_style_rect(i), x, y)) continue;
             app_settings_set_book_reading_line((uint8_t)i);
-            book_layout_set_reading_line((unsigned)i);
-            invalidate_prep();
-            return APP_REDRAW_PAGE;
+            return apply_reader_rule(ctx);
         }
         for (int i = 0; i < 2; ++i) {
             if (!ui_rect_hit(rule_span_rect(i), x, y)) continue;
             if (!app_settings_set_book_reading_line_full(i != 0)) return APP_REDRAW_NONE;
-            book_layout_set_reading_line_full(app_settings_book_reading_line_full());
-            invalidate_prep();
-            return APP_REDRAW_PAGE;
+            return apply_reader_rule(ctx);
         }
         if (app_settings_book_reading_line()) {
             int offset = app_settings_book_reading_line_offset();
@@ -8121,9 +8137,7 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
             if (offset < -8) offset = -8;
             if (offset > 8) offset = 8;
             app_settings_set_book_reading_line_offset((int8_t)offset);
-            book_layout_set_reading_line_offset(offset);
-            invalidate_prep();
-            return APP_REDRAW_PAGE;
+            return apply_reader_rule(ctx);
         }
         return APP_REDRAW_NONE;
     }
@@ -9938,6 +9952,7 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
     if (s_reader_panel == READER_PANEL_FONT_RECOVERY) return APP_REDRAW_NONE;
 #if KIIKO_BOARD_METALIO47
 #endif
+    if (s_reader_rule_pending) return reader_rule_tick(ctx);
     app_redraw_t rc_result=rc_tick(ctx);if(rc_result!=APP_REDRAW_NONE)return rc_result;
     app_redraw_t indent=reader_indent_hold_tick(ctx);
     if(indent!=APP_REDRAW_NONE)return indent;

@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "version": "0.3.3-rc114",
+  "version": "0.3.3-rc115",
   "project": "Kiikoread_Metalio_S31",
   "board": "Metalio-EINK4-Plus-S31",
   "layout": "metalio-s31-dual-5m-v1",
   "minimum_base_version": "0.3.3-rc98",
-  "url": "https://wegooo-cell.github.io/read-pico-reader/Metalio-S31-update-0.3.3-rc114.bin",
-  "size": 5157760,
-  "sha256": "2434c8bb7cd36c1760e926a0981fdce52f40962ec2243983bfe98b5c7c401e1e",
-  "notes": "书架提前加载，封面整页显示，切页和开书可打断。\nTXT 封面支持 Z-Library 和手选小图，保存到 TF 卡。\n票根校准章节和阅读时长，修复 TXT 导入和异常续读。\n短锁保留 TF 挂载，支持单击或双击唤醒，沿用 RC113 翻页参数。"
+  "url": "https://wegooo-cell.github.io/read-pico-reader/Metalio-S31-update-0.3.3-rc115.bin",
+  "size": 5189136,
+  "sha256": "840ac804d491673a50e8cc0eb8720c2005c3ff3fcc530edff292af54ce217ab4",
+  "notes": "优化章节题头、卷页、章首留白及页脚章名；修复阅读线手势并新增保存格式；优化大书加载、异常恢复及进度存储；新增设备同步。优化普通/水波纹、工具栏和目录刷新，修复启动重启。"
 }

@@ -42,6 +42,7 @@ static layout_image_t s_images[]={{0,10,80,20}};
 static const blk_t block={.offset=0,.len=3,.image=0};
 static int painted,baseline;
 static size_t skip_image_spacing(size_t off){return off;}
+static size_t skip_reader_spacing(size_t off){return off;}
 static const blk_t *block_at(size_t off){return off==0?&block:NULL;}
 static int heading_extent(const blk_t *b,size_t off,EpdRect rect){(void)b;(void)off;(void)rect;return 0;}
 static size_t heading_end(const blk_t *b){(void)b;assert(false);return 0;}
@@ -56,6 +57,8 @@ static bool take_line(size_t off,int available,int origin,size_t *next,bool *end
  (void)available;(void)origin;assert(off==4);strcpy(s_line,"tail");*next=8;*end=true;*px=10;*heading=false;*width=40;*indent=0;*align=0;*before=*after=0;return true;
 }
 static int line_height_for(int px){return px;}
+static int chapter_lead_extent(void){return s_lead_height;}
+static int line_leading(const blk_t *block,int margin,int64_t used,int room){(void)block;(void)used;(void)room;return margin;}
 static int line_fit_height(int px,int pitch){(void)px;return pitch;}
 static int line_page_height(int px,int pitch,size_t off,int64_t top,int height_limit){(void)off;(void)top;(void)height_limit;return line_fit_height(px,pitch);}
 int book_layout_page_top_padding(size_t page){(void)page;return 0;}

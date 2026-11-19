@@ -46,7 +46,10 @@ static app_redraw_t rc_execute(app_ctx_t*ctx,unsigned action){
     case RC_TOOLS_TOGGLE:
         if(!s_reader_fullscreen)return toggle_reader_fullscreen(ctx);
         {app_redraw_t redraw=toggle_reader_fullscreen(ctx);s_reader_panel=READER_PANEL_TOOLS;rc_invalidate();return redraw;}
-    case RC_GUIDE:{unsigned style=app_settings_book_reading_line();app_settings_set_book_reading_line(style?0:1);rc_invalidate();rc_notice(ctx,style?"阅读线已关闭":"阅读线已开启");return APP_REDRAW_PAGE;}
+    case RC_GUIDE:
+        if(!app_settings_toggle_book_reading_line()){rc_notice(ctx,"保存失败，请重试");return APP_REDRAW_PAGE;}
+        rc_notice(ctx,app_settings_book_reading_line()?"阅读线已开启":"阅读线已关闭");
+        return apply_reader_rule(ctx);
     case RC_CONTENTS:
         save_progress();set_reader_view(TOC);s_message[0]=0;s_toc_jump_open=s_toc_jump_drag=false;s_reader_panel=READER_PANEL_NONE;ctx->leaf=book_toc_open(current_toc_position());return APP_REDRAW_PAGE;
     case RC_BOOKMARKS:
@@ -152,7 +155,7 @@ static app_redraw_t rc_panel_action(app_ctx_t*ctx,int x,int y,bool*handled){
             if (!ui_rect_hit(rc_heading_style_rect(i),x,y)) continue;
             if (i == (int)app_settings_book_heading_style()) return APP_REDRAW_NONE;
             if (!app_settings_set_book_heading_style(i)) rc_notice(ctx,"保存失败，请重试");
-            else invalidate_prep();
+            else return rc_change_heading_size(ctx,app_settings_book_heading_size());
             return APP_REDRAW_PAGE;
         }
         return APP_REDRAW_NONE;
@@ -164,7 +167,7 @@ static app_redraw_t rc_panel_action(app_ctx_t*ctx,int x,int y,bool*handled){
     if(s_reader_panel==READER_PANEL_LAYOUT_SETTINGS&&
        (ui_rect_hit(reader_layout_back_rect(),x,y)||ui_rect_hit((EpdRect){32,525,64,64},x,y))){*handled=true;return rc_to_root(ctx,0);}
     if(s_reader_panel==READER_PANEL_RULE_SETTINGS&&
-       (ui_rect_hit((EpdRect){36,1113,612,72},x,y)||ui_rect_hit((EpdRect){32,605,64,64},x,y))){*handled=true;return rc_to_root(ctx,0);}
+       (ui_rect_hit(rule_back_rect(),x,y)||ui_rect_hit((EpdRect){32,605,64,64},x,y))){*handled=true;return rc_to_root(ctx,0);}
     if(s_reader_panel!=READER_PANEL_REFRESH_SETTINGS)return APP_REDRAW_NONE;
     *handled=true;rc_pause_auto();
     if(y<rc_root_top()||ui_rect_hit(rc_done_rect(),x,y))return rc_open(ctx,READER_PANEL_NONE);

@@ -1204,5 +1204,8 @@
   "中间单击全屏 · 全屏按区域翻页 · 上滑返回": "Tap centre for fullscreen · Tap regions to turn · Swipe up for tools",
   "范围": "Span",
   "跟随文字": "Follow text",
-  "整行": "Full line"
+  "整行": "Full line",
+  "保存阅读线格式": "Save reading guide format",
+  "阅读线格式已保存": "Reading guide format saved",
+  "请先选择虚线或点线": "Select dashed or dotted first"
 }

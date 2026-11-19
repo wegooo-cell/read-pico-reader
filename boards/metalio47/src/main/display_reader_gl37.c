@@ -2,8 +2,10 @@
  * SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
  *
- * 中文：S31 阅读专用 GL16：37 相文字/面板、八带水波纹及收起归一。
- * English: Reader-only S31 GL16 profiles: 37-phase text/sheets, eight-band ripple and dismissal normalization.
+ * 中文：S31 阅读专用 GL16：37 相文字/面板、水波纹及收起归一。
+ * English: Reader-only S31 GL16 profiles: 37-phase text/sheets, ripple and dismissal normalization.
+ * 用户2026-11-19修订：水波纹等黑/灰保持，白色目标在尾部三拍补白，最后一拍保持；非白目标及其他表保持。
+ * User2026-11-19 revision: ripple holds equal black/grays, reinforces white targets in three tail phases and holds the final phase; retain nonwhite targets and other profiles.
  * 用户2026-11-18：普通文字去掉剥除擦白后遗留的前导空等，只前移整段有效序列；相数、脉冲顺序/数量及变白列不改。
  * User2026-11-18: ordinary text advances active sequences past erase-stripped leading holds; retain phase count, pulse order/counts and the white-target column.
  * 冻结：只派生原厂 GL48，不修改共享 LUT、主页、系统列表或永久标定。
@@ -186,12 +188,33 @@ static int gray_derivative(uint8_t (*data)[16][4], bool image) {
     return frames;
 }
 
+static bool gray_water_tail(uint8_t (*data)[16][4]) {
+    const EpdWaveform *wave = display_reader_gray_waveform(DISPLAY_READER_GRAY_WATER);
+    const EpdWaveformPhases *base = e0470_waveform_phases(wave, MODE_GL16);
+    if (!base || base->phases != GRAY_PHASES || !base->luts || base->phase_times) return false;
+    memcpy(data, base->luts, GRAY_PHASES * 64);
+    // 不擦白两页重合的字芯/灰边，避免短暂出现旧字的白色轮廓。
+    // Hold overlapping cores/gray edges instead of briefly exposing an erased old-text outline.
+    for (int gray = 0; gray < 16; ++gray)
+        for (int phase = 0; phase < GRAY_PHASES; ++phase) gray_set(data, phase, gray, gray, 0);
+    // 白底维护移到尾部：既有末白相加两拍补白，白字旧影和空白区域一起整理，末相仍保持。
+    // Move maintenance to the tail: extend the existing final white phase by two pushes for old-ink and blank white targets,then hold the last phase.
+    enum { TAIL_WHITE_PHASES = 3, TAIL_HOLD_PHASES = 1 };
+    const int end = GRAY_PHASES - TAIL_HOLD_PHASES;
+    for (int from = 0; from < 16; ++from)
+        for (int phase = end - TAIL_WHITE_PHASES; phase < end; ++phase)
+            gray_set(data, phase, 15, from, 2);
+    return true;
+}
+
 const EpdWaveform *display_reader_gray_waveform(display_reader_gray_profile_t profile) {
     if ((unsigned)profile >= DISPLAY_READER_GRAY_COUNT) return NULL;
     reader_gray_table_t *table = &s_gray[profile];
     if (table->phases.luts) return &table->waveform;
     int frames = GRAY_PHASES;
-    if (profile == DISPLAY_READER_GRAY_BACKGROUND || profile == DISPLAY_READER_GRAY_IMAGE) {
+    if (profile == DISPLAY_READER_GRAY_WATER_TAIL) {
+        if (!gray_water_tail(table->data)) return NULL;
+    } else if (profile == DISPLAY_READER_GRAY_BACKGROUND || profile == DISPLAY_READER_GRAY_IMAGE) {
         frames = gray_derivative(table->data, profile == DISPLAY_READER_GRAY_IMAGE);
     } else if (profile == DISPLAY_READER_GRAY_NORMALIZE || profile == DISPLAY_READER_GRAY_NORMALIZE_GRAY) {
         const EpdWaveform *ink = display_reader_gray_waveform(DISPLAY_READER_GRAY_PAGE);
