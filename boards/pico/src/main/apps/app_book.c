@@ -557,6 +557,23 @@ static size_t s_jump_offset = SIZE_MAX, s_jump_page;
 static uint32_t s_file_size;
 static int s_px, s_margin, s_line_spacing, s_turns, s_unsaved;
 static int64_t s_poll_ms, s_last_turn_ms;
+// 翻页路径上的进度写入约 0.5 s，第 8 页与跨章保存改到停手后执行。宏为 0 时恢复当场保存。
+// A progress write costs about 0.5 s; the eighth-turn and chapter-crossing saves wait for idle. 0 saves inline.
+#ifndef READER_DEFER_TURN_SAVE
+#define READER_DEFER_TURN_SAVE 1
+#endif
+#define READER_DEFERRED_SAVE_IDLE_MS 1500
+// 连续快翻：距上一页推完不足 READER_RAPID_GAP_MS 的普通翻页改推 8 帧跟随 DU，
+// 停手 READER_RAPID_SETTLE_MS 后按普通翻页定稿。宏为 0 时关闭。
+// Rapid turns: ordinary turns arriving within READER_RAPID_GAP_MS of the previous push use the 8-frame
+// follow DU, then settle as an ordinary turn after READER_RAPID_SETTLE_MS idle. 0 disables.
+#ifndef READER_RAPID_TURN
+#define READER_RAPID_TURN 1
+#endif
+#define READER_RAPID_GAP_MS 500
+#define READER_RAPID_SETTLE_MS 700
+static bool s_progress_save_due, s_rapid_turn_pending, s_rapid_settle_due, s_rapid_cleanup_due;
+static int64_t s_turn_done_ms = -1000000;
 static int64_t s_stats_activity_ms;
 static uint32_t s_session_read_ms, s_session_turns;
 static int s_font_page;
@@ -603,6 +620,11 @@ static atomic_bool s_prep_stop;
 static book_layout_draw_cursor_t s_prep_cursor;
 static uint32_t s_next_generation;
 static uint8_t* s_next_fb;
+// 本页与上一页的正文点阵（不含状态栏/页脚），与 s_next_fb 轮换，往回翻和定稿直接复用。
+// Body-only bitmaps of the current and previous pages, rotated with s_next_fb for back turns and settles.
+static uint8_t *s_cur_body_fb, *s_prev_body_fb;
+static int s_cur_body_page = -1, s_prev_body_page = -1;
+static uint32_t s_cur_body_gen, s_prev_body_gen;
 static int s_next_page = -1, s_prep_page = -1;
 
 #define s_toolbar (s_reader_panel != READER_PANEL_NONE)
@@ -2240,6 +2262,7 @@ static void draw_bulk_sort(uint8_t *fb) {
 }
 #include "book_manage_ui.h"
 static void save_progress(void) {
+    s_progress_save_due = false;
     if (!s_text || !s_path[0] || !book_layout_page_count()) return;
     bool was_failed = s_save_failed;
     book_progress_t p = {
@@ -2272,7 +2295,13 @@ static void save_progress(void) {
     else { if (!s_unsaved) s_unsaved = 1; s_save_failed = true; }
     if (was_failed != s_save_failed) invalidate_prep();
 }
-static void invalidate_prep(void) { s_next_page = s_prep_page = -1; s_next_generation=0; memset(&s_prep_cursor,0,sizeof(s_prep_cursor)); }
+static void invalidate_prep(void) { s_next_page = s_prep_page = -1; s_next_generation=0; memset(&s_prep_cursor,0,sizeof(s_prep_cursor)); s_cur_body_page = s_prev_body_page = -1; }
+static void free_reader_page_buffers(void) {
+    free(s_next_fb); s_next_fb = NULL;
+    free(s_cur_body_fb); s_cur_body_fb = NULL;
+    free(s_prev_body_fb); s_prev_body_fb = NULL;
+    s_cur_body_page = s_prev_body_page = -1;
+}
 
 // 目录使用系统字体；切换前等待预渲染结束，回正文时恢复阅读字体与字形缓存。
 // The directory uses the system face; join painting before switching and restore the reader face on return.
@@ -4705,7 +4734,13 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         // The turn effect is independent of the footer: full-screen turns still use the selected water effect.
         EpdRect turn_area=s_area;
         bool whole_panel = false;
-        if (s_water_turn_pending) {
+        if (s_rapid_turn_pending && s_reader_turn_pending && s_mode == MODE_GL16 &&
+            s_view == READING && s_presented_view == (int)READING &&
+            s_reader_panel == READER_PANEL_NONE && !s_toolbar && !s_clear_confirm) {
+            // 快翻只推正文，状态栏/页脚留给定稿一起刷。/ Rapid turns push the body only; the settle refreshes metadata.
+            err = update_display_rapid_turn(ctx->hl, turn_area);
+            whole_panel = true;
+        } else if (s_water_turn_pending) {
             err = update_display_water_turn(ctx->hl, turn_area, s_water_turn_dir);
         } else if (s_reader_turn_pending && s_mode == MODE_GL16 && app_settings_reader_turn_effect() == 2 &&
                    s_view == READING && s_presented_view == (int)READING &&
@@ -4779,10 +4814,20 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         if(reader_entry)s_turns=0;
     }
     if (err == EPD_DRAW_SUCCESS) {
-        if (separate_metadata) (void)present_reader_footer(ctx);
+        if (separate_metadata && s_rapid_turn_pending) {
+            // 快翻时页脚等定稿一起刷；定稿被打断时由元数据节拍兜底。
+            // Rapid turns leave the footer to the settle; the metadata tick covers an interrupted settle.
+            s_reader_footer_pending = true;
+            s_reader_footer_due_ms = esp_timer_get_time() / 1000 + READER_RAPID_SETTLE_MS + 300;
+        } else if (separate_metadata) (void)present_reader_footer(ctx);
         else if (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL || reader_entry)
             s_reader_footer_pending = false;
     }
+    if (s_view == READING && (s_reader_turn_pending || s_rapid_turn_pending)) {
+        s_turn_done_ms = esp_timer_get_time() / 1000;
+        if (s_rapid_turn_pending && err == EPD_DRAW_SUCCESS) s_rapid_settle_due = true;
+    }
+    s_rapid_turn_pending = false;
     s_water_turn_pending = false;
     s_shelf_feedback_pending = false;
     s_cover_batch_present_pending = false;
@@ -4802,13 +4847,61 @@ static app_redraw_t paint_reading(app_ctx_t* ctx, enum EpdDrawMode mode) {
     s_reader_image_refresh_pending = !app_settings_reader_hide_images() &&
         book_layout_page_image_count(s_page) > 0 && s_page_images;
     lock_draw();
+    const uint32_t gen = book_layout_generation();
+    const size_t bytes = fb_bytes();
     bool cached = !s_toolbar && !s_clear_confirm && s_next_fb &&
-                  ((s_next_page == (int)s_page && s_next_generation == book_layout_generation()) ||
+                  ((s_next_page == (int)s_page && s_next_generation == gen) ||
                    reader_prefetch_resume(s_page));
+    const bool keep = !s_toolbar && !s_clear_confirm && s_reader_panel == READER_PANEL_NONE && !s_zoom_active &&
+        !app_settings_book_background_path()[0] && !book_layout_page_image_count(s_page);
     if (cached) {
-        memcpy(ctx->fb, s_next_fb, fb_bytes());
-        draw_reader_outer(ctx->fb,s_page);
+        memcpy(ctx->fb, s_next_fb, bytes);
+        if (keep) {
+            // 前进命中：上一页←本页，本页←预排页，空出的缓冲留给下一次预排。
+            // Forward hit: previous <- current, current <- prefetched; the freed buffer serves the next prefetch.
+            uint8_t *spare = s_prev_body_fb;
+            s_prev_body_fb = s_cur_body_fb; s_prev_body_page = s_cur_body_page; s_prev_body_gen = s_cur_body_gen;
+            s_cur_body_fb = s_next_fb; s_cur_body_page = (int)s_page; s_cur_body_gen = gen;
+            s_next_fb = spare;
+            s_next_page = s_prep_page = -1; s_next_generation = 0; memset(&s_prep_cursor, 0, sizeof(s_prep_cursor));
+        }
+    } else if (keep && s_prev_body_fb && s_prev_body_page == (int)s_page && s_prev_body_gen == gen) {
+        // 往回翻命中：本页成为下一页，上一页成为本页。
+        // Back hit: the current page becomes the next page and the previous page becomes current.
+        memcpy(ctx->fb, s_prev_body_fb, bytes);
+        cached = true;
+        uint8_t *spare = s_next_fb;
+        const bool next_valid = s_cur_body_fb && s_cur_body_page == (int)s_page + 1 && s_cur_body_gen == gen;
+        s_next_fb = s_cur_body_fb;
+        s_next_page = s_prep_page = next_valid ? s_cur_body_page : -1;
+        s_next_generation = next_valid ? gen : 0;
+        memset(&s_prep_cursor, 0, sizeof(s_prep_cursor));
+        s_cur_body_fb = s_prev_body_fb; s_cur_body_page = (int)s_page; s_cur_body_gen = gen;
+        s_prev_body_fb = spare; s_prev_body_page = -1;
+        if (!s_next_fb) { s_next_fb = s_prev_body_fb; s_prev_body_fb = NULL; }
+    } else if (keep && s_cur_body_fb && s_cur_body_page == (int)s_page && s_cur_body_gen == gen) {
+        // 同页重画（定稿）直接复用本页点阵。/ Same-page repaints such as the settle reuse the current body.
+        memcpy(ctx->fb, s_cur_body_fb, bytes);
+        cached = true;
+    } else if (keep) {
+        // 未命中：旧本页退为上一页，正文画进本页缓冲后再拷进屏缓冲。
+        // Miss: demote the old current page, draw the body into the current buffer, then copy it out.
+        if (s_cur_body_page >= 0 && s_cur_body_page != (int)s_page) {
+            uint8_t *t = s_prev_body_fb; s_prev_body_fb = s_cur_body_fb; s_cur_body_fb = t;
+            s_prev_body_page = s_cur_body_page; s_prev_body_gen = s_cur_body_gen;
+        }
+        if (!s_cur_body_fb && heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) > bytes + BOOK_PREP_RESERVE)
+            s_cur_body_fb = heap_caps_aligned_alloc(16, bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        s_cur_body_page = -1;
+        if (s_cur_body_fb) {
+            ui_text_set_system_scale(false);
+            memset(s_cur_body_fb, 0xff, bytes);
+            book_layout_draw_page(s_cur_body_fb, s_page, body_rect(), s_px);
+            s_cur_body_page = (int)s_page; s_cur_body_gen = gen;
+            memcpy(ctx->fb, s_cur_body_fb, bytes);
+        }
     }
+    if (cached || (keep && s_cur_body_fb && s_cur_body_page == (int)s_page)) draw_reader_outer(ctx->fb, s_page);
     else draw_reader(ctx->fb, s_page);
     // 下一页可能预渲染于数分钟前，复制后以当前时间重绘状态栏。
     // A prefetched page can be minutes old; replace its status with the current time.
@@ -4941,8 +5034,7 @@ static void release_image_headroom(void) {
     if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) >= 3u * 1024u * 1024u) return;
     lock_draw();
     invalidate_prep();
-    free(s_next_fb);
-    s_next_fb = NULL;
+    free_reader_page_buffers();
     unlock_draw();
     invalidate_covers();
     (void)ttf_font_cache_clear_all();
@@ -5216,8 +5308,7 @@ static bool open_book_impl(app_ctx_t* ctx, const char* path) {
     app_home_release_clock_cache();
     lock_draw();
     invalidate_prep();
-    free(s_next_fb);
-    s_next_fb = NULL;
+    free_reader_page_buffers();
     unlock_draw();
     if (network.network_ready) ttf_font_cache_clear();
     // 开书前把字形缓存全还回去并量一下能腾多少：书内字体要的正是这块 PSRAM，而系统字体
@@ -6373,10 +6464,20 @@ static bool reader_turn_chrome(app_ctx_t *ctx) {
     if(changed){invalidate_prep();s_reader_text_frame=false;}
     return changed;
 }
+// 翻页路径上的保存：默认只记待保存，停手后由 on_tick 写入当前位置。
+// Turn-path saves: by default mark the position due and let on_tick write it once idle.
+static void turn_save_progress(void) {
+#if READER_DEFER_TURN_SAVE
+    s_progress_save_due = true;
+#else
+    save_progress();
+#endif
+}
 static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
     if(!s_rc_auto_turning)rc_pause_auto();
     if (!s_text || s_clear_confirm) return APP_REDRAW_NONE;
     reader_zoom_reset();
+    const bool rapid_gap = ctx->now_ms - s_turn_done_ms < READER_RAPID_GAP_MS;
     // 页面图片表可能随跨章加载替换，旧页资格以实际成功显示的画面为准。
     // Chapter loads may replace the image table; the old-page eligibility comes from the displayed frame.
     bool from_text_frame = s_reader_text_frame;
@@ -6391,8 +6492,8 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
             return APP_REDRAW_PAGE;
         }
     }
-    else if (dir > 0 && s_chapter + 1 < book_chapter_count()) { save_progress(); changed = load_chapter(ctx, s_chapter + 1, 0, false); }
-    else if (dir < 0 && s_chapter) { save_progress(); changed = load_chapter(ctx, s_chapter - 1, 0, true); }
+    else if (dir > 0 && s_chapter + 1 < book_chapter_count()) { turn_save_progress(); changed = load_chapter(ctx, s_chapter + 1, 0, false); }
+    else if (dir < 0 && s_chapter) { turn_save_progress(); changed = load_chapter(ctx, s_chapter - 1, 0, true); }
     else return reader_turn_chrome(ctx) ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
     if (!changed) { set_reader_view(s_text ? TOC : SHELF); ctx->leaf = s_text ? book_toc_open(current_toc_position()) : 0; return APP_REDRAW_PAGE; }
     skip_hidden_image_pages(ctx, dir);
@@ -6410,7 +6511,7 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
     s_reader_cleanup = full_pages > 0 && s_turns >= full_pages;
     if (s_reader_cleanup) s_turns = 0;
     if (s_unsaved < 8) ++s_unsaved;
-    if (s_unsaved >= 8 && !s_save_failed) save_progress();
+    if (s_unsaved >= 8 && !s_save_failed) turn_save_progress();
     ESP_LOGI(TAG, "turn chapter=%u page=%u/%u pct=%u", (unsigned)s_chapter, (unsigned)s_page + 1, (unsigned)book_layout_page_count(), percent(s_page));
     // 预渲染未命中时也使用 GL16；到达设定页数后在本次翻页整屏全刷。
     // A cache miss still uses GL16; the selected turn count triggers a full-screen refresh on this turn.
@@ -6421,6 +6522,18 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
                            app_settings_reader_turn_effect() == 1 && from_text_frame &&
                            book_layout_page_image_count(s_page) == 0 && !app_settings_book_background_path()[0];
     s_water_turn_dir = dir > 0 ? E0470_TURN_RTL : E0470_TURN_LTR;
+    const bool rapid = READER_RAPID_TURN && s_reader_turn_pending && rapid_gap &&
+        app_settings_reader_turn_effect() == 0;
+    s_rapid_turn_pending = rapid && !s_reader_cleanup;
+    if (rapid && s_reader_cleanup) {
+        // 快翻中不插周期清理，留到停手定稿时做。/ Defer periodic cleanup during rapid turns to the settle.
+        s_reader_cleanup = false; s_rapid_cleanup_due = s_rapid_turn_pending = true;
+    } else if (s_rapid_cleanup_due && !rapid_gap) {
+        // 定稿前就慢翻：这一页补做清理。/ A slow turn before the settle performs the owed cleanup.
+        s_reader_cleanup = true; s_water_turn_pending = false; s_turns = 0;
+    }
+    // 本页已整块清理：欠下的清理和待定稿一并作废。/ A cleaning turn cancels any owed cleanup and settle.
+    if (s_reader_cleanup) s_rapid_cleanup_due = s_rapid_settle_due = false;
     return chrome_changed ? APP_REDRAW_PAGE : redraw;
 }
 static app_redraw_t resize_text(app_ctx_t* ctx, int dir) {
@@ -8069,8 +8182,7 @@ static void book_on_exit(app_ctx_t* ctx) {
     ui_reader_background_release();
     free(s_backgrounds); s_backgrounds = NULL; s_background_count = 0;
     free_book();
-    free(s_next_fb);
-    s_next_fb = NULL;
+    free_reader_page_buffers();
     if(s_prep_task){vTaskDelete(s_prep_task);s_prep_task=NULL;}
     if(s_prep_done){vSemaphoreDelete(s_prep_done);s_prep_done=NULL;}
     if (s_draw_lock) { vSemaphoreDelete(s_draw_lock); s_draw_lock = NULL; }
@@ -9080,6 +9192,24 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
         unlock_draw();
         if (!ok) { free_book(); s_view = SHELF; copy_text(s_message, sizeof(s_message), "字体重排失败，请重新打开图书"); }
         return APP_REDRAW_PAGE;
+    }
+    const bool reader_idle = s_view == READING && s_text && !(ctx->touch && ctx->touch->touched) &&
+        s_reader_panel == READER_PANEL_NONE && !s_toolbar && !s_clear_confirm;
+    // 快翻停手后按普通翻页重推本页，补回灰阶并清 DU 残影；欠下的周期清理在这里做。
+    // After rapid turns stop, re-push this page as an ordinary turn to restore grays; owed cleanup runs here.
+    if (s_rapid_settle_due && reader_idle && ctx->now_ms - s_turn_done_ms >= READER_RAPID_SETTLE_MS) {
+        s_rapid_settle_due = false;
+        const app_redraw_t settle = paint_reading(ctx, MODE_GL16);
+        s_reader_cleanup = s_rapid_cleanup_due;
+        s_rapid_cleanup_due = false;
+        s_reader_turn_pending = !s_reader_cleanup && settle == APP_REDRAW_AREA &&
+            book_layout_page_image_count(s_page) == 0 && !app_settings_book_background_path()[0];
+        return settle;
+    }
+    if (s_progress_save_due && reader_idle && ctx->now_ms - s_last_turn_ms >= READER_DEFERRED_SAVE_IDLE_MS) {
+        const bool failed = s_save_failed;
+        save_progress();
+        if (failed != s_save_failed) return APP_REDRAW_PAGE;
     }
     app_redraw_t metadata=reader_metadata_tick(ctx);
     if(metadata!=APP_REDRAW_NONE)return metadata;

@@ -384,6 +384,11 @@ if(NOT KIIKO_BOARD_METALIO47)
         if(source MATCHES "(^|/)(settings|book/book_added|apps/app_(device_settings|files|transfer|onboarding))[.]c$")
             set_property(SOURCE "${source}" APPEND PROPERTY COMPILE_OPTIONS "-Os")
         endif()
+        # 在线字体、联网升级、自检、键盘输入法与二维码不在阅读刷新路径上，同样按尺寸优化，给快速灰阶的 GRAY8 GL16 表腾出空间。
+        # Online fonts, network OTA, self-test, keyboard/IME and DataMatrix are off the reader refresh path; size-optimize them to fit the fast-gray GRAY8 GL16 table.
+        if(source MATCHES "/(online_font|online_font_store|ota_online|pmu_selftest|ui_keyboard|ui_ime|datamatrix)[.]c$")
+            set_property(SOURCE "${source}" APPEND PROPERTY COMPILE_OPTIONS "-Os")
+        endif()
     endforeach()
     option(PICO_MAIN_CLEAN_EXPERIMENT "Local Pico stronger root-switch white erasure" OFF)
     if(PICO_MAIN_CLEAN_EXPERIMENT)

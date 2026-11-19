@@ -1045,6 +1045,33 @@ enum EpdDrawError update_display_text_turn(EpdiyHighlevelState* hl,EpdRect area,
     return result;
 }
 
+// 连续快翻：正文阈值成黑白后用 8 帧跟随 DU（快扫描）一次提交，停手后由阅读页补灰阶定稿。
+// Rapid turns: threshold the body to BW and submit the 8-frame follow DU on the fast scan once; the
+// reader settles the grays after the user stops.
+enum EpdDrawError update_display_rapid_turn(EpdiyHighlevelState* hl, EpdRect area) {
+    LATENCY_DISPLAY_BEGIN();
+    bool held = pico_online_display_begin();
+    enum EpdDrawError result;
+    if (display_needs_full()) result = update_display_full_unlocked(hl);
+    else if (main_before_update(hl, &result)) { /* 全局恢复优先。/ Global recovery takes priority. */ }
+    else if (!display_reader_fast_text_prepare(hl, area))
+        result = update_display_reader_area(hl, display_main_gray_waveform(), MODE_GL16, area, false);
+    else {
+        use_scan_for(&E0470_FOLLOW_WAVEFORM, MODE_DU);
+        epd_poweron();
+        epd_hl_waveform(hl, &E0470_FOLLOW_WAVEFORM);
+        result = epd_hl_update_area_diff_exact(hl, MODE_DU, 25, area);
+        epd_hl_waveform(hl, &E0470_WAVEFORM);
+        use_scan_for(&E0470_WAVEFORM, MODE_GL16);
+        rails_keepalive();
+        if (result == EPD_DRAW_NO_PHASES_AVAILABLE) result = EPD_DRAW_SUCCESS;
+        else if (result != EPD_DRAW_SUCCESS) result = main_recover(hl, result);
+    }
+    pico_online_display_end(held);
+    LATENCY_DISPLAY_END();
+    return result;
+}
+
 void guard_draw_result(EpdiyHighlevelState* hl, enum EpdDrawError result) {
     LATENCY_DISPLAY_BEGIN();
     bool held = pico_online_display_begin();

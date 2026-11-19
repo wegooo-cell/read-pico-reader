@@ -4,6 +4,8 @@
 
 - Pico 每次翻页后只把顶部状态栏与底部进度条的白底再退一次白，未变化的文字和图形保持不动；普通翻页本身仍整屏推白。
 - After each Pico turn only the white background of the status row and progress bar is pushed white again; unchanged text and graphics are held. Ordinary turns still push the whole panel white.
+- Pico 普通翻页提速：翻页时不再当场写入进度（约 0.5 秒），改到停手后保存；连续快翻时正文用短黑白波形（约 0.12 秒/页），停手后自动补回灰阶，周期清理也留到那时做；往回翻复用已排好的上一页。
+- Faster Pico ordinary turns: progress writes (about 0.5 s) move off the turn path to idle time; rapid consecutive turns push the body with a short BW waveform (about 0.12 s per page) and settle the grays, plus any owed cleanup, after the user stops; back turns reuse the already laid-out previous page.
 
 ## S31 0.3.3-rc116 — 2026-11-19
 
