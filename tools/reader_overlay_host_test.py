@@ -294,6 +294,30 @@ int main(void){
   }
  }
  heading_size=100;
+ // 四款题头的实际底边参与预留；单行不能继续占用双行设计框。
+ // Reserve the actual lower edge for every style; single rows cannot retain a two-row canvas.
+ record_heading=true;
+ for(int style=0;style<APP_BOOK_HEADING_COUNT;++style)for(int align=0;align<APP_BOOK_HEADING_ALIGN_COUNT;++align){
+  heading_style=style;heading_align=align;
+  for(heading_size=80;heading_size<=200;heading_size+=10)for(int paired=0;paired<2;++paired){
+   EpdRect canvas={36,200,612,reader_heading_band_height(heading_size)};
+   heading_count=0;ui_clear_page(fb);
+   int extent=horizontal_heading_at_size(NULL,canvas,"Homeward",paired?"Chapter 12":"",style,align,heading_size);
+   assert(measure_reader_flow_heading(canvas,"12",2)>0);
+   assert(extent>0&&extent<canvas.height&&!heading_count);
+   for(size_t i=0;i<sizeof(fb);++i)assert(fb[i]==UI_GRAY_WHITE);
+   draw_horizontal_heading_text(fb,canvas,"Homeward",paired?"Chapter 12":"",style,align);
+   int bottom=canvas.y;
+   for(unsigned i=0;i<heading_count;++i){int end=heading_y[i]+heading_px[i]/2;if(end>bottom)bottom=end;}
+   for(int y=canvas.y;y<canvas.y+canvas.height;++y)for(int x=canvas.x;x<canvas.x+canvas.width;++x)
+    if(fb[y*684+x]!=UI_GRAY_WHITE&&y+1>bottom)bottom=y+1;
+   assert(abs(extent-(bottom-canvas.y))<=1);
+  }
+ }
+ record_heading=false;heading_size=100;
+ s_heading_layout_size=200;
+ assert(measure_reader_flow_heading(rule_band,"12",2)==horizontal_heading_at_size(NULL,rule_band,"12","",heading_style,heading_align,200));
+ s_heading_layout_size=0;
  strcpy(s_book_title,"TXT Book Name");
  const struct {
   const char *line, *number, *title;
@@ -321,18 +345,19 @@ int main(void){
   }
  }
  record_heading=false;
- // EPUB opening leads stay visible below reader chrome at their own top edge, for every style.
+ // Chapter leads keep identical full-body geometry when temporary chrome is shown or hidden.
  strcpy(s_chapter_heading_title,"Homeward");
  for(int v=0;v<2;++v)for(int full=0;full<2;++full)for(int style=0;style<APP_BOOK_HEADING_COUNT;++style){
   vertical=v;s_reader_fullscreen=full;heading_style=style;heading_align=APP_BOOK_HEADING_ALIGN_RIGHT;
   s_chapter_lead_height=v?0:214;s_chapter_lead_width=v?64:0;
   reader_heading_viewport();
   ui_clear_page(fb);draw_reader_outer(fb,0);
-  int top=full?body_rect().y:UI_READER_STANDARD_TOP;
+  int top=body_rect().y;
+  assert(chapter_view_height==body_rect().height&&chapter_view_padding==0);
   int ink_row=-1;
   for(int y=top;ink_row<0&&y<top+100;++y)for(int x=24;x<660;++x)
    if(fb[y*684+x]==UI_GRAY_BLACK){ink_row=y;break;}
-  assert(ink_row>=top&&ink_row<=top+(v?27:33));
+  if(full)assert(ink_row>=top&&ink_row<=top+(v?27:33));
  }
  s_chapter_heading_title[0]=0;s_chapter_lead_height=s_chapter_lead_width=0;
  strcpy(s_book_title,"Title");

@@ -10,16 +10,28 @@ Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Takin
 
 ## S31阅读GL16 / S31 reader GL16
 
+用户2026-11-19追加：两板章首页使用完整固定正文区，不能用工具栏可见区限制分页；工具栏显隐不改变题头/正文坐标、分页及源偏移，避免全屏时首段中途截断、底部留三分之一空白。阅读线手势立即应用已保存的样式/范围/位置，设置增加保存格式，开关不覆盖已保存格式，备份兼容旧版。
+On2026-11-19 chapter starts on both boards use the complete stable body, never the temporary toolbar viewport. Chrome visibility preserves heading/body coordinates,page boundaries and source offsets. Guide gestures apply the saved style/span/position immediately; the settings save action persists an independent preset with backward-compatible backups.
+
+用户2026-11-19要求两板阅读器生成的章节题头按实际字行和装饰高度预留，正文前只空一行当前正文行高；单行、双行、字号和样式均使用同一测量/绘制几何。不叠加无书内样式的原文空白段，首段与后续段落沿用设置段距，保留原书明确编排的空白、卷页与原文偏移。
+On2026-11-19 reader-generated headings on both boards reserve their measured text/decorative height plus one current body row. Measurement and drawing share geometry across single/paired headings,sizes and styles. Do not stack unstyled source blank paragraphs on reader paragraph gaps; retain authored spacers,volume pages and source offsets.
+
+用户2026-11-19要求S31水波纹速度介于最新本地与正式RC114之间。阅读保留37相/16灰及正文裁剪，四带紧凑启动、尾两带同拍：文字44→39拍，插图40→35拍，背景36→31拍；扫描时序、VCOM与其他页面不变。本轮先本地验证，不发布在线刷机。用户最新反馈残影明显，明确改回尾部单独补白：纯文字独立37相表保持等黑/灰，目标白色在相位33..35统一白推（原末白相加两相补白），相位36保持。非白目标变化迁移、变白前段和原七张表逐相不变；仍39拍，插图/背景/普通沿用原表。残影改善须实屏比较。
+On2026-11-19 the user requests S31 ripple between latest-local and officialRC114 speeds. Retain37-phase/16-gray crops with four compact paired-tail bands: text44→39 ticks,art40→35,background36→31; keep scan timing,VCOM and other pages. Local validation only. The latest user feedback requests separate tail whitening for visible ghosts. The private37-phase text profile holds equal black/grays,drives all white targets at phases33..35 (the existing final white plus two pushes),and holds phase36. Preserve changed nonwhite pairs,the earlier whitening sequence and all seven original profiles; retain39 ticks and ordinary/art/background tables. Optical improvement needs panel comparison.
+
 阅读器题头只用于核实的正文，目录/版权/序言等书前资料不套用。明确卷名独占页并在可见正文区居中，紧邻卷号/章号的副题合排；下一章新页，保留卷后引文和原文偏移。精排EPUB仍优先原书样式。两板页脚按当前正文位置找章名，只有章号时保留章号，不能剥成空文字。
 Reader headings apply only to verified body sections, not contents/copyright/preface material. Explicit reader-styled volumes center on their own page, paired subtitles compose with their numbers, and subsequent chapters start anew without dropping epigraphs or source offsets. Authored EPUB layouts retain priority. Both boards resolve footer names from the current text position and retain number-only labels.
 
-S31普通文字使用独立37相GL16，前移剥除擦白后留下空等的有效序列，保留脉冲顺序/数量和16灰。水波纹八带逐拍启动，纯文字及图文只扫描正文；背景29相、插图33相。状态栏/页脚和阅读工具栏/设置局刷，滑块区域定稿，收起面板37相归一。进入阅读、目录返回正文、阅读回主页正常路径各一次黑白全刷，不叠加盲清。默认VCOM为−1500mV，保留有效逐机标定；不写永久OTP/eFuse。主页切换、系统列表及PICO维持各自原有刷新。
-S31 ordinary text uses private37-phase GL16 with active sequences advanced past erase-stripped leading holds, retaining pulse order/counts and16 grays. Ripple launches eight compact bands and scans only the text/image body, with29-phase background and33-phase illustration derivatives. Status/footer and reader tools/settings update locally, sliders settle their rectangles, and dismissal normalizes in37 phases. Healthy reader entry, TOC return and exit to Home each use one black/white full refresh without blind preclears. Default VCOM is−1500mV with valid device calibration retained; never write permanent OTP/eFuses. Retain main switches, system lists and PICO refresh profiles.
+S31普通文字使用独立37相GL16，前移剥除擦白后留下空等的有效序列，保留脉冲顺序/数量和16灰。水波纹四带紧凑启动并合并尾两带，纯文字及图文只扫描正文；背景29相、插图33相。状态栏/页脚和阅读工具栏/设置局刷，滑块区域定稿，收起面板37相归一。进入阅读、目录返回正文、阅读回主页正常路径各一次黑白全刷，不叠加盲清。默认VCOM为−1500mV，保留有效逐机标定；不写永久OTP/eFuse。主页切换、系统列表及PICO维持各自原有刷新。
+S31 ordinary text uses private37-phase GL16 with active sequences advanced past erase-stripped leading holds, retaining pulse order/counts and16 grays. Ripple launches four compact bands with a paired tail and scans only the text/image body, with29-phase background and33-phase illustration derivatives. Status/footer and reader tools/settings update locally, sliders settle their rectangles, and dismissal normalizes in37 phases. Healthy reader entry, TOC return and exit to Home each use one black/white full refresh without blind preclears. Default VCOM is−1500mV with valid device calibration retained; never write permanent OTP/eFuses. Retain main switches, system lists and PICO refresh profiles.
 
 用户2026-11-18已授权将上述已验证本地修复同步到GitHub源码。本地S31版本沿用RC114；正式固件、官网与OTA发布另按发布流程处理。
 The user authorizes uploading these validated local fixes to GitHub source on2026-11-18. Local S31 builds remainRC114; formal firmware, website and OTA publication follow the separate release workflow.
 
 ## 双板正式发布 / Dual-board official publication
+
+用户2026-11-19授权将刚验证的章节首页、阅读线与既有本地优化正式发布：PICO RC109、S31 RC115，同步官网、GitHub Releases及Pages OTA；保留RC108/RC114原字节与历史入口。另导出Cloudzao单文件BIN，两款应用与正式渠道字节一致。此次发布标签以已测本地源码为基线；远端PR96的PICO普通整屏推白改动保留在后续main开发中，不自动混入本次固件。
+The user authorizes the tested local builds as Pico RC109/S31 RC115 on2026-11-19, synchronizing website,Releases and Pages OTA while retaining RC108/RC114 originals and history. Export matching Cloudzao BINs. Release tags retain the tested baseline; the remote PR96 Pico ordinary full-panel change remains subsequent main development rather than silently entering these images.
 
 用户2026-11-04明确要求推送Pico与S31在线刷机。本轮正式发布Pico rc105/S31 rc110：包括当前全部已验证本地功能，S31以8845为基准，Pico保留原灰阶字集与Moku波形。同步源码、GitHub Release、kiikoread.com刷机/TF下载及既有Pages OTA；归档原Pico rc104/S31 rc109并保留所有历史原字节。此授权取代此前对应仅本地、不上传/发布限制；不自动刷写设备、不修改供电/VCOM/分区。
 User explicitly authorizes official Pico rc105/S31 rc110 publication with current validated features, S31 based on8845 and Pico retaining its grayscale/Moku baseline. Synchronize source, Releases,kiikoread.com web/TF and existing Pages OTA. Archive original rc104/rc109 and preserve all historic bytes. This supersedes earlier local-only restrictions, without authorizing device flashes or changing power/VCOM/partitions.

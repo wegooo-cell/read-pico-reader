@@ -30,6 +30,9 @@ void book_layout_set_runs(const html_run_t* runs, size_t count);
 /// 阅读器尾行省去多余行后间距，纯文字续页将不足一行余量上下均分；默认关闭。
 /// Reader policy: omit unused tail leading and balance sub-line slack on full text continuations; default off.
 void book_layout_set_vertical_balance(bool enabled);
+/// 阅读段距代替无书内样式的原文空白段，默认关闭；保留明确样式和原始偏移。
+/// Reader gaps replace unstyled source blank paragraphs; default off,preserving authored spacing and offsets.
+void book_layout_set_reader_spacing(bool enabled);
 /// Reader-generated chapter headings start one body row below the standard viewport top.
 /// Top padding follows the visible chrome without repagination.
 void book_layout_set_chapter_viewport(int height, int top_padding);
@@ -63,6 +66,8 @@ void book_layout_set_vertical(bool vertical);
 bool book_layout_vertical(void);
 /// EPUB 章节首页预留标题区并跳过已经在题头显示的前置标题块；每章重排前调用。
 /// Reserve a first-page chapter heading and skip heading blocks already shown there; call before each chapter layout.
+/// 注册题头测量后height_px为题头实高，正文空行由本次字号/行高统一追加。
+/// With heading measurement installed,height_px is ink height; the current body pitch supplies the blank row.
 void book_layout_set_chapter_lead(size_t skip_bytes, unsigned height_px);
 /// 竖排首页从右边缘起预留的题头列宽（像素）；题头由调用方按同一宽度竖向绘制。
 /// 横排忽略它。每章重排前与 chapter_lead 一起调用。
@@ -74,6 +79,10 @@ void book_layout_set_chapter_lead_width(unsigned width_px);
 /// volume来自已核实的块语义，绘制不再根据文本重新猜测分卷。/ Volume comes from verified block semantics, not another text guess in the renderer.
 typedef void (*book_heading_draw_fn)(uint8_t *fb, EpdRect area, const char *text, size_t len, bool vertical, bool volume);
 void book_layout_set_heading_draw(book_heading_draw_fn draw);
+/// 横排题头实际高度（含装饰）；布局再留一行正文行高。NULL保留固定预留。
+/// Horizontal heading ink/decorative height; layout adds one body row. NULL retains the fixed extent.
+typedef int (*book_heading_measure_fn)(EpdRect area, const char *text, size_t len);
+void book_layout_set_heading_measure(book_heading_measure_fn measure);
 /// Heading band height in horizontal layout, width in vertical layout. Set before building.
 void book_layout_set_heading_extent(int extent);
 /// 返回该页的 EPUB 图片序号；文字页为 -1。/ Return an EPUB image index for this page, or -1 for text.

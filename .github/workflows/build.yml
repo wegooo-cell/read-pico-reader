@@ -131,9 +131,13 @@ jobs:
         shell: bash
         run: |
           . "$IDF_PATH/export.sh"
+          board_release_flags=()
+          if [ "${{ matrix.board }}" = metalio47 ]; then
+            board_release_flags=(--s31-pie --s31-reader-panel37 --s31-shelf37 --s31-settings-short-motion)
+          fi
           python tools/build_firmware.py --board "${{ matrix.board }}" \
             --idf-${{ matrix.board }} "$IDF_PATH" --python "$(command -v python)" \
-            --output build/boards
+            --output build/boards "${board_release_flags[@]}"
           if [ "${{ matrix.board }}" = pico ]; then
             python tools/lowzag_host_test.py --component build/boards/pico/source/managed_components/defensiblelogic__lowzag
           fi
@@ -240,6 +244,9 @@ jobs:
           python3 tools/reader_refresh_release_host_test.py
           python3 tools/reader_fullscreen_host_test.py
           python3 tools/reader_overlay_host_test.py
+          python3 tools/reader_heading_spacing_host_test.py
+          python3 tools/reader_chapter_viewport_host_test.py
+          python3 tools/reader_rule_toggle_host_test.py
           python3 tools/reader_immersive_space_host_test.py
           python3 tools/lock_screen_host_test.py
           python3 tools/power_double_click_host_test.py

@@ -232,6 +232,10 @@ void app_settings_set_book_indent_adjust(int8_t px);
 /// 正文阅读线：0 无，1 虚线，2 点线。/ Body reading guides: none, dashed or dotted.
 uint8_t app_settings_book_reading_line(void);
 void app_settings_set_book_reading_line(uint8_t style);
+/// 保存当前非空阅读线格式；提交成功后生效。/ Save the active nonempty guide format after a successful commit.
+bool app_settings_save_book_reading_line(void);
+/// 按保存格式开关阅读线，关闭不改变预设。/ Toggle the saved guide format without replacing its preset.
+bool app_settings_toggle_book_reading_line(void);
 /// 阅读线范围，false 跟随文字，true 整行/整列；提交成功才生效。/ Guide span, applied after commit.
 bool app_settings_book_reading_line_full(void);
 bool app_settings_set_book_reading_line_full(bool full);

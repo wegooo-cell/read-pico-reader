@@ -28,6 +28,7 @@ typedef enum {
     DISPLAY_READER_GRAY_IMAGE, ///< 插图33相 / Illustration33 phases
     DISPLAY_READER_GRAY_NORMALIZE, ///< 文字归一37相 / Text normalization37 phases
     DISPLAY_READER_GRAY_NORMALIZE_GRAY, ///< 保留灰阶归一37相 / Gray-preserving normalization37 phases
+    DISPLAY_READER_GRAY_WATER_TAIL, ///< 水波纹等灰保持与尾部白底维护37相 / Ripple37 with equal-gray holds and tail white maintenance
     DISPLAY_READER_GRAY_COUNT ///< 表数量 / Profile count
 } display_reader_gray_profile_t;
 /// 从原厂GL48派生；无有效表返回NULL，调用方保留完整灰阶回退。/ Derive from vendor GL48; NULL requests the caller's full-gray fallback.

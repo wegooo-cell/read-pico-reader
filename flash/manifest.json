@@ -1,6 +1,6 @@
 {
   "name": "kiikoread 墨水屏",
-  "version": "0.3.3-rc108",
+  "version": "0.3.3-rc109",
   "board": "pico",
   "experimental_pie_pixels": false,
   "experimental_text_ripple": false,
@@ -25,7 +25,7 @@
           "path": "bootloader.bin",
           "offset": 0,
           "size": 21232,
-          "sha256": "6327be0c150c02451ae1c10691cf82aaf007f926226f84fa655d2af9e3bf42df"
+          "sha256": "15e3f5bd1bf0e96f740a16a42e81ca03f1f050bb643a02a64b4a934f81650055"
         },
         {
           "path": "partitions.bin",
@@ -36,8 +36,8 @@
         {
           "path": "firmware.bin",
           "offset": 65536,
-          "size": 4171440,
-          "sha256": "61b60317be5c15ddb650ca19266cad281d61607f0d6aa111e7cd333395b8710e"
+          "size": 4193792,
+          "sha256": "e992d026f7c13a9a32217550f2590a8414248e0f02a8b603f39f71267436f7ed"
         },
         {
           "path": "ota_data_initial.bin",
@@ -48,15 +48,24 @@
       ]
     }
   ],
-  "updated_at": "2026-11-16T09:35:21+08:00",
+  "updated_at": "2026-11-19T11:15:36+08:00",
   "pico_ota": {
     "layout": "pico-dual-4m-v1",
-    "base_version": "0.3.3-rc108",
+    "base_version": "0.3.3-rc109",
     "minimum_base_version": "0.3.3-rc72",
     "online_ota_base_version": "0.3.3-rc79",
     "rollback": true
   },
-  "previous_version": "0.3.3-rc107",
-  "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc108/kiikoread-0.3.3-rc108-USB.zip",
-  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc108/kiikoread-0.3.3-rc108-TF.zip"
+  "previous_version": "0.3.3-rc108",
+  "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc109/kiikoread-0.3.3-rc109-USB.zip",
+  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc109/kiikoread-0.3.3-rc109-TF.zip",
+  "release_notes": [
+    "优化 TXT/EPUB 章节识别、题头样式、卷页与章节分页，修复章首和段落异常留白。",
+    "修复后续页章名显示，保留精排 EPUB 的图片、题头及自带格式。",
+    "修复阅读线手势，新增保存格式，开关恢复样式、范围和位置。",
+    "优化大书分段加载、插图内存管理与异常开书恢复。",
+    "优化阅读进度存储，修复票根及拼贴锁屏的 TXT 封面。",
+    "新增设备间设置和阅读资料同步。",
+    "优化阅读排版和操作稳定性。"
+  ]
 }

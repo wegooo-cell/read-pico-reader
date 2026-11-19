@@ -54,6 +54,8 @@ unit+='static app_redraw_t tap_aa(int x,int y){\n'+action[a:b]+'return APP_REDRA
 unit+=r'''
 static int rule_style=1,rule_offset,raster_rule_style=1,raster_rule_offset;
 static bool rule_full,raster_rule_full;
+static unsigned rule_saves;
+static bool app_settings_save_book_reading_line(void){if(save_fail)return false;++rule_saves;return true;}
 static int app_settings_book_reading_line(void){return rule_style;}
 static void app_settings_set_book_reading_line(uint8_t style){rule_style=style;}
 static void book_layout_set_reading_line(unsigned style){raster_rule_style=style;}
@@ -66,14 +68,20 @@ static void book_layout_set_reading_line_offset(int offset){raster_rule_offset=o
 '''
 for name in ['s_rule_offset_up','s_rule_offset_reset','s_rule_offset_down']:
  unit+=re.search(r'^static const EpdRect '+name+r' = .*',s,re.M)[0]+'\n'
-unit+=function('rule_style_rect',book)+'\n'+function('rule_span_rect',book)+'\n'
+unit+=function('rule_style_rect',book)+'\n'+function('rule_span_rect',book)+'\n'+function('rule_save_rect',book)+'\n'+function('rule_back_rect',book)+'\n'
+unit+='static app_redraw_t apply_reader_rule(app_ctx_t *ctx){(void)ctx;book_layout_set_reading_line(rule_style);book_layout_set_reading_line_full(rule_full);book_layout_set_reading_line_offset(rule_offset);invalidate_prep();return APP_REDRAW_PAGE;}\n'
 a=action.index('    if (s_reader_panel == READER_PANEL_RULE_SETTINGS) {')
 b=action.index('    if (s_reader_panel == READER_PANEL_FONT_PICKER)',a)
-unit+='static app_redraw_t tap_rule(int x,int y){\n'+action[a:b]+'return APP_REDRAW_NONE;}\n'
+unit+='static app_redraw_t tap_rule(int x,int y){app_ctx_t c={.now_ms=1000};app_ctx_t *ctx=&c;\n'+action[a:b]+'return APP_REDRAW_NONE;}\n'
 
 
 unit+=r'''
 int main(void){
+ s_reader_panel=READER_PANEL_RULE_SETTINGS;
+ assert(tap_rule(342,1108)==APP_REDRAW_PAGE&&rule_saves==1&&!strcmp(s_reader_notice,"阅读线格式已保存"));
+ save_fail=true;assert(tap_rule(342,1108)==APP_REDRAW_PAGE&&rule_saves==1&&!strcmp(s_reader_notice,"保存失败，请重试"));save_fail=false;
+ rule_style=0;assert(tap_rule(342,1108)==APP_REDRAW_PAGE&&rule_saves==1&&!strcmp(s_reader_notice,"请先选择虚线或点线"));rule_style=1;
+ assert(tap_rule(342,1170)==APP_REDRAW_PAGE&&s_reader_panel==READER_PANEL_FONT_SETTINGS);
  s_reader_panel=READER_PANEL_RULE_SETTINGS;
  assert(tap_rule(550,920)==APP_REDRAW_PAGE&&rule_full&&raster_rule_full&&invalidations==1);
  assert(tap_rule(330,920)==APP_REDRAW_PAGE&&!rule_full&&!raster_rule_full&&invalidations==2);

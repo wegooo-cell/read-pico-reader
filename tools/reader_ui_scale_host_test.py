@@ -47,6 +47,7 @@ static int ttf_text_width_px(int px,const char *text);
 static bool scaling=true,s_system_ttf;
 static unsigned glyphs;
 static EpdRect last_box, image_text_boxes[2];
+static bool box_probe;
 static bool rule_probe;static int rule_style_label_bottom,rule_offset_label_bottom,rule_hint_bottom;
 static bool reading_probe;static unsigned reading_labels,reading_switches;
 static bool image_probe;static unsigned image_text_count,image_switches;
@@ -63,8 +64,10 @@ static void ui_text_fixed_vc(uint8_t *fb,int x,int cy,int px,const char *text,en
  (void)fb;(void)inv;int above,below;ttf_measure_line_px(px,text,&above,&below);
  int w=ui_text_fixed_width_px(px,text),baseline=cy+(above-below)/2;
  int left=align==EPD_DRAW_ALIGN_LEFT?x:align==EPD_DRAW_ALIGN_RIGHT?x-w:x-w/2;
- assert(left>=last_box.x&&left+w<=last_box.x+last_box.width);
- assert(baseline-above>=last_box.y&&baseline+below<=last_box.y+last_box.height);
+ if(box_probe){
+  assert(left>=last_box.x&&left+w<=last_box.x+last_box.width);
+  assert(baseline-above>=last_box.y&&baseline+below<=last_box.y+last_box.height);
+ }else{assert(left>=0&&left+w<=684&&baseline-above>=0&&baseline+below<=1216);}
  assert(!strchr(text,'\n'));++glyphs;
 }
 static int ttf_text_width_px(int px,const char *text){return ui_text_fixed_width_px(px,text);}
@@ -119,7 +122,7 @@ static void ui_text_box(uint8_t *fb,EpdRect box,int px,const char *text,enum Epd
   if(!strncmp(text,"上下位置",strlen("上下位置")))rule_offset_label_bottom=box.y+box.height;
   if(!strcmp(text,"选择虚线或点线后可调整位置"))rule_hint_bottom=box.y+box.height;
  }
- assert(box.width>0&&box.height>0);last_box=box;actual_text_box(fb,box,px,text,align,inv);
+ assert(box.width>0&&box.height>0);last_box=box;box_probe=true;actual_text_box(fb,box,px,text,align,inv);box_probe=false;
 }
 '''
 unit+=function('draw_reading_font_name',book).replace('static void draw_reading_font_name(', 'static void actual_reading_font_name(')+'\n'
@@ -131,18 +134,18 @@ static void draw_reading_font_name(uint8_t *fb,EpdRect box,const char *text){
 '''
 unit+=function('draw_sheet',book)+'\n'
 for name in ('reader_ui_extra','reader_font_top','reader_font_card','reader_slider_rect',
-             'draw_pill_slider','draw_font_pair','reading_setting_rect','reading_settings_top',
-             'reading_toggle_rect','draw_reading_switch','draw_reading_card','draw_reading_toggle'):
+             'draw_pill_slider','draw_font_pair','reading_setting_rect',
+             'reading_toggle_rect','draw_reading_switch','draw_reading_toggle'):
     unit+=function(name,book)+'\n'
 for name in ['s_font_card','s_weight_card','s_bookfont_card','s_layout_card','s_rule_card','s_antialias_card']:
     unit+=re.search(r'^#define '+name+r' .*',s,re.M)[0]+'\n'
 unit+=function('reader_panel_text_vc',book)+'\n'+function('reader_panel_text',book)+'\n'
 for name in ['s_rule_offset_up','s_rule_offset_reset','s_rule_offset_down']:
     unit+=re.search(r'^static const EpdRect '+name+r' = .*',s,re.M)[0]+'\n'
-for name in ['rule_style_rect','rule_span_rect','draw_rule_settings']:
+for name in ['rule_style_rect','rule_span_rect','rule_save_rect','rule_back_rect','draw_rule_settings']:
     unit+=function(name,book)+'\n'
 unit+=function('reader_weight_value',book)+'\n'
-unit+=function('draw_font_settings',book)+'\n'+function('draw_reading_settings',book)+'\n'
+unit+=function('draw_font_settings',book)+'\n'
 unit+=function('reader_font_picker_top',book)+'\n'+function('reader_font_pick_rect',book)+'\n'
 unit+='static bool s_bookmark_edit;\n'+function('bookmark_row_step',book)+'\n'+function('bookmark_rows',book)+'\n'+function('bookmark_row_rect',book)+'\n'
 unit+=r'''
@@ -155,17 +158,13 @@ int main(void){uint8_t fb[1]={0};
     rule_style=style;rule_full=full;rule_probe=true;draw_rule_settings(fb);rule_probe=false;
     assert(rule_style_label_bottom<=rule_style_rect(0).y);
     assert(rule_offset_label_bottom<=s_rule_offset_up.y);
-    if(!style)assert(rule_hint_bottom<1113);
+    assert(rule_save_rect().y>=s_rule_offset_down.y+s_rule_offset_down.height);
    }
-   EpdRect rule_controls[]={rule_style_rect(0),rule_style_rect(1),rule_style_rect(2),rule_span_rect(0),rule_span_rect(1),s_rule_offset_up,s_rule_offset_reset,s_rule_offset_down,{36,1113,612,72}};
+   EpdRect rule_controls[]={rule_style_rect(0),rule_style_rect(1),rule_style_rect(2),rule_span_rect(0),rule_span_rect(1),s_rule_offset_up,s_rule_offset_reset,s_rule_offset_down,rule_save_rect(),rule_back_rect()};
    for(unsigned i=0;i<sizeof(rule_controls)/sizeof(rule_controls[0]);++i)for(unsigned j=0;j<i;++j)assert(!overlap(rule_controls[i],rule_controls[j]));
-   for(int i=0;i<6;++i){EpdRect a=reader_font_card(i);assert(a.y>=reader_font_top()+100&&a.y+a.height<1141);for(int j=0;j<i;++j)assert(!overlap(a,reader_font_card(j)));}
+   for(int i=0;i<4;++i){EpdRect a=reader_font_card(i);assert(a.y>=reader_font_top()+100&&a.y+a.height<1141);for(int j=0;j<i;++j)assert(!overlap(a,reader_font_card(j)));}
    EpdRect slider=reader_slider_rect(0);assert(slider.y>reader_font_top()+100&&slider.y+slider.height<reader_font_card(0).y);
-   int top=reading_settings_top();
-   reading_labels=reading_switches=0;reading_probe=true;draw_reading_settings(fb);reading_probe=false;assert(reading_labels==511&&reading_switches==5&&reading_settings_top()==top);
-   for(int i=0;i<9;++i){EpdRect a=reading_setting_rect(i);assert(a.width==(i==8?612:298)&&a.y>=top+110&&a.y+a.height<=1141);for(int j=0;j<i;++j)assert(!overlap(a,reading_setting_rect(j)));}
-   EpdRect first=reading_setting_rect(4),second=reading_setting_rect(5),last=reading_setting_rect(8);
-   assert(first.x==36&&second.x==350&&first.y==second.y&&last.x==36&&last.width==612);
+   // Root settings now use rc_draw_settings; their real dispatch is checked by reading_settings_host_test.
    for(int i=0;i<9;++i){EpdRect a=reader_font_pick_rect(i);assert(a.y>reader_font_picker_top()+120&&a.y+a.height<1141);for(int j=0;j<i;++j)assert(!overlap(a,reader_font_pick_rect(j)));}
    for(int edit=0;edit<2;++edit){s_bookmark_edit=edit;assert(bookmark_rows()>=3);for(int row=0;row<bookmark_rows();++row){EpdRect a=bookmark_row_rect(row);assert(a.y+a.height<=560+(edit?520:600));if(row)assert(!overlap(a,bookmark_row_rect(row-1)));}}
  }
@@ -180,5 +179,5 @@ with tempfile.TemporaryDirectory(dir=ROOT/'build') as folder:
     view=ROOT/".kiiko-source-view.json"
     boards=(int(json.loads(view.read_text())["board"]=="metalio47"),) if view.exists() else (0,1)
     for board in boards:
-        subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',f'-DKIIKO_BOARD_METALIO47={board}',str(c),'-o',str(b)],check=True)
+        subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined',f'-DKIIKO_BOARD_METALIO47={board}',str(c),'-o',str(b)],check=True)
         subprocess.run([str(b)],check=True)

@@ -12,6 +12,7 @@ unit=r'''
 #include <stdio.h>
 #include <string.h>
 #include "reader_controls.h"
+#include "settings.h"
 typedef int nvs_handle_t;
 typedef int esp_err_t;
 #define ESP_OK 0
@@ -24,6 +25,8 @@ static int nvs_open(const char*s,int mode,nvs_handle_t*h){(void)s;(void)mode;*h=
 static void nvs_close(nvs_handle_t h){(void)h;}
 static int nvs_get_blob(nvs_handle_t h,const char*k,void*out,size_t*n){(void)h;(void)k;if(!exists)return 1;memcpy(out,&disk,*n);return 0;}
 static int nvs_set_blob(nvs_handle_t h,const char*k,const void*data,size_t n){(void)h;(void)k;assert(n==sizeof(pending));memcpy(&pending,data,n);return 0;}
+static int nvs_get_u8(nvs_handle_t h,const char *key,uint8_t *value){(void)h;(void)key;(void)value;return 1;}
+static int nvs_set_u8(nvs_handle_t h,const char *key,uint8_t value){(void)h;(void)key;(void)value;return 0;}
 static int nvs_commit(nvs_handle_t h){(void)h;if(fail_commit)return 1;disk=pending;exists=true;return 0;}
 #include "settings_reader_controls.inc"
 int main(void){
@@ -63,5 +66,5 @@ with tempfile.TemporaryDirectory() as d:
     c=Path(d)/'test.c';c.write_text(unit)
     for board in (0,1):
         binary=Path(d)/f'test-{board}'
-        subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',f'-DKIIKO_BOARD_METALIO47={board}','-I'+str(ROOT/'main'),str(c),'-o',str(binary)],check=True)
+        subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',f'-DKIIKO_BOARD_METALIO47={board}','-Wno-unused-function','-I'+str(ROOT/'tools/settings_backup_stubs'),'-I'+str(ROOT/'main'),str(c),'-o',str(binary)],check=True)
         subprocess.run([str(binary)],check=True)
