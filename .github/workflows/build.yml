@@ -78,6 +78,12 @@ jobs:
           mkdir -p build/book-tests
           cc -std=c11 -D_DEFAULT_SOURCE -DKIIKO_BOARD_METALIO47=1 -Wall -Wextra -Werror -fsanitize=address,undefined -Itools/settings_backup_stubs -Imain tools/boot_state_host_test.c -o build/book-tests/boot-state
           build/book-tests/boot-state
+      - name: Progress filesystem initialization and restore preflight
+        shell: bash
+        run: |
+          python3 tools/progress_boot_storage_host_test.py
+          python3 tools/settings_restore_storage_host_test.py
+          python3 build/host/pico/tools/settings_restore_storage_host_test.py
       - name: Water-turn, display recovery, navigation and waveform regressions
         shell: bash
         working-directory: build/host/pico

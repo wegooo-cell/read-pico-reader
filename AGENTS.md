@@ -10,6 +10,12 @@ Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Takin
 
 ## S31阅读GL16 / S31 reader GL16
 
+用户2026-11-19已实测确认进度保存、底栏章名及配置恢复均正常，追加授权发布S31 RC116到官网/在线刷机与联网OTA，沿用RC115更新日志，导出Cloudzao 0x0单文件全量BIN；保持PICO正式RC109原字节与RC115历史归档。
+The user verified all three S31 fixes, then authorized RC116 website/online-flasher/OTA publication with unchanged RC115 notes and a Cloudzao full image at0x0. Preserve the published Pico RC109 bytes and original RC115 archive.
+
+用户2026-11-19要求修复S31进度保存、配置恢复及底栏章名被「未保存」挤掉；串口复现内置storage磨损均衡挂载ESP_ERR_NO_MEM。已确认空白FAT失败后SDK遗留WL句柄，重复探测耗尽实例；不能仅当作NVS空间或运行时堆不足。进度文件系统须在显示/字体大分配前挂载，不依赖NVS低空间条件；仅完整逻辑数据区逐字节确认全0xff后允许首次初始化，已有数据或读取失败不得格式化。FAT失败须释放WL句柄，后台失败重试间隔10秒；恢复先检查存储可用再更改配置。章名独立显示，当前书真正未落盘才显示小警示，其他书或最近路径失败不覆盖章名。允许直接刷入已连接S31本地修复，保留原NVS/存储/TF，正式RC115不可同号覆盖。
+The user requests S31 progress/configuration-restore/footer fixes and direct local installation on2026-11-19. Serial reproduction shows ESP_ERR_NO_MEM mounting internal wear-levelled storage. Mount before display/font allocations regardless of NVS free entries. Initialize only a logical data area fully verified as0xff; retain nonblank or unreadable data. Release WL handles on FAT failures, throttle background retries to10 seconds, and preflight restore storage before applying settings. Keep chapter text independent, warning only for the current book's unpersisted position. Preserve device data and immutable RC115 release bytes.
+
 用户2026-11-19追加：两板章首页使用完整固定正文区，不能用工具栏可见区限制分页；工具栏显隐不改变题头/正文坐标、分页及源偏移，避免全屏时首段中途截断、底部留三分之一空白。阅读线手势立即应用已保存的样式/范围/位置，设置增加保存格式，开关不覆盖已保存格式，备份兼容旧版。
 On2026-11-19 chapter starts on both boards use the complete stable body, never the temporary toolbar viewport. Chrome visibility preserves heading/body coordinates,page boundaries and source offsets. Guide gestures apply the saved style/span/position immediately; the settings save action persists an independent preset with backward-compatible backups.
 

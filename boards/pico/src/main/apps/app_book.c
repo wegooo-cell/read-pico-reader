@@ -4250,6 +4250,12 @@ static void reader_footer_progress(char *text,size_t cap,size_t page) {
 }
 // 独立绘制信息栏，先清理预读帧中的旧字形；物理刷新仍由正文/空闲局刷各自控制。
 // Paint independent metadata over clean cached bounds; body and idle updates control their own physical scans.
+// 全局失败队列还可能属于其他书或最近入口；底栏只提示当前书尚未落盘的位置。
+// Other books and the resume pointer have separate failures; warn only for this book's unsaved position.
+static bool reader_current_progress_unsaved(void) {
+    pending_progress_t *pending = pending_find(s_path);
+    return pending && pending->dirty && !pending->progress_saved;
+}
 static void draw_reader_footer(uint8_t *fb,size_t page) {
     ui_text_set_system_scale(false);
     EpdRect footer=progress_rect();
@@ -4263,9 +4269,14 @@ static void draw_reader_footer(uint8_t *fb,size_t page) {
     } else {
         char chapter[128];reader_footer_chapter_name(chapter,sizeof(chapter));
         char progress[48];reader_footer_progress(progress,sizeof(progress),page);
-        char line[160];snprintf(line,sizeof(line),"%s%s",s_save_failed?"未保存 · ":"",chapter);
-        fit_fixed_text(line,UI_READER_FOOTER_TEXT_PX,620-ui_text_fixed_width_px(UI_READER_FOOTER_TEXT_PX,progress)-12);
-        ui_text_fixed_vc(fb,32,footer.y+UI_READER_FOOTER_TEXT_Y-1168,UI_READER_FOOTER_TEXT_PX,line,EPD_DRAW_ALIGN_LEFT,false);
+        fit_fixed_text(chapter,UI_READER_FOOTER_TEXT_PX,620-ui_text_fixed_width_px(UI_READER_FOOTER_TEXT_PX,progress)-12);
+        ui_text_fixed_vc(fb,32,footer.y+UI_READER_FOOTER_TEXT_Y-1168,UI_READER_FOOTER_TEXT_PX,chapter,EPD_DRAW_ALIGN_LEFT,false);
+        if (reader_current_progress_unsaved()) {
+            const int cy = footer.y + UI_READER_FOOTER_TEXT_Y - 1168;
+            ui_draw_control_frame(fb, (EpdRect){8,cy-8,16,16}, 5, UI_GRAY_BLACK);
+            ui_fill_rect_fast((EpdRect){15,cy-4,2,6}, UI_GRAY_BLACK, fb);
+            ui_fill_rect_fast((EpdRect){15,cy+4,2,2}, UI_GRAY_BLACK, fb);
+        }
         ui_text_fixed_vc(fb,652,footer.y+UI_READER_FOOTER_TEXT_Y-1168,UI_READER_FOOTER_TEXT_PX,progress,EPD_DRAW_ALIGN_RIGHT,false);
         EpdRect track=ui_reader_progress();track.y+=footer.y-1168;ui_fill_round_rect(fb,track,3,0x90);
         track.width=track.width*(int)percent(page)/100;

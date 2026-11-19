@@ -33,6 +33,13 @@ static int s_view=READING,s_reader_panel=READER_PANEL_NONE,E0470_FOLLOW_WAVEFORM
 static bool immersive;
 static bool app_settings_reader_immersive(void){return immersive;}
 static bool s_reader_fullscreen=false,s_toolbar,s_clear_confirm,s_reader_footer_pending,s_save_failed;
+static const char *s_path="/sdcard/book.txt";
+typedef struct{bool dirty,progress_saved;}pending_progress_t;
+static pending_progress_t current_progress;
+static bool has_current_progress;
+static unsigned warnings,warning_ink;
+static pending_progress_t *pending_find(const char *path){assert(!strcmp(path,s_path));return has_current_progress?&current_progress:NULL;}
+static void ui_draw_control_frame(uint8_t *fb,EpdRect r,int radius,int gray){(void)fb;assert(r.x==8&&r.width==16&&r.height==16&&radius==5&&gray==0);++warnings;}
 static const char *s_text="body";
 static size_t s_chapter=36,total_pages=100;
 static int64_t s_reader_footer_due_ms;
@@ -58,7 +65,7 @@ static size_t book_layout_page_count(void){return total_pages;}
 static void fit_fixed_text(char *text,int px,int width){assert(px>0&&width>0);(void)text;}
 static int ui_text_fixed_width_px(int px,const char *text){return (int)strlen(text)*px/2;}
 static void reader_footer_chapter_name(char *text,size_t cap){snprintf(text,cap,"%s",expected_chapter);}
-static void ui_fill_rect_fast(EpdRect r,int color,uint8_t *fb){(void)fb;assert(color==255||color==UI_NAV_BACKGROUND_GRAY);if(s_reader_fullscreen&&immersive)assert(r.y==1204&&r.height==12);else if(r.y==0)assert(r.height==(s_reader_fullscreen?80:152));else if(!s_reader_fullscreen&&r.y==152)assert(r.height==24&&r.width==684&&color==UI_GRAY_WHITE);else assert(r.y==(s_reader_fullscreen?1168:1048));++fill_calls;}
+static void ui_fill_rect_fast(EpdRect r,int color,uint8_t *fb){(void)fb;if(r.width==2){assert(color==0&&r.x==15&&(r.height==2||r.height==6));++warning_ink;return;}assert(color==255||color==UI_NAV_BACKGROUND_GRAY);if(s_reader_fullscreen&&immersive)assert(r.y==1204&&r.height==12);else if(r.y==0)assert(r.height==(s_reader_fullscreen?80:152));else if(!s_reader_fullscreen&&r.y==152)assert(r.height==24&&r.width==684&&color==UI_GRAY_WHITE);else assert(r.y==(s_reader_fullscreen?1168:1048));++fill_calls;}
 static void ui_reader_background_paint(uint8_t *fb,EpdRect r,bool overlay){(void)fb;(void)r;assert(overlay);}
 static void ui_text_fixed_vc(uint8_t *fb,int x,int y,int px,const char *text,int align,bool inverted){
  (void)fb;assert(y==(s_reader_fullscreen?1180:1060)&&px==21&&!inverted);
@@ -93,6 +100,7 @@ static int64_t esp_timer_get_time(void){return test_now_ms*1000;}
 static EpdRect reader_footer_dirty(void *hl){(void)hl;return progress_rect();}
 static enum EpdDrawError update_display_reader_area(void *hl,const int *wave,int mode,EpdRect area,bool full){return reader_present_crop(hl,wave,mode,area,full);}
 '''
+unit += function('reader_current_progress_unsaved', source)+'\n'
 unit += function('draw_reader_footer', source)+'\n'
 unit += function('draw_reader_metadata', source)+'\n'
 if separate_footer:
@@ -101,6 +109,17 @@ for name in ['reader_metadata_tick','app_book_status_bar_visible','reader_status
     unit += function(name, source)+'\n'
 unit += r'''
 int main(void){
+ uint8_t fb[1]={0};
+ // A failed record for another book or for the resume pointer cannot displace this chapter.
+ s_save_failed=true;
+ for(int full=0;full<2;++full)for(int mode=0;mode<5;++mode){
+  s_reader_fullscreen=full;immersive=false;warnings=warning_ink=0;
+  has_current_progress=mode!=0;current_progress.dirty=mode>=2;current_progress.progress_saved=mode==3;
+  draw_reader_footer(fb,74);
+  assert(warnings==(unsigned)(mode==2||mode==4)&&warning_ink==2*warnings);
+ }
+ has_current_progress=false;s_save_failed=false;warnings=warning_ink=0;
+ s_reader_fullscreen=false;calls=guards=text_calls=bar_calls=fill_calls=0;
  char text[48];reader_footer_progress(text,sizeof(text),74);assert(!strcmp(text,"75/100  74%"));
  total_pages=0;reader_footer_progress(text,sizeof(text),0);assert(!strcmp(text,"0/0  0%"));total_pages=100;
  s_chapter=99;reader_footer_progress(text,sizeof(text),100);assert(!strcmp(text,"100/100  100%"));s_chapter=36;

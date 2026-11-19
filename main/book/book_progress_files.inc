@@ -185,10 +185,19 @@ void book_progress_prepare(void) {
 }
 
 void book_progress_prepare_at_boot(void) {
+    // 进度已移出NVS，空闲条目多也必须在显示/字体大分配前保留文件系统资源。
+    // Progress lives in files even when NVS has space; mount before large display/font allocations.
+    esp_err_t err = book_progress_prepare_storage();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "progress storage startup: %s", esp_err_to_name(err));
+        return;
+    }
     nvs_stats_t stats;
     if (nvs_get_stats(NULL, &stats) == ESP_OK && stats.available_entries < 64)
         book_progress_prepare();
 }
+
+esp_err_t book_progress_prepare_storage(void) { return disk_prepare(); }
 
 esp_err_t book_progress_restore_record(const char *key, const uint8_t *data, size_t len) {
     return progress_key_matches(key, data, len) ? disk_write(key, data, len) : ESP_ERR_INVALID_ARG;

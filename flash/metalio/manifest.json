@@ -1,6 +1,6 @@
 {
   "name": "Metalio 4.7 V1.5",
-  "version": "0.3.3-rc115",
+  "version": "0.3.3-rc116",
   "board": "metalio47",
   "experimental_pie_pixels": true,
   "experimental_text_ripple": false,
@@ -36,8 +36,8 @@
         {
           "path": "firmware.bin",
           "offset": 65536,
-          "size": 5189136,
-          "sha256": "840ac804d491673a50e8cc0eb8720c2005c3ff3fcc530edff292af54ce217ab4"
+          "size": 5190240,
+          "sha256": "090c38c52a2739bc8889dedc49e9d2f85f3e7bb854d91b4c5a3040ee135abf9e"
         },
         {
           "path": "ota_data_initial.bin",
@@ -48,17 +48,17 @@
       ]
     }
   ],
-  "updated_at": "2026-11-19T11:15:37+08:00",
+  "updated_at": "2026-11-19T12:28:46+08:00",
   "pico_ota": {
     "layout": "metalio-s31-dual-5m-v1",
-    "base_version": "0.3.3-rc115",
+    "base_version": "0.3.3-rc116",
     "minimum_base_version": "0.3.3-rc98",
     "online_ota_base_version": "0.3.3-rc98",
     "rollback": true
   },
-  "previous_version": "0.3.3-rc114",
-  "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/metalio-s31-v0.3.3-rc115/kiikoread-metalio47-0.3.3-rc115-USB.zip",
-  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/metalio-s31-v0.3.3-rc115/kiikoread-metalio47-0.3.3-rc115-TF.zip",
+  "previous_version": "0.3.3-rc115",
+  "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/metalio-s31-v0.3.3-rc116/kiikoread-metalio47-0.3.3-rc116-USB.zip",
+  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/metalio-s31-v0.3.3-rc116/kiikoread-metalio47-0.3.3-rc116-TF.zip",
   "release_notes": [
     "优化 TXT/EPUB 章节识别、题头样式、卷页与章节分页，修复章首和段落异常留白。",
     "修复后续页章名显示，保留精排 EPUB 的图片、题头及自带格式。",

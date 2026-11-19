@@ -26,12 +26,14 @@ void book_progress_notify_changed(void);
 /// 首次使用迁移旧 NVS 逐本进度，校验内置存储副本后再移除旧条目。
 /// On first use, migrate legacy per-book progress and remove NVS entries only after read-back verification.
 void book_progress_prepare(void);
-/// Recover space ahead of the boot checkpoint on devices with nearly full NVS.
+/// Mount before large hardware/font allocations; migrate ahead of boot checkpoints when NVS is nearly full.
 void book_progress_prepare_at_boot(void);
 
 typedef esp_err_t (*book_progress_record_fn)(const char *key, const uint8_t *data, size_t len, void *ctx);
 esp_err_t book_progress_records(book_progress_record_fn visit, void *ctx);
 #ifdef ESP_PLATFORM
+/// Prepare progress storage, initializing only an entirely erased data area; retain existing records.
+esp_err_t book_progress_prepare_storage(void);
 esp_err_t book_progress_restore_record(const char *key, const uint8_t *data, size_t len);
 esp_err_t book_progress_clear_records(void);
 #endif

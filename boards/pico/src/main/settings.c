@@ -41,6 +41,7 @@
 #include "read_pico_sd.h"
 #include "read_pico_transfer.h"
 #include "book/book_history_backup.h"
+#include "book/book_progress.h"
 
 #define TAG "settings"
 #define NVS_NS KIIKO_BOARD_SETTINGS_NAMESPACE
@@ -1450,6 +1451,18 @@ static esp_err_t backup_apply_stream(FILE *file) {
         return ESP_ERR_INVALID_RESPONSE;
     }
 
+#ifdef ESP_PLATFORM
+    // 先确认阅读记录可写，再改配置；避免恢复进行一半才遇到延迟挂载内存不足。
+    // Preflight storage before changing settings, rather than failing midway through history restore.
+    if (has_history) {
+        esp_err_t storage = book_progress_prepare_storage();
+        if (storage != ESP_OK) {
+            backup_erase_secret(&wifi, sizeof(wifi));
+            return storage;
+        }
+    }
+#endif
+
     if(version<20) {
         int px=version<19?(int)backup.flags[BK_TRACKING]*2-4:(int)backup.flags[BK_TRACKING]-4;
         if(px>APP_BOOK_TRACK_MAX)px=APP_BOOK_TRACK_MAX;
@@ -1626,6 +1639,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (!file) return ESP_ERR_NOT_FOUND;
     esp_err_t error = backup_apply_stream(file);
     if (fclose(file) != 0 && error == ESP_OK) error = ESP_FAIL;
+    if (error != ESP_OK) ESP_LOGW(TAG, "configuration restore: %s", esp_err_to_name(error));
     return error;
 }
 
@@ -1637,5 +1651,6 @@ esp_err_t app_settings_sync_import(const uint8_t *data, size_t length) {
     if (!file) return ESP_ERR_NO_MEM;
     esp_err_t error = backup_apply_stream(file);
     if (fclose(file) != 0 && error == ESP_OK) error = ESP_FAIL;
+    if (error != ESP_OK) ESP_LOGW(TAG, "configuration restore: %s", esp_err_to_name(error));
     return error;
 }

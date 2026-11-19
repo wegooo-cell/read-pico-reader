@@ -5,8 +5,8 @@
  * 书源根目录、挂载与容量策略，不包含界面。
  * Book roots, mounting and capacity policy without UI.
  *
- * 冻结：SD 优先；内置存储单文件最多 1 MiB，仅首次使用挂载。
- * Frozen: prefer SD; flash files are limited to 1 MiB and mounted lazily.
+ * 冻结：SD优先，内置书文件最多1MiB；进度存储早期挂载，仅经完整空白校验的逻辑区允许初始化。
+ * Frozen: prefer SD; flash books stay within1MiB. Mount progress early; initialize only a fully verified erased logical data area.
  */
 #pragma once
 

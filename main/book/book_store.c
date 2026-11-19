@@ -37,11 +37,14 @@
 #include "esp_vfs_fat.h"
 #include "read_pico_sd.h"
 #include "wear_levelling.h"
+#include "esp_timer.h"
 
 static const char* TAG = "book_store";
 static wl_handle_t s_wl = WL_INVALID_HANDLE;
 static unsigned s_revision;
 static bool s_roots_degraded;
+static esp_err_t s_flash_error;
+static int64_t s_flash_retry_us;
 
 void book_store_notify_changed(void) { ++s_revision; }
 unsigned book_store_revision(void) { return s_revision; }
@@ -63,19 +66,52 @@ static bool sd_ready(void) {
     return info.present && info.mounted;
 }
 
-static esp_err_t flash_mount(bool format) {
+// 只在整个逻辑数据区均为擦除态时允许首次建立FAT；磨损均衡元数据不算用户数据。
+// Initialize FAT only after checking every logical data byte; WL metadata is outside that area.
+static bool flash_data_blank(wl_handle_t handle) {
+    uint8_t bytes[512];
+    const size_t size = wl_size(handle);
+    if (!size) return false;
+    for (size_t off = 0; off < size; off += sizeof(bytes)) {
+        size_t count = size - off < sizeof(bytes) ? size - off : sizeof(bytes);
+        if (wl_read(handle, off, bytes, count) != ESP_OK) return false;
+        for (size_t i = 0; i < count; ++i) if (bytes[i] != 0xff) return false;
+    }
+    return true;
+}
+
+static esp_err_t flash_mount(bool force_retry) {
     if (!book_store_flash_ready()) {
-        const esp_vfs_fat_mount_config_t config = {
-            .format_if_mount_failed = format,
+        if (!force_retry && esp_timer_get_time() < s_flash_retry_us) return s_flash_error;
+        esp_vfs_fat_mount_config_t config = {
+            .format_if_mount_failed = false,
             .max_files = 4,
             .allocation_unit_size = 4096,
         };
-        esp_err_t err = esp_vfs_fat_spiflash_mount_rw_wl("/flash", "storage", &config, &s_wl);
+        wl_handle_t handle = WL_INVALID_HANDLE;
+        esp_err_t err = esp_vfs_fat_spiflash_mount_rw_wl("/flash", "storage", &config, &handle);
+        if (err != ESP_OK) {
+            const bool blank = err == ESP_FAIL && handle != WL_INVALID_HANDLE && flash_data_blank(handle);
+            // IDF的FAT失败路径会留下已建立的WL句柄；丢弃它会逐次耗尽实例。
+            // A failed FAT mount can retain its WL handle; release it before retrying.
+            esp_err_t released = handle == WL_INVALID_HANDLE ? ESP_OK : wl_unmount(handle);
+            handle = WL_INVALID_HANDLE;
+            if (blank && released == ESP_OK) {
+                ESP_LOGI(TAG, "initialize verified empty internal storage");
+                config.format_if_mount_failed = true;
+                err = esp_vfs_fat_spiflash_mount_rw_wl("/flash", "storage", &config, &handle);
+                if (err != ESP_OK && handle != WL_INVALID_HANDLE) (void)wl_unmount(handle);
+            }
+        }
         if (err != ESP_OK) {
             s_wl = WL_INVALID_HANDLE;
+            s_flash_error = err;
+            s_flash_retry_us = esp_timer_get_time() + INT64_C(10000000);
             ESP_LOGW(TAG, "flash mount: %s", esp_err_to_name(err));
             return err;
         }
+        s_wl = handle;
+        s_flash_retry_us = 0;
     }
     return ESP_OK;
 }
