@@ -18,6 +18,11 @@ const EpdWaveform* display_reader_fast_text_waveform(void);
 /// 两板普通翻页分别派生本板波形：Pico等灰保持、变白补四相；S31沿Moku GL37补六相目标白。
 /// Ordinary uses board-native profiles: Pico holds equal grays and adds four changed-white phases; S31 retains Moku GL37 plus six white-target phases.
 const EpdWaveform* display_reader_soft_turn_waveform(void);
+#if !KIIKO_BOARD_METALIO47
+/// Pico快速灰阶翻页：官方GRAY8 GL16 30相加4相整屏擦白；构造失败时回落到普通翻页波形。
+/// Pico fast-gray turns: official GRAY8 GL16 (30 phases) plus four whole-panel white phases; falls back to the ordinary turn.
+const EpdWaveform* display_reader_gray8_turn_waveform(void);
+#endif
 #if KIIKO_BOARD_METALIO47
 /// S31阅读独立GL16表；不影响其他页面或PICO。/ Reader-private S31 GL16 profiles; other pages and PICO remain independent.
 typedef enum {

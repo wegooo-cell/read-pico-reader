@@ -23,7 +23,7 @@
 #include "settings.h"
 #include "setup_state.h"
 #include "kiiko_board_config.h"
-#define READER_TURN_EFFECT_MAX 2
+#define READER_TURN_EFFECT_MAX KIIKO_BOARD_READER_TURN_EFFECT_MAX
 #include "book/book_font_size.h"
 
 #include <stdio.h>

@@ -4717,8 +4717,11 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
                 // 普通翻页整屏推白并重推黑，状态栏和页脚也一起擦，避免阳光下淡墨。
                 // Ordinary turns push white and re-drive black across the whole panel, metadata included,
                 // so nothing stays faint in sunlight.
-                ? update_display_reader_area(ctx->hl, display_reader_soft_turn_waveform(), s_mode,
-                                             (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT}, true)
+                // 翻页效果为“快速灰阶”时改用 GRAY8 30+4 相，范围与普通翻页相同。
+                // Fast gray swaps in the GRAY8 30+4 phase turn over the same extent as ordinary turns.
+                ? update_display_reader_area(ctx->hl, app_settings_reader_turn_effect() == 3
+                      ? display_reader_gray8_turn_waveform() : display_reader_soft_turn_waveform(),
+                      s_mode, (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT}, true)
                 : separate_metadata
                     ? update_display_reader_area(ctx->hl,
                         s_mode == MODE_DU ? &E0470_FOLLOW_WAVEFORM : display_reader_soft_turn_waveform(),

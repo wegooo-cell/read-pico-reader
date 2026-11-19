@@ -142,7 +142,7 @@ bool app_settings_set_book_background_path(const char *path);
 /// S31另支持20页，所有翻页效果均遵循所选间隔。/ S31 also supports20; every turn effect respects the selected interval.
 uint8_t app_settings_reader_full_pages(void);
 void app_settings_set_reader_full_pages(uint8_t pages);
-/// 阅读翻页效果：0普通，1水波纹，2速读黑白；旧0/1配置不变。/ Reader effect:0 ordinary,1 ripple,2 fast BW; preserve legacy0/1 settings.
+/// 阅读翻页效果：0普通，1水波纹，2速读黑白，3快速灰阶（仅Pico）；旧0/1配置不变。/ Reader effect:0 ordinary,1 ripple,2 fast BW,3 fast gray (Pico only); preserve legacy0/1 settings.
 uint8_t app_settings_reader_turn_effect(void);
 void app_settings_set_reader_turn_effect(uint8_t effect);
 /// 阅读正文里短按电源键翻下一页；默认关闭。/ Short power press turns forward only in reader body; off by default.

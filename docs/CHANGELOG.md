@@ -20,6 +20,9 @@
 
 ## 本地测试 / Local test — 2026-11-19
 
+- Pico 阅读设置「翻页效果」新增第四项「快速灰阶」：纯文字翻页改用官方 8 级灰 GL16（30 相）并追加 4 相整屏擦白，共 34 相，实测推屏约 433 ms（普通约 666 ms）；插图、封面、周期与手动全刷仍走原路径，普通翻页波形逐相不变。
+- Pico adds a fourth reader turn effect, Fast gray: text-only turns use the official 8-gray GL16 (30 phases) plus four whole-panel white phases, 34 in total, measured at about 433 ms per push versus about 666 ms for ordinary turns. Illustrations, covers, periodic and manual cleanup keep their paths, and the ordinary turn waveform is unchanged phase for phase.
+
 - 两款机型修复章节首页提前截断正文、底部异常留白；全屏下使用完整正文区域，工具栏显隐保持分页及阅读位置。
 - Both boards fix prematurely shortened chapter-opening pages and unused space below the text. Chapter starts use the complete body, with pagination and source positions retained across toolbar visibility changes.
 - 两款机型修复触摸手势的阅读线开关；新增「保存阅读线格式」，一键恢复已保存的样式、范围和上下位置，支持重启、备份和设备同步。

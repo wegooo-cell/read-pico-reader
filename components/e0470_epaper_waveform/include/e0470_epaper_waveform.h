@@ -65,6 +65,8 @@ const EpdWaveform* e0470_settings_motion_waveform(void);
 #define E0470_GRAY8_GL16_FRAMES 30
 #endif
 extern const EpdWaveform E0470_GRAY8_WAVEFORM;
+/// Pico快速灰阶翻页用：只返回8灰GL16相位表。/ Pico fast-gray turns: GRAY8 GL16 phases only.
+const EpdWaveformPhases* e0470_gray8_gl16_phases_only(void);
 
 #if KIIKO_BOARD_METALIO47
 /// 用户2026-11-03：S31残影对齐官方v2.0.66+与Pico默认——主表用完整48相，裁剪版降为可选快速档。
