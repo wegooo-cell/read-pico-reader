@@ -70,9 +70,9 @@ void display_set_bulk_io(bool active) {
     ESP_LOGI(TAG, "bulk I/O scan margin %s", active ? "on" : "off");
 }
 
-// 高压轨在连续操作间保留8秒，避免反复500ms放电；像素驱动在每轮结束时立即释放。
-// Keep HV rails for an eight-second burst to avoid repeated 500ms discharge; release pixel drive after every output.
-#define RAILS_IDLE_TIMEOUT_MS 8000
+// 高压轨在连续操作间保留30秒，避免反复500ms放电；像素驱动在每轮结束时立即释放。
+// Keep HV rails for a thirty-second burst to avoid repeated 500ms discharge; release pixel drive after every output.
+#define RAILS_IDLE_TIMEOUT_MS 30000
 
 // 0 表示轨道已断电；否则是到期时间（ms），到点后主循环断电。
 // 0 means the rails are off; otherwise a deadline (ms) after which the loop powers them down.
