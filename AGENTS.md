@@ -127,6 +127,8 @@ User2026-11-01 explicitly authorizes online publication: release Pico rc104/S31 
 User2026-11-01 follow-up: align Pico ordinary metadata with ripple/Fast BW. Ordinary text/image turns present the reading-content region, excluding top status/title and bottom chapter/progress; update the footer after800ms idle. This supersedes PR55/62's Pico metadata scan extent, retaining body waveforms, manual/periodic/entry cleanup and S31 behavior.
 用户2026-11-18改为：Pico普通翻页整屏推白，状态栏与页脚一起擦，重推黑移到波形最后一段；图文页仍按其原范围。
 User2026-11-18 revision: Pico ordinary turns push white across the whole panel, metadata included, with the black re-drive last in the waveform; image pages retain their previous extent.
+用户2026-11-19：每次翻页只把状态栏与进度条的白底再退白，其他像素保持不动。
+User2026-11-19: each turn only re-whitens the status and progress bar backgrounds and holds every other pixel.
 
 用户2026-11-01追加：底部上滑回到非全屏并显示底部工具栏；顶部先显示时间、签名、电量，下一行恢复返回键、书名及收藏操作。进入书籍的非全屏也使用此布局；上方返回/书名/收藏与底部工具栏共同出现，进入全屏共同收起，所有工具栏入口先退出全屏。全屏关闭沉浸时仍只有状态栏，不显示书名。
 User2026-11-01 follow-up: bottom swipes return to standard mode with bottom tools, a time/signature/battery row, then Back/book title/Favorite. Standard book entry shares this layout. Back/title/Favorite and bottom tools appear together and hide together on fullscreen entry; every tools entry first leaves fullscreen. Nonimmersive fullscreen retains its status-only header.

@@ -1,5 +1,10 @@
 # 版本变更 / Changelog
 
+## 本地测试 / Local test — 2026-11-19（Pico 翻页信息栏）
+
+- Pico 每次翻页后只把顶部状态栏与底部进度条的白底再退一次白，未变化的文字和图形保持不动；普通翻页本身仍整屏推白。
+- After each Pico turn only the white background of the status row and progress bar is pushed white again; unchanged text and graphics are held. Ordinary turns still push the whole panel white.
+
 ## S31 0.3.3-rc116 — 2026-11-19
 
 - 优化 TXT/EPUB 章节识别、题头样式、卷页与章节分页，修复章首和段落异常留白。
