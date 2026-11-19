@@ -1,5 +1,10 @@
 # 版本变更 / Changelog
 
+## 本地测试 / Local test — 2026-11-19（Pico 保轨）
+
+- Pico 高压轨空闲保留时间由 8 秒延长到 30 秒，减少反复放电/上电次数，改善阳光下淡墨与连续翻页的一致性；像素驱动仍在每轮输出后立即释放。
+- Pico keeps the HV rails for thirty seconds instead of eight between outputs, cutting repeated discharge/power-up cycles and improving sunlight density and consecutive-turn consistency; pixel drive still releases after each output.
+
 ## 本地测试 / Local test — 2026-11-19（Pico 翻页信息栏）
 
 - Pico 每次翻页后只把顶部状态栏与底部进度条的白底再退一次白，未变化的文字和图形保持不动；普通翻页本身仍整屏推白。
