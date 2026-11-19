@@ -4704,31 +4704,44 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         // 翻页动画与页脚刷新独立：全屏没有页脚，仍使用用户选择的水波纹。
         // The turn effect is independent of the footer: full-screen turns still use the selected water effect.
         EpdRect turn_area=s_area;
-        err = s_water_turn_pending
-            ? update_display_water_turn(ctx->hl, turn_area, s_water_turn_dir)
-            : s_reader_turn_pending && s_mode == MODE_GL16 && app_settings_reader_turn_effect() == 2 &&
-              s_view == READING && s_presented_view == (int)READING &&
-              s_reader_panel == READER_PANEL_NONE && !s_toolbar && !s_clear_confirm &&
-              !book_layout_page_image_count(s_page) && !app_settings_book_background_path()[0]
-                ? update_display_text_turn(ctx->hl, turn_area, E0470_TURN_RTL)
-            // 普通翻页沿用正文GL16，和水波纹/速读共用内容范围；信息栏独立局刷。
-            // Ordinary turns retain body GL16 with the ripple/Fast BW content extent; metadata updates independently.
-            : s_reader_turn_pending && s_mode == MODE_GL16
-                // 普通翻页整屏推白并重推黑，状态栏和页脚也一起擦，避免阳光下淡墨。
-                // Ordinary turns push white and re-drive black across the whole panel, metadata included,
-                // so nothing stays faint in sunlight.
-                // 翻页效果为“快速灰阶”时改用 GRAY8 30+4 相，范围与普通翻页相同。
-                // Fast gray swaps in the GRAY8 30+4 phase turn over the same extent as ordinary turns.
-                ? update_display_reader_area(ctx->hl, app_settings_reader_turn_effect() == 3
-                      ? display_reader_gray8_turn_waveform() : display_reader_soft_turn_waveform(),
-                      s_mode, (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT}, true)
-                : separate_metadata
-                    ? update_display_reader_area(ctx->hl,
-                        s_mode == MODE_DU ? &E0470_FOLLOW_WAVEFORM : display_reader_soft_turn_waveform(),
-                        s_mode, turn_area, false)
-                    : update_display_area_diff_with(ctx->hl,
-                    s_mode == MODE_DU ? &E0470_FOLLOW_WAVEFORM : display_reader_soft_turn_waveform(),
-                    s_mode, s_area);
+        bool whole_panel = false;
+        if (s_water_turn_pending) {
+            err = update_display_water_turn(ctx->hl, turn_area, s_water_turn_dir);
+        } else if (s_reader_turn_pending && s_mode == MODE_GL16 && app_settings_reader_turn_effect() == 2 &&
+                   s_view == READING && s_presented_view == (int)READING &&
+                   s_reader_panel == READER_PANEL_NONE && !s_toolbar && !s_clear_confirm &&
+                   !book_layout_page_image_count(s_page) && !app_settings_book_background_path()[0]) {
+            err = update_display_text_turn(ctx->hl, turn_area, E0470_TURN_RTL);
+        } else if (s_reader_turn_pending && s_mode == MODE_GL16) {
+            // 普通翻页整屏推白并重推黑，状态栏和页脚也一起擦，避免阳光下淡墨。
+            // Ordinary turns push white and re-drive black across the whole panel, metadata included,
+            // so nothing stays faint in sunlight.
+            // 翻页效果为“快速灰阶”时改用 GRAY8 30+4 相，范围与普通翻页相同。
+            // Fast gray swaps in the GRAY8 30+4 phase turn over the same extent as ordinary turns.
+            err = update_display_reader_area(ctx->hl, app_settings_reader_turn_effect() == 3
+                                                 ? display_reader_gray8_turn_waveform()
+                                                 : display_reader_soft_turn_waveform(),
+                                             s_mode, (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT}, true);
+            whole_panel = true;
+        } else if (separate_metadata) {
+            err = update_display_reader_area(ctx->hl,
+                s_mode == MODE_DU ? &E0470_FOLLOW_WAVEFORM : display_reader_soft_turn_waveform(),
+                s_mode, turn_area, false);
+        } else {
+            err = update_display_area_diff_with(ctx->hl,
+                s_mode == MODE_DU ? &E0470_FOLLOW_WAVEFORM : display_reader_soft_turn_waveform(),
+                s_mode, s_area);
+        }
+        // 每次翻页只把状态栏和进度条的白色底再退一次白，未变化的文字/图形保持不动。
+        // Every turn only re-whitens the white background of the status row and progress bar;
+        // unchanged text and graphics are held.
+        if ((s_water_turn_pending || s_reader_turn_pending) && !whole_panel &&
+            err == EPD_DRAW_SUCCESS && s_view == READING) {
+            const EpdWaveform *meta_wave = display_reader_white_push_waveform();
+            err = update_display_area_full_with(ctx->hl, meta_wave, MODE_GL16, reader_status_area());
+            if (err == EPD_DRAW_SUCCESS)
+                err = update_display_area_full_with(ctx->hl, meta_wave, MODE_GL16, progress_rect());
+        }
         if (s_water_turn_pending) e0470_page_turn_set_tick_us(prior_tick);
     }
     else err = s_view == READING

@@ -23,6 +23,9 @@ const EpdWaveform* display_reader_soft_turn_waveform(void);
 /// Pico fast-gray turns: official GRAY8 GL16 (30 phases) plus four whole-panel white phases; falls back to the ordinary turn.
 const EpdWaveform* display_reader_gray8_turn_waveform(void);
 #endif
+/// 只把目标为白的像素再补白，其他像素保持；用于翻页后状态栏/进度条的抗积灰。
+/// Push only white targets again and hold everything else; anti-ghost touch for status/footer bars.
+const EpdWaveform* display_reader_white_push_waveform(void);
 #if KIIKO_BOARD_METALIO47
 /// S31阅读独立GL16表；不影响其他页面或PICO。/ Reader-private S31 GL16 profiles; other pages and PICO remain independent.
 typedef enum {
