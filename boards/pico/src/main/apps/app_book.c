@@ -8292,7 +8292,7 @@ static void zoom_blit_bits(uint8_t *fb, const uint8_t *bits, EpdRect phys) {
         }
     }
 }
-static app_redraw_t zoom_frame(app_ctx_t* ctx) {
+static app_redraw_t __attribute__((optimize("Os"))) zoom_frame(app_ctx_t* ctx) {
     const reader_image_t *image = reader_zoom_image();
     if (!image || !image->gray) { reader_zoom_reset(); return APP_REDRAW_NONE; }
     s_image_zoom_bw = true;
@@ -8334,15 +8334,10 @@ static app_redraw_t zoom_frame(app_ctx_t* ctx) {
     zoom_blit_bits(ctx->fb, s_zoom_bits, phys);
     rails_keepalive();
     epd_poweron();
-    // 跟手帧用整区 GL16：跟随 DU 只在小块触摸笔迹上长期验证过，整块插图放大走它曾把刷新
-    // 队列卡死并触发看门狗；GL16 与正文插图刷新同一条稳定路径。黑/白点阵本身就是 16 级里
-    // 的两端，GL16 显示结果一致。
-    // Interactive frames use a band GL16 update: follow-DU has only been proven on small touch-ink
-    // patches, and it once wedged the refresh queue (watchdog reset) on a whole illustration band.
-    // GL16 is the same path the reader's own illustration refresh uses and renders black/white
-    // dots faithfully since they are the two ends of the 16 levels.
+    // 拖动帧用设置滑块同款的跟随 DU：只推变化像素，松手后在本区定稿。
+    // Drag frames use the settings sliders' follow-DU diff and settle locally on release.
     guard_draw_result(ctx->hl, update_display_area_diff_with(
-        ctx->hl, display_main_gray_waveform(), MODE_GL16, band));
+        ctx->hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, band));
     int64_t t_done = esp_timer_get_time();
     ESP_LOGI(TAG, "zoom %d build=%.1f blit+du=%.1f ms",
              s_image_zoom, (t_build_end - t_build) / 1000.0, (t_done - t_build_end) / 1000.0);
@@ -8352,16 +8347,15 @@ static app_redraw_t zoom_frame(app_ctx_t* ctx) {
 // 松手定稿：把黑白交互帧换成灰阶整页图；缩回原始大小时也走这里，避免半灰残影。
 // Settle after the fingers leave: replace the black/white frames with the grayscale page. Zooming
 // all the way back lands here too, which is what clears the half-tone ghosting.
-static app_redraw_t zoom_settle(app_ctx_t* ctx) {
+static app_redraw_t __attribute__((optimize("Os"))) zoom_settle(app_ctx_t* ctx) {
     s_image_zoom_start_distance = 0;
     s_image_pan_active = false;
     if (!s_image_zoom_bw && s_image_zoom <= READER_IMAGE_ZOOM_MIN) return APP_REDRAW_NONE;
     s_image_zoom_bw = false;
     continuous_du_reset();
     render(ctx, ctx->fb);
-    // 松手后整屏全刷：黑白帧留下的光学状态要整个驱动一遍，差分只剩插图区域会留下残影。
-    // Full-screen settle after release: the black/white frames leave optical state that a
-    // picture-only difference cannot clear, so drive every pixel of the panel.
+    // 松手后的定稿做彻底：整屏 GC16 一次，把拖动期间 DU 留下的残影全部清掉。
+    // Settle thoroughly on release: one full-panel GC16 clears every ghost the DU drag left behind.
     guard_draw_result(ctx->hl, update_display_area_full_with(
         ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16,
         (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT}));
@@ -8710,7 +8704,7 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
     }
     return decorated ? paint_control(ctx, start_rect) : APP_REDRAW_NONE;
 }
-static app_redraw_t reader_key_action(app_ctx_t *ctx, app_reader_key_action_t action) {
+static app_redraw_t __attribute__((optimize("Os"))) reader_key_action(app_ctx_t *ctx, app_reader_key_action_t action) {
     s_reader_tap.pending = false;
     switch (action) {
         case APP_READER_KEY_PREV: case APP_READER_KEY_NEXT:

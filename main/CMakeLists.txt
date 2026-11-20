@@ -381,7 +381,7 @@ if(NOT KIIKO_BOARD_METALIO47)
     # Keep recovery and storage compatible with the existing 4 MiB application slots.
     # Size-optimize settings/shelf journals and file/transfer screens; retain renderer/decoder loops.
     foreach(source IN LISTS kiiko_selected_sources)
-        if(source MATCHES "(^|/)(settings|book/book_added|apps/app_(device_settings|files|transfer|onboarding))[.]c$")
+        if(source MATCHES "(^|/)(settings|lock_screen|ui/ui_(menu|kit|nav)|book/book_added|apps/app_(device_settings|files|transfer|onboarding))[.]c$")
             set_property(SOURCE "${source}" APPEND PROPERTY COMPILE_OPTIONS "-Os")
         endif()
     endforeach()

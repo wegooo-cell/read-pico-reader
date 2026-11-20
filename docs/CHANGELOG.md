@@ -1,5 +1,10 @@
 # 版本变更 / Changelog
 
+## 本地测试 / Local test — 2026-11-20（Pico 插图拖动）
+
+- Pico 双击放大插图后的单指拖动改用跟随 DU 逐帧差分（与设置滑块一致），松手后整屏 GC16 定稿，拖动更顺且不留残影。
+- Pico one-finger panning of a zoomed illustration now uses follow-DU frame diffs like the settings sliders, with a full-panel GC16 settle on release.
+
 ## 本地测试 / Local test — 2026-11-19（Pico 保轨）
 
 - Pico 高压轨空闲保留时间由 8 秒延长到 30 秒，减少反复放电/上电次数，改善阳光下淡墨与连续翻页的一致性；像素驱动仍在每轮输出后立即释放。
