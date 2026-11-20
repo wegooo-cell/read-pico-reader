@@ -72,6 +72,7 @@ kiiko_board_sources(kiiko_selected_sources "${CMAKE_CURRENT_LIST_DIR}" "app_main
         "app/crash_note.c"
         "app/app_registry.c"
         "ui/ui_kit.c"
+        "ui/ui_icons.c"
         "ui/ui_text_edit.c"
         "ui/ui_text_input.c"
         "ui/ui_ime.c"
@@ -275,6 +276,7 @@ kiiko_board_sources(kiiko_selected_sources "${CMAKE_CURRENT_LIST_DIR}" "app_main
         "app/crash_note.c"
         "app/app_registry.c"
         "ui/ui_kit.c"
+        "ui/ui_icons.c"
         "ui/ui_text_edit.c"
         "ui/ui_text_input.c"
         "ui/ui_ime.c"
@@ -385,6 +387,9 @@ if(NOT KIIKO_BOARD_METALIO47)
             set_property(SOURCE "${source}" APPEND PROPERTY COMPILE_OPTIONS "-Os")
         endif()
     endforeach()
+    # 图标掩模表以 zlib 压缩存放，首次绘制时解压到 PSRAM，省下约 114 KB 应用分区。
+    # Store the icon-mask table zlib-compressed and inflate it into PSRAM on first draw, saving about 114 KB of app slot.
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KIIKO_UI_ICONS_DEFLATE=1)
     option(PICO_MAIN_CLEAN_EXPERIMENT "Local Pico stronger root-switch white erasure" OFF)
     if(PICO_MAIN_CLEAN_EXPERIMENT)
         target_compile_definitions(${COMPONENT_LIB} PRIVATE KIIKO_PICO_MAIN_CLEAN=1)

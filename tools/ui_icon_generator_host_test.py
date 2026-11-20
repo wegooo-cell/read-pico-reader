@@ -4,6 +4,7 @@
 """检查 SVG 线段坐标与固件成品掩模。/ Check SVG line coordinates and firmware masks."""
 import importlib.util
 import re
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,9 +33,22 @@ assert alpha(saved, 36, 9) >= 14  # 顶边保留。/ Retain the outer top edge.
 # 检查实际编译头文件，防止只改 SVG 却忘记更新成品。
 # Inspect the compiled header too, catching stale generated artwork.
 header = icons.HEADER.read_text()
-blocks = re.findall(r'\{([^{}]+)\}', header[header.index('static const uint8_t ui_icon_masks'):])
+raw_start = header.index('static const uint8_t ui_icon_masks')
+raw_table = header[raw_start:header.index('\n};', raw_start)]
+blocks = re.findall(r'\{([^{}]+)\}', raw_table[raw_table.index('{') + 1:])
 assert len(blocks) == len(icons.ICONS)
+raw = b''
 for name, block in zip(icons.ICONS, blocks):
     actual = bytes.fromhex(''.join(re.findall(r'0x([0-9a-fA-F]{2})', block)))
     assert actual == bytes(icons.pack_4bpp(icons.render_icon(name))), name
-print(f"PASS: SVG numeric coordinates, visible bookmark plus, no corner dot, {len(blocks)} generated masks")
+    raw += actual
+
+# 压缩表必须逐字节解回同一份原始掩模，且长度宏与数据一致。
+# The compressed table must inflate to exactly the raw masks, with a matching length macro.
+zipped_start = header.index('static const uint8_t ui_icon_deflate')
+zipped_table = header[zipped_start:header.index('\n};', zipped_start)]
+zipped = bytes.fromhex(''.join(re.findall(r'0x([0-9a-fA-F]{2})', zipped_table[zipped_table.index('{'):])))
+assert int(re.search(r'#define UI_ICON_DEFLATE_BYTES (\d+)', header).group(1)) == len(zipped)
+assert zlib.decompress(zipped) == raw
+print(f"PASS: SVG numeric coordinates, visible bookmark plus, no corner dot, {len(blocks)} generated masks, "
+      f"{len(zipped)} compressed bytes")

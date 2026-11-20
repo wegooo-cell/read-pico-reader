@@ -117,7 +117,8 @@ void ui_draw_icon(
     uint8_t *framebuffer, int cx, int cy, int size, ui_icon_t icon, uint8_t gray
 ) {
     if (framebuffer == NULL || size < 1 || icon < 0 || icon >= UI_ICON_COUNT) return;
-    const uint8_t *mask = ui_icon_masks[icon];
+    const uint8_t *mask = ui_icon_mask(icon);
+    if (mask == NULL) return;
     // Q16 定点：一个目标像素跨过多少源像素。掩模 72 像素，显示通常更小，所以是降采样。
     // Q16 fixed point: source pixels spanned by one target pixel. The 72 px mask is
     // normally drawn smaller, so this is a downscale.
