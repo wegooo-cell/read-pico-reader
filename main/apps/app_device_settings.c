@@ -965,15 +965,28 @@ static void devsync_start(kiiko_sync_role_t role) {
     }
 }
 
-static void devsync_failure_text(esp_err_t error, char *text, size_t size) {
-    if (error == ESP_ERR_TIMEOUT) snprintf(text, size, "连接超时，请靠近两台设备后重试");
-    else if (error == ESP_ERR_INVALID_CRC) snprintf(text, size, "数据校验失败，请重新同步");
-    else if (error == ESP_ERR_INVALID_RESPONSE) snprintf(text, size, "配对失败，请两端重新进入此页");
-    else if (error == ESP_ERR_NO_MEM) snprintf(text, size, "内存不足，请重启设备后重试");
-    else if (error == ESP_ERR_INVALID_SIZE) snprintf(text, size, "本机设置备份为空或过大");
-    else if (error == ESP_ERR_INVALID_STATE) snprintf(text, size, "正在传书或射频被占用，请稍后再试");
-    else if (error == ESP_ERR_NOT_FOUND) snprintf(text, size, "没有可同步的设置数据");
-    else snprintf(text, size, "同步失败：%s", esp_err_to_name(error));
+// 失败原因 = 失败阶段 + 具体错误码，避免只显示一个 ESP_ERR_* 名字。
+// Failure reason = failed phase + concrete error, never a bare ESP_ERR_* name.
+static void devsync_failure_text(const kiiko_sync_status_t *st, esp_err_t error, char *text, size_t size) {
+    const char *where = st->failed_from == KIIKO_SYNC_SCANNING ? "未找到另一台设备"
+                      : st->failed_from == KIIKO_SYNC_PAIRED ? "配对后连接中断"
+                      : st->failed_from == KIIKO_SYNC_TRANSFERRING ? "传输中断"
+                      : st->failed_from == KIIKO_SYNC_APPLYING ? "写入设置失败"
+                      : "同步失败";
+    const char *why = error == ESP_ERR_TIMEOUT ? "等待超时"
+                    : error == ESP_ERR_INVALID_CRC ? "数据校验失败"
+                    : error == ESP_ERR_INVALID_RESPONSE ? "配对码或被拒绝"
+                    : error == ESP_ERR_NO_MEM ? "内存不足"
+                    : error == ESP_ERR_INVALID_SIZE ? "设置数据为空或过大"
+                    : error == ESP_ERR_INVALID_STATE ? "射频被占用或已取消"
+                    : error == ESP_ERR_NOT_FOUND ? "没有可同步的数据"
+                    : error == ESP_FAIL ? "协议错误"
+                    : error == ESP_ERR_INVALID_ARG ? "设置数据无效"
+                    : error == ESP_ERR_NOT_SUPPORTED ? "对端版本不支持"
+                    : NULL;
+    if (why) snprintf(text, size, "%s：%s", where, why);
+    else if (error != ESP_OK) snprintf(text, size, "%s（错误码 0x%X）", where, (unsigned)error);
+    else snprintf(text, size, "%s，请两端重试", where);
 }
 
 static void devsync_status_line(const kiiko_sync_status_t *st, esp_err_t error, char *text, size_t size) {
@@ -986,7 +999,7 @@ static void devsync_status_line(const kiiko_sync_status_t *st, esp_err_t error, 
         break;
     case KIIKO_SYNC_APPLYING: snprintf(text, size, "正在写入设置…"); break;
     case KIIKO_SYNC_DONE: snprintf(text, size, "同步完成"); break;
-    case KIIKO_SYNC_FAILED: devsync_failure_text(error, text, size); break;
+    case KIIKO_SYNC_FAILED: devsync_failure_text(st, error, text, size); break;
     default: snprintf(text, size, "准备中…"); break;
     }
 }

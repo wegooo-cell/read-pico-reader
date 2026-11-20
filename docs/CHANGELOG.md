@@ -1,5 +1,10 @@
 # 版本变更 / Changelog
 
+## 本地测试 / Local test — 2026-11-20（设备同步失败提示）
+
+- 设备同步失败时显示「阶段：原因」：未找到另一台设备 / 配对后连接中断 / 传输中断 / 写入设置失败，并附具体错误原因；未知错误显示十六进制错误码。对端重开后自动跟随新的配对码，旧码不再被误报为「配对码或被拒绝」。
+- Device-sync failures now show the failed stage plus the concrete reason (no peer / link dropped after pairing / transfer interrupted / apply failed), with a hex code for unknown errors. A restarted peer's new pairing code is adopted, so a stale code is never reported as a rejection.
+
 ## 本地测试 / Local test — 2026-11-20（全刷间隔迁移）
 
 - 升级后首次开机把「默认全刷间隔」一次性强制为「不强制」，覆盖旧设置；标记落盘后用户仍可自行改回。只关闭按页自动全刷，手动全刷不变。
