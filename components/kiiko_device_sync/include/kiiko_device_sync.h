@@ -48,6 +48,7 @@ typedef struct {
     size_t done;              ///< 已传字节 / Bytes transferred
     size_t total;             ///< 总字节 / Total bytes
     esp_err_t error;          ///< 失败原因 / Failure reason
+    kiiko_sync_state_t failed_from; ///< 失败前所处的阶段 / Phase that failed
 } kiiko_sync_status_t;
 
 /// 设置流的注入点；组件只搬运字节，格式由 main 拥有。
