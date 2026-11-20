@@ -1,5 +1,10 @@
 # 版本变更 / Changelog
 
+## 本地测试 / Local test — 2026-11-20（全刷间隔迁移）
+
+- 升级后首次开机把「默认全刷间隔」一次性强制为「不强制」，覆盖旧设置；标记落盘后用户仍可自行改回。只关闭按页自动全刷，手动全刷不变。
+- The first boot after this update forces the periodic full-refresh interval to “never” once, overriding earlier values; once the marker is stored, later choices stick. Only the automatic page-count refresh is disabled; manual full refresh is unchanged.
+
 ## 本地测试 / Local test — 2026-11-20（Pico 插图拖动）
 
 - Pico 双击放大插图后的单指拖动改用跟随 DU 逐帧差分（与设置滑块一致），松手后整屏 GC16 定稿，拖动更顺且不留残影。

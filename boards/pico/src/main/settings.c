@@ -76,6 +76,7 @@
 #define NVS_KEY_BOOK_AA "bk_aa"
 #define NVS_KEY_BOOK_BACKGROUND "bk_bg"
 #define NVS_KEY_READER_FULL "rd_gc16"
+#define NVS_KEY_FULL_OFF_MIGRATION "gc16off"
 #define NVS_KEY_READER_TURN "rd_turn"
 #define NVS_KEY_POWER_TURN "rd_power"
 #define NVS_KEY_IMMERSIVE "rd_immersive"
@@ -320,6 +321,15 @@ void app_settings_init(void) {
         (reader_full_pages == 0 || reader_full_pages == 5 || reader_full_pages == 10 ||
          reader_full_pages == 15 || reader_full_pages == 30))
         s_reader_full_pages = reader_full_pages;
+    // 本次刷机强制一次「默认全刷间隔 = 不强制」，覆盖旧设置；标记落盘后用户仍可自行改回。
+    // Force the periodic full refresh to "never" once after this flash, overriding old values;
+    // once the marker is stored, later user choices stick.
+    uint8_t full_off_migrated = 0;
+    if (nvs_get_u8(h, NVS_KEY_FULL_OFF_MIGRATION, &full_off_migrated) != ESP_OK) {
+        s_reader_full_pages = 0;
+        nvs_put_u8(NVS_KEY_READER_FULL, 0);
+        nvs_put_u8(NVS_KEY_FULL_OFF_MIGRATION, 1);
+    }
     uint8_t reader_turn_effect = 0;
     if (nvs_get_u8(h, NVS_KEY_READER_TURN, &reader_turn_effect) == ESP_OK && reader_turn_effect <= READER_TURN_EFFECT_MAX)
         s_reader_turn_effect = reader_turn_effect;
