@@ -1621,6 +1621,17 @@ bool book_image_file_grayscale(const char *path, bool png, unsigned width, unsig
                 } else {
                     ok=jpeg_baseline_file(file,source_w,source_h,width,height,&plane);
                     ok=ok&&plane.pixels>=(size_t)width*height;
+                    // ROM TJpgDec 只解三分量 YCbCr；灰度等其他基线 JPEG 失败时由 JPEGDEC 从头再解一次，
+                    // 与内存解码的兜底一致。
+                    // The ROM TJpgDec decodes three-component YCbCr only; when grayscale or other baseline
+                    // JPEGs fail, let JPEGDEC decode the file again, matching the in-memory fallback.
+                    if(!ok&&!fseek(file,0,SEEK_SET)) {
+                        plane=(jpeg_file_plane_t){.out=out,.width=width,.height=height};
+                        memset(out,255,(size_t)width*height);
+                        ok=jpegdec_gray_file(file,(int)st.st_size,source_w,source_h,width,height,false,
+                            jpeg_file_collect,&plane,&plane.source_w,&plane.source_h)!=0;
+                        ok=ok&&plane.pixels>=(size_t)width*height;
+                    }
                 }
             }
         }
