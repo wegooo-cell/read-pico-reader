@@ -26,6 +26,11 @@ S31 RC117已按用户要求撤回；官网、TF与OTA恢复原正式RC116。以�
 
 # 版本变更 / Changelog
 
+## 本地测试 / Local test — 2026-11-21（12 小时制）
+
+- 日期与时间新增 24/12 小时制切换：点「当前时间」那一行即可切换，状态栏时钟与日期时间页按所选制式显示；该设置写入 NVS 并随备份/设备同步保存。
+- Add a 24/12-hour toggle on the Date & time page (tap the current-time row). The status-bar clock and the page follow the choice, and the setting is stored in NVS and carried by backups/device sync.
+
 ## 本地测试 / Local test — 2026-11-21（蓝牙手柄）
 
 - 蓝牙翻页器支持标准 BLE HID 手柄：从报告映射识别 Joystick/Game Pad，解析按钮位与 Hat 位；Hat 左右翻页，第一个按钮下一页、第二个按钮上一页，其余按键仍可在「试按学习」里绑定。
