@@ -12,6 +12,11 @@ S31 RC117已按用户要求撤回；官网、TF与OTA恢复原正式RC116。以�
 
 # 版本变更 / Changelog
 
+## 本地测试 / Local test — 2026-11-21（蓝牙手柄）
+
+- 蓝牙翻页器支持标准 BLE HID 手柄：从报告映射识别 Joystick/Game Pad，解析按钮位与 Hat 位；Hat 左右翻页，第一个按钮下一页、第二个按钮上一页，其余按键仍可在「试按学习」里绑定。
+- The BLE page turner now supports standard BLE HID gamepads: it detects Joystick/Game Pad in the report map, parses the button and hat bit layouts, turns pages on hat left/right and the first two buttons, and leaves other buttons to the learning UI.
+
 ## 本地测试 / Local test — 2026-11-20（设备同步失败提示）
 
 - 设备同步失败时显示「阶段：原因」：未找到另一台设备 / 配对后连接中断 / 传输中断 / 写入设置失败，并附具体错误原因；未知错误显示十六进制错误码。对端重开后自动跟随新的配对码，旧码不再被误报为「配对码或被拒绝」。

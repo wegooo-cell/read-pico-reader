@@ -264,6 +264,12 @@ static bool s_discovery_started;
 
 // 报告映射给出的提示：哪个字节更可能是键码。/ Report-map hint for the byte that holds the code.
 static bool s_has_keyboard_page, s_has_consumer_page;
+// 手柄：通用桌面页的 Joystick/Game Pad；按钮与 Hat 位偏移由报告映射解出。
+// Gamepad: Generic Desktop Joystick/Game Pad; the button and hat bit offsets come from the report map.
+static bool s_has_gamepad_page;
+static int8_t s_pad_btn_bit = -1;
+static int8_t s_pad_hat_bit = -1;
+static uint8_t s_pad_btn_count, s_pad_hat_size, s_pad_report_id;
 static uint8_t s_preferred_byte = 0xFF;
 
 // 静止帧：外设什么都没按时发的报告。它唯一的用途是判断一帧算不算「按下了」。学习界面会把
@@ -546,9 +552,44 @@ static void report_map_hints(const uint8_t *map, size_t len) {
         if (map[i] != 0x05) continue;  // Usage Page
         if (map[i + 1] == 0x07) s_has_keyboard_page = true;
         else if (map[i + 1] == 0x0C) s_has_consumer_page = true;
+        else if (map[i + 1] == 0x01) {
+            // 通用桌面页后紧跟 Joystick(0x04) 或 Game Pad(0x05) 就是手柄。
+            // A Generic Desktop page followed by Joystick(0x04) or Game Pad(0x05) is a gamepad.
+            for (size_t j = i + 2; j + 1 < len && j < i + 12; ++j)
+                if (map[j] == 0x09 && (map[j + 1] == 0x04 || map[j + 1] == 0x05)) {
+                    s_has_gamepad_page = true;
+                    break;
+                }
+        }
     }
     if (s_has_keyboard_page) s_preferred_byte = 2;
     else if (s_has_consumer_page) s_preferred_byte = 1;
+    if (!s_has_gamepad_page) return;
+    // 解出手柄报告的按钮位与 Hat 位：只走一遍报告映射的全局状态。
+    // Walk the report map once to find the button and hat bit offsets.
+    int page = -1, usage = -1, size = 0, count = 0, bit = 0;
+    for (size_t i = 0; i + 1 < len; ++i) {
+        const uint8_t item = map[i];
+        if (item == 0x05) { page = map[++i]; continue; }
+        if (item == 0x09) { usage = map[++i]; continue; }
+        if (item == 0x85) { s_pad_report_id = map[++i]; continue; }
+        if (item == 0x75) { size = map[++i]; continue; }
+        if (item == 0x95) { count = map[++i]; continue; }
+        if (item == 0x81 || item == 0x91 || item == 0xB1) {
+            const bool constant = (map[i + 1] & 1u) != 0;
+            if (!constant) {
+                if (page == 0x09 && s_pad_btn_bit < 0) {
+                    s_pad_btn_bit = (int8_t)(bit < 127 ? bit : 127);
+                    s_pad_btn_count = (uint8_t)(count > 32 ? 32 : count);
+                } else if (page == 0x01 && usage == 0x39 && s_pad_hat_bit < 0) {
+                    s_pad_hat_bit = (int8_t)(bit < 127 ? bit : 127);
+                    s_pad_hat_size = (uint8_t)(size > 8 ? 8 : size);
+                }
+            }
+            bit += size * count;
+            ++i;
+        }
+    }
 }
 
 // 取报告里的主码值：优先用报告映射指出的字节，否则扫前几字节取第一个非零。
@@ -561,6 +602,43 @@ static uint8_t extract_primary_code(const uint8_t *p, size_t n) {
     const size_t limit = n < 8 ? n : 8;
     for (size_t i = 0; i < limit; ++i)
         if (p[i] != 0) return p[i];
+    return 0;
+}
+
+// HID 位序：字节内低位在前。/ HID bit order: least significant bit first within each byte.
+static unsigned pad_bits(const uint8_t *p, size_t n, int bit, int bits) {
+    unsigned value = 0;
+    for (int i = 0; i < bits; ++i) {
+        const int index = bit + i;
+        const size_t byte = (size_t)(index / 8);
+        if (byte >= n) break;
+        value |= ((unsigned)((p[byte] >> (index % 8)) & 1u)) << i;
+    }
+    return value;
+}
+
+// 手柄报告：Hat 左右直接翻页，否则第一个按下的按钮当下一页、第二个当上一页；
+// 其余按键仍可在「试按学习」里绑定。
+// Gamepad reports: hat left/right turn pages, otherwise the first pressed button is next and the
+// second is previous; any other button can still be bound in the learning UI.
+static uint8_t gamepad_code(const uint8_t *p, size_t n) {
+    if (!p || !n) return 0;
+    const size_t off = s_pad_report_id ? 1u : 0u;
+    if (n <= off) return 0;
+    if (s_pad_hat_bit >= 0 && s_pad_hat_size) {
+        const unsigned hat = pad_bits(p + off, n - off, s_pad_hat_bit, s_pad_hat_size);
+        if (hat == 5 || hat == 6 || hat == 7) return 0x4B;  // 左半圈 → 上一页
+        if (hat >= 1 && hat <= 3) return 0x4E;              // 右半圈 → 下一页
+    }
+    if (s_pad_btn_bit >= 0) {
+        const unsigned buttons = pad_bits(p + off, n - off, s_pad_btn_bit,
+                                          s_pad_btn_count ? s_pad_btn_count : 8);
+        if (buttons) {
+            const int index = __builtin_ctz(buttons);
+            if (index == 0) return 0x4E;  // 主键 → 下一页
+            if (index == 1) return 0x4B;  // 副键 → 上一页
+        }
+    }
     return 0;
 }
 
@@ -611,7 +689,8 @@ static void ingest_report(const uint8_t *data, size_t len) {
     // s_held_usage otherwise never clears when the peer never sends the all-zero release report.
     s_last_rx_ms = now;
 
-    const uint8_t code = extract_primary_code(data, len);
+    uint8_t code = extract_primary_code(data, len);
+    if (s_has_gamepad_page) code = gamepad_code(data, len);
     const uint8_t mods = s_has_keyboard_page ? data[len == 9 ? 1 : 0] : 0;
 
     // 静止帧取第一帧「什么都没按」的报告。/ The rest frame is the first report with nothing pressed.
@@ -1463,7 +1542,9 @@ static int start_connect(const char *addr, uint8_t type) {
     s_rest_known = false;
     raw_reset();
     remote_reset();
-    s_has_keyboard_page = s_has_consumer_page = false;
+    s_has_keyboard_page = s_has_consumer_page = s_has_gamepad_page = false;
+    s_pad_btn_bit = s_pad_hat_bit = -1;
+    s_pad_btn_count = s_pad_hat_size = s_pad_report_id = 0;
     s_preferred_byte = 0xFF;
     s_held_usage = 0;
     s_subscribed_count = 0;
