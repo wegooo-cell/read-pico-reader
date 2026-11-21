@@ -26,6 +26,11 @@ S31 RC117已按用户要求撤回；官网、TF与OTA恢复原正式RC116。以�
 
 # 版本变更 / Changelog
 
+## 本地测试 / Local test — 2026-11-21（JPEGDEC 基线解码）
+
+- 封面与插图解码：基线 JPEG 先走 JPEGDEC 的全平面 8 位灰度（按目标尺寸选 1/1~1/8，清晰度与 TJpgDec 同级），渐进式继续用 1/8 平面，失败回落 TJpgDec。
+- Covers and illustrations: baseline JPEGs now try JPEGDEC's full 8-bit gray plane first (1/1..1/8 chosen from the target size, matching TJpgDec's sharpness); progressive frames keep the 1/8 plane and TJpgDec remains the fallback.
+
 ## 本地测试 / Local test — 2026-11-21（低残影模式）
 
 - 显示设置新增「低残影模式」开关（默认开启）：开启后阅读原文时持续保持面板供电，翻页保留额外擦白/重推黑；关闭后翻页波形去掉额外白刷，回到 DC 平衡。开启前弹窗提示续航大约减少 5%。
