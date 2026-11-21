@@ -53,6 +53,7 @@
 #define NVS_KEY_PIN_GRACE "pin_grace"
 #define NVS_KEY_PIN_LOCK_AT "pin_lck_at"
 #define NVS_KEY_HOME_FULL "home_full"
+#define NVS_KEY_CLOCK_12H "clk12"
 #define NVS_KEY_HOME_COMPONENT "home_widget"
 #define NVS_KEY_HOME_GOAL "home_goal"
 #define NVS_KEY_MAIN_REFRESH "main_mode"
@@ -115,6 +116,7 @@ static uint8_t s_wake_presses = 1;
 static uint8_t s_pin_grace_code_v;  // 0-4 档位码，NVS 存码不存分钟 / 0-4 step code, NVS stores the code not minutes
 static uint32_t s_pin_locked_at;    // 最近一次带密码锁屏的 unix 秒 / last PIN-enabled lock, unix seconds
 static bool s_home_full_refresh = true;
+static bool s_clock_12h;
 static app_home_component_t s_home_component = APP_HOME_MOON;
 static uint8_t s_home_goal_minutes = 30;
 static app_main_refresh_mode_t s_main_refresh;
@@ -263,6 +265,8 @@ void app_settings_init(void) {
     }
     raw = 1;
     if (nvs_get_u8(h, NVS_KEY_HOME_FULL, &raw) == ESP_OK && raw <= 1) s_home_full_refresh = raw == 1;
+    raw = 0;
+    if (nvs_get_u8(h, NVS_KEY_CLOCK_12H, &raw) == ESP_OK) s_clock_12h = raw != 0;
     raw = 0;
     s_home_component = nvs_get_u8(h, NVS_KEY_HOME_COMPONENT, &raw) == ESP_OK && raw < APP_HOME_COMPONENT_COUNT
         ? (raw == 3 ? APP_HOME_CLOCK : (app_home_component_t)raw) : APP_HOME_MOON;
@@ -530,6 +534,12 @@ esp_err_t app_settings_set_home_goal_minutes(uint8_t minutes) {
 }
 
 bool app_settings_home_full_refresh(void) { return s_home_full_refresh; }
+bool app_settings_clock_12h(void) { return s_clock_12h; }
+void app_settings_set_clock_12h(bool enabled) {
+    if (enabled == s_clock_12h) return;
+    s_clock_12h = enabled;
+    nvs_put_u8(NVS_KEY_CLOCK_12H, enabled ? 1 : 0);
+}
 app_main_refresh_mode_t app_settings_main_refresh_mode(void) { return s_main_refresh; }
 bool app_settings_main_fast_refresh(void) { return s_main_refresh == APP_MAIN_REFRESH_FAST; }
 void app_settings_set_main_refresh_mode(app_main_refresh_mode_t mode) {
@@ -1241,6 +1251,7 @@ static esp_err_t backup_write_stream(FILE *file, bool rotate, bool compatible) {
                                 (s_ble_turner ? 8 : 0) |
                                 (s_reader_hold_refresh ? 16 : 0) |
                                 (s_reader_vertical_turn ? 32 : 0) |
+                                (s_clock_12h ? 64 : 0) |
                                 (app_settings_main_fast_refresh() ? 128 : 0);
     uint32_t profile_hash = backup_profile_checksum(&backup, extension[0], extension[1], extension[2], &profile);
     for (int i = 0; i < 4; ++i) profile.checksum[i] = (uint8_t)(profile_hash >> (i * 8));
@@ -1561,6 +1572,7 @@ static esp_err_t backup_apply_stream(FILE *file, bool apply) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_VERTICAL_TURN, (profile.home_full_refresh & 32) != 0);
 
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOME_FULL, profile.home_full_refresh & 1);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_CLOCK_12H, (profile.home_full_refresh & 64) != 0);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_MAIN_REFRESH, (uint8_t)main_refresh);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOME_COMPONENT, home.component);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOME_GOAL, home.minutes);
@@ -1633,6 +1645,7 @@ static esp_err_t backup_apply_stream(FILE *file, bool apply) {
     s_reader_hold_refresh = (profile.home_full_refresh & 16) != 0;
     s_reader_vertical_turn = (profile.home_full_refresh & 32) != 0;
     s_home_full_refresh = (profile.home_full_refresh & 1) != 0;
+    s_clock_12h = (profile.home_full_refresh & 64) != 0;
     s_main_refresh = main_refresh;
     s_reader_hide_images = (profile.home_full_refresh & 2) != 0;
     s_shelf_recent_sort = (profile.home_full_refresh & 4) != 0;

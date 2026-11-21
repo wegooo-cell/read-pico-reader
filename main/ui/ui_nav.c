@@ -208,7 +208,12 @@ static void clock_text(char *clock, size_t capacity) {
     if (now > 1704067200) {
         time_t china = now + 8 * 3600;
         struct tm date;
-        if (gmtime_r(&china, &date)) snprintf(clock, capacity, "%02d:%02d", date.tm_hour, date.tm_min);
+        if (gmtime_r(&china, &date)) {
+            if (app_settings_clock_12h()) {
+                const int hour = date.tm_hour % 12 ? date.tm_hour % 12 : 12;
+                snprintf(clock, capacity, "%d:%02d", hour, date.tm_min);
+            } else snprintf(clock, capacity, "%02d:%02d", date.tm_hour, date.tm_min);
+        }
     }
 }
 void ui_nav_clock_draw(uint8_t *fb) {

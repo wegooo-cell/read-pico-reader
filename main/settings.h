@@ -60,6 +60,9 @@ uint32_t app_settings_pin_locked_at(void);
 void app_settings_record_pin_lock(uint32_t unix_seconds);
 /// 首页进入时强制全刷；无配置时默认开启，保留已保存的选择。/ Full refresh when entering Home; on when unconfigured, retaining saved choices.
 bool app_settings_home_full_refresh(void);
+/// 时间显示是否使用12小时制 / Whether clocks use a12-hour format.
+bool app_settings_clock_12h(void);
+void app_settings_set_clock_12h(bool enabled);
 void app_settings_set_home_full_refresh(bool enabled);
 /// 首页组件无配置时默认Moon Clock；选择与每日目标掉电保存。/ Default to Moon Clock when unconfigured; persist the widget and daily goal.
 typedef enum {

@@ -1638,11 +1638,18 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         char shown[64] = "未设置";
         if (now >= 1704067200) {
             struct tm tm; time_t local = now + 8 * 3600;
-            if (gmtime_r(&local, &tm)) snprintf(shown, sizeof(shown), "%04d-%02d-%02d  %02d:%02d",
-                tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min);
+            if (gmtime_r(&local, &tm)) {
+                if (app_settings_clock_12h()) {
+                    const int hour = tm.tm_hour % 12 ? tm.tm_hour % 12 : 12;
+                    snprintf(shown, sizeof(shown), "%04d-%02d-%02d  %s %d:%02d",
+                        tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                        tm.tm_hour < 12 ? "上午" : "下午", hour, tm.tm_min);
+                } else snprintf(shown, sizeof(shown), "%04d-%02d-%02d  %02d:%02d",
+                    tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min);
+            }
         }
         section(fb, 253, "当前时间 · 北京时间");
-        row(fb, 296, shown, "");
+        row(fb, 296, shown, app_settings_clock_12h() ? "12 小时" : "24 小时");
         row(fb, 407, "通过 WiFi 对时", "立即同步  ›");
         row(fb, 518, "手动设置", "编辑  ›");
         ui_text(fb, 54, 656, 21, "对时成功后由内部时钟持续走时；无需保持联网。", EPD_DRAW_ALIGN_LEFT, false);
@@ -3204,6 +3211,10 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
 #endif
     }
     if (s_page == SETTINGS_TIME) {
+        if (y >= 296 && y < 366) {
+            app_settings_set_clock_12h(!app_settings_clock_12h());
+            return APP_REDRAW_PAGE;
+        }
         if (y >= 407 && y < 477) {
             s_notice[0] = 0; s_sync_pending = true;
             snprintf(s_notice, sizeof(s_notice), "正在获取网络时间…");
