@@ -622,6 +622,10 @@ static book_layout_draw_cursor_t s_prep_cursor;
 static uint32_t s_next_generation;
 static uint8_t* s_next_fb;
 static int s_next_page = -1, s_prep_page = -1;
+// 连续往回翻的次数；达到两次后预绘上一页。只回翻一次再向后翻时仍命中下一页。
+// Consecutive backward turns; from the second one the previous page is prefetched. A single look
+// back followed by a forward turn still hits the prefetched next page.
+static uint8_t s_back_turns;
 
 #define s_toolbar (s_reader_panel != READER_PANEL_NONE)
 
@@ -4467,11 +4471,19 @@ static void prep_task(void *arg) {
         xSemaphoreGive(s_prep_done);
     }
 }
+// 预绘目标：连续回翻时取上一页，否则取下一页；越界或任一页带图时不预绘。
+// Prefetch target: the previous page while paging backward, otherwise the next; none when out of
+// range or when either page carries an image.
+static int reader_prefetch_target(void) {
+    int target=s_back_turns>=2&&s_page>0?(int)s_page-1:(int)s_page+1;
+    if(target>=(int)book_layout_page_count()||book_layout_page_image_count(s_page)||
+       book_layout_page_image_count((size_t)target)||app_settings_book_background_path()[0])return -1;
+    return target;
+}
 static bool kick_prep(void) {
-    if(s_view!=READING||!s_text||s_toolbar||s_clear_confirm||s_reader_panel!=READER_PANEL_NONE||
-       s_page+1>=book_layout_page_count()||book_layout_page_image_count(s_page)||
-       book_layout_page_image_count(s_page+1)||app_settings_book_background_path()[0])return false;
-    int target=(int)s_page+1;
+    if(s_view!=READING||!s_text||s_toolbar||s_clear_confirm||s_reader_panel!=READER_PANEL_NONE)return false;
+    int target=reader_prefetch_target();
+    if(target<0)return false;
     if(s_next_page==target&&s_next_generation==book_layout_generation())return false;
     if(s_prep_page!=target||s_prep_cursor.generation!=book_layout_generation()){
         s_next_page=-1;s_next_generation=0;s_prep_page=target;memset(&s_prep_cursor,0,sizeof(s_prep_cursor));
@@ -4505,9 +4517,7 @@ static bool reader_prefetch_resume(size_t page) {
 static void reader_prefetch_idle(app_ctx_t *ctx) {
     if(s_view!=READING||!s_text||s_toolbar||s_clear_confirm||s_reader_panel!=READER_PANEL_NONE||
        ctx->consumed||ctx->request_app||ctx->request_menu||ctx->request_return||
-       (ctx->touch&&ctx->touch->touched)||s_prep_page!=(int)s_page+1)return;
-    if(app_settings_book_background_path()[0]||book_layout_page_image_count(s_page)||
-       book_layout_page_image_count(s_page+1)||s_page+1>=book_layout_page_count())return;
+       (ctx->touch&&ctx->touch->touched)||s_prep_page<0||s_prep_page!=reader_prefetch_target())return;
     if(s_next_page==s_prep_page&&s_next_generation==book_layout_generation())return;
     if(!reader_prefetch_buffer())return;
     const int64_t deadline=esp_timer_get_time()+BOOK_PREP_IDLE_US;
@@ -6597,6 +6607,8 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
     // Chapter loads may replace the image table; the old-page eligibility comes from the displayed frame.
     bool from_text_frame = s_reader_text_frame;
     bool changed = true;
+    if (dir < 0) { if (s_back_turns < 2) ++s_back_turns; }
+    else s_back_turns = 0;
     if (dir > 0 && s_page + 1 < book_layout_page_count()) ++s_page;
     else if (dir < 0 && s_page) --s_page;
     else if ((dir > 0 && s_part_more) || (dir < 0 && s_part_base)) {
