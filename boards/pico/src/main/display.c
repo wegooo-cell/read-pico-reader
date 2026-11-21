@@ -89,6 +89,11 @@ void rails_keepalive(void) {
     pico_online_display_end(held);
 }
 
+// 低残影模式：阅读期间显式要求高压轨常开，直到离开阅读或关闭该模式。
+// Low-ghost mode: keep the HV rails on for the whole reading session until it is left or disabled.
+static bool s_rail_hold;
+void display_set_rail_hold(bool held) { s_rail_hold = held; }
+
 void rails_idle_check(int64_t now_ms) {
     if (!(drive_release_retry_ms && now_ms >= drive_release_retry_ms) &&
         !(rails_deadline_ms && now_ms >= rails_deadline_ms)) return;
@@ -100,6 +105,7 @@ void rails_idle_check(int64_t now_ms) {
     if (drive_release_retry_ms && now_ms >= drive_release_retry_ms)
         drive_release_retry_ms = read_pico_epd_release_drive() ? 0 : now_ms + 50;
     if (rails_deadline_ms != 0 && now_ms >= rails_deadline_ms) {
+        if (s_rail_hold) { rails_deadline_ms = now_ms + RAILS_IDLE_TIMEOUT_MS; pico_online_display_end(held); return; }
         rails_deadline_ms = 0;
         drive_release_retry_ms = 0;
         epd_poweroff();

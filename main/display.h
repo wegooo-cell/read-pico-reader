@@ -192,6 +192,8 @@ int display_pclk_mhz(void);
 void guard_draw_result(EpdiyHighlevelState* hl, enum EpdDrawError result);
 
 #if !KIIKO_BOARD_METALIO47
+/// 低残影模式：阅读期间保持EPD高压轨常开。/ Low-ghost mode: hold the EPD HV rails while reading.
+void display_set_rail_hold(bool held);
 /// PICO 阅读分区独立提交，防止对齐跨过正文和信息栏的边界。/ Present Pico reader regions without aligning into neighboring chrome.
 enum EpdDrawError update_display_reader_area(EpdiyHighlevelState *hl,
     const EpdWaveform *wave, enum EpdDrawMode mode, EpdRect area, bool full);

@@ -54,6 +54,7 @@
 #define NVS_KEY_PIN_LOCK_AT "pin_lck_at"
 #define NVS_KEY_HOME_FULL "home_full"
 #define NVS_KEY_CLOCK_12H "clk12"
+#define NVS_KEY_LOW_GHOST "lowghost"
 #define NVS_KEY_HOME_COMPONENT "home_widget"
 #define NVS_KEY_HOME_GOAL "home_goal"
 #define NVS_KEY_MAIN_REFRESH "main_mode"
@@ -117,6 +118,7 @@ static uint8_t s_pin_grace_code_v;  // 0-4 档位码，NVS 存码不存分钟 / 
 static uint32_t s_pin_locked_at;    // 最近一次带密码锁屏的 unix 秒 / last PIN-enabled lock, unix seconds
 static bool s_home_full_refresh = true;
 static bool s_clock_12h;
+static bool s_low_ghost = true;
 static app_home_component_t s_home_component = APP_HOME_MOON;
 static uint8_t s_home_goal_minutes = 30;
 static app_main_refresh_mode_t s_main_refresh;
@@ -267,6 +269,8 @@ void app_settings_init(void) {
     if (nvs_get_u8(h, NVS_KEY_HOME_FULL, &raw) == ESP_OK && raw <= 1) s_home_full_refresh = raw == 1;
     raw = 0;
     if (nvs_get_u8(h, NVS_KEY_CLOCK_12H, &raw) == ESP_OK) s_clock_12h = raw != 0;
+    raw = 0;
+    if (nvs_get_u8(h, NVS_KEY_LOW_GHOST, &raw) == ESP_OK) s_low_ghost = raw != 0;
     raw = 0;
     s_home_component = nvs_get_u8(h, NVS_KEY_HOME_COMPONENT, &raw) == ESP_OK && raw < APP_HOME_COMPONENT_COUNT
         ? (raw == 3 ? APP_HOME_CLOCK : (app_home_component_t)raw) : APP_HOME_MOON;
@@ -535,6 +539,12 @@ esp_err_t app_settings_set_home_goal_minutes(uint8_t minutes) {
 
 bool app_settings_home_full_refresh(void) { return s_home_full_refresh; }
 bool app_settings_clock_12h(void) { return s_clock_12h; }
+bool app_settings_low_ghost(void) { return s_low_ghost; }
+void app_settings_set_low_ghost(bool enabled) {
+    if (enabled == s_low_ghost) return;
+    s_low_ghost = enabled;
+    nvs_put_u8(NVS_KEY_LOW_GHOST, enabled ? 1 : 0);
+}
 void app_settings_set_clock_12h(bool enabled) {
     if (enabled == s_clock_12h) return;
     s_clock_12h = enabled;
