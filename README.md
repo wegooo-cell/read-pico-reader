@@ -12,9 +12,9 @@ An independent reading firmware with publicly available source for the **MindRes
 
 The current interface has Home, Bookshelf, Files, and Settings. It reads EPUB and TXT books from a TF card, remembers reading progress, and supports Wi-Fi, hotspot, or USB file transfer. The online flasher installs the same firmware image as the local `flash/` bundle.
 
-## Current releases: PICO rc110 / S31 rc117
+## Current releases: PICO rc110 / S31 rc116
 
-Separate Books directories from enrolled books, choose imports by real folder, and restart enrollment by clearing only shelf membership. Management uses13 list rows or4×3 covers, page-scoped selection, strict sorting and bounded author text. Reading supports20–120px type,100–300% line height and−100–100% paragraph gaps in10% steps; fixes retain progress, compatible backups and safe resume. Pico updates metadata independently; S31 improves ripple/whitening and long-press startup. Use web USB installation for the matching S31 bootloader. Existing settings, books and release history are retained. See the [changelog](docs/CHANGELOG.md).
+Separate Books directories from enrolled books, choose imports by real folder, and restart enrollment by clearing only shelf membership. Management uses13 list rows or4×3 covers, page-scoped selection, strict sorting and bounded author text. Reading supports20–120px type,100–300% line height and−100–100% paragraph gaps in10% steps; fixes retain progress, compatible backups and safe resume. Pico updates metadata independently. S31 rc117 has been withdrawn; its official web/TF/OTA release remains the original rc116, while later S31 source changes remain unpublished. Existing settings, books and release history are retained. See the [changelog](docs/CHANGELOG.md).
 
 ### Settings, storage and lock fixes
 

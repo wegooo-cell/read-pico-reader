@@ -8,6 +8,11 @@ Agent entry for this tree. Humans can read it too. Product overview, hardware, p
 
 Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Taking over an in-flight task: read [docs/HANDOFF.md](docs/HANDOFF.md) first.
 
+## 2026-11-21 · S31 RC117撤回 / S31 RC117 withdrawal
+
+用户在双板发布后取消S31更新。S31官网刷机、TF/USB下载和Pages OTA恢复原正式RC116字节与清单，RC117 Release转草稿保留附件和标签、不再推荐；源码改动保留为未发布状态。PICO RC110及其他已发布历史版本保持，PR99仍关闭不合并。本条取代下方S31 RC117继续发布授权。
+After dual-board publication the user canceled the S31 update. Restore original RC116 bytes and metadata for S31 web/TF/USB and Pages OTA; keep RC117 as a draft with its assets/tag, retaining later source changes as unpublished. Preserve Pico RC110 and release history, and keep PR99 closed/unmerged. This supersedes the S31 RC117 publication authorization below.
+
 ## 2026-11-21 · 书架、导入与阅读更新 / Library and reader release
 
 用户授权同步当前双板固件到GitHub源码、正式Release、官网在线刷机/USB/TF下载和既有Pages OTA。发布PICO RC110、S31 RC117，保留原RC109/RC116及历史原字节；PR99保持关闭且不纳入，保留已验证的PR100/102/103及Moku98/101/104–106。此授权取代本轮仅本地/不发布限制，不要求重刷设备。
