@@ -618,6 +618,7 @@ static bool poll_media(app_ctx_t* ctx, const app_desc_t* current,
         if (probe == ESP_ERR_NOT_FINISHED) return false;
     }
     if (err == ESP_ERR_NOT_FINISHED) return false;
+    if ((err != ESP_OK || !info.mounted) && app_sleep_media_settling()) return false;
     bool ready = err == ESP_OK && info.mounted;
     bool lost = *mounted && !ready;
     bool gained = !*mounted && ready;
@@ -644,30 +645,37 @@ static bool poll_media(app_ctx_t* ctx, const app_desc_t* current,
 // Save the current page first, then settle a clock-free static frame so shutdown never leaves a misleading frozen time.
 // 锁屏前先由页面保存进度，再持久化一次恢复上下文；不在翻页或点击时写入。
 // Flush page progress before persisting one lock checkpoint; never write it on page turns or taps.
-static void prepare_lock(app_ctx_t *ctx, const app_desc_t *current, bool feedback) {
+static bool prepare_lock(app_ctx_t *ctx, const app_desc_t *current, bool feedback) {
     app_book_shelf_prefetch_cancel();
     if (feedback) app_lock_feedback(ctx->hl);
     if (current->on_before_lock) current->on_before_lock(ctx);
     int tab = app_index_of(current);
-    pico_resume_t resume = {.tab = tab >= 0 && tab < 4 ? (uint8_t)tab : 0};
+    pico_resume_t resume = {.tab = tab >= 0 && tab < PICO_BOOT_TAB_COUNT ? (uint8_t)tab : 0};
     bool fullscreen = false;
     if (tab == 1 && app_book_resume_context(resume.path, sizeof(resume.path), &fullscreen)) {
         resume.reader = 1;
         resume.fullscreen = fullscreen;
     }
-    (void)pico_boot_save_resume(&resume);
+    const bool position_ready = current != &app_book || app_book_checkpoint_ready();
+    const bool checkpoint_ready = pico_boot_save_resume(&resume) == ESP_OK;
+    app_lock_set_resume_ready(position_ready && checkpoint_ready);
+    return position_ready && checkpoint_ready;
 }
 static void run_power_action(app_ctx_t *ctx, const app_desc_t *current, bool restart) {
-    prepare_lock(ctx, current, false);
+    if (!prepare_lock(ctx, current, false)) {
+        ESP_LOGW(TAG, "power-off deferred: current position or resume checkpoint not saved");
+        app_present(ctx, current, APP_REDRAW_PAGE);
+        return;
+    }
     ui_power_final_draw(ctx->fb, restart);
     guard_draw_result(ctx->hl, update_display_full(ctx->hl));
     app_lock_wait_key_idle(800);
     epd_poweroff();
-    pico_boot_clear_resume();
     if (restart) app_restart_host();
     esp_err_t error = app_enter_host_sleep(APP_SLEEP_OFF);
     if (error != ESP_OK) ESP_LOGW(TAG, "power off failed: %s", esp_err_to_name(error));
     // 关机交接失败时回到可操作原页；不关闭书籍后再重新自动开书。/ A failed shutdown returns to the operable current page without closing/reopening the book.
+    pico_boot_clear_resume();
     app_present(ctx, current, APP_REDRAW_PAGE);
 }
 

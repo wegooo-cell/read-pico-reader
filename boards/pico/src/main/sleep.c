@@ -143,8 +143,11 @@ static void periph_suspend(bool host_off) {
 
 // 深睡的触摸只认 TP_RST 复位；加速度计按睡前的配置重新上电。
 // Deep-sleeping touch only wakes via TP_RST; the accelerometer comes back with its pre-sleep config.
+static int64_t s_wake_media_grace_until_us;
+bool app_sleep_media_settling(void) { return esp_timer_get_time() < s_wake_media_grace_until_us; }
 static void periph_resume(void) {
     (void)read_pico_ioe_wake();
+    s_wake_media_grace_until_us = esp_timer_get_time() + INT64_C(1500000);
     if (s_tp != NULL && cst836u_get_mode(s_tp) == CST836U_MODE_DEEPSLEEP) {
         esp_err_t err = cst836u_wake(s_tp);
         if (err != ESP_OK) ESP_LOGW(TAG, "touch wake %s", esp_err_to_name(err));
@@ -158,6 +161,8 @@ static void periph_resume(void) {
 static EpdiyHighlevelState *s_lock_hint_hl;
 static EpdiyHighlevelState *s_boot_lock_hl;
 static bool s_boot_lock_active, s_boot_lock_known, s_boot_lock_draw;
+static bool s_lock_deep_ready;
+void app_lock_set_resume_ready(bool ready) { s_lock_deep_ready = ready; }
 
 // 未恢复像素前不做差分提示；缺卡/坏透明底图仍保留物理锁图，不假设白底。
 // Never hint against unknown pixels; absent media or a damaged transparent backdrop keeps physical art rather than assuming white.
@@ -729,10 +734,12 @@ void enter_lock_and_sleep(
         // PMU SOFT_SLEEP drops the ESP rail while keeping its RTC alive. A short
         // power-key press boots the host; the e-paper keeps this lock image.
         if(lock_drawn && result==EPD_DRAW_SUCCESS && !lock_pin_enabled() && lock_screen_save(framebuffer)) (void)pico_boot_mark_frame_cached();
-        app_enter_host_sleep(APP_SLEEP_DEEP);
+        if (s_lock_deep_ready) app_enter_host_sleep(APP_SLEEP_DEEP);
+        else ESP_LOGW(TAG, "deep sleep deferred: current position or resume checkpoint not saved");
         wake=app_light_sleep_wait_timed(NULL,APP_LOCK_LIGHT_SLEEP_MS);
     }
     pico_boot_clear_resume();
+    s_lock_deep_ready=false;
     s_lock_hint_hl=NULL;
     if (system_lock) app_font_end_lock(&lock_font);
     // 所有样式的Wi-Fi/HTTP均由调用者恢复页面后重启，避免网络初始化挡住首帧。

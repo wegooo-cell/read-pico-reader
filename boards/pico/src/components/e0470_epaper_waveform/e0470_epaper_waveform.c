@@ -217,6 +217,10 @@ const EpdWaveform E0470_GRAY8_WAVEFORM = {
     .temp_intervals = e0470_intervals,
 };
 
+// 只取 8 灰 GL16 相位表：引用整张 E0470_GRAY8_WAVEFORM 会把用不到的 GC16 表（1.9 KB）一起链接进应用分区。
+// GL16 half of GRAY8 only; referencing the whole waveform would also link the unused 1.9 KB GC16 table.
+const EpdWaveformPhases* e0470_gray8_gl16_phases_only(void) { return &e0470_gray8_gl16_phases; }
+
 /* ---- 默认表 / Default tables ---- */
 // 完整灰阶表裁掉余量，开机算进 RAM。
 // / Trim slack from the full gray tables into RAM at boot.

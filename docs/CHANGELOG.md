@@ -1,4 +1,39 @@
+## 0.3.3-rc110（PICO）/ 0.3.3-rc117（S31） · 2026-11-21
+
+- 重做书架导入与管理：Books目录按真实文件夹浏览，已上架书籍独立管理；列表13项、封面4×3、本页全选/取消、目录递归导入，修复长作者遮挡和中文书名/进度/添加时间/最近阅读排序。
+- 新机书架等待明确导入，关闭或取消后返回仍提示；主动成功开书自动上架。重新扫描先清空上架列表再重新选择，书籍文件和阅读进度保留，保存失败保留原列表。
+- 阅读字号20–120，行高100%–300%，段距−100%–100%且每次10%；修复点击/拖动/侧滑的范围和失败回退，兼容标准与完整配置备份。
+- 修复阅读位置、锁屏/关机恢复及首页继续阅读百分比同步，进度保存失败保留可重试记录；目录与导入均支持取消和存储失败保护。
+- PICO保留普通、水波纹、快速三种效果，顶部/底部信息独立局刷并更新页数；压缩图标节省固件空间，修复灰度JPEG与设置头像，图片拖动采用跟随DU刷新。未纳入PR99连续快翻与延迟保存。
+- S31放慢水波纹并加入擦白过渡，配套引导程序修复长按启动重复按键及锁屏横条路径；完整开机改善请使用网页USB安装（TF/OTA只更新应用）。
+- 保留Moku高压轨保持、升级后一次性关闭周期全刷、设备同步失败阶段等已验证改动；历史正式版、原固定下载地址和默认数据保留不变。
+
 # 版本变更 / Changelog
+
+## 本地测试 / Local test — 2026-11-20（设备同步失败提示）
+
+- 设备同步失败时显示「阶段：原因」：未找到另一台设备 / 配对后连接中断 / 传输中断 / 写入设置失败，并附具体错误原因；未知错误显示十六进制错误码。对端重开后自动跟随新的配对码，旧码不再被误报为「配对码或被拒绝」。
+- Device-sync failures now show the failed stage plus the concrete reason (no peer / link dropped after pairing / transfer interrupted / apply failed), with a hex code for unknown errors. A restarted peer's new pairing code is adopted, so a stale code is never reported as a rejection.
+
+## 本地测试 / Local test — 2026-11-20（全刷间隔迁移）
+
+- 升级后首次开机把「默认全刷间隔」一次性强制为「不强制」，覆盖旧设置；标记落盘后用户仍可自行改回。只关闭按页自动全刷，手动全刷不变。
+- The first boot after this update forces the periodic full-refresh interval to “never” once, overriding earlier values; once the marker is stored, later choices stick. Only the automatic page-count refresh is disabled; manual full refresh is unchanged.
+
+## 本地测试 / Local test — 2026-11-20（Pico 插图拖动）
+
+- Pico 双击放大插图后的单指拖动改用跟随 DU 逐帧差分（与设置滑块一致），松手后整屏 GC16 定稿，拖动更顺且不留残影。
+- Pico one-finger panning of a zoomed illustration now uses follow-DU frame diffs like the settings sliders, with a full-panel GC16 settle on release.
+
+## 本地测试 / Local test — 2026-11-19（Pico 保轨）
+
+- Pico 高压轨空闲保留时间由 8 秒延长到 30 秒，减少反复放电/上电次数，改善阳光下淡墨与连续翻页的一致性；像素驱动仍在每轮输出后立即释放。
+- Pico keeps the HV rails for thirty seconds instead of eight between outputs, cutting repeated discharge/power-up cycles and improving sunlight density and consecutive-turn consistency; pixel drive still releases after each output.
+
+## 本地测试 / Local test — 2026-11-19（Pico 翻页信息栏）
+
+- Pico 每次翻页后只把顶部状态栏与底部进度条的白底再退一次白，未变化的文字和图形保持不动；普通翻页本身仍整屏推白。
+- After each Pico turn only the white background of the status row and progress bar is pushed white again; unchanged text and graphics are held. Ordinary turns still push the whole panel white.
 
 ## S31 0.3.3-rc116 — 2026-11-19
 

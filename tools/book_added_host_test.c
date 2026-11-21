@@ -31,9 +31,14 @@ int main(void) {
     uint64_t old_x=x,old_y=y,old_z=z;
     x=y=z=0;book_added_load(items,3);
     assert(x==old_x&&y==old_y&&z==old_z);
-    book_added_migrate(a,moved);
+    assert(book_added_migrate(a,moved));
     uint64_t moved_order=0;book_added_item_t one={moved,&moved_order};
     book_added_load(&one,1);assert(moved_order==old_x);
+    book_added_forget(a);
+    uint64_t recreated=0;book_added_item_t original_again={a,&recreated};book_added_load(&original_again,1);
+    assert(recreated>old_x&&moved_order==old_x);
+    // Restore the source fixture identity for the independent damaged-tail tests below.
+    assert(write_identity(a,old_x));
     book_added_forget(b);y=0;book_added_item_t again={b,&y};
     book_added_load(&again,1);assert(y>old_x&&y>old_y&&y>old_z);
     assert(journal_path(test_sd,journal));

@@ -1,5 +1,5 @@
 /* 中文：S31 专用网页安装，先验证再写入；与 Pico 安装器隔离。 / English: Verify-before-write S31 installation isolated from the Pico installer. */
-import {require,equal,partitionTable,selectedSlot} from './metalio-flash-core.js';
+import {require,equal,partitionTable,selectedSlot,installationParts} from './metalio-flash-core.js?v=rc117-bootloader';
 import {connectS31,prepareS31Flash,connectionMessage} from './metalio-connection.js?v=s31-direct-20261024';
 import {readS31Flash,verifyS31Flash} from './metalio-flash-reader.js?v=s31-direct-20261024';
 let active=false;
@@ -87,8 +87,7 @@ async function open(snapshot){
       // 再次核对检查后设备未变；写入中不更改已绑定的版本。 / Recheck the device and retain the clicked release throughout writing.
       require(await loader.chip.readMac(loader)===plan.mac,'设备身份发生变化。');
       require(equal(await read(0x8000,0x8000,'复核分区与启动记录'),protectedBefore),'检查后启动记录发生变化，请重新连接。');
-      const app=bundle.parts.find(p=>p.name==='firmware.bin');
-      const parts=plan.full?bundle.parts.map(p=>({data:p.data,address:p.offset})):[{data:app.data,address:plan.slot.address}];
+      const parts=installationParts(bundle,plan,snapshot.manifest.requires_bootloader_update===true);
       parts.sort((a,b)=>a.address-b.address);
       say('正在写入，请保持页面开启和 USB 连接…');append(`Write ${snapshot.manifest.version}: ${plan.full?'full install':`0x${plan.slot.address.toString(16)}`}`);
       await loader.writeFlash({fileArray:parts,flashSize:'keep',flashMode:'keep',flashFreq:'keep',eraseAll:false,compress:true,reportProgress:(index,written,total)=>{progress.value=Math.floor((index+written/total)/parts.length*75);}});

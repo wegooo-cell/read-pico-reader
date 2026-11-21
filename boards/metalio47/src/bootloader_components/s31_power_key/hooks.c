@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
  * S31 only: read P1.7 before application loading, through a bounded open-drain bus.
  * Never write expander configuration/outputs or use the shared IRQ as key evidence.
+ * User2026-11-20: keep XOE/MODE inactive before app loading to protect retained lock art.
  */
 #include "sdkconfig.h"
 #include "metalio_early_key_record.h"
@@ -67,7 +68,19 @@ static bool read_register(uint8_t reg,uint8_t *value) {
     if(ok && stopped)*value=byte;
     return ok && stopped;
 }
+static void panel_idle_early(void) {
+    const unsigned pins[]={18,19};
+    for(unsigned i=0;i<sizeof(pins)/sizeof(pins[0]);++i) {
+        unsigned pin=pins[i];
+        gpio_ll_set_level(&GPIO,pin,0);
+        gpio_ll_func_sel(&GPIO,pin,PIN_FUNC_GPIO);
+        esp_rom_gpio_connect_out_signal(pin,SIG_GPIO_OUT_IDX,false,false);
+        gpio_ll_output_enable(&GPIO,pin);
+        gpio_ll_hold_dis(&GPIO,pin);
+    }
+}
 void bootloader_before_init(void) {
+    panel_idle_early();
     unsigned reason=(unsigned)esp_rom_get_reset_reason(0);
     if(reason!=METALIO_EARLY_KEY_POWERON) {
         captured=metalio_early_key_sample(reason,read_register,delay_us);

@@ -142,7 +142,8 @@ bool app_settings_set_book_background_path(const char *path);
 /// S31另支持20页，所有翻页效果均遵循所选间隔。/ S31 also supports20; every turn effect respects the selected interval.
 uint8_t app_settings_reader_full_pages(void);
 void app_settings_set_reader_full_pages(uint8_t pages);
-/// 阅读翻页效果：0普通，1水波纹，2速读黑白；旧0/1配置不变。/ Reader effect:0 ordinary,1 ripple,2 fast BW; preserve legacy0/1 settings.
+/// 阅读翻页效果：0普通、1水波纹；PICO为3快速（旧2迁移到3），S31保留2速读黑白。
+/// Reader effects:0 ordinary,1 ripple; Pico uses3 fast (legacy2 migrates to3), S31 retains2 FastBW.
 uint8_t app_settings_reader_turn_effect(void);
 void app_settings_set_reader_turn_effect(uint8_t effect);
 /// 阅读正文里短按电源键翻下一页；默认关闭。/ Short power press turns forward only in reader body; off by default.
@@ -267,18 +268,20 @@ bool app_settings_set_book_heading_size(unsigned percent);
 /// 阅读线相对默认位置 -8..+8 像素，2 像素一步，默认 0。/ Guide offset in 2 px steps.
 int8_t app_settings_book_reading_line_offset(void);
 void app_settings_set_book_reading_line_offset(int8_t offset_px);
-/// 阅读行高百分比，110..150。/ Reader line-height percentage: 110..150.
-uint8_t app_settings_book_line_spacing(void);
-void app_settings_set_book_line_spacing(uint8_t percent);
+/// 阅读行高百分比，100..300，最小不添加行间空白。/ Reader line height: 100..300%, with no extra leading at the minimum.
+int app_settings_book_line_spacing(void);
+void app_settings_set_book_line_spacing(int percent);
 /// 阅读页左右边距，0..48 像素。/ Reader horizontal margin: 0..48 pixels.
 uint8_t app_settings_book_margin(void);
 void app_settings_set_book_margin(uint8_t px);
-/// 段距11档，25%居中，0..100%。/ Eleven paragraph-gap stops centered on 25%, spanning 0..100%.
-#define APP_BOOK_PARAGRAPH_COUNT 11
-uint8_t app_settings_book_paragraph_value(uint8_t level);
-uint8_t app_settings_book_paragraph_level(uint8_t percent);
-uint8_t app_settings_book_paragraph_spacing(void);
-void app_settings_set_book_paragraph_spacing(uint8_t percent);
+/// 段距-100..100%，每10%一档，共21档。/ Paragraph gaps: -100..100% in 21 stops spaced by 10%.
+#define APP_BOOK_PARAGRAPH_COUNT 21
+int app_settings_book_paragraph_value(uint8_t level);
+uint8_t app_settings_book_paragraph_level(int percent);
+int app_settings_book_paragraph_spacing(void);
+void app_settings_set_book_paragraph_spacing(int percent);
+/// 同一次提交保存阅读排版，失败保留当前运行设置。/ Commit reader layout together, retaining live settings on failure.
+bool app_settings_try_book_layout(uint8_t px, uint8_t margin, int line, int paragraph);
 /// 书架样式：1 深色书轨、2 亚克力、5 列表、6 液态玻璃；旧3/4安全回退2。/ Shelf styles: rail (1), acrylic (2), list (5), liquid glass (6); retired IDs 3/4 fall back to 2.
 uint8_t app_settings_shelf_style(void);
 /// 三种封面书架的进度角标，不影响列表进度。/ Progress badges on cover shelves, independent of list metadata.

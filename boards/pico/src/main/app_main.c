@@ -229,20 +229,9 @@ void app_main(void) {
     if (pico_boot_take_resume(&resume)) {
         if (!resume.reader) first = app_at(resume.tab);
         else {
-            // 挂载等待有界；恢复入口已消费，无卡或资源失败不会反复自动开书。
-            // Bound mount waiting after consuming the checkpoint; absent media or failed resources cannot auto-open in a loop.
-            if (!strncmp(resume.path, "/sdcard/", 8)) {
-                read_pico_sd_info_t info;
-                for (unsigned wait = 0; wait < 150 && read_pico_sd_get_info(&info) == ESP_ERR_NOT_FINISHED; ++wait)
-                    vTaskDelay(pdMS_TO_TICKS(20));
-            }
-            if (!strncmp(resume.path, "/flash/books/", 13) && !book_store_flash_ready()) {
-                book_store_root_t roots[BOOK_STORE_ROOT_MAX]; int count;
-                (void)book_store_roots(roots, &count);
-            }
-            struct stat st;
-            if (!stat(resume.path, &st) && S_ISREG(st.st_mode) &&
-                app_book_request_resume(resume.path, resume.fullscreen)) first = app_at(1);
+            // 先进入可操作内容页，慢挂载由其有界等待；路径在实际开书时再检查。
+            // Admit the content page and let its bounded media wait validate the file on actual opening.
+            if (app_book_request_resume(resume.path, resume.fullscreen)) first = app_at(1);
         }
     }
     char interrupted[PICO_BOOT_PATH_MAX];

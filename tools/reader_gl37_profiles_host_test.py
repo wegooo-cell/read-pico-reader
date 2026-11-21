@@ -61,6 +61,18 @@ int main(int argc,char **argv){
  assert(!display_reader_gray_waveform(-1)&&!display_reader_gray_waveform(DISPLAY_READER_GRAY_COUNT));
  assert(!memcmp(old_gl,gl->luts,gl->phases*64)&&!memcmp(old_gc,gc->luts,gc->phases*64)&&!memcmp(old_du,du->luts,du->phases*64));
  assert(!memcmp(raw,my_gl_25_0.luts,48*64)&&!memcmp(raw+48*64,my_gc_25_0.luts,48*64)&&!memcmp(raw+96*64,my_du_25_0.luts,20*64));
+ for(unsigned k=0;k<3;++k){
+  display_reader_gray_profile_t kind=k==0?DISPLAY_READER_GRAY_WATER_TAIL:k==1?DISPLAY_READER_GRAY_IMAGE:DISPLAY_READER_GRAY_BACKGROUND;
+  const EpdWaveformPhases *base=e0470_waveform_phases(display_reader_gray_waveform(kind),MODE_GL16);
+  const EpdWaveformPhases *wipe=e0470_waveform_phases(display_reader_ripple_waveform(kind),MODE_GL16);
+  assert(wipe&&wipe->phases==base->phases+19&&wipe->phases<=64);
+  for(int to=0;to<16;++to)for(int from=0;from<16;++from)for(int f=0;f<wipe->phases;++f){
+   int action=e0470_phase_action(wipe,f,to,from);
+   assert(action==(f<18?2:f==18?0:e0470_phase_action(base,f-19,to,15)));
+  }
+  assert(display_reader_ripple_waveform(kind)==display_reader_ripple_waveform(kind));
+ }
+ assert(!display_reader_ripple_waveform(DISPLAY_READER_GRAY_COUNT));
  puts("PASS: eight bounded profiles, nonwhite changes preserved, equal ink held, all white targets reinforced at the tail, final phase held, unchanged original seven/shared/raw LUTs");
 }
 '''

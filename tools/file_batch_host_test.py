@@ -9,6 +9,7 @@ source=root/'main/apps/app_files.c'
 item=re.search(r'typedef struct \{[^{}]*\} file_item_t;',source.read_text())[0]
 unit=r'''
 #include <assert.h>
+#include "read_pico_search.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -51,7 +52,7 @@ static void book_store_notify_changed(void){++notifications;}
 static void repair_deleted_directories(void){assert(mounted);++repairs;}
 static bool moved_settings_fit(const char *a,const char *b){assert(a&&b);return true;}
 static void sync_moved_settings(const char*a,const char*b){assert(a&&b);++migrations;}
-static void notify_moved_tree(const char*a,const char*b,unsigned depth){assert(a&&b&&!depth);}
+static bool notify_moved_tree(const char*a,const char*b,unsigned depth){assert(a&&b&&!depth);return true;}
 static void file_deleted(const char *path,bool dir,void *ctx){(void)dir;(void)ctx;assert(strncmp(path,root_path,strlen(root_path))==0);}
 static void copy_utf8(char *out,size_t size,const char *in){assert(strlen(in)<size);snprintf(out,size,"%s",in);}
 static void host_path(const char *virtual_path,char out[512]){
@@ -120,7 +121,7 @@ int main(int argc,char **argv){
 '''
 with tempfile.TemporaryDirectory(prefix='kiiko-file-batch-') as temp:
  work=Path(temp);(work/'test.c').write_text(unit);(work/'card').mkdir()
- flags=['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-misleading-indentation','-g','-fsanitize=address,undefined','-I'+str(root/'tools/file_tree_stubs'),'-I'+str(root/'main/apps')]
+ flags=['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-misleading-indentation','-g','-fsanitize=address,undefined','-I'+str(root/'tools/file_tree_stubs'),'-I'+str(root/'main/apps'),'-I'+str(root/'components/read_pico_search/include')]
  subprocess.run(flags+['-Dfile_tree_move=real_move','-Dfile_tree_delete=real_delete','-c',str(root/'main/apps/file_tree.c'),'-o',str(work/'tree.o')],check=True)
- subprocess.run(flags+[str(work/'test.c'),str(work/'tree.o'),'-o',str(work/'test')],check=True)
+ subprocess.run(flags+[str(work/'test.c'),str(work/'tree.o'),str(root/'components/read_pico_search/read_pico_search.c'),'-o',str(work/'test')],check=True)
  subprocess.run([str(work/'test'),str(work/'card')],check=True)

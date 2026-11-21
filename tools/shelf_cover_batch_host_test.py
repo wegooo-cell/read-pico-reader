@@ -30,10 +30,13 @@ static bool queued_touch __attribute__((unused));
 static unsigned no_artwork_mask,s_shelf_no_artwork_mask;
 static unsigned ram_mask;
 static bool shelf_cover_ram_hit(int index,int row,bool load);
-static void shelf_record_cover_result(int index,int state,const book_cover_result_t *result){
+static __attribute__((unused)) void shelf_record_cover_result(int index,int state,const book_cover_result_t *result){
  (void)index;(void)state;(void)result;
 }
-static bool s_category_menu,s_sort_menu,s_clear_confirm,s_scan_pending;
+static bool s_import_candidates,s_bulk_grid=true;
+static bool book_import_running(void){return false;}
+static __attribute__((unused)) bool s_category_menu,s_sort_menu,s_clear_confirm;
+static bool s_scan_pending;
 static unsigned s_cover_generation,s_cover_pending_mask,s_cover_decode_mask,s_cover_dirty_mask,s_cover_present_mask;
 static unsigned ready_mask,failed_mask,nav_polls,queued,warm_calls,s_cover_warm_mask;
 static int64_t s_cover_warm_after_ms;
@@ -52,14 +55,14 @@ static bool shelf_cover_ram_hit(int index,int row,bool load){
  s_cover_dirty_mask|=bit;
  return true;
 }
-static struct{char path[32],name[32],author[32];bool removed,favorite,has_progress;int pct;unsigned size;}s_shelf[9];
+static struct{char path[32],name[32],author[32];bool removed,favorite,has_progress,is_dir;int pct;unsigned size;}s_shelf[9];
 static int shelf_rows(void){return rows;}
 static int app_settings_shelf_style(void){return 2;}
 static bool app_settings_main_fast_refresh(void){return fast;}
 static unsigned app_settings_system_contrast(void){return 100;}
 static EpdRect shelf_cover_image(int row){return(EpdRect){20,192+row*282,164,214};}
 static void copy_text(char *to,size_t cap,const char *from){snprintf(to,cap,"%s",from);}
-static bool app_touch_input_pending(app_ctx_t *ctx){return ctx->request_app||queued_touch;}
+static __attribute__((unused)) bool app_touch_input_pending(app_ctx_t *ctx){return ctx->request_app||queued_touch;}
 static __attribute__((unused)) bool app_poll_main_navigation(app_ctx_t *ctx){
  (void)ctx;return nav_stop>=0 && (int)++nav_polls>=nav_stop;
 }

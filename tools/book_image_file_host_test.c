@@ -4,6 +4,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include "book_cover.h"
+#include "tjpgd.h"
+// 模拟 ESP32-S3 ROM 里 2012 年版 TJpgDec：只接受三分量 YCbCr，灰度 JPEG 返回 JDR_FMT3。
+// Emulate the 2012 TJpgDec in the ESP32-S3 ROM, which accepts three-component YCbCr only and
+// rejects grayscale JPEGs with JDR_FMT3.
+JRESULT host_rom_jd_prepare(JDEC *jd, size_t (*in)(JDEC *, uint8_t *, size_t), void *pool, size_t size, void *dev) {
+    JRESULT result = jd_prepare(jd, in, pool, size, dev);
+    return result == JDR_OK && jd->ncomp != 3 ? JDR_FMT3 : result;
+}
+// 本测试不覆盖 WebP；解码器链接需要这个入口。/ WebP is out of scope here; the decoder link needs this entry.
+bool read_pico_webp_rgb565(const uint8_t *data, size_t size, size_t max_pixels, uint8_t **out,
+                           unsigned *width, unsigned *height) {
+    (void)data; (void)size; (void)max_pixels; (void)out; (void)width; (void)height;
+    return false;
+}
 int main(int argc, char **argv) {
     assert(argc > 2);
     for (int i = 2; i < argc; ++i) {

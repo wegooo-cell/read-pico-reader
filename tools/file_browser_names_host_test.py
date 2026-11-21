@@ -14,6 +14,7 @@ text = source.read_text()
 item_type = re.search(r'typedef struct \{[^{}]*\} file_item_t;', text).group()
 unit = r'''
 #include <assert.h>
+#include "read_pico_search.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -32,6 +33,12 @@ typedef struct {int id;} app_desc_t;
 typedef struct {const app_desc_t *request_app;} app_ctx_t;
 const app_desc_t app_book={1},app_image={2};
 typedef struct {bool mounted;uint64_t free_bytes;} read_pico_sd_info_t;
+#define BOOK_STORE_PATH_MAX 288
+#define BOOK_PROGRESS_MOVE_CONFLICT 0x6b01
+static int s_book_move_error;
+static char mock_last_path[288];
+static bool book_progress_last_path(char *out,size_t cap){snprintf(out,cap,"%s",mock_last_path);return mock_last_path[0]!=0;}
+static esp_err_t book_progress_set_last_path(const char *path){snprintf(mock_last_path,sizeof(mock_last_path),"%s",path);return ESP_OK;}
 #define FILE_MAX 96
 enum {FILE_VIEW_LIST,FILE_VIEW_MOVE};
 '''+item_type+r'''
@@ -45,7 +52,7 @@ static void file_search_stop(void){}
 static void file_selection_restore(void){}
 static char s_message[96],s_dir[288],root[80],opened[288],copied_to[288];
 static read_pico_sd_info_t s_sd;
-static bool card=true,alloc_ok=true;
+static bool card=true,alloc_ok=true,migration_ok=true;
 static unsigned changed,book_opens,image_opens,font_opens,haptics;
 static bool files_alloc(void){if(!alloc_ok)return false;if(!s_files)s_files=calloc(FILE_MAX,sizeof(*s_files));return s_files!=NULL;}
 static const char *folder_root(int folder){(void)folder;return root;}
@@ -59,7 +66,7 @@ static void app_settings_set_system_font_path(const char *path){assert(!strcmp(p
 static void app_font_activate_system(void){}
 static bool moved_settings_fit(const char *from,const char *to){assert(!strcmp(from,s_selected.path)&&strcmp(from,to));return true;}
 static void sync_moved_settings(const char *from,const char *to){assert(!strcmp(from,s_selected.path));check_payload(to);}
-static void notify_moved_tree(const char *from,const char *to,unsigned depth){assert(!depth&&!strcmp(from,s_selected.path));check_payload(to);}
+static bool notify_moved_tree(const char *from,const char *to,unsigned depth){assert(!depth&&!strcmp(from,s_selected.path));check_payload(to);if(!migration_ok)snprintf(mock_last_path,sizeof(mock_last_path),"%s",to);return migration_ok;}
 static void leave_move(bool changed_ok){assert(changed_ok);}
 static int file_tree_move(const char *from,const char *to){check_payload(from);return rename(from,to)?ESP_FAIL:ESP_OK;}
 #if KIIKO_BOARD_METALIO47
@@ -104,6 +111,8 @@ int main(void){
  char copy[288],expected[288];name_repeat(copy,"中",44,"甲 副本.epub");snprintf(expected,sizeof(expected),"%s/%s",root,copy);assert(!strcmp(copied_to,expected));check_payload(expected);
  assert(copy_selected_item(label)==ESP_OK&&changed==2);name_repeat(copy,"中",44,"甲 副本 2.epub");snprintf(expected,sizeof(expected),"%s/%s",root,copy);assert(!strcmp(copied_to,expected));
  snprintf(s_dir,sizeof(s_dir),"%s/move",root);assert(!mkdir(s_dir,0700));
+ snprintf(mock_last_path,sizeof(mock_last_path),"%s",s_selected.path);
+ migration_ok=false;assert(move_selected()==APP_REDRAW_PAGE&&changed==2&&s_message[0]);check_payload(s_selected.path);assert(!strcmp(mock_last_path,s_selected.path));migration_ok=true;
  assert(move_selected()==APP_REDRAW_PAGE&&changed==3);snprintf(expected,sizeof(expected),"%s/%s",s_dir,a);check_payload(expected);assert(access(s_selected.path,F_OK));assert(!unlink(expected)&&!rmdir(s_dir));clear_root();
  // General directory and type-specific filters retain long directory, image and font names.
  name_repeat(name,"册",44,"");char path[512];snprintf(path,sizeof(path),"%s/%s",root,name);assert(!mkdir(path,0700));
@@ -139,5 +148,5 @@ with tempfile.TemporaryDirectory(prefix='file-browser-names-') as folder:
         output = work/f'board-{board}'
         subprocess.run(['cc', '-std=gnu11', '-g', '-Wall', '-Wextra', '-Werror',
                         '-fsanitize=address,undefined', f'-DKIIKO_BOARD_METALIO47={board}',
-                        str(work/'test.c'), '-o', str(output)], check=True)
+                        '-I'+str(ROOT/'components/read_pico_search/include'),str(ROOT/'components/read_pico_search/read_pico_search.c'), str(work/'test.c'), '-o', str(output)], check=True)
         subprocess.run([str(output)], check=True)

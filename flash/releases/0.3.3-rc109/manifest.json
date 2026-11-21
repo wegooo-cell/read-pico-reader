@@ -1,0 +1,71 @@
+{
+  "name": "kiikoread 墨水屏",
+  "version": "0.3.3-rc109",
+  "board": "pico",
+  "experimental_pie_pixels": false,
+  "experimental_text_ripple": false,
+  "experimental_reader_panel37": false,
+  "experimental_shelf37": false,
+  "experimental_fast_reader_panels": false,
+  "experimental_du14": false,
+  "experimental_settings_short_motion": false,
+  "experimental_trimmed_waveform": false,
+  "experimental_main_clean": false,
+  "experimental_network_probe": false,
+  "local_transfer_start_test": false,
+  "experimental_early_power_key": false,
+  "requires_bootloader_update": false,
+  "project": "Read_Pico",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "bootloader.bin",
+          "offset": 0,
+          "size": 21232,
+          "sha256": "15e3f5bd1bf0e96f740a16a42e81ca03f1f050bb643a02a64b4a934f81650055"
+        },
+        {
+          "path": "partitions.bin",
+          "offset": 32768,
+          "size": 3072,
+          "sha256": "edba9d92e5fc51c706c12f4b4a5d5d23728ba8fb0fbc00be654f1eccef404bda"
+        },
+        {
+          "path": "../../Pico-update-0.3.3-rc109.bin",
+          "offset": 65536,
+          "size": 4193792,
+          "sha256": "e992d026f7c13a9a32217550f2590a8414248e0f02a8b603f39f71267436f7ed"
+        },
+        {
+          "path": "ota_data_initial.bin",
+          "offset": 13697024,
+          "size": 8192,
+          "sha256": "7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f"
+        }
+      ]
+    }
+  ],
+  "updated_at": "2026-11-19T11:15:36+08:00",
+  "pico_ota": {
+    "layout": "pico-dual-4m-v1",
+    "base_version": "0.3.3-rc109",
+    "minimum_base_version": "0.3.3-rc72",
+    "online_ota_base_version": "0.3.3-rc79",
+    "rollback": true
+  },
+  "previous_version": "0.3.3-rc108",
+  "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc109/kiikoread-0.3.3-rc109-USB.zip",
+  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc109/kiikoread-0.3.3-rc109-TF.zip",
+  "release_notes": [
+    "优化 TXT/EPUB 章节识别、题头样式、卷页与章节分页，修复章首和段落异常留白。",
+    "修复后续页章名显示，保留精排 EPUB 的图片、题头及自带格式。",
+    "修复阅读线手势，新增保存格式，开关恢复样式、范围和位置。",
+    "优化大书分段加载、插图内存管理与异常开书恢复。",
+    "优化阅读进度存储，修复票根及拼贴锁屏的 TXT 封面。",
+    "新增设备间设置和阅读资料同步。",
+    "优化阅读排版和操作稳定性。"
+  ]
+}

@@ -23,7 +23,7 @@
 #include "settings.h"
 #include "setup_state.h"
 #include "kiiko_board_config.h"
-#define READER_TURN_EFFECT_MAX 2
+#define READER_TURN_EFFECT_MAX KIIKO_BOARD_READER_TURN_EFFECT_MAX
 #include "book/book_font_size.h"
 
 #include <stdio.h>
@@ -76,6 +76,7 @@
 #define NVS_KEY_BOOK_AA "bk_aa"
 #define NVS_KEY_BOOK_BACKGROUND "bk_bg"
 #define NVS_KEY_READER_FULL "rd_gc16"
+#define NVS_KEY_FULL_OFF_MIGRATION "gc16off"
 #define NVS_KEY_READER_TURN "rd_turn"
 #define NVS_KEY_POWER_TURN "rd_power"
 #define NVS_KEY_IMMERSIVE "rd_immersive"
@@ -89,6 +90,8 @@
 #define NVS_KEY_BLE_TURNER "ble_turn"
 #define NVS_KEY_SHELF_RECENT "shelf_recent"
 #define NVS_KEY_BOOK_LINE "bk_line"
+#define NVS_KEY_BOOK_LINE_FULL "bk_line_full"
+#define NVS_KEY_BOOK_PARA_FULL "bk_para_full"
 #define NVS_KEY_BOOK_PARA "bk_para"
 #define NVS_KEY_BOOK_MARGIN "bk_margin"
 #define NVS_KEY_BOOK_TRACK "bk_track"
@@ -135,7 +138,9 @@ static bool s_book_antialias = true;
 static char s_book_background[288];
 static uint8_t s_reader_full_pages = 15;
 static uint8_t s_reader_turn_effect;
-static uint8_t s_book_line = 130, s_book_para = 50, s_book_margin = 24;
+static int s_book_line = 130;
+static int s_book_para = 50;
+static uint8_t s_book_margin = 24;
 static bool s_reader_power_turn;
 static bool s_reader_immersive;
 static bool s_reader_default_fullscreen;
@@ -201,6 +206,20 @@ static bool set_media_dir(char *dst, const char *key, const char *path) {
 
 static uint8_t valid_book_px(uint8_t px) {
     return px >= BOOK_READER_PX_MIN && px <= BOOK_READER_PX_MAX ? px : 48;
+}
+
+// 一次性全刷迁移只在标记确实缺失时执行，写入失败留待下次重试。
+// Run the one-time refresh migration only for a missing marker; failed writes remain retryable.
+static void migrate_reader_full_off(nvs_handle_t read) {
+    uint8_t migrated = 0;
+    if (nvs_get_u8(read, NVS_KEY_FULL_OFF_MIGRATION, &migrated) != ESP_ERR_NVS_NOT_FOUND) return;
+    s_reader_full_pages = 0;
+    nvs_handle_t write;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &write) != ESP_OK) return;
+    esp_err_t err = nvs_set_u8(write, NVS_KEY_READER_FULL, 0);
+    if (err == ESP_OK) err = nvs_set_u8(write, NVS_KEY_FULL_OFF_MIGRATION, 1);
+    if (err == ESP_OK) err = nvs_commit(write);
+    nvs_close(write);
 }
 
 void app_settings_init(void) {
@@ -311,7 +330,7 @@ void app_settings_init(void) {
     uint8_t antialias = 1;
     s_book_antialias = nvs_get_u8(h, NVS_KEY_BOOK_AA, &antialias) != ESP_OK || antialias != 0;
     uint8_t book_px = 48;
-    if (nvs_get_u8(h, NVS_KEY_BOOK_PX, &book_px) == ESP_OK) s_book_px = valid_book_px(book_px);
+    if (nvs_get_u8(h, NVS_KEY_BOOK_PX, &book_px) == ESP_OK) s_book_px = valid_book_px(book_px >= 18 && book_px < BOOK_READER_PX_MIN ? BOOK_READER_PX_MIN : book_px);
     size_t background_len = sizeof(s_book_background);
     if (nvs_get_str(h, NVS_KEY_BOOK_BACKGROUND, s_book_background, &background_len) != ESP_OK ||
         (s_book_background[0] && strncmp(s_book_background, "/sdcard/pictures/", 17))) s_book_background[0] = 0;
@@ -320,9 +339,10 @@ void app_settings_init(void) {
         (reader_full_pages == 0 || reader_full_pages == 5 || reader_full_pages == 10 ||
          reader_full_pages == 15 || reader_full_pages == 30))
         s_reader_full_pages = reader_full_pages;
+    migrate_reader_full_off(h);
     uint8_t reader_turn_effect = 0;
     if (nvs_get_u8(h, NVS_KEY_READER_TURN, &reader_turn_effect) == ESP_OK && reader_turn_effect <= READER_TURN_EFFECT_MAX)
-        s_reader_turn_effect = reader_turn_effect;
+        s_reader_turn_effect = reader_turn_effect == 2 ? 3 : reader_turn_effect;
     uint8_t power_turn = 0;
     if (nvs_get_u8(h, NVS_KEY_POWER_TURN, &power_turn) == ESP_OK) s_reader_power_turn = power_turn == 1;
     uint8_t immersive = 0;
@@ -384,7 +404,14 @@ void app_settings_init(void) {
         if (line >= 110 && line <= 150) s_book_line = line;
         else if (line == 180) s_book_line = 150;
     }
-    if (nvs_get_u8(h, NVS_KEY_BOOK_PARA, &para) == ESP_OK && app_settings_book_paragraph_value(app_settings_book_paragraph_level(para)) == para) s_book_para = para;
+    if (nvs_get_u8(h, NVS_KEY_BOOK_PARA, &para) == ESP_OK && book_reader_legacy_paragraph(para) == para)
+        s_book_para = app_settings_book_paragraph_value(app_settings_book_paragraph_level(para));
+    // 新值与旧值投影配对；旧固件改变旧键后不回放过期扩展。/ Pair new values with legacy projections; a legacy edit invalidates a stale extension.
+    uint8_t full_line = 0, full_para = 0;
+    if (nvs_get_u8(h,NVS_KEY_BOOK_LINE_FULL,&full_line)==ESP_OK && full_line<=200 &&
+        line==book_reader_legacy_line(full_line+100)) s_book_line=full_line+100;
+    if (nvs_get_u8(h,NVS_KEY_BOOK_PARA_FULL,&full_para)==ESP_OK && full_para<=200 && full_para%10==0 &&
+        para==book_reader_legacy_paragraph((int)full_para-100)) s_book_para=(int)full_para-100;
     if (nvs_get_u8(h, NVS_KEY_BOOK_MARGIN, &margin) == ESP_OK && margin <= 60)
         s_book_margin = margin > 48 ? 48 : margin;
     uint8_t shelf_style = 6;
@@ -726,6 +753,7 @@ void app_settings_set_reader_full_pages(uint8_t pages) {
 }
 uint8_t app_settings_reader_turn_effect(void) { return s_reader_turn_effect; }
 void app_settings_set_reader_turn_effect(uint8_t effect) {
+    if (effect == 2) effect = 3; // 旧速读黑白迁移到快速，保留原3灰阶ID。/ Retire FastBW into fast while retaining gray ID3.
     if (effect > READER_TURN_EFFECT_MAX || effect == s_reader_turn_effect) return;
     s_reader_turn_effect = effect;
     nvs_put_u8(NVS_KEY_READER_TURN, effect);
@@ -907,12 +935,10 @@ void app_settings_set_book_reading_line_offset(int8_t offset_px) {
     s_book_rule_offset = index;
     nvs_put_u8(NVS_KEY_BOOK_RULE_OFFSET, index);
 }
-uint8_t app_settings_book_line_spacing(void) { return s_book_line; }
-void app_settings_set_book_line_spacing(uint8_t percent) {
-    if (percent < 110 || percent > 150) return;
-    if (s_book_line == percent) return;
-    s_book_line = percent;
-    nvs_put_u8(NVS_KEY_BOOK_LINE, percent);
+int app_settings_book_line_spacing(void) { return s_book_line; }
+void app_settings_set_book_line_spacing(int percent) {
+    if(percent<BOOK_READER_LINE_MIN || percent>BOOK_READER_LINE_MAX || s_book_line==percent)return;
+    (void)app_settings_try_book_layout(s_book_px,s_book_margin,percent,s_book_para);
 }
 uint8_t app_settings_book_margin(void) { return s_book_margin; }
 void app_settings_set_book_margin(uint8_t px) {
@@ -920,27 +946,40 @@ void app_settings_set_book_margin(uint8_t px) {
     s_book_margin = px;
     nvs_put_u8(NVS_KEY_BOOK_MARGIN, px);
 }
-// 非线性段距保留旧档位，并将25%置于几何中点。/ Nonlinear gaps retain legacy stops with 25% at the geometric midpoint.
-uint8_t app_settings_book_paragraph_value(uint8_t level) {
-    static const uint8_t values[APP_BOOK_PARAGRAPH_COUNT]={0,5,10,15,20,25,30,40,50,75,100};
-    return values[level<APP_BOOK_PARAGRAPH_COUNT?level:APP_BOOK_PARAGRAPH_COUNT-1];
+// 线性21档，0%位于滑杆中点；旧档位按最近10%迁移。/ Twenty-one linear stops put 0% at the center; migrate old stops to the nearest 10%.
+int app_settings_book_paragraph_value(uint8_t level) {
+    if(level>=APP_BOOK_PARAGRAPH_COUNT)level=APP_BOOK_PARAGRAPH_COUNT-1;
+    return BOOK_READER_PARAGRAPH_MIN+level*BOOK_READER_PARAGRAPH_STEP;
 }
-uint8_t app_settings_book_paragraph_level(uint8_t percent) {
-    uint8_t best=0;
-    unsigned distance=255;
-    for(uint8_t i=0;i<APP_BOOK_PARAGRAPH_COUNT;++i) {
-        int delta=(int)app_settings_book_paragraph_value(i)-(int)percent;
-        unsigned d=(unsigned)(delta<0?-delta:delta);
-        if(d<distance){distance=d;best=i;}
-    }
-    return best;
+uint8_t app_settings_book_paragraph_level(int percent) {
+    if(percent<BOOK_READER_PARAGRAPH_MIN)percent=BOOK_READER_PARAGRAPH_MIN;
+    if(percent>BOOK_READER_PARAGRAPH_MAX)percent=BOOK_READER_PARAGRAPH_MAX;
+    return (percent-BOOK_READER_PARAGRAPH_MIN+BOOK_READER_PARAGRAPH_STEP/2)/BOOK_READER_PARAGRAPH_STEP;
 }
-uint8_t app_settings_book_paragraph_spacing(void) { return s_book_para; }
-void app_settings_set_book_paragraph_spacing(uint8_t percent) {
-    if (app_settings_book_paragraph_value(app_settings_book_paragraph_level(percent)) != percent) return;
-    if (s_book_para == percent) return;
-    s_book_para = percent;
-    nvs_put_u8(NVS_KEY_BOOK_PARA, percent);
+int app_settings_book_paragraph_spacing(void) { return s_book_para; }
+void app_settings_set_book_paragraph_spacing(int percent) {
+    if(percent<BOOK_READER_PARAGRAPH_MIN || percent>BOOK_READER_PARAGRAPH_MAX || percent%BOOK_READER_PARAGRAPH_STEP || s_book_para==percent)return;
+    (void)app_settings_try_book_layout(s_book_px,s_book_margin,s_book_line,percent);
+}
+bool app_settings_try_book_layout(uint8_t px, uint8_t margin, int line, int paragraph) {
+    if(px<BOOK_READER_PX_MIN || px>BOOK_READER_PX_MAX || margin>48 ||
+       line<BOOK_READER_LINE_MIN || line>BOOK_READER_LINE_MAX ||
+       paragraph<BOOK_READER_PARAGRAPH_MIN || paragraph>BOOK_READER_PARAGRAPH_MAX || paragraph%10)return false;
+    nvs_handle_t h;
+    if(nvs_open(NVS_NS,NVS_READWRITE,&h)!=ESP_OK)return false;
+    esp_err_t error=nvs_set_u8(h,NVS_KEY_BOOK_PX,px);
+#define LAYOUT_PUT(key,value) do {if(error==ESP_OK)error=nvs_set_u8(h,key,value);} while(0)
+    LAYOUT_PUT(NVS_KEY_BOOK_MARGIN,margin);
+    LAYOUT_PUT(NVS_KEY_BOOK_LINE,book_reader_legacy_line(line));
+    LAYOUT_PUT(NVS_KEY_BOOK_LINE_FULL,line-100);
+    LAYOUT_PUT(NVS_KEY_BOOK_PARA,book_reader_legacy_paragraph(paragraph));
+    LAYOUT_PUT(NVS_KEY_BOOK_PARA_FULL,paragraph+100);
+#undef LAYOUT_PUT
+    if(error==ESP_OK)error=nvs_commit(h);
+    nvs_close(h);
+    if(error!=ESP_OK)return false;
+    s_book_px=px;s_book_margin=margin;s_book_line=line;s_book_para=paragraph;
+    return true;
 }
 uint8_t app_settings_shelf_style(void) { return s_shelf_style; }
 void app_settings_set_shelf_style(uint8_t style) {
@@ -1074,7 +1113,7 @@ static bool backup_home_valid(const settings_backup_home_t *v) {
 static unsigned backup_version(const settings_backup_v1_t *backup) {
     if (memcmp(backup->magic, "PICOSET", 7)) return 0;
     unsigned char c = backup->magic[7];
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : 0;
+    return c >= '1' && c <= '9' ? c - '0' : c >= 'A' && c <= 'R' ? c - 'A' + 10 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1153,21 +1192,21 @@ static bool backup_card_ready(void) {
 
 // 备份先写进调用方给的流：TF 卡和内存导出共用同一份字节。
 // Write into a caller-owned stream so the card and memory exports share one byte layout.
-static esp_err_t backup_write_stream(FILE *file, bool rotate) {
+static esp_err_t backup_write_stream(FILE *file, bool rotate, bool compatible) {
     settings_backup_v1_t backup = {0};
-    memcpy(backup.magic, "PICOSETQ", sizeof(backup.magic));
+    memcpy(backup.magic, compatible ? "PICOSETP" : "PICOSETR", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
     f[BK_SYS_SIZE] = s_system_size;
     f[BK_SYS_CONTRAST] = s_system_contrast;
     f[BK_LOCK] = s_lock_style;
-    f[BK_BOOK_PX] = s_book_px;
+    f[BK_BOOK_PX] = compatible && s_book_px>90 ? 90 : s_book_px;
     // v15复用已退役的晃动标志保存关闭抗锯齿；旧备份始终恢复开启。
     // v15 reuses the retired shake flag for disabled AA; older backups always restore AA on.
     f[BK_SHAKE] = s_book_antialias ? 0 : 1;
-    f[BK_FULL_PAGES] = s_reader_full_pages;
-    f[BK_TURN] = s_reader_turn_effect;
+    f[BK_FULL_PAGES] = compatible && s_reader_full_pages == 20 ? 15 : s_reader_full_pages;
+    f[BK_TURN] = compatible && s_reader_turn_effect > 2 ? 0 : s_reader_turn_effect;
     f[BK_POWER_TURN] = s_reader_power_turn;
     // v22：独立入口与沉浸位，保留固定布局与旧版读取。/ Independent entry/immersion bits; retain layout and legacy decoding.
     f[BK_IMMERSIVE] = (uint8_t)s_reader_immersive + 2*(uint8_t)s_reader_default_fullscreen + 4*(uint8_t)s_reader_equal_margins;
@@ -1175,9 +1214,9 @@ static esp_err_t backup_write_stream(FILE *file, bool rotate) {
     // v21把范围与样式封在同一校验字段，旧版本0..2始终跟随文字。
     // V21 seals span and style together; legacy0..2 always follow text.
     f[BK_READING_LINE] = s_book_reading_line + (s_book_rule_full ? 3 : 0);
-    f[BK_LINE_SPACING] = s_book_line;
+    f[BK_LINE_SPACING] = compatible ? book_reader_legacy_line(s_book_line) : s_book_line-100;
     f[BK_MARGIN] = s_book_margin;
-    f[BK_PARAGRAPH] = s_book_para;
+    f[BK_PARAGRAPH] = compatible ? book_reader_legacy_paragraph(s_book_para) : s_book_para+100;
     f[BK_SHELF] = s_shelf_style;
     strlcpy(backup.font, !strcmp(s_font, "builtin") ? "" : s_font, sizeof(backup.font));
     strlcpy(backup.system_font, s_system_font, sizeof(backup.system_font));
@@ -1227,7 +1266,7 @@ static esp_err_t backup_write_stream(FILE *file, bool rotate) {
         memset(&wifi, 0, sizeof(wifi));
         wifi_err = ESP_OK;
     }
-    if (wifi_err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); return wifi_err; }
+    if (wifi_err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); fclose(file); return wifi_err; }
     backup_wifi_seal(&wifi);
     settings_backup_background_t background = {0};
     strlcpy(background.path, s_book_background, sizeof(background.path));
@@ -1260,7 +1299,7 @@ static esp_err_t backup_write_stream(FILE *file, bool rotate) {
     settings_backup_hold_t guide={.action=s_book_rule_saved};
     uint32_t guide_hash=backup_hold_checksum(&guide);
     for(unsigned i=0;i<4;++i)guide.checksum[i]=guide_hash>>(8*i);
-    if(ok)ok=fwrite(&guide,1,sizeof(guide),file)==sizeof(guide);
+    if(ok && !compatible)ok=fwrite(&guide,1,sizeof(guide),file)==sizeof(guide);
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
     // memstream 没有文件描述符；只有卡上的文件需要 fsync。
@@ -1274,16 +1313,24 @@ static esp_err_t backup_write_stream(FILE *file, bool rotate) {
     else if (ok && errno != ENOENT) ok = false;
     if (ok && rename(BACKUP_TEMP, BACKUP_FILE) != 0) ok = false;
     if (!ok && rotated) (void)rename(BACKUP_PREVIOUS, BACKUP_FILE);
-    if (ok && rotated) (void)remove(BACKUP_PREVIOUS);
+    // Retain the last complete interchange generation for corruption recovery.
     if (!ok) { if (rotate) (void)remove(BACKUP_TEMP); return ESP_FAIL; }
     return ESP_OK;
 }
 
+#include "settings_backup_pair.inc"
+
 esp_err_t app_settings_backup_save(void) {
     if (!backup_card_ready()) return ESP_ERR_INVALID_STATE;
-    FILE *file = fopen(BACKUP_TEMP, "wb");
+    FILE *file = fopen(BACKUP_FULL_TEMP, "wb");
     if (!file) return ESP_FAIL;
-    return backup_write_stream(file, true);
+    esp_err_t error = backup_write_stream(file, false, false);
+    if (error != ESP_OK) return error;
+    file = fopen(BACKUP_TEMP, "wb");
+    if (!file) return ESP_FAIL;
+    error = backup_write_stream(file, true, true);
+    if (error == ESP_OK) error = backup_pair_commit();
+    return error;
 }
 
 // 内存导出：调用方拿到 malloc 的整段字节，长度由接收端随会话带过来。
@@ -1297,7 +1344,7 @@ esp_err_t app_settings_sync_export(uint8_t **data, size_t *length) {
     size_t size = 0;
     FILE *file = open_memstream(&buffer, &size);
     if (!file) return ESP_ERR_NO_MEM;
-    esp_err_t error = backup_write_stream(file, false);
+    esp_err_t error = backup_write_stream(file, false, false);
     if (error != ESP_OK || !buffer || !size) { free(buffer); return error == ESP_OK ? ESP_FAIL : error; }
     *data = (uint8_t *)buffer;
     *length = size;
@@ -1329,16 +1376,16 @@ static bool backup_valid(const settings_backup_v1_t *backup) {
     if (f[BK_SLEEP] > APP_SLEEP_OFF || f[BK_PICKUP] > 1 ||
         f[BK_SYS_SIZE] < 100 || f[BK_SYS_SIZE] > 200 || f[BK_SYS_SIZE] % 10 ||
         f[BK_SYS_CONTRAST] < 100 || f[BK_SYS_CONTRAST] > 140 || f[BK_SYS_CONTRAST] % 10 ||
-        f[BK_LOCK] > 3 || f[BK_BOOK_PX] < BOOK_READER_PX_MIN || f[BK_BOOK_PX] > BOOK_READER_PX_MAX ||
+        f[BK_LOCK] > 3 || f[BK_BOOK_PX] < (backup_version(backup)>=27 ? BOOK_READER_PX_MIN : 18) || f[BK_BOOK_PX] > (backup_version(backup)>=27 ? BOOK_READER_PX_MAX : 90) ||
         f[BK_SHAKE] > 1 || (f[BK_FULL_PAGES] != 0 && f[BK_FULL_PAGES] != 5 &&
-                            f[BK_FULL_PAGES] != 10 && f[BK_FULL_PAGES] != 15 &&
+                            f[BK_FULL_PAGES] != 10 && f[BK_FULL_PAGES] != 15 && f[BK_FULL_PAGES] != 20 &&
                             f[BK_FULL_PAGES] != 30) ||
-        f[BK_TURN] > READER_TURN_EFFECT_MAX || f[BK_POWER_TURN] > 1 || f[BK_IMMERSIVE] > (backup_version(backup)>=23 ? 7 : backup_version(backup)>=22 ? 3 : 1) ||
+        f[BK_TURN] > 3 || f[BK_POWER_TURN] > 1 || f[BK_IMMERSIVE] > (backup_version(backup)>=23 ? 7 : backup_version(backup)>=22 ? 3 : 1) ||
         f[BK_TRACKING] > (backup_version(backup)>=20 ? APP_BOOK_TRACK_COUNT-1 : backup_version(backup)==19 ? 20 : 4) || f[BK_READING_LINE] > (backup_version(backup) >= 21 ? 5 : 2) ||
-        f[BK_LINE_SPACING] < 110 || f[BK_LINE_SPACING] > 150 ||
+        (backup_version(backup)>=27 ? f[BK_LINE_SPACING]>200 : f[BK_LINE_SPACING]<110 || f[BK_LINE_SPACING]>150) ||
         f[BK_MARGIN] > 60 ||
-        (backup_version(backup)>=20 ?
-         app_settings_book_paragraph_value(app_settings_book_paragraph_level(f[BK_PARAGRAPH])) != f[BK_PARAGRAPH] :
+        (backup_version(backup)>=27 ? f[BK_PARAGRAPH]>200 || f[BK_PARAGRAPH]%10 : backup_version(backup)>=20 ?
+         book_reader_legacy_paragraph(f[BK_PARAGRAPH]) != f[BK_PARAGRAPH] :
          f[BK_PARAGRAPH] > 75 || f[BK_PARAGRAPH] % 25) ||
         f[BK_SHELF] < 1 || f[BK_SHELF] > 6) return false;
     if (strnlen(backup->books_dir, sizeof(backup->books_dir)) == sizeof(backup->books_dir) ||
@@ -1357,7 +1404,7 @@ static bool backup_file_exists(const char *path, bool directory) {
 // 应用一个只读备份流：卡上的文件与内存里收到的一段字节走同一条校验/写入路径。
 // Apply one read-only backup stream; the card file and the received memory block share
 // this validation and write path.
-static esp_err_t backup_apply_stream(FILE *file) {
+static esp_err_t backup_apply_stream(FILE *file, bool apply) {
     settings_backup_v1_t backup;
     bool ok = fread(&backup, 1, sizeof(backup), file) == sizeof(backup);
     unsigned version = ok ? backup_version(&backup) : 0;
@@ -1451,6 +1498,15 @@ static esp_err_t backup_apply_stream(FILE *file) {
         return ESP_ERR_INVALID_RESPONSE;
     }
 
+    if (!apply) { backup_erase_secret(&wifi, sizeof(wifi)); return ESP_OK; }
+    int restored_line=version>=27 ? (int)backup.flags[BK_LINE_SPACING]+100 : backup.flags[BK_LINE_SPACING];
+    int restored_para=version>=27 ? (int)backup.flags[BK_PARAGRAPH]-100 :
+        app_settings_book_paragraph_value(app_settings_book_paragraph_level(backup.flags[BK_PARAGRAPH]));
+    if(backup.flags[BK_BOOK_PX]<BOOK_READER_PX_MIN)backup.flags[BK_BOOK_PX]=BOOK_READER_PX_MIN;
+    // The wire accepts Pico fast-gray; receivers without that effect use ordinary turns.
+    if (backup.flags[BK_TURN] > READER_TURN_EFFECT_MAX) backup.flags[BK_TURN] = 0;
+    if (backup.flags[BK_FULL_PAGES] == 20) backup.flags[BK_FULL_PAGES] = 15;
+
 #ifdef ESP_PLATFORM
     // 先确认阅读记录可写，再改配置；避免恢复进行一半才遇到延迟挂载内存不足。
     // Preflight storage before changing settings, rather than failing midway through history restore.
@@ -1536,9 +1592,11 @@ static esp_err_t backup_apply_stream(FILE *file) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_RULE, backup.flags[BK_READING_LINE] % 3);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_RULE_FULL, version >= 21 && backup.flags[BK_READING_LINE] >= 3);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_RULE_OFFSET, rule_offset);
-    BACKUP_SET_U8(NVS_KEY_BOOK_LINE, BK_LINE_SPACING);
+    if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_BOOK_LINE,book_reader_legacy_line(restored_line));
+    if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_BOOK_LINE_FULL,restored_line-100);
     BACKUP_SET_U8(NVS_KEY_BOOK_MARGIN, BK_MARGIN);
-    BACKUP_SET_U8(NVS_KEY_BOOK_PARA, BK_PARAGRAPH);
+    if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_BOOK_PARA,book_reader_legacy_paragraph(restored_para));
+    if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_BOOK_PARA_FULL,restored_para+100);
     BACKUP_SET_U8(NVS_KEY_SHELF_STYLE, BK_SHELF);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_SHELF_V22, 1);
     if (background.path[0] && !backup_file_exists(background.path, false)) background.path[0] = 0;
@@ -1589,7 +1647,7 @@ static esp_err_t backup_apply_stream(FILE *file) {
     s_book_px = f[BK_BOOK_PX];
 
     s_reader_full_pages = f[BK_FULL_PAGES];
-    s_reader_turn_effect = f[BK_TURN];
+    s_reader_turn_effect = f[BK_TURN] == 2 ? 3 : f[BK_TURN];
     s_reader_power_turn = f[BK_POWER_TURN];
     s_reader_immersive = (f[BK_IMMERSIVE]&1)!=0;
     s_reader_default_fullscreen = version>=22 && (f[BK_IMMERSIVE]&2)!=0;
@@ -1601,9 +1659,9 @@ static esp_err_t backup_apply_stream(FILE *file) {
     s_book_rule_full = version >= 21 && f[BK_READING_LINE] >= 3;
     s_book_rule_saved=guide.action;
     s_book_rule_offset = rule_offset;
-    s_book_line = f[BK_LINE_SPACING];
+    s_book_line = restored_line;
     s_book_margin = f[BK_MARGIN];
-    s_book_para = f[BK_PARAGRAPH];
+    s_book_para = restored_para;
     s_shelf_style = f[BK_SHELF];
     strlcpy(s_book_background, background.path, sizeof(s_book_background));
     s_home_component = (app_home_component_t)home.component;
@@ -1631,15 +1689,25 @@ static esp_err_t backup_apply_stream(FILE *file) {
 
 esp_err_t app_settings_backup_restore(void) {
     if (!backup_card_ready()) return ESP_ERR_INVALID_STATE;
-    // 依次识别统一名与两板旧名，旧卡或换板后的备份可直接恢复。
-    // Accept the unified name and both legacy names so old cards and moved backups still restore.
-    FILE *file = NULL;
-    for (unsigned i = 0; i < sizeof(BACKUP_RESTORE_FILES) / sizeof(BACKUP_RESTORE_FILES[0]) && !file; ++i)
-        file = fopen(BACKUP_RESTORE_FILES[i], "rb");
-    if (!file) return ESP_ERR_NOT_FOUND;
-    esp_err_t error = backup_apply_stream(file);
-    if (fclose(file) != 0 && error == ESP_OK) error = ESP_FAIL;
-    if (error != ESP_OK) ESP_LOGW(TAG, "configuration restore: %s", esp_err_to_name(error));
+    esp_err_t error = ESP_ERR_NOT_FOUND;
+    for (unsigned i=0;i<sizeof(BACKUP_RESTORE_FILES)/sizeof(BACKUP_RESTORE_FILES[0]);++i) {
+        const char *path=BACKUP_RESTORE_FILES[i];
+        FILE *file=fopen(path,"rb");
+        if(!file)continue;
+        error=backup_apply_stream(file,false);
+        if(error!=ESP_OK || fseek(file,0,SEEK_SET)) {fclose(file);error=ESP_ERR_INVALID_RESPONSE;continue;}
+        if(backup_pair_matches(path)) {
+            FILE *full=fopen(BACKUP_FULL,"rb");
+            if(full) {
+                bool valid=backup_apply_stream(full,false)==ESP_OK && fseek(full,0,SEEK_SET)==0;
+                if(valid){fclose(file);file=full;}else fclose(full);
+            }
+        }
+        error=backup_apply_stream(file,true);
+        if(fclose(file)&&error==ESP_OK)error=ESP_FAIL;
+        break;
+    }
+    if(error!=ESP_OK)ESP_LOGW(TAG,"configuration restore: %s",esp_err_to_name(error));
     return error;
 }
 
@@ -1649,7 +1717,7 @@ esp_err_t app_settings_sync_import(const uint8_t *data, size_t length) {
     if (!data || !length) return ESP_ERR_INVALID_ARG;
     FILE *file = fmemopen((void *)data, length, "rb");
     if (!file) return ESP_ERR_NO_MEM;
-    esp_err_t error = backup_apply_stream(file);
+    esp_err_t error = backup_apply_stream(file, true);
     if (fclose(file) != 0 && error == ESP_OK) error = ESP_FAIL;
     if (error != ESP_OK) ESP_LOGW(TAG, "configuration restore: %s", esp_err_to_name(error));
     return error;

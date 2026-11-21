@@ -10,6 +10,13 @@ ROOT = Path(__file__).resolve().parents[1]
 def function(name, path):
     text = path.read_text()
     scan = re.sub(r'//[^\n]*|/\*[\s\S]*?\*/|"(?:\\.|[^"\\])*"', lambda m: ' ' * len(m[0]), text)
+    # 属性不属于函数名，按括号深度遮罩以兼容optimize等嵌套参数。
+    # Attributes are not part of the name; mask balanced arguments such as nested optimize options.
+    for attribute in reversed(list(re.finditer(r'\b__attribute__\s*\(', scan))):
+        begin=attribute.start();at=attribute.end();depth=1
+        while depth:
+            depth+=(scan[at]=='(')-(scan[at]==')');at+=1
+        scan=scan[:begin]+' '*(at-begin)+scan[at:]
     start = re.search(r'^(?:static )?(?:[A-Za-z_]\w*(?:\s+|\s*\*\s*))+' + name + r'\([^;{}]*?\)\s*\{', scan, re.M)
     assert start, name
     at, depth = start.end(), 1

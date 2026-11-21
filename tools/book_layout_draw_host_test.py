@@ -63,7 +63,7 @@ static int line_fit_height(int px,int pitch){(void)px;return pitch;}
 static int line_page_height(int px,int pitch,size_t off,int64_t top,int height_limit){(void)off;(void)top;(void)height_limit;return line_fit_height(px,pitch);}
 int book_layout_page_top_padding(size_t page){(void)page;return 0;}
 int book_layout_page_content_height(size_t page){(void)page;return s_rect.height;}
-static int gap_for(int height,bool heading){(void)height;(void)heading;return 0;}
+static int gap_for(int height,bool heading,int px){(void)height;(void)heading;(void)px;return 0;}
 static int ttf_ascender_px(int px){return px;}
 int test_guide_segments,test_guide_first_x,test_guide_first_y,test_guide_second_y,test_guide_last_y,test_guide_height;
 uint8_t test_guide_gray;

@@ -44,20 +44,23 @@ bool app_sleep_media_pending(void);
 void app_sleep_discard_media_io(void);
 /// 主动拼贴锁屏先灭灯并显示圆锁，保留后续短按。/ Manual collage feedback retains later wake clicks.
 void app_lock_feedback(EpdiyHighlevelState *hl);
-/// 定时关机必须已有成功保存的恢复点。/ Require a persisted resume checkpoint before timed lock power-off.
-void app_lock_set_resume_ready(bool ready);
 /// 在硬件初始化前锁存深睡电源键唤醒原因。/ Capture a deep-sleep power wake before hardware initialization.
 void app_lock_capture_boot_wakeup(void);
 /// 深睡保留物理锁图，卡就绪后恢复真实参考；NULL在解锁绘制前取消。
 /// Retain physical lock art across deep boot and restore references when media is ready; NULL cancels before unlock drawing.
 bool app_lock_resume_frame(EpdiyHighlevelState *hl);
 #else
+/// IOE唤醒后的短暂稳定期不能冒充拔卡。/ A short IOE wake settling period is not card removal.
+bool app_sleep_media_settling(void);
 /// 登记常开供电的触摸与加速度计，并准备 CPU 浅睡保持区。/ Bind always-on touch/accelerometer and prepare CPU light-sleep retention.
 void app_sleep_bind(cst836u_handle_t tp, sc7a20h_handle_t acc);
 /// 深睡保持原面板画面，TF就绪后恢复真实参考；不等待挂载、不改解锁规则。
 /// Retain deep-boot panel art and restore true references when media is ready; NULL cancels before application rendering.
 bool app_lock_resume_frame(EpdiyHighlevelState *hl);
 #endif
+
+/// 定时关机必须已有成功保存的恢复点。/ Require a persisted resume checkpoint before timed lock power-off.
+void app_lock_set_resume_ready(bool ready);
 
 void enter_lock_and_sleep(
     EpdiyHighlevelState* hl, int64_t* ignore_until_ms, sc7a20h_handle_t acc, cst836u_handle_t touch,

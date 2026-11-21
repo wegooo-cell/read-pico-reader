@@ -7,6 +7,9 @@
  * 冻结：目标画面不得丢失；白色基准只作用于后缓冲。
  * Frozen: Preserve the requested picture; the white baseline affects only the back buffer.
  */
+#ifndef TEST_RAILS_IDLE_MS
+#define TEST_RAILS_IDLE_MS 8000
+#endif
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -350,9 +353,9 @@ int main(void) {
     rails_idle_check(20099); assert(drive_releases == old_releases + 1);
     rails_idle_check(20100); assert(!drive_active && drive_releases == old_releases + 2);
     unsigned old_offs = poweroffs;
-    rails_idle_check(27999); assert(poweroffs == old_offs && drive_releases == old_releases + 2);
-    rails_idle_check(28000); assert(poweroffs == old_offs + 1);
-    rails_idle_check(28001); assert(poweroffs == old_offs + 1);
+    rails_idle_check(20000+TEST_RAILS_IDLE_MS-1); assert(poweroffs == old_offs && drive_releases == old_releases + 2);
+    rails_idle_check(20000+TEST_RAILS_IDLE_MS); assert(poweroffs == old_offs + 1);
+    rails_idle_check(20000+TEST_RAILS_IDLE_MS+1); assert(poweroffs == old_offs + 1);
     assert(draws == old_draws && clears == old_clears);
     assert(!memcmp(front, target, FB_BYTES) && !memcmp(back, target, FB_BYTES));
     now_us = INT64_C(3640000000);
@@ -362,14 +365,14 @@ int main(void) {
     old_offs = poweroffs; old_releases = drive_releases;
     rails_idle_check(3640049); assert(drive_releases == old_releases && poweroffs == old_offs);
     rails_idle_check(3640050); assert(drive_active && poweroffs == old_offs);
-    rails_idle_check(3647999); assert(poweroffs == old_offs);
-    rails_idle_check(3648000); assert(!drive_active && poweroffs == old_offs + 1);
+    rails_idle_check(3640000+TEST_RAILS_IDLE_MS-1); assert(poweroffs == old_offs);
+    rails_idle_check(3640000+TEST_RAILS_IDLE_MS); assert(!drive_active && poweroffs == old_offs + 1);
     old_releases = drive_releases;
-    rails_idle_check(3658000); assert(drive_releases == old_releases && poweroffs == old_offs + 1);
+    rails_idle_check(3640000+TEST_RAILS_IDLE_MS+10000); assert(drive_releases == old_releases && poweroffs == old_offs + 1);
     release_failures = 0;
     assert(draws == old_draws && clears == old_clears && !ota_display_depth);
     assert(!memcmp(front, target, FB_BYTES) && !memcmp(back, target, FB_BYTES));
-    puts("reader idle rails: eight-second power-off and neutral-write fault timeout passed");
+    printf("reader idle rails: %d-ms power-off and neutral-write fault timeout passed\n",TEST_RAILS_IDLE_MS);
     puts("idle drive release: no-change output, bounded I2C retry, no extra scans and unchanged HV burst timeout passed");
     puts("display recovery: front retained, locked blind panel repair, single final frame, retry/failure recovery and bulk prefill passed");
 }

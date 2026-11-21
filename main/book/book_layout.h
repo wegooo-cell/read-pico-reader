@@ -39,8 +39,8 @@ void book_layout_set_chapter_viewport(int height, int top_padding);
 int book_layout_page_content_height(size_t page);
 /// Position of the visible body relative to the layout origin, including chrome and continuation balancing.
 int book_layout_page_top_padding(size_t page);
-/// 设置行高百分比与段后距离百分比，重排时生效。/ Set line height and paragraph gap percentages for the next layout.
-void book_layout_set_spacing(unsigned line_percent, unsigned paragraph_percent);
+/// 设置100..300%行高与-100..100%段后距离，负段距最紧不重叠字格。/ Set 100..300% line height and -100..100% paragraph gap; negative gaps stop at touching type cells.
+void book_layout_set_spacing(unsigned line_percent, int paragraph_percent);
 /// 正文额外字间距为 -15..+15 像素。/ Extra body tracking is -15..+15 pixels.
 void book_layout_set_typography(int tracking_px);
 /// 普通正文首行缩进 0..3 字；不改变标题及居中、右对齐块。/ Indent ordinary body paragraphs by 0..3 em; keep headings and aligned blocks unchanged.

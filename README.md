@@ -3,7 +3,7 @@
 > **Licensing:** New original material explicitly marked with the [Personal Study License](licenses/kiikoread-Personal-Study-1.0.txt) permits personal study and prohibits commercial use without separate written permission. **This policy does not relicense rc93 or earlier code/binaries, remove existing Apache-2.0 rights, or override third-party licenses.** See [LICENSE](LICENSE) for the exact scope.
 
 The public project name is **kiikoread**. The website calls the device an ink-screen reader; the GitHub URL and legacy update/backup filenames remain compatible. Firmware UI branding also uses kiikoread. The bright-white website includes screen previews, features, version selection, web USB flashing, Bin downloads and an [online user manual](flash/manual.html). Stage it with `python3 tools/stage_public_flash.py _site`; both GitHub Pages and Cloudflare Pages can serve `_site`. The PDF can be regenerated from `docs/user-manual.zh-CN.json` with `tools/build_user_manual.py --font /path/to/a/static-CJK.ttf` (Python ReportLab required).
-Official firmware binaries are stored in [GitHub Releases](https://github.com/wegooo-cell/read-pico-reader/releases). The verified site staging step retrieves the matching assets; do not publish the raw flash directory. Device OTA checks `https://kiikoread.com/update.json` first, with the existing GitHub Pages feed as a fallback. Stage the primary site with `python3 tools/stage_public_flash.py _site --ota-origin https://kiikoread.com`; keep the default origin for GitHub Pages.
+Official firmware binaries are stored in [GitHub Releases](https://github.com/wegooo-cell/read-pico-reader/releases). The verified site staging step retrieves the matching assets; do not publish the raw flash directory. New firmware checks the existing GitHub Pages OTA feed first and retains the official website fallback; already-published clients keep their built-in order. Stage the primary site with `python3 tools/stage_public_flash.py _site --ota-origin https://kiikoread.com`; keep the default origin for GitHub Pages.
 
 
 [简体中文](README.zh-CN.md) · [日本語](README.ja-JP.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
@@ -12,9 +12,9 @@ An independent reading firmware with publicly available source for the **MindRes
 
 The current interface has Home, Bookshelf, Files, and Settings. It reads EPUB and TXT books from a TF card, remembers reading progress, and supports Wi-Fi, hotspot, or USB file transfer. The online flasher installs the same firmware image as the local `flash/` bundle.
 
-## Current release: rc99
+## Current releases: PICO rc110 / S31 rc117
 
-Restore system text antialiasing, improve charging display, add one/two-press wake and icon-set lock/cancel artwork, trim reading guides to text spans and clean reader entry. Based on 51e7d8d; keep the original rc98 for rollback. See the [changelog](docs/CHANGELOG.md).
+Separate Books directories from enrolled books, choose imports by real folder, and restart enrollment by clearing only shelf membership. Management uses13 list rows or4×3 covers, page-scoped selection, strict sorting and bounded author text. Reading supports20–120px type,100–300% line height and−100–100% paragraph gaps in10% steps; fixes retain progress, compatible backups and safe resume. Pico updates metadata independently; S31 improves ripple/whitening and long-press startup. Use web USB installation for the matching S31 bootloader. Existing settings, books and release history are retained. See the [changelog](docs/CHANGELOG.md).
 
 ### Settings, storage and lock fixes
 
@@ -97,7 +97,7 @@ Automatic sleep and manual lock both use the selected lock style. PIN background
 
 TXT/EPUB books opened from any TF-card directory appear on the shelf after progress is saved, including on cached returns without a rescan. Bookshelf management → Remove from shelf hides selected books while keeping their files, progress, and favorites. Reading a removed book puts it back. Removal state persists and is included in configuration backups.
 
-Bookshelf management follows the file browser: search, a book count, **Shelf order**, Select, and list/grid switching. Tap a book to read; hold a book or tap Select to reveal circular selection marks and Delete books / Clear progress / Remove from shelf / Back. Back leaves selection; paging, sorting and layout changes retain selected book identities. The pager jumps to the first/previous/next/last page. Lists show five books per page and grids six; destructive actions retain confirmation.
+Management separates **Books directories** (real folders, filename order and rename/delete/move/import actions) from **enrolled books** (display-name edits, removal, progress clearing and four strict sort rules). Lists show13 rows without covers; grids show4×3 covers. Search uses a header icon, selection/cancellation applies only to the displayed page, and authors are clipped beside titles. The bottom circle returns to Bookshelf. Rescan clears shelf membership before offering all/manual import; source files and progress are retained. Folder imports recurse, cancellation never enrolls partial results, and failed writes remain retryable.
 
 TXT books and EPUB books without a valid embedded cover receive a deterministic grayscale cover shared by the shelf, home, and ticket lock screen. A valid EPUB cover takes priority. Generated covers are cached under `.readpico/covers` on the TF card and rebuilt when the file or title changes.
 

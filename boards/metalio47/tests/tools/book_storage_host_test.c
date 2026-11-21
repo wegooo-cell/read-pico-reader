@@ -145,11 +145,24 @@ int main(void){
     listed=0;assert(book_progress_list(record_list_visit,&listed)==ESP_OK&&listed==1);
     assert(book_progress_forget(sd)==ESP_OK&&book_progress_forget(flash)==ESP_OK);
     listed=0;assert(book_progress_list(record_list_visit,NULL)==ESP_OK&&listed==0);
-    for(int px=18;px<=90;++px){
+    for(int px=20;px<=120;++px){
         p.px=(uint8_t)px;p.pct=83;assert(book_progress_save(sd,&p)==ESP_OK);
         assert(book_progress_load(sd,p.file_size,&q)&&q.px==px);
         listed=0;assert(book_progress_list(record_list_visit,NULL)==ESP_OK);
         assert(listed==1&&listed_px==px&&!strcmp(listed_paths[0],sd));
     }
     puts("book progress: v1/v2, sequence, collision, two roots, NVS-full, partial forget and retry passed");
+    const char *moved="/sdcard/Elsewhere/moved.txt";
+    assert(book_progress_load(sd,p.file_size,&q));uint32_t before_move=q.last_open_s;
+    assert(book_progress_copy_to(sd,moved,p.file_size)==ESP_OK&&sequence==before_move);
+    book_progress_t copied;assert(book_progress_load(moved,p.file_size,&copied));
+    assert(copied.last_open_s==before_move&&copied.byte_off==q.byte_off&&copied.pct==q.pct);
+    blob_failure=ESP_FAIL;assert(book_progress_copy_to(sd,"/sdcard/Elsewhere/failed-move.txt",p.file_size)==ESP_FAIL);blob_failure=0;
+    assert(book_progress_load(sd,p.file_size,&copied)&&copied.last_open_s==before_move&&copied.byte_off==q.byte_off);
+    p.px=48;p.byte_off++;assert(book_progress_save(sd,&p)==ESP_OK);
+    assert(book_progress_copy_to(sd,moved,p.file_size)==BOOK_PROGRESS_MOVE_CONFLICT);
+    assert(book_progress_load(moved,p.file_size,&copied)&&copied.byte_off==q.byte_off&&copied.last_open_s==before_move);
+    assert(book_progress_forget(moved)==ESP_OK);
+    puts("PASS: moving progress preserves original recent order, source recovery record and position after failed writes");
+
 }

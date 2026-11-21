@@ -120,7 +120,7 @@ with tempfile.TemporaryDirectory(prefix='reader-header-') as temp:
     folder = Path(temp)
     (folder / 'epdiy.h').write_text('#pragma once\ntypedef struct{int x,y,width,height;}EpdRect;\n')
     (folder / 'test.c').write_text(unit)
-    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function',
+    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function', '-Wno-unknown-attributes',
                     '-fsanitize=address,undefined', '-I' + str(folder), '-I' + str(ROOT / 'main/ui'),
                     str(folder / 'test.c'), '-o', str(folder / 'test')], check=True)
     subprocess.run([str(folder / 'test')], check=True)

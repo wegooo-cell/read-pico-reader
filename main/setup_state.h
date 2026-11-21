@@ -12,3 +12,8 @@ bool app_setup_english(void);
 esp_err_t app_setup_set_english(bool english);
 /// 跳过与完成都需提交成功才退出，失败保留引导。/ Both Skip and Finish leave only after a successful commit.
 esp_err_t app_setup_finish(void);
+
+/// Fresh onboarding does not adopt a previous card's bookshelf/index until explicit enrollment.
+bool app_setup_library_pending(void);
+/// Clear only after checked library commit; failures keep the first-import boundary.
+esp_err_t app_setup_library_complete(void);

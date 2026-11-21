@@ -956,14 +956,14 @@ static enum EpdDrawError reader_gl37_turn_unlocked(EpdiyHighlevelState* hl, EpdR
         : background ? DISPLAY_READER_GRAY_BACKGROUND
         : bands == 1 ? DISPLAY_READER_GRAY_TEXT : DISPLAY_READER_GRAY_WATER_TAIL;
     if (bands == 1) return reader_gray_present_unlocked(hl, area, profile, false);
-    const EpdWaveform *wave = display_reader_gray_waveform(profile);
+    const EpdWaveform *wave = display_reader_ripple_waveform(profile);
     if (!wave) return reader_gray_present_unlocked(hl, area, DISPLAY_READER_GRAY_PAGE, true);
     read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FAST);
     epd_lcd_set_prefill_lines(s_bulk_io ? 127 : 64);
     epd_poweron();
-    // 阅读折中档：四带、尾两带同拍，37相共39拍；不改每像素波形、节拍或供屏时序。
-    // Reader compromise: four bands with a paired tail,37 phases over39 ticks; retain each pixel's waveform, pacing and scan timing.
-    enum EpdDrawError result = e0470_reader_ripple_with_waveform(hl, area, dir, wave, 4);
+    // 用户2026-11-20：四带每三拍启动，先擦白再重建灰阶，尾两带同拍；只限阅读水波纹。
+    // User2026-11-20: reader-only four bands spaced by three ticks, white erase then gray rebuild, with the final pair together.
+    enum EpdDrawError result = e0470_reader_ripple_with_waveform_timed(hl, area, dir, wave, 4, 3);
     use_scan_for(&E0470_WAVEFORM, MODE_GL16);
     rails_keepalive();
     if (result == EPD_DRAW_NO_PHASES_AVAILABLE)

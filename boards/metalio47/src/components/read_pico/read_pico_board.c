@@ -14,22 +14,25 @@
 // Reader GL16 builds default to -1500mV; boot still prioritizes valid local calibration.
 static int vcom=1500;
 static read_pico_i2c_census_t census;
-void read_pico_epd_restore_lcd(void) {
+// Set inactive latches/directions before releasing holds or powering the display rail.
+static void panel_control_idle(void) {
     const int pins[]={18,19,35,37};
-    for (unsigned i=0;i<sizeof(pins)/sizeof(pins[0]);i++) {
-        gpio_hold_dis(pins[i]); gpio_set_level(pins[i],0); gpio_set_direction(pins[i],GPIO_MODE_OUTPUT);
+    for(unsigned i=0;i<sizeof(pins)/sizeof(pins[0]);++i) {
+        gpio_set_level(pins[i],0);
+        gpio_set_direction(pins[i],GPIO_MODE_OUTPUT);
+        gpio_hold_dis(pins[i]);
     }
+}
+void read_pico_epd_restore_lcd(void) {
+    panel_control_idle();
     lcd_bus_config_t bus={.data={8,9,10,11,12,13,14,15},.clock=16,.ckv=40,.leh=17,.start_pulse=4,.stv=35};
     read_pico_epd_scan_t scan; read_pico_epd_scan(20,READ_PICO_EPD_SCAN_FULL,&scan);
     read_pico_epd_init_lcd(&bus,8,1216,684,&scan);
 }
 static void board_init(uint32_t width) {
     (void)width;
+    panel_control_idle();
     ESP_ERROR_CHECK(metalio_hw_init());
-    const int pins[]={18,19,35,37};
-    for (unsigned i=0;i<sizeof(pins)/sizeof(pins[0]);i++) {
-        gpio_hold_dis(pins[i]); gpio_set_level(pins[i],0); gpio_set_direction(pins[i],GPIO_MODE_OUTPUT);
-    }
     lcd_bus_config_t bus={.data={8,9,10,11,12,13,14,15},.clock=16,.ckv=40,.leh=17,.start_pulse=4,.stv=35};
     read_pico_epd_scan_t scan; read_pico_epd_scan(20,READ_PICO_EPD_SCAN_FULL,&scan);
     read_pico_epd_init_lcd(&bus,8,1216,684,&scan);

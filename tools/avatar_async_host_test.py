@@ -72,7 +72,7 @@ uint8_t pixels[82*82];
  puts("PASS: real avatar entry/poll does no file IO or joining; single worker/two bounded sizes, fast repeat navigation, stale-page/media results discarded, unmount ownership and OOM/decode/task failures safe");
 }
 '''
-if (root/'.kiiko-source-view.json').exists() and 'metalio47' in (root/'.kiiko-source-view.json').read_text():
+if (root/'.kiiko-source-view.json').exists() and __import__('json').loads((root/'.kiiko-source-view.json').read_text())['board']=='metalio47':
  unit=unit.replace(' puts("PASS:', ' assert(jpeg_cancels>0);\n puts("PASS:')
 with tempfile.TemporaryDirectory(prefix='kiiko-avatar-') as folder:
  c=Path(folder)/'test.c';binary=Path(folder)/'test';c.write_text(unit)

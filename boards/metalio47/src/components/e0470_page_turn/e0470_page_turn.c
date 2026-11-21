@@ -8,8 +8,8 @@
  *       保留原始48相表及扫描/节拍下限。
  * English: S31 uses eight bands, one per tick: 55 ticks with the default full 48
  *          phases (44 for the trimmed 37), retaining scan timing and minimum pacing.
- * 普通文字单带整轮提交；阅读专用水波纹用8带，尾部两带同时启动，22相共28拍。
- * Ordinary text batches a single band; reader-only ripple uses eight bands with the final pair launched together, totaling28 ticks for22 phases.
+ * 用户2026-11-20：阅读水波纹每三拍启动一带，末两带同拍；普通/主页节奏保持。
+ * User2026-11-20: reader ripple launches every three ticks, pairing its final two bands; ordinary/main pacing remains.
  * 保留每个像素的完整有效驱动、准备相与尾相；主页及侧滑仍按原节拍逐带启动。
  * Retain every pixel's complete active, setup and tail phases; main pages and edge-back retain their original stagger schedule.
  */
@@ -305,7 +305,7 @@ static int text_leading_holds(const EpdWaveformPhases* gl, const EpdiyHighlevelS
 
 static enum EpdDrawError page_turn_run(EpdiyHighlevelState* hl, EpdRect area,
     e0470_turn_dir_t dir, const EpdWaveform* waveform, unsigned band_count,
-    bool compact, bool text_skip, bool paired_tail) {
+    bool compact, bool text_skip, bool paired_tail, unsigned launch_ticks) {
     if (hl == NULL) return EPD_DRAW_NO_PHASES_AVAILABLE;
     if (band_count < (compact ? 1u : 2u) || band_count > TURN_BANDS_MAX) return EPD_DRAW_INVALID_CROP;
     if (dir > E0470_TURN_BTT) dir = E0470_TURN_RTL;
@@ -319,7 +319,7 @@ static enum EpdDrawError page_turn_run(EpdiyHighlevelState* hl, EpdRect area,
     const int nphase = gl->phases;
     // 紧凑模式供阅读和快速主页共用；仅提前后续条带的启动，不跳过每个像素的任何相位。
     // Reading and fast main pages share compact launches; start later bands sooner without skipping any pixel phase.
-    const int launch_step = compact ? 1 : (nphase + bands - 2) / (bands - 1);
+    const int launch_step = compact ? (int)launch_ticks : (nphase + bands - 2) / (bands - 1);
     // 阅读末两带共用启动时刻，避免最后一窄带独自拖尾；每带仍输出全部相位。
     // Reader's final pair shares a launch, avoiding an isolated narrow tail while retaining every phase per band.
     const int last_launch = bands - 1 - (paired_tail && bands > 1 ? 1 : 0);
@@ -445,22 +445,28 @@ static enum EpdDrawError page_turn_run(EpdiyHighlevelState* hl, EpdRect area,
 }
 
 enum EpdDrawError e0470_page_turn(EpdiyHighlevelState* hl, EpdRect area, e0470_turn_dir_t dir) {
-    return page_turn_run(hl, area, dir, &E0470_WAVEFORM, TURN_DEFAULT_BANDS, true, false, false);
+    return page_turn_run(hl, area, dir, &E0470_WAVEFORM, TURN_DEFAULT_BANDS, true, false, false, 1);
 }
 
 enum EpdDrawError e0470_page_turn_with_waveform(EpdiyHighlevelState* hl, EpdRect area,
     e0470_turn_dir_t dir, const EpdWaveform* waveform, unsigned band_count) {
-    return page_turn_run(hl, area, dir, waveform, band_count, false, false, false);
+    return page_turn_run(hl, area, dir, waveform, band_count, false, false, false, 1);
 }
 
 enum EpdDrawError e0470_page_turn_with_waveform_compact(EpdiyHighlevelState* hl, EpdRect area,
     e0470_turn_dir_t dir, const EpdWaveform* waveform, unsigned band_count) {
-    return page_turn_run(hl, area, dir, waveform, band_count, true, false, false);
+    return page_turn_run(hl, area, dir, waveform, band_count, true, false, false, 1);
 }
 
 enum EpdDrawError e0470_reader_ripple_with_waveform(EpdiyHighlevelState* hl, EpdRect area,
     e0470_turn_dir_t dir, const EpdWaveform* waveform, unsigned band_count) {
-    return page_turn_run(hl, area, dir, waveform, band_count, true, false, true);
+    return page_turn_run(hl, area, dir, waveform, band_count, true, false, true, 1);
+}
+
+enum EpdDrawError e0470_reader_ripple_with_waveform_timed(EpdiyHighlevelState* hl, EpdRect area,
+    e0470_turn_dir_t dir, const EpdWaveform* waveform, unsigned band_count, unsigned launch_ticks) {
+    if(launch_ticks<1 || launch_ticks>8)return EPD_DRAW_INVALID_CROP;
+    return page_turn_run(hl, area, dir, waveform, band_count, true, false, true, launch_ticks);
 }
 
 static enum EpdDrawError text_turn(EpdiyHighlevelState* hl, EpdRect area,

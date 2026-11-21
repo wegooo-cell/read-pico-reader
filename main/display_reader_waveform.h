@@ -18,6 +18,14 @@ const EpdWaveform* display_reader_fast_text_waveform(void);
 /// 两板普通翻页分别派生本板波形：Pico等灰保持、变白补四相；S31沿Moku GL37补六相目标白。
 /// Ordinary uses board-native profiles: Pico holds equal grays and adds four changed-white phases; S31 retains Moku GL37 plus six white-target phases.
 const EpdWaveform* display_reader_soft_turn_waveform(void);
+#if !KIIKO_BOARD_METALIO47
+/// Pico快速灰阶翻页：官方GRAY8 GL16 30相加4相整屏擦白；构造失败时回落到普通翻页波形。
+/// Pico fast-gray turns: official GRAY8 GL16 (30 phases) plus four whole-panel white phases; falls back to the ordinary turn.
+const EpdWaveform* display_reader_gray8_turn_waveform(void);
+#endif
+/// 只把目标为白的像素再补白，其他像素保持；用于翻页后状态栏/进度条的抗积灰。
+/// Push only white targets again and hold everything else; anti-ghost touch for status/footer bars.
+const EpdWaveform* display_reader_white_push_waveform(void);
 #if KIIKO_BOARD_METALIO47
 /// S31阅读独立GL16表；不影响其他页面或PICO。/ Reader-private S31 GL16 profiles; other pages and PICO remain independent.
 typedef enum {
@@ -33,6 +41,8 @@ typedef enum {
 } display_reader_gray_profile_t;
 /// 从原厂GL48派生；无有效表返回NULL，调用方保留完整灰阶回退。/ Derive from vendor GL48; NULL requests the caller's full-gray fallback.
 const EpdWaveform *display_reader_gray_waveform(display_reader_gray_profile_t profile);
+/// S31 ripple: an erased white band followed by the unchanged white-origin gray sequence.
+const EpdWaveform *display_reader_ripple_waveform(display_reader_gray_profile_t profile);
 /// S31普通纯文字整页翻页：白底随新字同步补白。 / S31 full-page ordinary text turns maintain blank white during text drive.
 const EpdWaveform* display_reader_ordinary_turn_waveform(void);
 /// S31纯文字翻页：白→中灰改为白侧直接推黑（0.40标定），灰边与黑白端点同段出现。

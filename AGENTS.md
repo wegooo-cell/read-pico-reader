@@ -8,6 +8,20 @@ Agent entry for this tree. Humans can read it too. Product overview, hardware, p
 
 Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Taking over an in-flight task: read [docs/HANDOFF.md](docs/HANDOFF.md) first.
 
+## 2026-11-21 · 书架、导入与阅读更新 / Library and reader release
+
+用户授权同步当前双板固件到GitHub源码、正式Release、官网在线刷机/USB/TF下载和既有Pages OTA。发布PICO RC110、S31 RC117，保留原RC109/RC116及历史原字节；PR99保持关闭且不纳入，保留已验证的PR100/102/103及Moku98/101/104–106。此授权取代本轮仅本地/不发布限制，不要求重刷设备。
+The user authorizes source, Releases, web/USB/TF and existing Pages OTA publication as Pico RC110/S31 RC117, preserving immutable history and excluding closed PR99. Retain verified PR100/102/103 and Moku98/101/104–106; this supersedes local-only constraints without requesting another device flash.
+
+书架管理分为Books目录和已上架书籍；前者按真实目录/文件名显示，不使用书架排序，后者严格按所选排序、收藏不置顶。管理/手动导入13行或4×3封面，本页全选/取消不影响其他页选择；作者限宽不覆盖书名，导入页不显示进度。重扫先保存清空上架成员再重新选书，失败保留原成员；不删源书/进度。关闭/取消首次导入不完成入架，未导入时返回书架重弹；成功主动开书自动入架。
+Books directories follow real hierarchy/name order without shelf sorting; enrolled books honor the selected sort without favorite pinning. Use13 rows or4×3 covers, page-scoped selection, bounded authors and no import progress. Rescan persists empty membership before reselection, retaining the old library on failure and preserving books/progress. Dismissal/cancellation leaves initial enrollment pending; successful deliberate opening enrolls a book.
+
+两板字号20..120，行高100..300%（最小字格紧挨），段距−100..100%且10%一步，失败保留旧排版/位置。标准TF设置备份保留旧格式兼容投影、精确完整配置配对存储；保存失败不当作零进度或允许丢失后断电。
+Both boards use20..120px type,100..300% line height with touching cells at minimum, and−100..100% paragraph gaps in10% steps. Failed layout/save operations preserve old state. Retain compatible standard TF backups plus paired full settings; failures never masquerade as zero progress or permit losing state on power-off.
+
+PICO普通/水波纹/快速三入口，快速沿用灰阶ID3、旧ID2迁移为3；上下信息栏按实际变化独立局刷并即时更新数字，首页重新读取真实进度，读取失败保留并重试。S31保留原模式，水波纹使用已验证的条带/擦白时序；配套引导程序在应用加载前稳定面板引脚并采样物理开机键，只在核实POWERON证据后略过重复短按门禁，不绕过PIN，不改原厂LUT/VCOM/eFuse。
+Pico offers Ordinary/Ripple/Fast, retaining grayscaleID3 and migrating oldID2. Update changed metadata independently and reread true Home progress with retries. Retain S31 modes and verified ripple/whitening; the matching bootloader stabilizes panel pins and samples physical power-on evidence before loading. Only verified POWERON can skip the redundant short-press gate; retain PIN, factory LUTs, VCOM and eFuses.
+
 ## S31阅读GL16 / S31 reader GL16
 
 用户2026-11-19已实测确认进度保存、底栏章名及配置恢复均正常，追加授权发布S31 RC116到官网/在线刷机与联网OTA，沿用RC115更新日志，导出Cloudzao 0x0单文件全量BIN；保持PICO正式RC109原字节与RC115历史归档。
@@ -127,6 +141,8 @@ User2026-11-01 explicitly authorizes online publication: release Pico rc104/S31 
 User2026-11-01 follow-up: align Pico ordinary metadata with ripple/Fast BW. Ordinary text/image turns present the reading-content region, excluding top status/title and bottom chapter/progress; update the footer after800ms idle. This supersedes PR55/62's Pico metadata scan extent, retaining body waveforms, manual/periodic/entry cleanup and S31 behavior.
 用户2026-11-18改为：Pico普通翻页整屏推白，状态栏与页脚一起擦，重推黑移到波形最后一段；图文页仍按其原范围。
 User2026-11-18 revision: Pico ordinary turns push white across the whole panel, metadata included, with the black re-drive last in the waveform; image pages retain their previous extent.
+用户2026-11-19：每次翻页只把状态栏与进度条的白底再退白，其他像素保持不动。
+User2026-11-19: each turn only re-whitens the status and progress bar backgrounds and holds every other pixel.
 
 用户2026-11-01追加：底部上滑回到非全屏并显示底部工具栏；顶部先显示时间、签名、电量，下一行恢复返回键、书名及收藏操作。进入书籍的非全屏也使用此布局；上方返回/书名/收藏与底部工具栏共同出现，进入全屏共同收起，所有工具栏入口先退出全屏。全屏关闭沉浸时仍只有状态栏，不显示书名。
 User2026-11-01 follow-up: bottom swipes return to standard mode with bottom tools, a time/signature/battery row, then Back/book title/Favorite. Standard book entry shares this layout. Back/title/Favorite and bottom tools appear together and hide together on fullscreen entry; every tools entry first leaves fullscreen. Nonimmersive fullscreen retains its status-only header.

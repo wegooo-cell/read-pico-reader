@@ -138,10 +138,15 @@ static uint32_t pair_code(uint32_t nonce, const uint8_t *sender, const uint8_t *
 }
 
 static void state_set(kiiko_sync_state_t state, esp_err_t error) {
+    const kiiko_sync_state_t previous = s_state;
     s_state = state;
     taskENTER_CRITICAL(&s_lock);
     s_status.state = state;
     s_status.error = error;
+    // 记下失败发生的阶段，界面据此区分“没找到设备/传输断/写入失败”。
+    // Remember which phase failed so the UI can tell "no peer / link dropped / apply failed" apart.
+    if (state == KIIKO_SYNC_FAILED && previous != KIIKO_SYNC_FAILED)
+        s_status.failed_from = previous;
     s_status.role = s_role;
     taskEXIT_CRITICAL(&s_lock);
     if (state == KIIKO_SYNC_DONE) ESP_LOGI(TAG, "sync done");
@@ -375,6 +380,16 @@ static void handle_frame(const sync_rx_t *item) {
             peer_add(s_peer, false);
             state_set(KIIKO_SYNC_PAIRED, ESP_OK);
             s_next_tx_ms = now;
+        } else if (s_state == KIIKO_SYNC_PAIRED) {
+            // 对端重开一次会换随机数；已配对时跟着更新码，避免旧码让对方判成“被拒绝”。
+            // The peer regenerates its nonce when restarted; adopt it while paired so the old code
+            // does not make the sender look like a rejected peer.
+            if (frame->nonce != s_nonce && frame->total) {
+                s_nonce = frame->nonce;
+                s_total = frame->total;
+                code_set(pair_code(s_nonce, s_peer, s_own));
+            }
+            return;
         } else if (s_state == KIIKO_SYNC_TRANSFERRING) {
             // 配对的确认可能丢；发送端重复广播时补发确认与当前进度。
             // The confirmation may be lost; re-answer a repeated announce with confirm and progress.
@@ -389,10 +404,11 @@ static void handle_frame(const sync_rx_t *item) {
         if (frame->nonce != s_nonce) return;
         memcpy(s_peer, item->mac, sizeof(s_peer));
         s_peer_known = true;
-        if (frame->value != pair_code(s_nonce, s_own, s_peer)) {
-            fail(ESP_ERR_INVALID_RESPONSE);
-            return;
-        }
+        // 对端可能是上一次会话遗留的旧码；忽略它继续找，超时才算失败，
+        // 不把“对方已经同意”误报成“配对码或被拒绝”。
+        // A stale code from an earlier session may still be in flight; ignore it and keep scanning.
+        // Only the timeout is fatal, so an accepted peer is never reported as rejected.
+        if (frame->value != pair_code(s_nonce, s_own, s_peer)) return;
         code_set(frame->value);
         peer_add(s_peer, false);
         state_set(KIIKO_SYNC_PAIRED, ESP_OK);

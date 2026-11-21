@@ -9,6 +9,7 @@ r=Path(__file__).resolve().parents[1]
 f=r/'main/apps/app_book.c'
 u=r'''
 #include <assert.h>
+#include "book/book_font_size.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -41,15 +42,15 @@ for n in ('app_settings_book_indent_adjust','app_settings_set_book_indent_adjust
     u+=function(n,r/'main/settings.c')+'\n'
 u+=r'''
 int main(void){
- const uint8_t stops[]={0,5,10,15,20,25,30,40,50,75,100};
+ const int stops[]={-100,-90,-80,-70,-60,-50,-40,-30,-20,-10,0,10,20,30,40,50,60,70,80,90,100};
  EpdRect slider={156,0,396,50};
- assert(APP_BOOK_PARAGRAPH_COUNT==11&&APP_BOOK_TRACK_COUNT==31);
+ assert(APP_BOOK_PARAGRAPH_COUNT==21&&APP_BOOK_TRACK_COUNT==31);
  int midpoint=slider.x+(slider.width-1)/2;
- assert(app_settings_book_paragraph_value(slider_index(slider,midpoint,APP_BOOK_PARAGRAPH_COUNT))==25);
+ assert(app_settings_book_paragraph_value(slider_index(slider,midpoint,APP_BOOK_PARAGRAPH_COUNT))==0);
  assert(slider_index(slider,midpoint,APP_BOOK_TRACK_COUNT)+APP_BOOK_TRACK_MIN==0);
- for(unsigned i=0;i<11;++i){
-  int x=slider.x+64+(i*(slider.width-128)+5)/10;
-  assert(app_settings_book_paragraph_value(slider_index(slider,x,11))==stops[i]);
+ for(unsigned i=0;i<21;++i){
+  int x=slider.x+64+(i*(slider.width-128)+10)/20;
+  assert(app_settings_book_paragraph_value(slider_index(slider,x,21))==stops[i]);
   assert(app_settings_book_paragraph_level(stops[i])==i);
  }
  for(int px=-15;px<=15;++px){
@@ -57,7 +58,7 @@ int main(void){
   assert(slider_index(slider,x,31)+APP_BOOK_TRACK_MIN==px);
  }
 
- for(int px=36;px<=72;++px)for(int tr=-15;tr<=15;++tr){
+ for(int px=20;px<=120;++px)for(int tr=-15;tr<=15;++tr){
   int widths[9],values[9];assert(reader_margin_levels(px,tr,widths,values)==9);
   for(int i=0;i<9;++i){assert(values[i]==i*6&&widths[i]==684-i*12);assert(reader_margin_level_for(i*6,px,tr)==i);}
   for(int i=0;i<=48;++i)assert(reader_margin_for_level(reader_margin_level_for(i,px,tr),i,px,tr)==i);
@@ -76,5 +77,5 @@ int main(void){
 '''
 with tempfile.TemporaryDirectory() as d:
  p=Path(d)/'test.c';p.write_text(u);out=p.with_suffix('')
- subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined',str(p),'-o',str(out)],check=True)
+ subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-function','-I'+str(r/'main'),'-fsanitize=address,undefined',str(p),'-o',str(out)],check=True)
  subprocess.run([str(out)],check=True)

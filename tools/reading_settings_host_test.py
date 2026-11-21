@@ -70,12 +70,18 @@ static app_redraw_t rc_change_heading_size(app_ctx_t *ctx,unsigned size){
 }
 """
 u+=next(line for line in ui.read_text().splitlines() if line.startswith('enum { RC_HEADING_TOP'))
-for n in ['rc_root_top','rc_done_rect','rc_tab_rect','rc_grid_rect','rc_heading_link_rect','rc_heading_align_rect','rc_heading_size_rect','rc_heading_style_rect','rc_heading_back_hit','rc_display_rect','rc_effect_rect','rc_refresh_rect','rc_auto_card','rc_interval_rect']:u+=function(n,ui)+'\n'
+# 翻页效果按钮数随板型最大值变化，宏定义在函数之外，单独带入。/ The board-sized effect count lives outside functions; carry it over.
+ui_text=ui.read_text();a=ui_text.index('#ifndef RC_EFFECT_COUNT');u+='\n#include "kiiko_board_config.h"\n'+ui_text[a:ui_text.index('#endif',a)+len('#endif')]+'\n'
+for n in ['rc_effect_id','rc_effect_name','rc_effect_next','rc_root_top','rc_done_rect','rc_tab_rect','rc_grid_rect','rc_heading_link_rect','rc_heading_align_rect','rc_heading_size_rect','rc_heading_style_rect','rc_heading_back_hit','rc_display_rect','rc_effect_rect','rc_refresh_rect','rc_auto_card','rc_interval_rect']:u+=function(n,ui)+'\n'
 action=function('rc_panel_action',runtime)
 a=action.index('    if(s_reader_panel==READER_PANEL_READING_DISPLAY){');b=action.index('    if(s_reader_panel==READER_PANEL_FONT_SETTINGS',a)
 display=action[a:b]
 a=action.index('    if(s_reader_panel!=READER_PANEL_REFRESH_SETTINGS)');root=action[a:]
 u+='static app_redraw_t panel(app_ctx_t*ctx,int x,int y,bool*handled){*handled=false;\n'+display+root+'\n'
+effect_case=function('rc_execute',runtime)
+a=effect_case.index('    case RC_EFFECT:');b=effect_case.index('    case RC_REFRESH:',a)
+u+='static app_redraw_t cycle_effect(app_ctx_t *ctx){switch(RC_EFFECT){'+effect_case[a:b]+'default:return APP_REDRAW_NONE;}}\n'
+
 u+=r'''
 static app_redraw_t tap(app_ctx_t*c,EpdRect r){bool handled=false;app_redraw_t out=panel(c,r.x+r.width/2,r.y+r.height/2,&handled);assert(handled);return out;}
 int main(void){
@@ -178,7 +184,15 @@ int main(void){
   assert(step.x>=interval.x&&step.x+step.width<=interval.x+interval.width);
   assert(step.y>=interval.y&&step.y+step.height<=interval.y+interval.height);}
  s_rc_tab=1;s_reader_panel=READER_PANEL_REFRESH_SETTINGS;
- for(int i=0;i<3;++i){s_turns=99;assert(tap(&c,rc_effect_rect(i))==APP_REDRAW_PAGE&&app_settings_reader_turn_effect()==(unsigned)i&&!s_turns);}
+ assert(RC_EFFECT_COUNT==3);
+ assert(rc_effect_id(0)==0&&rc_effect_id(1)==1&&rc_effect_id(2)==(KIIKO_BOARD_READER_TURN_EFFECT_MAX==3?3:2));
+ assert(!strcmp(rc_effect_name(2),KIIKO_BOARD_READER_TURN_EFFECT_MAX==3?"快速":"速读黑白"));
+ assert(rc_effect_next(0)==1&&rc_effect_next(1)==rc_effect_id(2)&&rc_effect_next(rc_effect_id(2))==0);
+ for(int i=0;i<RC_EFFECT_COUNT;++i){EpdRect r=rc_effect_rect(i);assert(r.x>=36&&r.x+r.width<=648&&r.y==effect.y);
+  if(i)assert(r.x>=rc_effect_rect(i-1).x+rc_effect_rect(i-1).width);}
+ if(RC_EFFECT_COUNT==3)assert(rc_effect_rect(1).x==244&&rc_effect_rect(2).x==452&&rc_effect_rect(0).width==196);
+ for(int i=0;i<RC_EFFECT_COUNT;++i){s_turns=99;assert(tap(&c,rc_effect_rect(i))==APP_REDRAW_PAGE&&app_settings_reader_turn_effect()==rc_effect_id(i)&&!s_turns);}
+ app_settings_set_reader_turn_effect(0);for(unsigned i=0;i<9;++i){assert(cycle_effect(&c)==APP_REDRAW_PAGE&&app_settings_reader_turn_effect()==rc_effect_id((i+1)%3));}notices=0;
  assert(tap(&c,rc_auto_card(0))==APP_REDRAW_PAGE&&last_action==RC_AUTOTURN);
  for(unsigned n=10;n>1;--n){assert(tap(&c,rc_interval_rect(false))==APP_REDRAW_PAGE&&reader_controls_seconds(&config)==n-1);}
  assert(tap(&c,rc_interval_rect(false))==APP_REDRAW_NONE&&reader_controls_seconds(&config)==1);

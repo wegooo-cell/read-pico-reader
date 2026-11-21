@@ -27,7 +27,7 @@ unit=r'''
 #define APP_KEY_ADDRESS 0x2e000060u
 #define ESP_LOGI(...) ((void)0)
 static int GPIO;
-static unsigned now_us,raw_reason,reads,outputs,disabled,touched,handoff_writes,load_calls,flash_reads;
+static unsigned now_us,raw_reason,reads,outputs,disabled,touched,handoff_writes,load_calls,flash_reads,panel_low,panel_output,panel_released;
 static bool level[2],clock_stuck,data_stuck,early_boot_power_key;
 static int bits[256];static unsigned bits_count,bits_at;
 static uint8_t frames[24][4];static unsigned frame_count,byte_count,bit_count,current_byte;
@@ -67,7 +67,7 @@ static void esp_rom_delay_us(unsigned us){now_us+=us;assert(now_us<100000);}
 static unsigned esp_rom_get_reset_reason(int cpu){assert(!cpu);return raw_reason;}
 static unsigned esp_reset_reason(void){return raw_reason;}
 static void gpio_ll_set_level(void *hw,unsigned pin,unsigned value){
- assert(hw==&GPIO&&pin<=1);touched|=1u<<pin;
+ assert(hw==&GPIO&&(pin<=1||pin==18||pin==19));if(pin>=18){assert(!value);panel_low|=1u<<pin;return;}touched|=1u<<pin;
  if(pin==SDA && level[SCL] && !clock_stuck && level[SDA]!=(bool)value){
   if(!value){assert(frame_count<24);++frame_count;byte_count=bit_count=current_byte=0;}
   else bit_count=current_byte=0;
@@ -87,23 +87,24 @@ static int gpio_ll_get_level(void *hw,unsigned pin){
  if(data_stuck)return 0;
  assert(bits_at<bits_count);return bits[bits_at++];
 }
-static void gpio_ll_func_sel(void *hw,unsigned p,unsigned f){assert(hw==&GPIO&&p<=1&&f==1);}
-static void esp_rom_gpio_connect_out_signal(unsigned p,int s,bool i,bool o){assert(p<=1&&s==256&&!i&&!o);}
+static void gpio_ll_func_sel(void *hw,unsigned p,unsigned f){assert(hw==&GPIO&&(p<=1||p==18||p==19)&&f==1);}
+static void esp_rom_gpio_connect_out_signal(unsigned p,int s,bool i,bool o){assert((p<=1||p==18||p==19)&&s==256&&!i&&!o);}
 static void gpio_ll_od_enable(void *hw,unsigned p){assert(hw==&GPIO&&p<=1);}
 static void gpio_ll_input_enable(void *hw,unsigned p){assert(hw==&GPIO&&p<=1);}
 static void gpio_ll_pullup_en(void *hw,unsigned p){assert(hw==&GPIO&&p<=1);}
 static void gpio_ll_pulldown_dis(void *hw,unsigned p){assert(hw==&GPIO&&p<=1);}
-static void gpio_ll_output_enable(void *hw,unsigned p){assert(hw==&GPIO&&p<=1);outputs|=1u<<p;}
-static void gpio_ll_hold_dis(void *hw,unsigned p){assert(hw==&GPIO&&p<=1);}
+static void gpio_ll_output_enable(void *hw,unsigned p){assert(hw==&GPIO&&(p<=1||p==18||p==19));if(p>=18){assert(panel_low&(1u<<p));panel_output|=1u<<p;return;}outputs|=1u<<p;}
+static void gpio_ll_hold_dis(void *hw,unsigned p){assert(hw==&GPIO&&(p<=1||p==18||p==19));if(p>=18){assert(panel_output&(1u<<p));panel_released|=1u<<p;}}
 static void gpio_ll_output_disable(void *hw,unsigned p){assert(hw==&GPIO&&p<=1);disabled|=1u<<p;}
 '''
-for name in ('delay_us','set','high','clock_high','start','stop','write_byte','read_register','bootloader_before_init','__wrap_bootloader_load_image'):
+for name in ('delay_us','set','high','clock_high','start','stop','write_byte','read_register','panel_idle_early','bootloader_before_init','__wrap_bootloader_load_image'):
     unit+=function(name,hooks)+'\n'
 unit+=function('metalio_capture_boot_power_key',hardware)+'\n'
 unit+=r'''
 static void publish(void){assert(__wrap_bootloader_load_image(&partition,&metadata)==load_error);}
 static void reset(void){
  now_us=reads=outputs=disabled=touched=handoff_writes=load_calls=flash_reads=bits_count=bits_at=0;
+ panel_low=panel_output=panel_released=0;
  raw_reason=1;clock_stuck=data_stuck=early_boot_power_key=false;
  level[0]=level[1]=true;frame_count=byte_count=bit_count=current_byte=0;
  memset(frames,0,sizeof(frames));memset(&s_boot_key_handoff,0xaa,sizeof(s_boot_key_handoff));
@@ -144,6 +145,7 @@ int main(void){
  // Real byte-level GPIO wire code uses only pointer writes + repeated-start reads.
  reset();full_reads(0x7f,0x7f);bootloader_before_init();publish();
  assert(captured.flags==3&&now_us>=30000&&bits_at==bits_count);
+ assert(panel_low==((1u<<18)|(1u<<19))&&panel_output==panel_low&&panel_released==panel_low);
  assert(touched==3&&outputs==3&&disabled==3&&level[0]&&level[1]);
  assert(handoff_writes==1&&load_calls==1&&flash_reads==1&&frame_count==8);
  const unsigned regs[]={7,5,1,1};
@@ -169,7 +171,7 @@ int main(void){
   if(reason==1)continue;
   metalio_early_key_record_t stale=valid;assert(!metalio_early_key_take(&stale,reason,NULL));
   reset();raw_reason=reason;bootloader_before_init();publish();
-  assert(!touched&&!outputs&&!disabled&&!bits_at&&!now_us);
+  assert(!touched&&!outputs&&!disabled&&!bits_at&&!now_us);assert(panel_released==((1u<<18)|(1u<<19)));
   metalio_capture_boot_power_key();assert(!early_boot_power_key);
  }
  // Invalid direction/inversion and each byte NACK cannot fabricate zero-valued input.

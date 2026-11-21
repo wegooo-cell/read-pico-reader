@@ -10,6 +10,7 @@
 #include "kiiko_board_config.h"
 
 #define PICO_BOOT_PATH_MAX 288
+#define PICO_BOOT_TAB_COUNT 6
 typedef struct {
     uint8_t tab, reader, fullscreen;
     char path[PICO_BOOT_PATH_MAX];

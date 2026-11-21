@@ -105,6 +105,11 @@ unit += function('draw_reader_footer', source)+'\n'
 unit += function('draw_reader_metadata', source)+'\n'
 if separate_footer:
     unit += function('present_reader_footer', source)+'\n'
+    if 'static bool present_reader_metadata(' in source.read_text():
+        # 本夹具隔离顶部，完整上下栏推屏由pico_reader_metadata_present_host_test执行。
+        # Isolate the header here; the complete presenter has its own physical-history regression.
+        unit += 'static bool present_reader_metadata(app_ctx_t *ctx){return present_reader_footer(ctx);}'+'\n'
+
 for name in ['reader_metadata_tick','app_book_status_bar_visible','reader_status_visible']:
     unit += function(name, source)+'\n'
 unit += r'''

@@ -1,6 +1,19 @@
 /* 中文：只解析 S31 分区和已确认启动记录，不访问硬件。 / English: Parse only S31 layouts and confirmed boot records without hardware access. */
 export function require(condition,message){if(!condition)throw Error(message);}
 export function equal(a,b){return a.length===b.length&&a.every((v,i)=>v===b[i]);}
+// 兼容布局只更新当前应用和需要的配套引导程序，保留分区/NVS/OTA。/ Compatible layouts retain metadata while updating the app and any required matching bootloader.
+export function installationParts(bundle,plan,requiresBootloader){
+  if(plan.full)return bundle.parts.map(p=>({data:p.data,address:p.offset}));
+  const app=bundle.parts.find(p=>p.name==='firmware.bin');
+  require(app&&[0x10000,0x510000].includes(plan.slot.address),'S31 应用或启动槽不匹配。');
+  const parts=[{data:app.data,address:plan.slot.address}];
+  if(requiresBootloader){
+    const boot=bundle.parts.find(p=>p.name==='bootloader.bin');
+    require(boot&&boot.offset===0x2000&&boot.data.length>0&&boot.data.length<=0x6000,'缺少匹配的 S31 引导程序。');
+    parts.push({data:boot.data,address:boot.offset});
+  }
+  return parts;
+}
 export function partitionTable(data){
   require(data.length>=0xc00,'分区表不完整。');
   const expected=[['nvs',1,2,0x9000,0x4000],['otadata',1,0,0xd000,0x2000],['phy_init',1,1,0xf000,0x1000],['ota_0',0,16,0x10000,0x500000],['ota_1',0,17,0x510000,0x500000],['storage',1,0x81,0xa10000,0x5e0000],['coredump',1,3,0xff0000,0x10000]];

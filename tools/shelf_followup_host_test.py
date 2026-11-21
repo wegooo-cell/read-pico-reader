@@ -5,9 +5,7 @@ English: Exercise real sorting/menu/commit-failure and scoped management-style r
 from pathlib import Path
 import subprocess,tempfile,sys
 R=Path(__file__).resolve().parents[1];sys.path.insert(0,str(R/'tools'))
-try:from home_cover_cache_host_test import function
-except ImportError:
- sys.path.insert(0,'/Users/weihongli/Documents/New project/read-pico-reader/build/multiboard-20261018/system-ripple-nav-fix-20261020/source/tools');from home_cover_cache_host_test import function
+from home_cover_cache_host_test import function
 book=R/'main/apps/app_book.c';settings=R/'main/apps/app_device_settings.c'
 u=r'''
 #include <assert.h>
@@ -17,6 +15,7 @@ u=r'''
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include "read_pico_search.h"
 typedef struct{int x,y,width,height;}EpdRect;
 typedef int app_desc_t;
 typedef struct{int leaf;const app_desc_t*request_app;bool request_return;}app_ctx_t;
@@ -24,9 +23,11 @@ typedef enum{APP_REDRAW_NONE,APP_REDRAW_PAGE}app_redraw_t;
 enum{SHELF,BULK,MANAGE,READING,TOC,SETTINGS_MAIN,SETTINGS_SHELF_STYLE,READER_PANEL_NONE,READER_PANEL_TOUCH_SETTINGS,READER_PANEL_TOUCH_MORE,READER_PANEL_KEY_SETTINGS};
 enum{UI_GESTURE_TAP,UI_GESTURE_SWIPE_U};
 typedef struct{unsigned type;int x0,y0,x,y;}ui_gesture_event_t;
-typedef struct{char name[32],path[64];bool favorite,has_progress,search_match,selected;unsigned pct,recent,added,size,chapter;bool removed,chapters_checked;}shelf_entry_t;
-static shelf_entry_t items[]={{"Z","/z",false,true,true,true,100,5,9,1,0,false,false},{"A","/a",false,false,true,false,99,0,1,1,0,false,false},{"B","/b",true,true,true,false,10,4,2,1,0,false,false},{"C","/c",false,true,true,false,50,3,3,1,0,false,false},{"D","/d",false,true,false,true,60,2,4,1,0,false,false}};
+typedef struct{char name[32],path[64];bool favorite,has_progress,search_match,selected;unsigned pct,recent,added,size,chapter;bool removed,chapters_checked,is_dir;}shelf_entry_t;
+static shelf_entry_t items[]={{"Z","/z",false,true,true,true,100,5,9,1,0,false,false,false},{"A","/a",false,false,true,false,99,0,1,1,0,false,false,false},{"B","/b",true,true,true,false,10,4,2,1,0,false,false,false},{"C","/c",false,true,true,false,50,3,3,1,0,false,false,false},{"D","/d",false,true,false,true,60,2,4,1,0,false,false,false}};
 static shelf_entry_t*s_shelf=items;static int s_count=5,s_visible_count,s_view=SHELF;
+static bool s_manage_books,s_import_candidates;
+static void library_restore_import_selection(void){assert(!s_import_candidates);}
 static uint8_t s_shelf_order,persisted_order;static bool s_recent_sort,s_sort_menu,fail_save;
 static int invalidations,remembered;static char s_message[128],s_batch_message[128];
 static bool shelf_matches(const shelf_entry_t*i){return i->search_match;}
@@ -55,6 +56,9 @@ static void shelf_category_restore(app_ctx_t*c){(void)c;}
 '''
 u+=function('refresh_cached_progress',book)+'\n'
 u+=r'''
+static bool cover_lookup_resume(void){return false;}
+static bool s_manage_files_return,s_requested_manage;
+static char s_requested_open[288];
 static bool s_manage_style_restore,s_shelf_cache_valid=true,s_cache_sd_present=true,s_cache_sd_mounted=true,s_scan_pending;
 static bool sd_present=true,sd_mounted=true;
 static int s_presented_view,s_pressed_control,s_cache_shelf_style,fallback;
@@ -82,10 +86,10 @@ int main(void){
  for(unsigned order=0;order<8;++order){s_shelf_order=order;s_recent_sort=order==1||order==3;
   for(int i=0;i<5;++i)for(int j=0;j<5;++j){int a=compare_books(&items[i],&items[j]),b=compare_books(&items[j],&items[i]);assert((a>0)-(a<0)==-((b>0)-(b<0)));}
  }
- s_shelf_order=7;s_recent_sort=false;sort_shelf(&ctx);assert(s_visible_count==4&&!strcmp(items[0].path,"/b")&&!strcmp(items[1].path,"/z")&&!strcmp(items[2].path,"/c")&&!strcmp(items[3].path,"/a"));
- s_shelf_order=6;sort_shelf(&ctx);assert(!strcmp(items[0].path,"/b")&&!strcmp(items[1].path,"/a")&&!strcmp(items[2].path,"/c")&&!strcmp(items[3].path,"/z"));
+ s_shelf_order=7;s_recent_sort=false;sort_shelf(&ctx);assert(s_visible_count==4&&!strcmp(items[0].path,"/z")&&!strcmp(items[1].path,"/c")&&!strcmp(items[2].path,"/b")&&!strcmp(items[3].path,"/a"));
+ s_shelf_order=6;sort_shelf(&ctx);assert(!strcmp(items[0].path,"/a")&&!strcmp(items[1].path,"/b")&&!strcmp(items[2].path,"/c")&&!strcmp(items[3].path,"/z"));
  bool selected_z=false,selected_d=false;for(int i=0;i<5;++i){if(!strcmp(items[i].path,"/z"))selected_z=items[i].selected;if(!strcmp(items[i].path,"/d"))selected_d=items[i].selected;}assert(selected_z&&selected_d);
- refresh_cached_progress(&ctx);assert(!strcmp(items[0].path,"/b")&&!strcmp(items[1].path,"/a")&&!strcmp(items[2].path,"/c")&&items[2].pct==100);
+ refresh_cached_progress(&ctx);assert(!strcmp(items[0].path,"/a")&&!strcmp(items[1].path,"/b")&&!strcmp(items[2].path,"/c")&&items[2].pct==100);
  s_shelf_order=0;s_recent_sort=false;s_sort_menu=true;const unsigned expected[]={1,5,0,7};
  for(int i=0;i<4;++i){EpdRect r=shelf_sort_menu_rect(i);ui_gesture_event_t e={UI_GESTURE_TAP,r.x+20,r.y+20,r.x+20,r.y+20};assert(shelf_sort_gesture(&ctx,&e)==APP_REDRAW_PAGE&&s_sort_menu&&s_shelf_order==expected[i]&&persisted_order==expected[i]);}
  ui_gesture_event_t direction={UI_GESTURE_TAP,400,500,400,500};shelf_sort_gesture(&ctx,&direction);assert(s_shelf_order==6);
@@ -101,8 +105,8 @@ int main(void){
  app_book_return_from_shelf_style();sd_mounted=false;return_enter(&ctx);assert(fallback==1&&!s_manage_style_restore);
  s_view=READING;s_reader_panel=READER_PANEL_TOUCH_SETTINGS;assert(!app_book_status_bar_visible()&&!reader_status_visible());s_reader_panel=READER_PANEL_TOUCH_MORE;assert(!app_book_status_bar_visible()&&!reader_status_visible());
  s_reader_panel=READER_PANEL_KEY_SETTINGS;assert(app_book_status_bar_visible()&&reader_status_visible());s_reader_fullscreen=immersive=true;assert(!reader_status_visible());
- puts("PASS: eight real sort orders and comparator symmetry, progress/unread/favorites/filter/selection, root+bulk directions, failed commit, scoped native chooser return, full-screen touch status exclusion");
+ puts("PASS: eight real sort orders and comparator symmetry, progress/unread/unpinned-favorites/filter/selection, root+bulk directions, failed commit, scoped native chooser return, full-screen touch status exclusion");
 }
 '''
 with tempfile.TemporaryDirectory() as d:
- p=Path(d);(p/'test.c').write_text(u);subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',str(p/'test.c'),'-o',str(p/'test')],check=True);subprocess.run([str(p/'test')],check=True)
+ p=Path(d);(p/'test.c').write_text(u);subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(R/'components/read_pico_search/include'),str(R/'components/read_pico_search/read_pico_search.c'),str(p/'test.c'),'-o',str(p/'test')],check=True);subprocess.run([str(p/'test')],check=True)

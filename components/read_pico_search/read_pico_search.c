@@ -12,8 +12,7 @@
 #include <string.h>
 #include "search_table.h"
 #include "search_candidates.h"
-#if !KIIKO_BOARD_METALIO47
-#include "search_packed.h"
+#include "search_sort.h"
 // Fixed-width immutable data: direct random access, no decompression buffer or heap.
 static uint32_t search_unpack(const uint8_t *data,size_t i,unsigned bits) {
     size_t bit=i*bits,offset=bit/8;
@@ -21,6 +20,8 @@ static uint32_t search_unpack(const uint8_t *data,size_t i,unsigned bits) {
         ((uint32_t)data[offset+2]<<16)|((uint32_t)data[offset+3]<<24);
     return (word>>(bit%8))&((1u<<bits)-1);
 }
+#if !KIIKO_BOARD_METALIO47
+#include "search_packed.h"
 static uint32_t search_codepoint_at(size_t i) { return search_unpack(search_packed_codepoints,i,SEARCH_PACKED_CODEPOINTS_BITS); }
 static uint16_t search_group_at(size_t i) { return (uint16_t)search_unpack(search_packed_groups,i,SEARCH_PACKED_GROUPS_BITS); }
 #define SEARCH_CODEPOINT_COUNT SEARCH_PACKED_COUNT
@@ -86,6 +87,61 @@ static int lookup(uint32_t cp) {
     }
     return low < SEARCH_CODEPOINT_COUNT && search_codepoint_at(low) == cp
         ? (int)search_group_at(low) : -1;
+}
+// Sorting uses one dictionary-default reading per character; searching still uses all.
+static const char *sort_reading(uint32_t cp, int group) {
+    size_t low=0,high=SEARCH_SORT_OVERRIDE_COUNT;
+    while(low<high){size_t mid=low+(high-low)/2;
+        if((search_unpack(search_sort_overrides,mid,21)>>3)<cp)low=mid+1;else high=mid;
+    }
+    uint32_t record=low<SEARCH_SORT_OVERRIDE_COUNT?search_unpack(search_sort_overrides,low,21):0;
+    unsigned offset=(record>>3)==cp?(record&7):0;
+    return search_syllables+search_syllable_offsets[search_readings[search_group_offsets[group]+offset]];
+}
+typedef struct {const char *text,*reading;size_t at,length;} sort_cursor_t;
+static uint32_t sort_next(sort_cursor_t *cursor) {
+    for(;;){
+        if(cursor->reading){
+            if(*cursor->reading)return (unsigned char)*cursor->reading++;
+            cursor->reading=NULL;return 1; // Keep syllable boundaries: xia sorts before xiang.
+        }
+        if(cursor->at==cursor->length)return 0;
+        uint32_t cp;size_t start=cursor->at;
+        if(!utf8(cursor->text,cursor->length,&cursor->at,&cp))return 0x110000u+(unsigned char)cursor->text[start];
+        if(cp>=0xff01&&cp<=0xff5e)cp-=0xfee0;
+        if(cp<128){cp=lower((unsigned char)cp);if(letter(cp)||digit(cp))return cp;continue;}
+        if((cp>=0x2000&&cp<=0x206f)||(cp>=0x3000&&cp<=0x303f))continue;
+        int group=lookup(cp);
+        if(group<0)return 0x110000u+cp;
+        cursor->reading=sort_reading(cp,group);
+    }
+}
+static size_t sort_number(sort_cursor_t *cursor,uint32_t *token) {
+    while(*token=='0')*token=sort_next(cursor);
+    size_t length=0;
+    for(;digit(*token);*token=sort_next(cursor))++length;
+    return length;
+}
+int read_pico_name_compare(const char *left,const char *right) {
+    if(!left)left="";
+    if(!right)right="";
+    sort_cursor_t a={.text=left,.length=strlen(left)},b={.text=right,.length=strlen(right)};
+    uint32_t x=sort_next(&a),y=sort_next(&b);
+    while(x&&y){
+        if(digit(x)&&digit(y)){
+            sort_cursor_t ax=a,by=b;uint32_t xx=x,yy=y;
+            size_t nx=sort_number(&ax,&xx),ny=sort_number(&by,&yy);
+            if(nx!=ny)return nx<ny?-1:1;
+            while(x=='0')x=sort_next(&a);
+            while(y=='0')y=sort_next(&b);
+            for(size_t i=0;i<nx;++i){if(x!=y)return x<y?-1:1;x=sort_next(&a);y=sort_next(&b);}
+            continue;
+        }
+        if(x!=y)return x<y?-1:1;
+        x=sort_next(&a);y=sort_next(&b);
+    }
+    if(x!=y)return x<y?-1:1;
+    return strcmp(left,right);
 }
 // 位j表示已匹配查询前j字节；每步允许重新开始子串。/ Bit j means j matched query bytes; every step can start a new substring.
 static bool advance(uint64_t* state, unsigned char c, const uint64_t masks[128], uint64_t finish) {

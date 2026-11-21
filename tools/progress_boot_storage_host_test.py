@@ -4,7 +4,7 @@
 from pathlib import Path
 import subprocess,tempfile,sys
 R=Path(__file__).resolve().parents[1]
-prefix=(R/'tools/book_storage_host_test.c').read_text().split('#ifdef ESP_PLATFORM',1)[0]
+prefix=(R/'tools/book_storage_host_test.c').read_text().split('#ifdef ESP_PLATFORM',1)[0].split('int main(',1)[0]
 prefix=prefix.replace('assert(!strcmp(ns,"rp_books"))','assert(!strcmp(ns,"rp_books")||!strcmp(ns,"mt_books"))')
 unit=prefix+r'''
 #include "esp_vfs_fat.h"
@@ -50,7 +50,7 @@ int main(int argc,char **argv){
   puts("PASS: nonblank/read-error data never formats; failed mounts release every WL handle and background retries are throttled");return 0;
  }
  const char *path="/sdcard/books/example.txt";
- book_progress_t value={.file_size=10000,.chapter=2,.byte_off=345,.px=40,.pct=17},actual;
+ book_progress_t value={.file_size=10000,.chapter=2,.byte_off=8200,.px=40,.pct=82},actual;
  if(early){
   book_progress_prepare_at_boot();assert(book_store_flash_ready()&&mounts==(!strcmp(argv[1],"empty")?2u:1u)&&live_handles==1);
  }
@@ -61,6 +61,24 @@ int main(int argc,char **argv){
  assert(err==ESP_OK&&mounts==expected_mounts);
  assert(book_progress_load(path,value.file_size,&actual)&&actual.byte_off==value.byte_off);
  assert(book_progress_records(copy_record,NULL)==ESP_OK&&saved_len);
+ // Populate both slots, then make both unreadable as records. A checked load must not become zero.
+ assert(book_progress_save(path,&value)==ESP_OK&&book_progress_save(path,&value)==ESP_OK);
+ uint8_t copies[2][512];size_t lengths[2];char filenames[2][256];
+ for(unsigned slot=0;slot<2;++slot){
+  snprintf(filenames[slot],sizeof(filenames[slot]),"%s/%.8s.%u",BOOK_PROGRESS_DIR,saved_key+2,slot);
+  FILE *f=fopen(filenames[slot],"rb");assert(f);lengths[slot]=fread(copies[slot],1,sizeof(copies[slot]),f);assert(lengths[slot]&&fclose(f)==0);
+  f=fopen(filenames[slot],"ab");assert(f&&fputc(0,f)!=EOF&&fclose(f)==0);
+ }
+ actual.byte_off=123;
+ assert(book_progress_load_checked(path,value.file_size,&actual)==ESP_ERR_INVALID_STATE&&actual.byte_off==123);
+ book_progress_t zero=value;zero.byte_off=0;zero.pct=0;
+ assert(book_progress_save(path,&zero)==ESP_ERR_INVALID_STATE);
+ for(unsigned slot=0;slot<2;++slot){
+  FILE *f=fopen(filenames[slot],"rb");assert(f&&fseek(f,0,SEEK_END)==0&&ftell(f)==(long)lengths[slot]+1&&fclose(f)==0);
+  f=fopen(filenames[slot],"wb");assert(f&&fwrite(copies[slot],1,lengths[slot],f)==lengths[slot]&&fclose(f)==0);
+ }
+ assert(book_progress_load_checked(path,value.file_size,&actual)==ESP_OK&&actual.pct==82&&actual.byte_off==8200);
+ puts("PASS: bad progress reads never turn 82% into a zero write; rejected writes preserve both slots, and recovery reads the saved position");
  // The same filesystem is used by settings restore: preflight, clear and restore remain writable.
  assert(book_progress_prepare_storage()==ESP_OK&&book_progress_clear_records()==ESP_OK);
  assert(book_progress_restore_record(saved_key,saved_record,saved_len)==ESP_OK);

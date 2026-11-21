@@ -28,6 +28,7 @@ enum {READING,TOC,SHELF,READER_PANEL_NONE,READER_PANEL_TOOLS};
 #define E0470_TURN_LTR -1
 #define ESP_LOGI(...) ((void)0)
 static char s_requested_open[288];
+static int64_t s_resume_media_deadline_ms;
 static bool s_requested_fullscreen=true,s_requested_open_home,s_requested_resume_mode,s_shelf_open_queued;
 static bool default_fullscreen;
 static bool app_settings_reader_default_fullscreen(void){return default_fullscreen;}

@@ -26,6 +26,7 @@ unit=r'''
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include "read_pico_search.h"
 #include "book_shelf_categories.h"
 #define BOOK_STORE_PATH_MAX 288
 #define SHELF_CATEGORY_LIMIT 128
@@ -48,13 +49,16 @@ static shelf_category_t *s_categories;
 static int s_category_count,s_category_capacity,s_category_selected,s_category_menu_page;
 static char s_category_root[288];
 static int s_view=SHELF;
-static bool s_scan_pending,s_shelf_cache_valid,s_recent_sort;
+static bool s_scan_pending,s_shelf_cache_valid;
+static bool shelf_waiting_for_index(void){return s_scan_pending;}
 static int s_count,s_visible_count,s_filter;
 static unsigned s_shelf_order;
-typedef struct{char path[288],name[256];bool removed,search_match,is_flash,favorite;uint32_t recent;uint64_t added;}shelf_entry_t;
+static bool s_manage_books,s_import_candidates;
+static void library_restore_import_selection(void){assert(!s_import_candidates);}
+typedef struct{char path[288],name[256];bool removed,search_match,is_flash,favorite,has_progress,is_dir;unsigned pct;uint32_t recent;uint64_t added;}shelf_entry_t;
 static shelf_entry_t s_shelf[40];
 '''
-for name in ('shelf_category_add','shelf_category_init','shelf_category_name','shelf_category_matches','shelf_category_remember','shelf_category_restore','shelf_categories_recount','shelf_matches','compare_books','sort_shelf'):
+for name in ('shelf_category_add','shelf_category_init','shelf_category_name','shelf_category_matches','shelf_category_remember','shelf_category_restore','shelf_categories_recount','shelf_matches','shelf_order_mode','shelf_order_desc','compare_books','sort_shelf'):
  unit+=function(name)+'\n'
 unit+=r'''
 int main(void){
@@ -93,5 +97,5 @@ int main(void){
 unit=unit.replace('while(s_category_count<s_category_capacity)shelf_category_add("/not-a-real-path");','while(s_category_count<s_category_capacity){char path[288];snprintf(path,sizeof(path),"/fill/%d",s_category_count);shelf_category_add(path);}')
 with tempfile.TemporaryDirectory() as directory:
  c=Path(directory)/'shelf.c';binary=c.with_suffix('');c.write_text(unit)
- subprocess.run(['cc','-Dshelf_display_style=app_settings_shelf_style','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(root/'main/book'),str(c),'-o',str(binary)],check=True)
+ subprocess.run(['cc','-Dshelf_display_style=app_settings_shelf_style','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(root/'main/book'),'-I'+str(root/'components/read_pico_search/include'),str(root/'components/read_pico_search/read_pico_search.c'),str(c),'-o',str(binary)],check=True)
  subprocess.run([str(binary)],check=True)

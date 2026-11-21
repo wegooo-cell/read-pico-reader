@@ -32,6 +32,11 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
+# 断言照常检查并在失败时中止，只是不再打印表达式、文件和行号，给 4 MiB 应用分区省下约 74 KB；
+# 崩溃现场仍记录程序地址，可用 addr2line 查回源码位置。
+# Assertions still check and abort on failure but no longer print the expression, file and line,
+# saving about 74 KB of the 4 MiB app slot; the crash scene keeps the program address for addr2line.
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
 # 1ms tick：EPD 上电流程里按毫秒轮询 PGOOD，100Hz 的 tick 会把每次等待放大到 10ms
 CONFIG_FREERTOS_HZ=1000
 # 长文件名以 UTF-8 交给界面与 fopen；磁盘 LFN 保持 UTF-16，不需要增加 CP936 表。

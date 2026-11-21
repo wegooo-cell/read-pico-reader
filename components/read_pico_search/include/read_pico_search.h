@@ -23,3 +23,9 @@ size_t read_pico_search_candidates(const char* syllable, uint32_t* out, size_t c
 
 /// 只读音节枚举，越界返回 NULL；与单字输入共享字表。/ Enumerate shared immutable syllables; NULL past the end.
 const char *read_pico_search_syllable(size_t index);
+
+/// 名称升序：中文默认读音全拼、ASCII不分大小写、数字自然顺序，忽略空白标点。
+/// 同音/同值按原文兜底；不猜词语多音字。无文件访问、无堆分配。
+/// Ascending names: dictionary-default pinyin, folded ASCII and natural numbers;
+/// skip spacing/punctuation and break equal keys by original text. No contextual pronunciation guesses.
+int read_pico_name_compare(const char *left, const char *right);

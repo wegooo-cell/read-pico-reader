@@ -28,13 +28,13 @@ static int s_px=36,s_margin=24,s_reader_slider=-1;
 static int s_reader_preview_px,s_reader_preview_margin,s_reader_preview_line;
 static int s_reader_preview_para,s_reader_preview_tracking;
 static bool s_reader_slider_endpoint,fail_layout;
-static uint8_t s_book_tracking=15,s_book_para=25;
+static uint8_t s_book_tracking=15;static int s_book_para=30;
 static unsigned writes,saves,builds,invalidations;
 static char s_text_storage[1],*s_text=s_text_storage;
 static size_t s_text_len=1,s_page=2,s_block_count;
 static const void *s_blocks;
 static int typography;
-static uint8_t stored_tracking=207,stored_para=25;
+static uint8_t stored_tracking=207;static int stored_para=30;
 #define NVS_KEY_BOOK_TRACK "bk_track"
 #define NVS_KEY_BOOK_PARA "bk_para"
 static void nvs_put_u8(const char *key,uint8_t value){
@@ -70,6 +70,13 @@ static bool book_layout_build_blocks(const char *text,size_t length,const void *
 }
 static void save_progress(void){++saves;}
 '''
+unit+=r'''
+#define NVS_KEY_BOOK_PARA_FULL "bk_para_full"
+#define s_book_px s_px
+#define s_book_margin s_margin
+#define s_book_line 130
+static bool app_settings_try_book_layout(uint8_t px,uint8_t margin,int line,int para){(void)px;(void)margin;(void)line;++writes;stored_para=s_book_para=para;return true;}
+'''
 header = (root / 'main/settings.h').read_text()
 for name in ('APP_BOOK_TRACK_MIN', 'APP_BOOK_TRACK_MAX', 'APP_BOOK_TRACK_COUNT', 'APP_BOOK_PARAGRAPH_COUNT'):
     unit += re.search(r'^#define ' + name + r' .*', header, re.M)[0] + '\n'
@@ -78,7 +85,7 @@ for name in ('app_settings_book_paragraph_value', 'app_settings_book_paragraph_l
              'app_settings_book_paragraph_spacing', 'app_settings_set_book_paragraph_spacing'):
     unit += function(name, settings) + '\n'
 unit += r'''
-static app_redraw_t apply_reader_layout(app_ctx_t *ctx,int px,int margin,int line,uint8_t para){
+static app_redraw_t apply_reader_layout(app_ctx_t *ctx,int px,int margin,int line,int para){
  (void)ctx;assert(px==s_px&&margin==s_margin&&line==130);
  app_settings_set_book_paragraph_spacing(para);save_progress();return APP_REDRAW_PAGE;
 }
@@ -125,7 +132,7 @@ int main(void){
   assert(stored_para==app_settings_book_paragraph_spacing());
  }
  for(int target=0;target<APP_BOOK_PARAGRAPH_COUNT;++target){
-  int x=para.x+64+(target*(para.width-128)+5)/10;
+  int x=para.x+64+(target*(para.width-128)+10)/20;
   if(x>=para.x+para.width-64)x=para.x+para.width-65;
   reader_slider_begin(3,x);reader_slider_commit(&ctx);
   assert(s_book_para==app_settings_book_paragraph_value(target)&&stored_para==s_book_para);
@@ -140,12 +147,12 @@ int main(void){
   assert(typography==start+APP_BOOK_TRACK_MIN&&s_page==2);
   assert(writes==old_writes&&saves==old_saves&&builds==old_builds+2);
  }
- s_px=90;reader_slider_begin(0,648);assert(s_reader_preview_px==90);
- s_px=18;reader_slider_begin(0,36);assert(s_reader_preview_px==18);
+ s_px=120;reader_slider_begin(0,648);assert(s_reader_preview_px==120);
+ s_px=20;reader_slider_begin(0,36);assert(s_reader_preview_px==20);
  reader_slider_begin(2,648);assert(s_reader_preview_line==131);
  reader_slider_begin(2,354);assert(s_reader_preview_line==129);
  assert(invalidations&&saves&&writes);
- puts("PASS: actual press/drag/commit for all 31 tracking and 11 paragraph stops, endpoint bounds, NVS encoding, anchored reflow and unchanged saved spacing on reflow failure");
+ puts("PASS: actual press/drag/commit for all 31 tracking and 21 paragraph stops, endpoint bounds, NVS encoding, anchored reflow and unchanged saved spacing on reflow failure");
 }
 '''
 with tempfile.TemporaryDirectory() as directory:

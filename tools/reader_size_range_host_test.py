@@ -22,7 +22,7 @@ unit=r'''
 #define BOOK_MARGIN_CHOICES 9
 #define APP_BOOK_TRACK_MIN -15
 #define APP_BOOK_TRACK_COUNT 31
-#define APP_BOOK_PARAGRAPH_COUNT 11
+#define APP_BOOK_PARAGRAPH_COUNT 21
 typedef struct {int x,y,width,height;}EpdRect;
 static int s_px=48,s_margin=24,s_line_spacing=130;
 static int s_reader_slider,s_reader_preview_px,s_reader_preview_margin,s_reader_preview_line,s_reader_preview_para,s_reader_preview_tracking;
@@ -41,16 +41,16 @@ for name in ['app_settings_book_paragraph_value','app_settings_book_paragraph_le
 for name in ['slider_index','reader_slider_map','reader_slider_begin']:unit+=function(name)
 unit+=r'''
 int main(void){
- bool seen[91]={0};int previous=18;
- for(int x=-200;x<1000;++x){reader_slider_map(0,x);assert(s_reader_preview_px>=18&&s_reader_preview_px<=90);assert(s_reader_preview_px>=previous);seen[s_reader_preview_px]=true;previous=s_reader_preview_px;}
- for(int px=18;px<=90;++px){
+ bool seen[BOOK_PX_MAX+1]={0};int previous=BOOK_PX_MIN;
+ for(int x=-200;x<1000;++x){reader_slider_map(0,x);assert(s_reader_preview_px>=20&&s_reader_preview_px<=120);assert(s_reader_preview_px>=previous);seen[s_reader_preview_px]=true;previous=s_reader_preview_px;}
+ for(int px=20;px<=120;++px){
   assert(seen[px]);s_px=px;
-  reader_slider_begin(0,40);assert(s_reader_preview_px==(px==18?18:px-1));
-  reader_slider_begin(0,645);assert(s_reader_preview_px==(px==90?90:px+1));
+  reader_slider_begin(0,40);assert(s_reader_preview_px==(px==20?20:px-1));
+  reader_slider_begin(0,645);assert(s_reader_preview_px==(px==120?120:px+1));
  }
- s_px=48;reader_slider_begin(0,342);assert(s_reader_preview_px==54);
+ s_px=48;reader_slider_begin(0,342);assert(s_reader_preview_px==70);
  assert(BOOK_READER_PX_DEFAULT==48);
- puts("PASS: all 73 reader sizes reachable monotonically on the real rail; 1px endpoint steps, clamped 18/90 and unchanged 48px default");
+ puts("PASS: all 101 reader sizes reachable monotonically on the real rail; 1px endpoint steps, clamped 20/120 and unchanged 48px default");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='kiiko-size-') as tmp:

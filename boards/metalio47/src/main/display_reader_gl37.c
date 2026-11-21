@@ -4,6 +4,8 @@
  *
  * 中文：S31 阅读专用 GL16：37 相文字/面板、水波纹及收起归一。
  * English: Reader-only S31 GL16 profiles: 37-phase text/sheets, ripple and dismissal normalization.
+ * 用户2026-11-20修订：阅读水波纹在同轮条带中先18相擦白、1相保持，再逐字灰阶从白重建；原有各表保持。
+ * User2026-11-20: reader ripple erases for18 phases, holds once, then rebuilds from the existing white-origin gray sequences; retain the base profiles.
  * 用户2026-11-19修订：水波纹等黑/灰保持，白色目标在尾部三拍补白，最后一拍保持；非白目标及其他表保持。
  * User2026-11-19 revision: ripple holds equal black/grays, reinforces white targets in three tail phases and holds the final phase; retain nonwhite targets and other profiles.
  * 用户2026-11-18：普通文字去掉剥除擦白后遗留的前导空等，只前移整段有效序列；相数、脉冲顺序/数量及变白列不改。
@@ -242,4 +244,32 @@ const EpdWaveform *display_reader_gray_waveform(display_reader_gray_profile_t pr
     table->waveform = (EpdWaveform){.num_modes = 1, .num_temp_ranges = 1,
         .mode_data = table->modes, .temp_intervals = E0470_FULL_WAVEFORM.temp_intervals};
     return &table->waveform;
+}
+
+// One lazy S31-only table; profile switches reuse it instead of retaining another full set.
+const EpdWaveform *display_reader_ripple_waveform(display_reader_gray_profile_t profile) {
+    enum { ERASE = 18, PAUSE = 1, CAPACITY = 64 };
+    static READER_GRAY_RAM uint8_t data[CAPACITY][16][4];
+    static EpdWaveformPhases phases;
+    static const EpdWaveformPhases *ranges[1];
+    static EpdWaveformMode mode;
+    static const EpdWaveformMode *modes[1];
+    static EpdWaveform waveform;
+    static int cached = -1;
+    if(cached == (int)profile && phases.luts)return &waveform;
+    const EpdWaveform *base = display_reader_gray_waveform(profile);
+    const EpdWaveformPhases *source = e0470_waveform_phases(base, MODE_GL16);
+    if(!source || !source->luts || source->phase_times || source->phases <= 0 ||
+       source->phases + ERASE + PAUSE > CAPACITY)return NULL;
+    memset(data, 0, sizeof(data));
+    for(int to=0;to<16;++to)for(int from=0;from<16;++from) {
+        for(int f=0;f<ERASE;++f)gray_set(data,f,to,from,2);
+        // All pixels now start at white, including equal glyphs erased by the transition.
+        for(int f=0;f<source->phases;++f)
+            gray_set(data,ERASE+PAUSE+f,to,from,e0470_phase_action(source,f,to,15));
+    }
+    phases=(EpdWaveformPhases){source->phases+ERASE+PAUSE,(const uint8_t*)data,NULL};
+    ranges[0]=&phases;mode=(EpdWaveformMode){MODE_GL16,1,ranges};modes[0]=&mode;
+    waveform=*base;waveform.num_modes=1;waveform.mode_data=modes;cached=(int)profile;
+    return &waveform;
 }

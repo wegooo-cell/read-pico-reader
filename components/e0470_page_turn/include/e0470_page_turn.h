@@ -68,6 +68,12 @@ enum EpdDrawError e0470_reader_ripple_with_waveform(
     EpdiyHighlevelState* hl, EpdRect area, e0470_turn_dir_t dir,
     const EpdWaveform* waveform, unsigned bands
 );
+/// Explicit reader launch spacing in ticks; 1..8, with the same final-pair grouping.
+enum EpdDrawError e0470_reader_ripple_with_waveform_timed(
+    EpdiyHighlevelState* hl, EpdRect area, e0470_turn_dir_t dir,
+    const EpdWaveform* waveform, unsigned bands, unsigned launch_ticks
+);
+
 
 /// S31普通文字单带：一次提交整轮，复用内部LUT；仅跳过实际全保持前导相，保留一相准备及所有有效/尾相。
 /// S31 single-band text: batch through the internal LUT; omit only actual all-hold leading phases, retaining one setup phase and every active/tail phase.

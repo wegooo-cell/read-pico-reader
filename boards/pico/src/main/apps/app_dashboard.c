@@ -31,6 +31,7 @@
  * User revision: Home's title matches the shelf/files/settings left edge, top and nominal 52px size in the active system face.
  */
 #include <dirent.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -69,6 +70,8 @@
 #include "esp_attr.h"
 #include "read_pico_sd.h"
 #include "settings.h"
+#include "setup_state.h"
+#include "nvs.h"
 #include "ttf_font.h"
 #include "ui_gesture.h"
 #include "ui_kit.h"
@@ -106,6 +109,9 @@ static uint64_t s_cover_font_key;
 static unsigned s_weread_cover_revision;
 static bool s_scan_pending;
 static bool s_books_cache_valid;
+static bool s_cached_library_pending;
+static bool s_progress_retry_pending;
+static int64_t s_progress_retry_after;
 static bool s_cached_sd_present;
 static bool s_cached_sd_mounted;
 static unsigned s_cached_store_revision;
@@ -245,6 +251,13 @@ static bool recent_visit(const char *path,const book_progress_t *progress,void *
     return true;
 }
 static void scan_books(void) {
+    // 首次未入架时不采用卡上旧历史或目录回退；原记录留待明确导入后使用。
+    // Before initial enrollment, ignore card history and directory fallbacks without deleting them.
+    if (app_setup_library_pending()) {
+        memset(&s_current, 0, sizeof(s_current));
+        memset(s_recent, 0, sizeof(s_recent));
+        return;
+    }
     char last[BOOK_STORE_PATH_MAX];
     // 不支持的恢复记录只跳过，不删除其他固件的缓存和阅读位置。
     // Ignore unsupported resume records without deleting another firmware's cache or progress.
@@ -290,14 +303,36 @@ static void scan_books(void) {
     }
 }
 
-static void refresh_progress(void) {
+// 每次返回首页核对真实进度；临时读取失败保留上一值，稍后重试而非显示0%。
+// Check persisted progress on every Home entry; retain prior values on transient errors and retry instead of showing0%.
+static bool refresh_progress(void) {
+    bool ready = true;
     for (int i = 0; i < 7; ++i) {
         home_book_t *item = book_at(i);
         struct stat st;
-        if (!item->path[0] || stat(item->path, &st) || !S_ISREG(st.st_mode) ||
-            st.st_size < 0 || (uint64_t)st.st_size > UINT32_MAX) continue;
-        item->has_progress = book_progress_load(item->path, (uint32_t)st.st_size, &item->progress);
+        if (!item->path[0]) continue;
+        if (stat(item->path, &st)) {
+            if (errno == ENOENT || errno == ENOTDIR) { item->path[0] = 0; item->has_progress = false; }
+            else ready = false;
+            continue;
+        }
+        if (!S_ISREG(st.st_mode) || st.st_size < 0 || (uint64_t)st.st_size > UINT32_MAX) continue;
+        book_progress_t progress = {0};
+        esp_err_t result = book_progress_load_checked(item->path, (uint32_t)st.st_size, &progress);
+        if (result == ESP_OK || result == ESP_ERR_NVS_NOT_FOUND) {
+            item->has_progress = result == ESP_OK;
+            item->progress = progress;
+        } else ready = false;
     }
+    return ready;
+}
+
+static bool scan_state_matches(const read_pico_sd_info_t *sd, esp_err_t error) {
+    return s_books_cache_valid && error != ESP_ERR_NOT_FINISHED &&
+        s_cached_library_pending == app_setup_library_pending() &&
+        s_cached_store_revision == book_store_revision() &&
+        s_cached_sd_present == sd->present && s_cached_sd_mounted == sd->mounted &&
+        !strcmp(s_cached_books_dir, app_settings_books_dir());
 }
 
 static void remember_scan_state(const read_pico_sd_info_t *sd) {
@@ -306,8 +341,10 @@ static void remember_scan_state(const read_pico_sd_info_t *sd) {
     s_cached_sd_present = sd->present;
     s_cached_sd_mounted = sd->mounted;
     snprintf(s_cached_books_dir, sizeof(s_cached_books_dir), "%s", app_settings_books_dir());
+    s_cached_library_pending = app_setup_library_pending();
     s_cached_last_path[0] = 0;
-    (void)book_progress_last_path(s_cached_last_path, sizeof(s_cached_last_path));
+    if (!s_cached_library_pending)
+        (void)book_progress_last_path(s_cached_last_path, sizeof(s_cached_last_path));
 }
 
 static home_book_t *book_at(int index) { return index ? &s_recent[index - 1] : &s_current; }
@@ -667,7 +704,7 @@ static void render_root(uint8_t *fb) {
         label_on(fb,622,482,24,"继续阅读 ›",EPD_DRAW_ALIGN_RIGHT,0,card_background);
         EpdRect track={264,511,358,7};ui_fill_round_rect(fb,track,3,0xcc);
         track.width=358*(b->has_progress?b->progress.pct:0)/100;if(track.width)ui_fill_round_rect(fb,track,3,0x30);
-    } else label_on(fb,342,410,23,"打开一本书后，会在这里继续阅读",EPD_DRAW_ALIGN_CENTER,0x60,card_background);
+    } else label_on(fb,342,410,23,"现在到书架正式开始读一本书吧～",EPD_DRAW_ALIGN_CENTER,0x60,card_background);
     HOME_STAGE("card_body");
     ui_draw_separator(fb,606,36,612,0x50);
     if(app_settings_home_component()==APP_HOME_FOLDER) {
@@ -881,17 +918,19 @@ static void on_enter(app_ctx_t *ctx) {
     (void)ctx;s_view=HOME_ROOT;s_clock_pending=s_time_pending=s_widget_pending=s_component_pending=false;s_press_pending=false;s_save_error=false;s_time_stamp=s_widget_stamp=-1;s_motion_ms=-100;
     s_home_force_full_once=app_settings_home_full_refresh();refresh_days();avatar_prepare_state();
     read_pico_sd_info_t sd={0};esp_err_t error=read_pico_sd_get_info(&sd);
-    bool same=s_books_cache_valid&&error!=ESP_ERR_NOT_FINISHED&&s_cached_store_revision==book_store_revision()&&
-        s_cached_sd_present==sd.present&&s_cached_sd_mounted==sd.mounted&&!strcmp(s_cached_books_dir,app_settings_books_dir());
-    char last[BOOK_STORE_PATH_MAX]={0};book_progress_last_path(last,sizeof(last));
+    bool same=scan_state_matches(&sd,error);
+    char last[BOOK_STORE_PATH_MAX]={0};
+    if(!app_setup_library_pending())book_progress_last_path(last,sizeof(last));
     bool changed=strcmp(last,s_cached_last_path);
-    if(same&&!changed){if(s_cached_progress_revision!=progress_revision)refresh_progress();s_scan_pending=false;}
+    if(same&&!changed){s_scan_pending=false;}
     else {
         memset(&s_current,0,sizeof(s_current));memset(s_recent,0,sizeof(s_recent));s_scan_pending=!same;
         if(s_scan_pending) read_pico_sd_start_probe();
         scan_books();
         if(same||error!=ESP_ERR_NOT_FINISHED)remember_scan_state(&sd);
     }
+    s_progress_retry_pending = !refresh_progress();
+    s_progress_retry_after = ctx->now_ms + 500;
     if(!same||changed)restore_cover_cache();
     rp_boot_mark("scan");
     s_cached_progress_revision=progress_revision;
@@ -910,6 +949,14 @@ static void on_media_ready(app_ctx_t *ctx) {(void)ctx;s_books_cache_valid=false;
 static app_redraw_t on_tick(app_ctx_t *ctx) {
     clock_base_prepare();
     if(ctx->consumed||(ctx->touch&&ctx->touch->touched))return APP_REDRAW_NONE;
+    if(s_view==HOME_ROOT && s_progress_retry_pending && ctx->now_ms>=s_progress_retry_after) {
+        home_book_t *before=featured();bool had=before->has_progress;unsigned pct=before->progress.pct;
+        s_progress_retry_pending=!refresh_progress();s_progress_retry_after=ctx->now_ms+2000;
+        home_book_t *after=featured();
+        if(before!=after||had!=after->has_progress||pct!=after->progress.pct){
+            s_area=continue_card_rect();return APP_REDRAW_AREA;
+        }
+    }
     if(s_view==HOME_COMPONENT&&s_component_pending){s_area=s_component_dirty;return APP_REDRAW_AREA;}
     bool folder_preview=s_view==HOME_COMPONENT&&s_component_browse==APP_HOME_FOLDER;
     if(s_view==HOME_ROOT||folder_preview){

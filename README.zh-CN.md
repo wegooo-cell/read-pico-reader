@@ -3,7 +3,7 @@
 > **使用与授权：** 今后明确标注适用[个人学习许可](licenses/kiikoread-Personal-Study-1.0.txt)的新增原创内容，允许个人学习，未经单独书面授权不得商用。**此政策不重新许可 rc93 及以前的代码或固件，不撤销既有 Apache-2.0 授权，也不覆盖第三方许可。** 完整范围见 [LICENSE](LICENSE)。
 
 项目对外名称统一为 **kiikoread**，网页对设备使用「墨水屏」。保留原 GitHub 仓库网址、升级地址与备份文件名；固件界面也统一使用 kiikoread。纯白官网包含界面预览、功能介绍、版本选择、网页刷机、Bin 下载和[在线使用说明](flash/manual.html)。运行 `python3 tools/stage_public_flash.py _site` 生成公开网站，GitHub Pages 或 Cloudflare Pages 均可使用 `_site` 作为发布目录。说明书从 `docs/user-manual.zh-CN.json` 同源生成，运行 `tools/build_user_manual.py --font /path/to/a/static-CJK.ttf` 可更新 HTML 与 PDF（需要 Python ReportLab）。
-正式固件 Bin 统一保存到 [GitHub Releases](https://github.com/wegooo-cell/read-pico-reader/releases)，网站构建按清单下载并校验，不直接发布原始 flash 目录。设备优先读取 `https://kiikoread.com/update.json`，失败后回退原 GitHub 更新源。主站使用 `python3 tools/stage_public_flash.py _site --ota-origin https://kiikoread.com`；GitHub Pages 使用默认参数，保留旧固件可识别的升级地址。
+正式固件 Bin 统一保存到 [GitHub Releases](https://github.com/wegooo-cell/read-pico-reader/releases)，网站构建按清单下载并校验，不直接发布原始 flash 目录。新固件优先读取既有 GitHub Pages OTA 清单，官网作为备用；已发布客户端沿用各自内置顺序。主站使用 `python3 tools/stage_public_flash.py _site --ota-origin https://kiikoread.com`；GitHub Pages 使用默认参数，保留旧固件可识别的升级地址。
 
 
 [English](README.md) · [日本語](README.ja-JP.md) · [第三方许可](THIRD_PARTY_NOTICES.md)
@@ -12,9 +12,9 @@
 
 界面包括首页、书架、文件管理和设置；可阅读 TF 卡中的 EPUB、TXT，保存阅读进度，并通过 WiFi、设备热点或 USB 传输文件。
 
-## 当前正式版：rc99
+## 当前正式版：PICO rc110 / S31 rc117
 
-基于51e7d8d：恢复系统文字抗锯齿，修复充电显示，新增单击/双击唤醒选项，统一锁屏/取消图标，阅读辅助线随文字范围裁剪，进入阅读完整清理。官网保留原rc98供回退。详见[更新日志](docs/CHANGELOG.md)。
+书架管理分为Books目录和已上架书籍，按真实目录选择导入；重新扫描只清空上架列表再重选。管理采用13行列表或4×3封面、本页全选/取消、严格排序及作者限宽。阅读字号20–120、行高100%–300%、段距−100%–100%且每次10%，修复进度同步、配置备份和安全恢复。PICO信息栏独立局刷；S31改善水波纹、擦白和长按开机，完整开机修复请使用网页USB安装配套引导程序。保留设置、书籍和历史版本。详见[更新日志](docs/CHANGELOG.md)。
 
 
 ### 阅读与低功耗更新
@@ -127,7 +127,7 @@ TF 卡当前支持 FAT16/FAT32，未启用 exFAT，容量大小本身不代表�
 
 从文件管理打开 TF 卡任意目录中的 TXT/EPUB 并保存阅读进度后，返回书架会自动收录，无需重新扫描。书架管理的「移出书架」只隐藏所选条目，保留文件、阅读进度和收藏；再次打开阅读后自动重新上架。移出状态会记住，并随配置备份保存、恢复。
 
-书架管理沿用文件管理布局：顶部切换列表/图标，下面是搜索框、书籍数量、「书架排序」和选择，不再显示来源筛选。普通点按开书；长按书籍或点「选择」才显示圆形待选标记与删除书籍、清理进度、移出书架、返回四项操作，返回先退出选择。分页、排序和切换视图保留已选书籍；应用搜索清空选择。分页支持最前、上一页、下一页、最后；列表每页五本，图标每页六本，三类批量操作仍需确认。
+书架管理分为**Books目录**和**已上架书籍**。Books目录按真实文件夹与文件名浏览，支持文件改名、删除、移动和导入；已上架书籍支持显示名、移出、清理进度及四类严格排序。列表每页13项且无封面，图标每页4×3封面，作者限宽。搜索为题头图标，本页全选/取消不影响其他页选择，底部圆圈键返回书架。重新扫描先清空上架成员再选择全部或手动导入，源书文件与进度保留；目录选择递归导入，取消不产生部分入架，保存失败可重试。
 
 TXT 或没有有效内嵌封面的 EPUB 会按书籍路径稳定生成灰阶封面；书架、首页和阅读票根显示同一版式。有效的 EPUB 原封面仍优先使用。生成结果缓存在 TF 卡的 `.readpico/covers` 中，文件或书名变化后会重新生成。
 

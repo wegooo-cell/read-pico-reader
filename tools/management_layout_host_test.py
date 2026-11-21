@@ -45,17 +45,70 @@ int main(void){
  for(int i=0;i<3;++i){bounds(ui_files_category_rect(i));bounds(ui_files_transfer_rect(i));assert(!overlaps(ui_files_storage_rect(),ui_files_category_rect(i)));}
  for(int grid=0;grid<2;++grid){
   for(int row=0;row<ui_book_manage_rows(grid);++row){
-   EpdRect r=ui_book_manage_entry(grid,row),cover=ui_book_manage_cover(grid,row);bounds(r);bounds(cover);
-   assert(r.y+r.height<1006&&cover.x>=r.x&&cover.x+cover.width<=r.x+r.width&&cover.y>=r.y&&cover.y+cover.height<=r.y+r.height);
+   EpdRect r=ui_book_manage_entry(grid,row),cover=ui_book_manage_cover(grid,row);bounds(r);if(grid)bounds(cover);
+   assert(r.y+r.height<1006&&(!grid||(cover.x>=r.x&&cover.x+cover.width<=r.x+r.width&&cover.y>=r.y&&cover.y+cover.height<=r.y+r.height)));
    for(int j=0;j<row;++j)assert(!overlaps(r,ui_book_manage_entry(grid,j)));
   }
  }
- EpdRect cover=ui_book_manage_get_cover(), sort=ui_book_manage_sort();
- assert(cover.y==sort.y&&cover.x+cover.width<sort.x&&hit(cover,cover.x+5,cover.y+5));
- EpdRect controls[]={ui_book_manage_search(),ui_book_manage_layout(),cover,sort,ui_book_manage_import(),ui_book_manage_select()};
- for(int i=0;i<6;++i){bounds(controls[i]);for(int j=0;j<i;++j)assert(!overlaps(controls[i],controls[j]));}
+ for(int grid=0;grid<2;++grid)for(int i=0;i<(grid?12:13);++i){EpdRect r=ui_book_import_entry(grid,i);bounds(r);assert(r.y>=244&&r.y+r.height<=1020);if(grid)bounds(ui_book_import_cover(grid,i));for(int j=0;j<i;++j)assert(!overlaps(r,ui_book_import_entry(grid,j)));}
+ EpdRect imports[]={ui_book_import_search(),ui_book_import_layout(),ui_book_import_parent(),ui_book_import_select(),ui_book_import_cancel()};
+ for(int i=0;i<5;++i){bounds(imports[i]);for(int j=0;j<i;++j)assert(!overlaps(imports[i],imports[j]));}
+ assert(ui_book_manage_rows(false)==13&&ui_book_manage_rows(true)==12);
+ EpdRect controls[]={ui_book_manage_tab(0),ui_book_manage_tab(1),ui_book_manage_search(),ui_book_manage_layout(),ui_book_manage_sort(),ui_book_manage_select(),ui_book_manage_cancel(),ui_book_manage_get_cover()};
+ for(int i=0;i<8;++i){bounds(controls[i]);for(int j=0;j<i;++j)assert(!overlaps(controls[i],controls[j]));}
  for(int i=3;i<7;++i){EpdRect action=ui_book_manage_action(i);bounds(action);assert(action.y==1096&&action.height==120);assert(!overlaps(action,(EpdRect){36,1006,612,50}));for(int j=3;j<i;++j)assert(!overlaps(action,ui_book_manage_action(j)));}
- puts("PASS: stable body with disjoint visible crop/header/footer, immediate centre mode tap, retained image side zoom, 7 file rows/4 actions, 5 shelf rows and separated pager/actions");
+ puts("PASS: stable body with disjoint visible crop/header/footer, immediate centre mode tap, retained image side zoom, 7 file rows/4 actions, 13 coverless list rows/12 grid covers with source tabs/import/rescan and separated pager/actions");
 }
 ''')
  exe=p/'test';subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(p),'-I'+str(root/'main'),str(p/'test.c'),'-o',str(exe)],check=True);subprocess.run([str(exe)],check=True)
+
+# 验证作者按实际测量限宽，不覆盖书名或百分比。/ Exercise author clipping with variable-width font measurements.
+from home_cover_cache_host_test import function
+for source in [root/'main/apps/app_book.c',root/'boards/pico/src/main/apps/app_book.c']:
+ unit=r'''
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+enum{EPD_DRAW_ALIGN_RIGHT};
+static int font_width=1;static char rendered[160];
+static int ui_text_fixed_width_px(int px,const char*text){
+ assert(px==18);int width=0;
+ for(const unsigned char*p=(const unsigned char*)text;*p;){
+  if(*p<128){width+=font_width*((*p=='W'||*p=='M')?14:7);++p;}
+  else{unsigned n=(*p&0xe0)==0xc0?2:(*p&0xf0)==0xe0?3:4;
+   for(unsigned i=1;i<n;++i)assert(p[i]&&(p[i]&0xc0)==0x80);
+   width+=font_width*18;p+=n;}
+ }return width;
+}
+static void ui_text_fixed_ink_vc(uint8_t*fb,int x,int y,int px,const char*text,int align,uint8_t gray){
+ (void)fb;assert(x==578&&y==337&&px==18&&align==EPD_DRAW_ALIGN_RIGHT&&gray==0x60);
+ assert(ui_text_fixed_width_px(px,text)<=152&&x-ui_text_fixed_width_px(px,text)>=426);
+ snprintf(rendered,sizeof(rendered),"%s",text);
+}
+'''
+ unit+=function('copy_text',source)+'\n'+function('fit_fixed_text',source)+'\n'+function('bulk_draw_author',root/'main/apps/book_manage_ui.h')
+ unit+=r'''
+int main(void){uint8_t fb=0;char long_name[512],unchanged[512];
+ for(font_width=1;font_width<=3;++font_width){
+  const char *samples[]={"","鲁迅","J. K. Rowling","[美] 很长很长的作者姓名与译者姓名以及出版信息", "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW", "作者😀作者😀作者😀作者😀作者😀作者😀"};
+  for(unsigned i=0;i<sizeof(samples)/sizeof(samples[0]);++i){
+   bulk_draw_author(&fb,samples[i],337);
+   if(ui_text_fixed_width_px(18,samples[i])<=152)assert(!strcmp(rendered,samples[i]));
+   else assert(strstr(rendered,"…"));
+  }
+  memset(long_name,'W',sizeof(long_name)-1);long_name[sizeof(long_name)-1]=0;strcpy(unchanged,long_name);
+  bulk_draw_author(&fb,long_name,337);assert(!strcmp(long_name,unchanged)&&strstr(rendered,"…"));
+ }
+ assert(70+340<578-152);puts("PASS: actual author rendering clips UTF-8/English/emoji at measured widths, keeps source intact and cannot overlap title/progress");
+}
+'''
+ with tempfile.TemporaryDirectory() as d:
+  p=Path(d);(p/'author.c').write_text(unit)
+  subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',str(p/'author.c'),'-o',str(p/'author')],check=True)
+  subprocess.run([str(p/'author')],check=True)
+ui=(root/'main/apps/book_manage_ui.h').read_text()
+assert '"已上架书籍"' in ui and '"已上架书架"' not in ui
+assert 'if(!s_import_candidates&&!s_manage_books)draw_shelf_order_button' in ui
+assert 'else bulk_draw_author(fb,item->author' in ui

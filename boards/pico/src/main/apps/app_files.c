@@ -34,6 +34,7 @@
 #include "book_progress.h"
 #include "book_title.h"
 #include "book_added.h"
+#include "book_library.h"
 #include "display.h"
 #include "file_tree.h"
 #include "file_search.h"
@@ -68,6 +69,14 @@ static const char *file_item_name(const file_item_t *item) {
 // The file list lives in PSRAM. Internal RAM is already around 90% statically used and the BLE
 // controller can only use internal RAM, so a list this big has no business holding any of it.
 static file_item_t *s_files;
+static char s_book_action_path[288];
+static bool s_book_action_move,s_book_action_active;
+bool app_files_request_book_action(const char *path,bool move){
+    if(!path||strncmp(path,"/sdcard/",8)||strlen(path)>=sizeof(s_book_action_path))return false;
+    struct stat st;if(stat(path,&st)||!S_ISREG(st.st_mode))return false;
+    strcpy(s_book_action_path,path);s_book_action_move=move;return true;
+}
+
 
 static bool files_alloc(void) {
     if (!s_files)
@@ -144,7 +153,7 @@ static void file_selection_restore(void) {
 static bool s_delete_confirm;
 static int s_move_origin_folder, s_move_origin_page;
 static char s_move_origin_dir[288];
-static char s_editor[121], s_editor_ext[16], s_editor_notice[96];
+static char s_editor[256], s_editor_ext[16], s_editor_notice[96];
 static ui_text_edit_t s_editor_input;
 static void scan_folder(int folder);
 static void rescan_current(void);
@@ -202,6 +211,13 @@ static int file_sheet_offset(void) {
 }
 static int visible_rows(void) { return s_view==FILE_VIEW_MOVE?(file_action_rect(0).y-16-214)/88:s_file_grid?9:UI_FILES_ROWS; }
 static int root_rows(void) { return 6; }
+static void file_select_page(void){
+    int rows=s_folder<0?root_rows():visible_rows(),start=s_page*rows;
+    bool all=true;
+    for(int n=start;n<file_visible_count()&&n<start+rows;++n)if(!s_files[file_visible_index(n)].selected)all=false;
+    for(int n=start;n<file_visible_count()&&n<start+rows;++n)s_files[file_visible_index(n)].selected=!all;
+    s_batch_count=0;
+}
 static int file_pager_pages(void) {
     int rows=s_folder<0?root_rows():visible_rows();
     int count=file_visible_count();return count?1+(count-1)/rows:1;
@@ -283,17 +299,23 @@ static bool sibling_path(const char *name, char out[288]) {
     return true;
 }
 
-static void migrate_book_state(const char *old_path, const char *new_path, uint32_t size) {
-    if (!is_book_path(old_path)) return;
-    book_added_migrate(old_path,new_path);
-    book_progress_t progress = {0};
-    bool had_progress = book_progress_load(old_path, size, &progress);
-    char last[BOOK_STORE_PATH_MAX] = {0};
-    bool was_last = book_progress_last_path(last, sizeof(last)) && !strcmp(last, old_path);
-    if (had_progress) (void)book_progress_save(new_path, &progress);
-    (void)book_progress_forget(old_path);
-    if (was_last) (void)book_progress_set_last_path(new_path);
-    (void)book_title_clear(old_path);
+static esp_err_t s_book_move_error;
+static bool migrate_book_state(const char *old_path, const char *new_path, uint32_t size) {
+    if (!is_book_path(old_path)) return true;
+    s_book_move_error=book_progress_copy_to(old_path,new_path,size);
+    if(s_book_move_error!=ESP_OK)return false;
+    char title[256];
+    esp_err_t title_error=book_title_get(old_path,title,sizeof(title))?book_title_set(new_path,title):book_title_clear(new_path);
+    if(title_error!=ESP_OK)return false;
+    if(!app_book_copy_file_identity(old_path,new_path))return false;
+    char last[BOOK_STORE_PATH_MAX]={0};
+    if(book_progress_last_path(last,sizeof(last))&&!strcmp(last,old_path))
+        if(book_progress_set_last_path(new_path)!=ESP_OK)return false;
+    if(book_library_move(old_path,new_path)!=ESP_OK)return false;
+    if(strcmp(old_path,new_path)&&book_added_migrate(old_path,new_path))book_added_forget(old_path);
+    // Keep old progress as a recovery copy; its old library identity has been removed.
+    return true;
+
 }
 
 static esp_err_t copy_selected_item(char out_name[128]) {
@@ -361,30 +383,30 @@ static void sync_moved_settings(const char *old_path, const char *new_path) {
         app_settings_set_wallpaper_path(updated);
 }
 
-static void notify_moved_tree(const char *old_path, const char *new_path, unsigned depth) {
-    if (depth > 8) return;
+static bool notify_moved_tree(const char *old_path, const char *new_path, unsigned depth) {
+    if (depth > 8) return false;
     struct stat st;
-    if (stat(new_path, &st)) return;
+    if (stat(new_path, &st)) return false;
     if (S_ISREG(st.st_mode)) {
-        migrate_book_state(old_path, new_path,
+        return migrate_book_state(old_path, new_path,
             st.st_size >= 0 && (uint64_t)st.st_size <= UINT32_MAX ? (uint32_t)st.st_size : 0);
-        return;
     }
-    if (!S_ISDIR(st.st_mode)) return;
+    if (!S_ISDIR(st.st_mode)) return false;
     DIR *dir = opendir(new_path);
-    if (!dir) return;
+    if (!dir) return false;
     char *paths = heap_caps_malloc(576, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!paths) { closedir(dir); return; }
+    if (!paths) { closedir(dir); return false; }
     char *old_child = paths, *new_child = paths + 288;
+    bool complete=true;
     struct dirent *entry;
     while ((entry = readdir(dir))) {
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
         if (snprintf(old_child, 288, "%s/%s", old_path, entry->d_name) >= 288 ||
-            snprintf(new_child, 288, "%s/%s", new_path, entry->d_name) >= 288) continue;
-        notify_moved_tree(old_child, new_child, depth + 1);
+            snprintf(new_child, 288, "%s/%s", new_path, entry->d_name) >= 288){complete=false;continue;}
+        if(!notify_moved_tree(old_child,new_child,depth+1))complete=false;
     }
     free(paths);
-    closedir(dir);
+    closedir(dir);return complete;
 }
 
 static void file_deleted(const char *path, bool directory, void *ctx) {
@@ -452,14 +474,22 @@ static app_redraw_t move_selected(void) {
     if (!moved_settings_fit(s_selected.path, destination)) {
         snprintf(s_message, sizeof(s_message), "设置路径过长，无法移动"); return APP_REDRAW_PAGE;
     }
+    char previous_last[BOOK_STORE_PATH_MAX]={0};
+    bool had_last=book_progress_last_path(previous_last,sizeof(previous_last));
     esp_err_t err = file_tree_move(s_selected.path, destination);
     if (err != ESP_OK) {
         snprintf(s_message, sizeof(s_message), err == ESP_ERR_INVALID_STATE ? "目标已有同名项目" :
                  err == ESP_ERR_INVALID_ARG ? "不能移入自身文件夹" : "移动失败，请检查 TF 卡");
         return APP_REDRAW_PAGE;
     }
-    sync_moved_settings(s_selected.path, destination);
-    notify_moved_tree(s_selected.path, destination, 0);
+    if(!notify_moved_tree(s_selected.path,destination,0)){
+        if(!s_selected.is_dir&&file_tree_move(destination,s_selected.path)==ESP_OK){
+            if(had_last)(void)book_progress_set_last_path(previous_last);
+            snprintf(s_message,sizeof(s_message),"%s",s_book_move_error==BOOK_PROGRESS_MOVE_CONFLICT?"目标有旧进度，文件已还原，请换个名称或位置":"记录保存失败，文件已还原，请重试");return APP_REDRAW_PAGE;
+        }
+        snprintf(s_message,sizeof(s_message),"文件已移动，部分记录未迁移，请保留原进度");return APP_REDRAW_PAGE;
+    }
+    sync_moved_settings(s_selected.path,destination);
     book_store_notify_changed();
     leave_move(true);
     snprintf(s_message, sizeof(s_message), "移动完成");
@@ -505,7 +535,7 @@ static app_redraw_t file_batch_tick(void) {
                 else if(!moved_settings_fit(item->path,target))err=ESP_ERR_INVALID_SIZE;
                 else{
                     err=file_tree_move(item->path,target);
-                    if(err==ESP_OK){sync_moved_settings(item->path,target);notify_moved_tree(item->path,target,0);}
+                    if(err==ESP_OK){if(notify_moved_tree(item->path,target,0))sync_moved_settings(item->path,target);else err=ESP_FAIL;}
                 }
             }else err=file_tree_delete(item->path,file_deleted,NULL);
         }
@@ -564,7 +594,7 @@ static int compare_files(const void *left, const void *right) {
     int order=0;
     if(s_file_sort==1&&a->modified!=b->modified)order=a->modified<b->modified?-1:1;
     else if(s_file_sort==2&&a->size!=b->size)order=a->size<b->size?-1:1;
-    else order=strcasecmp(file_item_name(a),file_item_name(b));
+    else order=read_pico_name_compare(file_item_name(a),file_item_name(b));
     if(!order)order=strcmp(a->path,b->path);
     return s_file_desc?-order:order;
 }
@@ -970,6 +1000,15 @@ static void on_enter(app_ctx_t *ctx) {
     // 已完成首帧目录扫描时不在下一拍重复统计并推整页；挂载/分配未完成仍沿原重试路径。
     // Do not repeat a completed first-frame scan and whole-page present on the next tick; retain mount/allocation retries.
     if(info_status!=ESP_ERR_NOT_FINISHED&&s_files)s_scan_pending=false;
+    s_book_action_active=s_book_action_path[0]!=0;
+    if(s_book_action_active){
+        struct stat st;memset(&s_selected,0,sizeof(s_selected));copy_utf8(s_selected.path,sizeof(s_selected.path),s_book_action_path);s_book_action_path[0]=0;
+        if(stat(s_selected.path,&st)||!S_ISREG(st.st_mode)){s_book_action_active=false;return;}
+        s_selected.size=st.st_size;s_selected.modified=st.st_mtime;s_folder=3;
+        copy_utf8(s_dir,sizeof(s_dir),s_selected.path);char *slash=strrchr(s_dir,'/');if(slash)*slash=0;
+        if(s_book_action_move)start_move();else editor_start();s_scan_pending=false;
+    }
+
 }
 static void on_media_lost(app_ctx_t *ctx) {
     file_search_stop();s_file_query[0]=s_search_root[0]=0;
@@ -985,6 +1024,10 @@ static void on_media_ready(app_ctx_t *ctx) {
 }
 static app_redraw_t rename_paint(app_ctx_t *ctx, bool field);
 static app_redraw_t on_tick(app_ctx_t *ctx) {
+    if(s_book_action_active&&(s_view==FILE_VIEW_LIST||s_view==FILE_VIEW_ACTIONS)){
+        extern const app_desc_t app_book;s_book_action_active=false;ctx->request_app=&app_book;return APP_REDRAW_NONE;
+    }
+
     if(s_batch_running)return file_batch_tick();
     if (s_view == FILE_VIEW_RENAME || s_view == FILE_VIEW_SEARCH) {
         if (ctx->consumed) return APP_REDRAW_NONE;
@@ -1078,7 +1121,7 @@ static app_redraw_t save_rename(void) {
         snprintf(s_editor_notice, sizeof(s_editor_notice), "请输入有效文件名");
         return APP_REDRAW_PAGE;
     }
-    char name[128], destination[288];
+    char name[288], destination[288];
     if (snprintf(name, sizeof(name), "%s%s", s_editor, s_editor_ext) >= sizeof(name) ||
         !sibling_path(name, destination)) {
         snprintf(s_editor_notice, sizeof(s_editor_notice), "文件名过长");
@@ -1096,12 +1139,20 @@ static app_redraw_t save_rename(void) {
         return APP_REDRAW_PAGE;
     }
     file_search_stop();
+    char previous_last[BOOK_STORE_PATH_MAX]={0};
+    bool had_last=book_progress_last_path(previous_last,sizeof(previous_last));
     if (file_tree_move(old_path, destination) != ESP_OK) {
         snprintf(s_editor_notice, sizeof(s_editor_notice), "重命名失败，请检查 TF 卡");
         return APP_REDRAW_PAGE;
     }
-    sync_moved_settings(old_path, destination);
-    notify_moved_tree(old_path, destination, 0);
+    if(!notify_moved_tree(old_path,destination,0)){
+        if(!s_selected.is_dir&&file_tree_move(destination,old_path)==ESP_OK){
+            if(had_last)(void)book_progress_set_last_path(previous_last);
+            snprintf(s_editor_notice,sizeof(s_editor_notice),"%s",s_book_move_error==BOOK_PROGRESS_MOVE_CONFLICT?"目标有旧进度，文件已还原，请换个名称":"记录保存失败，文件已还原，请重试");return APP_REDRAW_PAGE;
+        }
+        snprintf(s_editor_notice,sizeof(s_editor_notice),"文件已改名，记录迁移失败，请保留原进度");return APP_REDRAW_PAGE;
+    }
+    sync_moved_settings(old_path,destination);
     book_store_notify_changed();
     copy_utf8(s_selected.path, sizeof(s_selected.path), destination);
     s_view = FILE_VIEW_ACTIONS;
@@ -1251,10 +1302,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         if(s_file_selecting&&ev->y0>=1096){
             if(ui_rect_hit(ui_files_batch_rect(3),ev->x0,ev->y0)){s_file_selecting=false;s_batch_count=0;for(int i=0;i<s_count;++i)s_files[i].selected=false;return APP_REDRAW_FULL;}
             if(ui_rect_hit(ui_files_batch_rect(0),ev->x0,ev->y0)){
-                int rows=s_folder<0?root_rows():visible_rows(),start=s_page*rows;bool all=true;
-                for(int n=start;n<file_visible_count()&&n<start+rows;++n){int i=file_visible_index(n);if(!s_files[i].selected)all=false;}
-                for(int n=start;n<file_visible_count()&&n<start+rows;++n)s_files[file_visible_index(n)].selected=!all;
-                s_batch_count=0;return APP_REDRAW_PAGE;
+                file_select_page();return APP_REDRAW_PAGE;
             }
 
             if(ui_rect_hit(file_batch_button(0),ev->x0,ev->y0)&&file_batch_prepare()){

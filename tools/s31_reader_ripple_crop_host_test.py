@@ -26,7 +26,7 @@ prefix=prefix[:start]+r'''
     int expected=0;bool expected_seen[TEST_PHASES]={0};
     for(int b=0;b<test_bands;++b){
         int launch=b<last_launch?b:last_launch;
-        int phase=tick-launch;
+        int phase=tick-launch*(paired_tail?3:1);
         if(phase>=0&&phase<TEST_PHASES&&!expected_seen[phase]){expected_seen[phase]=true;++expected;}
         // 每带取中心点，独立核对方向、启动顺序以及所有有效相位。
         // Sample each band center to check direction, launches and every active phase independently.
@@ -50,12 +50,12 @@ int main(void){
  test_launch_step=1;check_direction=false;
  for(int profile=0;profile<2;++profile)for(int rot=1;rot<=3;rot+=2)for(int dir=0;dir<2;++dir)for(int style=0;style<3;++style){
   test_bands=profile?4:8;paired_tail=profile;
-  int expected_ticks=TEST_PHASES+(profile?2:7);
+  int expected_ticks=TEST_PHASES+(profile?6:7);
   rotation=(enum EpdRotation)rot;direction=(e0470_turn_dir_t)dir;
   EpdRect body={0,tops[style],HEIGHT,bottoms[style]-tops[style]};logical_body=body;
   memset(front,0x24,sizeof(front));memset(back,0xff,sizeof(back));memset(phase_hits,0,sizeof(phase_hits));memset(band_hits,0,sizeof(band_hits));
   scans=differences=powerons=fail_at=0;now_us=0;
-  enum EpdDrawError result=profile?e0470_reader_ripple_with_waveform(&hl,body,direction,&soft_wave,4):
+  enum EpdDrawError result=profile?e0470_reader_ripple_with_waveform_timed(&hl,body,direction,&soft_wave,4,3):
       e0470_page_turn_with_waveform_compact(&hl,body,direction,&soft_wave,8);
   assert(result==EPD_DRAW_SUCCESS&&scans==expected_ticks&&differences==1&&!staged_luts);
   assert(now_us==(int64_t)expected_ticks*E0470_TURN_FAST_TICK_US);
@@ -68,7 +68,7 @@ int main(void){
   // Fail each scan in turn without committing partial history or retaining phase pointers.
   for(int failure=1;failure<=expected_ticks;++failure){
    memset(back,0xff,sizeof(back));scans=differences=0;fail_at=failure;
-   result=profile?e0470_reader_ripple_with_waveform(&hl,body,direction,&soft_wave,4):
+   result=profile?e0470_reader_ripple_with_waveform_timed(&hl,body,direction,&soft_wave,4,3):
       e0470_page_turn_with_waveform_compact(&hl,body,direction,&soft_wave,8);
    assert(result==EPD_DRAW_OTHER_ERROR&&scans==failure&&!staged_luts);
    for(size_t i=0;i<sizeof(back);++i)assert(back[i]==0xff);
@@ -80,7 +80,7 @@ int main(void){
 '''
 with tempfile.TemporaryDirectory(prefix='s31-ripple-crop-') as temporary:
     folder=Path(temporary);source=folder/'test.c';source.write_text(unit)
-    for phases in (37,33,29):
+    for phases in (37,33,29,56,52,48):
         binary=folder/('test-'+str(phases))
         subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-variable',
             '-fsanitize=address,undefined','-DTEST_PHASES='+str(phases),'-I'+str(root/'tools/water_turn_stubs'),

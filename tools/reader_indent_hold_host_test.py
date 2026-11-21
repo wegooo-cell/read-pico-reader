@@ -10,6 +10,7 @@ book=root/'main/apps/app_book.c'
 text=book.read_text()
 unit=r'''
 #include <assert.h>
+#include "book/book_font_size.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -139,5 +140,5 @@ assert 'reader_indent_gesture(ctx,ev,&indent_handled)' in function('gesture_even
 assert 'reader_indent_hold_tick(ctx)' in function('on_tick',book)
 with tempfile.TemporaryDirectory() as directory:
     p=Path(directory)/'test.c';p.write_text(unit);exe=p.with_suffix('')
-    subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',str(p),'-o',str(exe)],check=True)
+    subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(root/'main'),str(p),'-o',str(exe)],check=True)
     subprocess.run([str(exe)],check=True)

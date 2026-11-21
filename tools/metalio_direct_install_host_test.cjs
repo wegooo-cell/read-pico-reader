@@ -14,9 +14,9 @@ function table(){
  }
  data.writeUInt16LE(0xebeb,index*32);return data;
 }
-async function run({slot=0,chip=32,badLayout=false,badBundle=false}={}){
+async function run({slot=0,chip=32,badLayout=false,badBundle=false,requiresBootloader=false,badBoot=false}={}){
  const tableData=table(),protectedData=new Uint8Array(0x8000).fill(255);protectedData.set(tableData);protectedData.fill(0x63,0x1000,0x5000);
- const app=new Uint8Array(512).fill(0x31),writes=[],reads=[],fields=new Map();let dialog,ports=0,requests=0;
+ const boot=new Uint8Array(512).fill(0x42);const app=new Uint8Array(512).fill(0x31),writes=[],reads=[],fields=new Map();let dialog,ports=0,requests=0;
  function element(){return {checked:false,disabled:false,hidden:false,textContent:'',listeners:{},addEventListener(n,cb){this.listeners[n]=cb;}};}
  class FakeTransport{async disconnect(){}}
  class FakeLoader{
@@ -29,15 +29,15 @@ async function run({slot=0,chip=32,badLayout=false,badBundle=false}={}){
  const context=vm.createContext({Uint8Array,DataView,TextDecoder,performance,setTimeout,clearTimeout,Promise,Event,FakeTransport,FakeLoader,
   navigator:{serial:{requestPort:async()=>{ports++;return {};}}},
   document:{createElement(){dialog={...element(),innerHTML:'',setAttribute(){},showModal(){},remove(){},querySelector(s){if(!fields.has(s))fields.set(s,element());return fields.get(s);}};return dialog;},body:{appendChild(){}}},
-  window:{dispatchEvent(){},KiikoreadFlasher:{prepare:async()=>{requests++;if(badBundle)throw Error('bad bundle');return {parts:[{name:'partitions.bin',data:tableData},{name:'firmware.bin',data:app}],dispose(){}};}}},
+  window:{dispatchEvent(){},KiikoreadFlasher:{prepare:async()=>{requests++;if(badBundle)throw Error('bad bundle');return {parts:[{name:'partitions.bin',data:tableData},{name:'firmware.bin',data:app},{name:'bootloader.bin',offset:badBoot?0x8000:0x2000,data:boot}],dispose(){}};}}},
   connectS31:async()=>{},prepareS31Flash:async()=>{},connectionMessage:e=>e.message,
   readS31Flash:async(loader,address,size)=>{reads.push([address,size]);assert.equal(address,0x8000,'Never read or inspect the current application');assert.equal(size,0x8000);const b=protectedData.slice();if(badLayout)b[0]^=1;return b;},verifyS31Flash:async()=> 'verified'});
  vm.runInContext(core,context);
  if(slot!==null){const at=0x5000,v=new DataView(protectedData.buffer);protectedData.fill(255,at,at+32);v.setUint32(at,slot+1,true);v.setUint32(at+24,2,true);v.setUint32(at+28,context.otaCRC(protectedData.slice(at,at+4)),true);}
- vm.runInContext(installer,context);await context.window.MetalioInstaller.open({manifest:{version:'test'},manifestURL:'https://local.invalid/manifest.json',files:{}});
+ vm.runInContext(installer,context);await context.window.MetalioInstaller.open({manifest:{version:'test',requires_bootloader_update:requiresBootloader},manifestURL:'https://local.invalid/manifest.json',files:{}});
  assert(!fields.get('[data-clear]').checked);assert.equal(ports,0);await fields.get('[data-connect]').listeners.click();
  assert.equal(ports,1);assert.equal(requests,1);
- if(badLayout||badBundle||chip!==32){assert.equal(writes.length,0);return;}
- assert.equal(writes.length,1);assert.equal(writes[0].fileArray.length,1);assert.equal(writes[0].fileArray[0].address,slot===1?0x510000:0x10000);assert.equal(writes[0].fileArray[0].data,app);assert.equal(reads.length,3);assert.match(fields.get('[data-status]').textContent,/安装及设备端校验完成/);
+ if(badLayout||badBundle||chip!==32||badBoot){assert.equal(writes.length,0);return;}
+ assert.equal(writes.length,1);assert.equal(writes[0].fileArray.length,requiresBootloader?2:1);const appPart=writes[0].fileArray.find(p=>p.address===(slot===1?0x510000:0x10000));assert.equal(appPart.data,app);if(requiresBootloader){assert.equal(writes[0].fileArray[0].address,0x2000);assert.equal(writes[0].fileArray[0].data,boot);}assert.equal(reads.length,3);assert.match(fields.get('[data-status]').textContent,/安装及设备端校验完成/);
 }
-(async()=>{for(const slot of [0,1,null])await run({slot});await run({badLayout:true});await run({badBundle:true});await run({chip:9});console.log('PASS: S31 installs without reading existing firmware for both confirmed slots/initial boot; app-only writes, unchanged metadata, default data retention, model/layout/bundle rejection and no automatic serial request');})().catch(e=>{console.error(e);process.exitCode=1;});
+(async()=>{for(const slot of [0,1,null])await run({slot});await run({badLayout:true});await run({badBundle:true});await run({chip:9});for(const slot of [0,1,null])await run({slot,requiresBootloader:true});await run({requiresBootloader:true,badBoot:true});console.log('PASS: S31 installs without reading existing firmware for both confirmed slots/initial boot; app-only or required matching-bootloader writes, unchanged metadata, default data retention, model/layout/bundle rejection and no automatic serial request');})().catch(e=>{console.error(e);process.exitCode=1;});

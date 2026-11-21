@@ -9,6 +9,7 @@
  * Frozen: Caller owns source text and serializes all font measurement and drawing.
  */
 #include "book_layout.h"
+#include "book_font_size.h"
 #include "english_hyphen.h"
 #include "../font/text_glue.h"
 #include <limits.h>
@@ -37,7 +38,8 @@ static char* s_line;
 static size_t s_line_capacity;
 static EpdRect s_rect;
 static int s_px;
-static unsigned s_line_percent = 150, s_paragraph_percent = 50;
+static unsigned s_line_percent = 150;
+static int s_paragraph_percent = 50;
 static int s_tracking_px;
 static unsigned s_first_line_indent_em = 2;
 static int s_first_line_indent_adjust_px;
@@ -409,9 +411,9 @@ int book_layout_page_top_padding(size_t page) {
     return s_page_y&&page<s_count?s_page_y[page]:0;
 }
 
-void book_layout_set_spacing(unsigned line_percent, unsigned paragraph_percent) {
-    s_line_percent = line_percent >= 110 && line_percent <= 200 ? line_percent : 150;
-    s_paragraph_percent = paragraph_percent <= 100 ? paragraph_percent : 50;
+void book_layout_set_spacing(unsigned line_percent, int paragraph_percent) {
+    s_line_percent = line_percent >= BOOK_READER_LINE_MIN && line_percent <= BOOK_READER_LINE_MAX ? line_percent : 150;
+    s_paragraph_percent = paragraph_percent >= BOOK_READER_PARAGRAPH_MIN && paragraph_percent <= BOOK_READER_PARAGRAPH_MAX ? paragraph_percent : 50;
 }
 void book_layout_set_typography(int tracking_px) {
     s_tracking_px = tracking_px >= -15 && tracking_px <= 15 ? tracking_px : 0;
@@ -664,8 +666,11 @@ int book_layout_page_image(size_t page) {
     return page_end == after ? block->image : -1;
 }
 
-static int gap_for(int height, bool heading) {
-    return (int)((unsigned)height * s_paragraph_percent / (heading ? 150 : 100));
+static int gap_for(int height, bool heading, int px) {
+    int gap = height * s_paragraph_percent / (heading ? 150 : 100);
+    // 负段距只压缩行间空白，不让相邻字格重叠。/ Negative gaps compress leading without overlapping adjacent type cells.
+    int minimum = px - height;
+    return gap < minimum ? minimum : gap;
 }
 
 static int line_leading(const blk_t *block, int margin, int64_t used, int room) {
@@ -1221,7 +1226,7 @@ static bool build_vertical(size_t len) {
             continue;
         }
         used += leading + pitch;
-        if (paragraph_end) used += gap_for(pitch, heading) + margin_after;
+        if (paragraph_end) used += gap_for(pitch, heading, px) + margin_after;
         off = next;
     }
     return true;
@@ -1430,7 +1435,7 @@ bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks,
         s_last_line_used = (int)used + leading;
         s_last_line_x_end = s_rect.x + indent + line_width;
         used += leading + line_height;
-        if (paragraph_end) used += gap_for(line_height, heading) + margin_after;
+        if (paragraph_end) used += gap_for(line_height, heading, line_px) + margin_after;
         off = next;
     }
     // 整页只有一张插图时把它上下居中：贴顶会让插图页看起来像被裁掉了下半页。
@@ -1616,7 +1621,7 @@ static void draw_vertical_page(uint8_t* fb, size_t page, EpdRect rect) {
             if (saved_weight) ttf_set_weight(saved_weight);
         }
         used += pitch;
-        if (paragraph_end) used += gap_for(pitch, heading) + margin_after;
+        if (paragraph_end) used += gap_for(pitch, heading, px) + margin_after;
         off = next;
         if (s_idle_draw && off < end) {
             s_idle_draw->offset=off;s_idle_draw->used=used;s_idle_draw->image_at=img_at;
@@ -1793,7 +1798,7 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
             if (saved_weight) ttf_set_weight(saved_weight);
         }
         used += line_height;
-        if (paragraph_end) used += gap_for(line_height, heading) + margin_after;
+        if (paragraph_end) used += gap_for(line_height, heading, line_px) + margin_after;
         off = next;
         if (s_idle_draw && off < end) {
             s_idle_draw->offset=off;s_idle_draw->used=used;s_idle_draw->image_at=img_at;

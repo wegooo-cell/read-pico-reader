@@ -82,6 +82,17 @@ jobs:
         shell: bash
         run: |
           python3 tools/progress_boot_storage_host_test.py
+          python3 tools/reader_resume_durability_host_test.py
+          python3 tools/book_library_host_test.py
+          python3 tools/book_library_ui_host_test.py
+          python3 tools/management_layout_host_test.py
+          python3 tools/home_initial_empty_host_test.py
+          python3 tools/pico_reader_metadata_present_host_test.py
+          python3 tools/pico_home_progress_sync_host_test.py
+          python3 tools/reader_full_off_migration_host_test.py
+          python3 tools/device_sync_pairing_host_test.py
+          python3 build/host/pico/tools/settings_backup_pair_host_test.py
+          python3 build/host/metalio47/tools/settings_backup_pair_host_test.py
           python3 tools/settings_restore_storage_host_test.py
           python3 build/host/pico/tools/settings_restore_storage_host_test.py
       - name: Water-turn, display recovery, navigation and waveform regressions

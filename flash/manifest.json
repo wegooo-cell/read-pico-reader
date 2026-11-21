@@ -1,6 +1,6 @@
 {
   "name": "kiikoread 墨水屏",
-  "version": "0.3.3-rc109",
+  "version": "0.3.3-rc110",
   "board": "pico",
   "experimental_pie_pixels": false,
   "experimental_text_ripple": false,
@@ -24,8 +24,8 @@
         {
           "path": "bootloader.bin",
           "offset": 0,
-          "size": 21232,
-          "sha256": "15e3f5bd1bf0e96f740a16a42e81ca03f1f050bb643a02a64b4a934f81650055"
+          "size": 20128,
+          "sha256": "c55b72f5770cf8fe2406e9961c840ba5221cdfa8b03631db954acae22cea4bf1"
         },
         {
           "path": "partitions.bin",
@@ -36,8 +36,8 @@
         {
           "path": "firmware.bin",
           "offset": 65536,
-          "size": 4193792,
-          "sha256": "e992d026f7c13a9a32217550f2590a8414248e0f02a8b603f39f71267436f7ed"
+          "size": 3997152,
+          "sha256": "8406aab5067d9e32acb0c73918db25f6cbc10350657f33cce5476f12f2927720"
         },
         {
           "path": "ota_data_initial.bin",
@@ -48,24 +48,24 @@
       ]
     }
   ],
-  "updated_at": "2026-11-19T11:15:36+08:00",
+  "updated_at": "2026-11-21T14:07:33+08:00",
   "pico_ota": {
     "layout": "pico-dual-4m-v1",
-    "base_version": "0.3.3-rc109",
+    "base_version": "0.3.3-rc110",
     "minimum_base_version": "0.3.3-rc72",
     "online_ota_base_version": "0.3.3-rc79",
     "rollback": true
   },
-  "previous_version": "0.3.3-rc108",
-  "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc109/kiikoread-0.3.3-rc109-USB.zip",
-  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc109/kiikoread-0.3.3-rc109-TF.zip",
+  "previous_version": "0.3.3-rc109",
+  "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc110/kiikoread-0.3.3-rc110-USB.zip",
+  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/v0.3.3-rc110/kiikoread-0.3.3-rc110-TF.zip",
   "release_notes": [
-    "优化 TXT/EPUB 章节识别、题头样式、卷页与章节分页，修复章首和段落异常留白。",
-    "修复后续页章名显示，保留精排 EPUB 的图片、题头及自带格式。",
-    "修复阅读线手势，新增保存格式，开关恢复样式、范围和位置。",
-    "优化大书分段加载、插图内存管理与异常开书恢复。",
-    "优化阅读进度存储，修复票根及拼贴锁屏的 TXT 封面。",
-    "新增设备间设置和阅读资料同步。",
-    "优化阅读排版和操作稳定性。"
+    "书架管理分为Books目录和已上架书籍，按真实文件夹导入；列表13项、封面4×3，本页全选/取消。",
+    "修复首次空书架返回导入提示、中文及阅读进度排序、长作者遮挡；主动开书自动入架。",
+    "重新扫描清空上架列表后重新选书，源书和阅读进度保留，取消及失败状态可安全重试。",
+    "字号20–120、行高100%–300%、段距−100%–100%且每次10%；修复滑动调节、进度保存和锁屏恢复。",
+    "兼容标准与完整设置备份，修复首页继续阅读进度和首次未导入空态，改善设备同步失败提示。",
+    "普通/水波纹/快速三模式，信息栏独立局刷并即时更新页数；优化灰度JPEG、头像及图标容量。",
+    "保留Moku图片拖动和刷新改进，未纳入PR99连续快翻与延迟保存。"
   ]
 }

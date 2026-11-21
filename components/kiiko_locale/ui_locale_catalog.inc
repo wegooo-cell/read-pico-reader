@@ -595,6 +595,7 @@ static const ui_locale_pair_t s_pairs[] = {
     {"待准备","Pending"},
     {"快充","Fast charge"},
     {"快刷","Fast"},
+    {"快速灰阶","Fast gray"},
     {"思源黑体","思源黑体"},
     {"思源黑体（TF 卡）","思源黑体（TF 卡）"},
     {"思源黑体（内建）","思源黑体（内建）"},

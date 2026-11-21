@@ -57,6 +57,8 @@ static bool book_cover_jobs_quiesce(unsigned ms){assert(ms==2000);return true;}
 static bool ui_avatar_quiesce(unsigned ms){assert(ms==2000);return avatar_ok;}
 static int tp_mode, touch_wakes, acc_ups, acc_downs, cpu_requests;
 static int off_calls, deep_calls, pauses, resumes, syncs, prepared, radio_stops;
+static int64_t s_wake_media_grace_until_us;
+static int64_t esp_timer_get_time(void){return 1000;}
 static int error_result, waits;
 static esp_err_t operation(void) { return ++step == fault ? ESP_FAIL : ESP_OK; }
 static esp_err_t fca9555_set_output(void *h, int p, uint8_t v) {

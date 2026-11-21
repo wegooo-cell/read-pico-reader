@@ -138,22 +138,26 @@ void book_added_load(book_added_item_t *items, size_t count) {
         if (file) (void)close_written(file);
     }
 }
-static void write_identity(const char *path, uint64_t order) {
+static bool write_identity(const char *path, uint64_t order) {
     const char *root = medium(path);
     char journal[ADDED_PATH_MAX];
-    if (!journal_path(root, journal)) return;
+    if (!journal_path(root, journal)) return false;
     uint64_t existing = 0;
     book_added_item_t item = {.path=path,.order=&existing};
     unsigned remaining=0;
-    if (!load_root(root, &item, 1,&remaining)||!remaining) return;
+    if (!load_root(root, &item, 1,&remaining)||!remaining) return false;
     FILE *file = fopen(journal, "ab");
-    if (file) { (void)append(file, path, order); (void)close_written(file); }
+    if (!file) return false;
+    bool appended=append(file,path,order),closed=close_written(file);
+    return appended&&closed;
 }
-void book_added_migrate(const char *old_path, const char *new_path) {
+bool book_added_migrate(const char *old_path, const char *new_path) {
     const char *root = medium(old_path);
-    if (!root || !medium(new_path)) return;
+    if (!root || !medium(new_path)) return false;
     uint64_t order = 0;
     book_added_item_t item = {.path=old_path,.order=&order};
-    if (load_root(root, &item, 1,NULL) && order) write_identity(new_path, order);
+    if (!load_root(root,&item,1,NULL)||!order||!write_identity(new_path,order))return false;
+    uint64_t verified=0;book_added_item_t target={.path=new_path,.order=&verified};
+    return load_root(medium(new_path),&target,1,NULL)&&verified==order;
 }
 void book_added_forget(const char *path) { write_identity(path, 0); }

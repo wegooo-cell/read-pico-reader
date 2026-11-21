@@ -37,7 +37,7 @@ static app_redraw_t rc_execute(app_ctx_t*ctx,unsigned action){
             s_reader_panel=READER_PANEL_NONE;s_rc_auto_waiting=false;reader_auto_start(&s_rc_auto,ctx->now_ms,reader_controls_seconds(app_settings_reader_controls()));rc_notice(ctx,"自动翻页已开启");
         }
         return APP_REDRAW_PAGE;
-    case RC_EFFECT:{unsigned effect=(app_settings_reader_turn_effect()+1)%3;app_settings_set_reader_turn_effect(effect);s_turns=0;invalidate_prep();rc_notice(ctx,effect==0?"普通翻页":effect==1?"水波纹翻页":"速读黑白翻页");return APP_REDRAW_PAGE;}
+    case RC_EFFECT:{unsigned effect=rc_effect_next(app_settings_reader_turn_effect());app_settings_set_reader_turn_effect(effect);s_turns=0;invalidate_prep();for(unsigned i=0;i<RC_EFFECT_COUNT;++i)if(rc_effect_id(i)==effect){rc_notice(ctx,KIIKO_BOARD_READER_TURN_EFFECT_MAX==3?rc_effect_name(i):effect==0?"普通翻页":effect==1?"水波纹翻页":"速读黑白翻页");break;}return APP_REDRAW_PAGE;}
     case RC_REFRESH:return reader_manual_refresh(ctx);
     case RC_FULLSCREEN:return toggle_reader_fullscreen(ctx);
     case RC_TOOLS:{
@@ -178,7 +178,7 @@ static app_redraw_t rc_panel_action(app_ctx_t*ctx,int x,int y,bool*handled){
             const reader_panel_t panels[]={READER_PANEL_FONT_SETTINGS,READER_PANEL_LAYOUT_SETTINGS,READER_PANEL_READING_DISPLAY,READER_PANEL_RULE_SETTINGS};
             s_rc_font_root=true;return rc_open(ctx,panels[i]);}
     }else if(s_rc_tab==1){
-        for(int i=0;i<3;++i)if(ui_rect_hit(rc_effect_rect(i),x,y)){app_settings_set_reader_turn_effect(i);s_turns=0;invalidate_prep();return APP_REDRAW_PAGE;}
+        for(int i=0;i<RC_EFFECT_COUNT;++i)if(ui_rect_hit(rc_effect_rect(i),x,y)){app_settings_set_reader_turn_effect(rc_effect_id(i));s_turns=0;invalidate_prep();return APP_REDRAW_PAGE;}
         if(ui_rect_hit(rc_refresh_rect(),x,y)){
             static const uint8_t values[]={0,5,10,15,
 #if KIIKO_BOARD_METALIO47
@@ -274,7 +274,7 @@ static int rc_hit_target(int x,int y){
             if (ui_rect_hit(rc_heading_link_rect(),x,y)) return 104;
             for(int i=0;i<4;++i)if(ui_rect_hit(rc_grid_rect(i),x,y))return 100+i;
         }
-        if(s_rc_tab==1){for(int i=0;i<3;++i)if(ui_rect_hit(rc_effect_rect(i),x,y))return 100+i;
+        if(s_rc_tab==1){for(int i=0;i<RC_EFFECT_COUNT;++i)if(ui_rect_hit(rc_effect_rect(i),x,y))return 100+i;
             if(ui_rect_hit(rc_refresh_rect(),x,y))return 110;
             if(ui_rect_hit(rc_auto_card(0),x,y))return 111;
             for(unsigned i=0;i<2;++i)if(ui_rect_hit(rc_interval_rect(i),x,y))return 112+i;}
@@ -331,7 +331,7 @@ static app_redraw_t rc_gesture(app_ctx_t*ctx,const ui_gesture_event_t*ev,bool*ha
         if(ev->type==UI_GESTURE_CANCEL){rc_cancel_side();return APP_REDRAW_PAGE;}
         int min=0,max=240,step=2;
         if(s_rc_side_action==RC_SIDE_FONT){min=BOOK_PX_MIN;max=BOOK_PX_MAX;step=24;}
-        if(s_rc_side_action==RC_SIDE_LINE){min=110;max=150;step=24;}
+        if(s_rc_side_action==RC_SIDE_LINE){min=BOOK_READER_LINE_MIN;max=BOOK_READER_LINE_MAX;step=24;}
         int value=s_rc_side_start-dy/step;if(value<min)value=min;if(value>max)value=max;
         bool changed=value!=s_rc_side_value;s_rc_side_value=value;
 #if KIIKO_BOARD_METALIO47

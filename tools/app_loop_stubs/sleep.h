@@ -9,3 +9,7 @@ bool app_sleep_media_pending(void);
 bool app_sleep_book_reopen_failed(void);
 void app_sleep_discard_media_io(void);
 #endif
+
+static inline void app_lock_set_resume_ready(bool ready) { (void)ready; }
+
+static inline bool app_sleep_media_settling(void) { return false; }

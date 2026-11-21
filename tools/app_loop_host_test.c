@@ -12,8 +12,9 @@ uint8_t app_settings_system_contrast(void) {return 100;}
 void pico_boot_ready(void) {}
 void app_book_cover_mode_changed(void) {}
 void app_home_cover_mode_changed(void) {}
-esp_err_t pico_boot_save_resume(const pico_resume_t *resume) { (void)resume; return ESP_OK; }
-void pico_boot_clear_resume(void) {}
+static bool resume_checkpoint_live;
+esp_err_t pico_boot_save_resume(const pico_resume_t *resume) { (void)resume; resume_checkpoint_live=true; return ESP_OK; }
+void pico_boot_clear_resume(void) { resume_checkpoint_live=false; }
 bool app_book_resume_context(char *p,size_t c,bool *f) { (void)p;(void)c;(void)f;return false; }
 bool test_reader_open;
 #include "read_pico_transfer.h"
@@ -218,7 +219,7 @@ void read_pico_transfer_resume_after_sleep(void) {assert(wake_clean_requests>net
 
 void app_lock_feedback(EpdiyHighlevelState*h) {(void)h;++lock_feedback_calls;if(feedback_enabled){assert(!before_locks&&!idle_locks);++lock_badges;}}
 void app_lock_wait_key_idle(int ms) {(void)ms;}
-esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {assert(mode==APP_SLEEP_OFF);++shutdowns;longjmp(done,1);}
+esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {assert(resume_checkpoint_live);assert(mode==APP_SLEEP_OFF);++shutdowns;longjmp(done,1);}
 void app_restart_host(void) {++restarts;longjmp(done,1);}
 void epd_poweroff(void) {}
 const char* app_settings_font_path(void) {return "builtin";}

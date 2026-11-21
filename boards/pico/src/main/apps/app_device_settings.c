@@ -846,15 +846,28 @@ static void devsync_start(kiiko_sync_role_t role) {
     }
 }
 
-static void devsync_failure_text(esp_err_t error, char *text, size_t size) {
-    if (error == ESP_ERR_TIMEOUT) snprintf(text, size, "连接超时，请靠近两台设备后重试");
-    else if (error == ESP_ERR_INVALID_CRC) snprintf(text, size, "数据校验失败，请重新同步");
-    else if (error == ESP_ERR_INVALID_RESPONSE) snprintf(text, size, "配对失败，请两端重新进入此页");
-    else if (error == ESP_ERR_NO_MEM) snprintf(text, size, "内存不足，请重启设备后重试");
-    else if (error == ESP_ERR_INVALID_SIZE) snprintf(text, size, "本机设置备份为空或过大");
-    else if (error == ESP_ERR_INVALID_STATE) snprintf(text, size, "正在传书或射频被占用，请稍后再试");
-    else if (error == ESP_ERR_NOT_FOUND) snprintf(text, size, "没有可同步的设置数据");
-    else snprintf(text, size, "同步失败：%s", esp_err_to_name(error));
+// 失败原因 = 失败阶段 + 具体错误码，避免只显示一个 ESP_ERR_* 名字。
+// Failure reason = failed phase + concrete error, never a bare ESP_ERR_* name.
+static void devsync_failure_text(const kiiko_sync_status_t *st, esp_err_t error, char *text, size_t size) {
+    const char *where = st->failed_from == KIIKO_SYNC_SCANNING ? "未找到另一台设备"
+                      : st->failed_from == KIIKO_SYNC_PAIRED ? "配对后连接中断"
+                      : st->failed_from == KIIKO_SYNC_TRANSFERRING ? "传输中断"
+                      : st->failed_from == KIIKO_SYNC_APPLYING ? "写入设置失败"
+                      : "同步失败";
+    const char *why = error == ESP_ERR_TIMEOUT ? "等待超时"
+                    : error == ESP_ERR_INVALID_CRC ? "数据校验失败"
+                    : error == ESP_ERR_INVALID_RESPONSE ? "配对码或被拒绝"
+                    : error == ESP_ERR_NO_MEM ? "内存不足"
+                    : error == ESP_ERR_INVALID_SIZE ? "设置数据为空或过大"
+                    : error == ESP_ERR_INVALID_STATE ? "射频被占用或已取消"
+                    : error == ESP_ERR_NOT_FOUND ? "没有可同步的数据"
+                    : error == ESP_FAIL ? "协议错误"
+                    : error == ESP_ERR_INVALID_ARG ? "设置数据无效"
+                    : error == ESP_ERR_NOT_SUPPORTED ? "对端版本不支持"
+                    : NULL;
+    if (why) snprintf(text, size, "%s：%s", where, why);
+    else if (error != ESP_OK) snprintf(text, size, "%s（错误码 0x%X）", where, (unsigned)error);
+    else snprintf(text, size, "%s，请两端重试", where);
 }
 
 static void devsync_status_line(const kiiko_sync_status_t *st, esp_err_t error, char *text, size_t size) {
@@ -867,7 +880,7 @@ static void devsync_status_line(const kiiko_sync_status_t *st, esp_err_t error, 
         break;
     case KIIKO_SYNC_APPLYING: snprintf(text, size, "正在写入设置…"); break;
     case KIIKO_SYNC_DONE: snprintf(text, size, "同步完成"); break;
-    case KIIKO_SYNC_FAILED: devsync_failure_text(error, text, size); break;
+    case KIIKO_SYNC_FAILED: devsync_failure_text(st, error, text, size); break;
     default: snprintf(text, size, "准备中…"); break;
     }
 }
@@ -1090,9 +1103,14 @@ static void draw_style_thumbnail(uint8_t *fb, int style, int top) {
     }
 }
 
-// 仅 82x82 灰阶头像，不缓存整屏或第二份字库；文件变更/拔卡会使缓存失效。
-// One 82x82 gray avatar, never a full frame or second font; file changes/removal invalidate it.
-static EXT_RAM_BSS_ATTR uint8_t s_avatar_pixels[82*82];
+// 与首页共用 60x60 头像小图，首页准备好后进设置无需再解码或补刷；居中放在原 82px 位置，文字排版不变。
+// Share the home page's 60x60 avatar so settings needs no extra decode or repaint; it is centred in the
+// former 82px slot so the text layout stays unchanged.
+#define SETTINGS_AVATAR_SIDE 60
+#define SETTINGS_AVATAR_X (57 + (82 - SETTINGS_AVATAR_SIDE) / 2)
+// 仅一张灰阶头像，不缓存整屏或第二份字库；文件变更/拔卡会使缓存失效。
+// One gray avatar, never a full frame or second font; file changes/removal invalidate it.
+static EXT_RAM_BSS_ATTR uint8_t s_avatar_pixels[SETTINGS_AVATAR_SIDE*SETTINGS_AVATAR_SIDE];
 static char s_avatar_path[288];
 static bool s_avatar_ready, s_avatar_pending;
 static char s_main_wifi[33];
@@ -1649,12 +1667,14 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
     const int profile_y=180-s_main_scroll, profile_h=settings_profile_height();
     if (profile_y+profile_h>160) {
         settings_card(fb,(EpdRect){36,profile_y,612,profile_h},24,UI_GRAY_WHITE,0x70);
-        int avatar_y=profile_y+(profile_h-82)/2;
+        int avatar_y=profile_y+(profile_h-SETTINGS_AVATAR_SIDE)/2;
+        const EpdRect avatar={SETTINGS_AVATAR_X,avatar_y,SETTINGS_AVATAR_SIDE,SETTINGS_AVATAR_SIDE};
         bool avatar_ok=s_avatar_ready;
-        if (avatar_ok) ui_wallpaper_draw_avatar(fb,s_avatar_pixels,(EpdRect){57,avatar_y,82,82},20);
+        if (avatar_ok) ui_wallpaper_draw_avatar(fb,s_avatar_pixels,avatar,15);
         if (!avatar_ok) {
-            ui_fill_round_rect(fb,(EpdRect){57,avatar_y,82,82},20,0x30);
-            ui_text_fixed_vc(fb,98,avatar_y+41,49,"K",EPD_DRAW_ALIGN_CENTER,true);
+            ui_fill_round_rect(fb,avatar,15,0x30);
+            ui_text_fixed_vc(fb,SETTINGS_AVATAR_X+SETTINGS_AVATAR_SIDE/2,avatar_y+SETTINGS_AVATAR_SIDE/2,36,"K",
+                             EPD_DRAW_ALIGN_CENTER,true);
         }
         char name[64];snprintf(name,sizeof(name),"%s",app_settings_device_name());
         int width=588-ui_text_fixed_width_px(ui_text_effective_px(20),"编辑")-188;
@@ -2058,8 +2078,8 @@ static void settings_prepare_profile(void) {
     if(pico_boot_recovery()||!path[0]){ui_avatar_request("",60);s_avatar_ready=s_avatar_pending=false;s_avatar_path[0]=0;return;}
     if(strcmp(path,s_avatar_path))s_avatar_ready=false;
     snprintf(s_avatar_path,sizeof(s_avatar_path),"%s",path);
-    ui_avatar_request(path,82);
-    ui_avatar_state_t state=ui_avatar_poll(path,82,s_avatar_pixels);
+    ui_avatar_request(path,SETTINGS_AVATAR_SIDE);
+    ui_avatar_state_t state=ui_avatar_poll(path,SETTINGS_AVATAR_SIDE,s_avatar_pixels);
     s_avatar_ready=state==UI_AVATAR_READY;s_avatar_pending=state==UI_AVATAR_PENDING;
 }
 static void on_enter(app_ctx_t *ctx) {
@@ -2164,13 +2184,14 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
     }
 
     if (s_page==SETTINGS_MAIN && s_avatar_pending && !(ctx->touch && ctx->touch->touched)) {
-        ui_avatar_state_t state=ui_avatar_poll(s_avatar_path,82,s_avatar_pixels);
+        ui_avatar_state_t state=ui_avatar_poll(s_avatar_path,SETTINGS_AVATAR_SIDE,s_avatar_pixels);
         s_avatar_pending=state==UI_AVATAR_PENDING;
         s_avatar_ready=state==UI_AVATAR_READY;
         if (s_avatar_ready && s_main_scroll < 180+settings_profile_height()-160) {
             settings_drag_reset();
             render(ctx,ctx->fb);
-            EpdRect area={57,180-s_main_scroll+(settings_profile_height()-82)/2,82,82};
+            EpdRect area={SETTINGS_AVATAR_X,180-s_main_scroll+(settings_profile_height()-SETTINGS_AVATAR_SIDE)/2,
+                           SETTINGS_AVATAR_SIDE,SETTINGS_AVATAR_SIDE};
             if (area.y<160) { area.height-=160-area.y; area.y=160; }
             if(area.height>0)guard_draw_result(ctx->hl,update_display_area_diff_with(ctx->hl,
                 app_settings_main_refresh_mode()==APP_MAIN_REFRESH_NORMAL?display_main_normal_waveform():display_main_gray_waveform(),MODE_GL16,area));

@@ -5,6 +5,7 @@
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 typedef struct {
     const char *path; ///< 完整路径身份 / Complete path identity
@@ -13,7 +14,7 @@ typedef struct {
 
 /// 在非绘制阶段批量读取并登记；临时数组可重新排序。/ Load/register outside rendering; may sort the temporary array.
 void book_added_load(book_added_item_t *items, size_t count);
-/// 文件移动后保留首次收录顺序。/ Preserve first-added ordering after a file move.
-void book_added_migrate(const char *old_path, const char *new_path);
+/// 文件移动后保留首次收录顺序，回读确认后返回true。/ Preserve and verify first-added order after a move.
+bool book_added_migrate(const char *old_path, const char *new_path);
 /// 删除后清除旧身份的顺序，重新导入会重新登记。/ Forget deleted identities so a reimport registers anew.
 void book_added_forget(const char *path);

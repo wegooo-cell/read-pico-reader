@@ -118,46 +118,65 @@ void book_progress_prepare_at_boot(void) {}
 
 static esp_err_t read_record(nvs_handle_t h, const char *key, uint8_t *data, size_t *len) {
 #ifdef ESP_PLATFORM
-    if (book_store_flash_ready() && disk_read(key, data, len, NULL) == ESP_OK) return ESP_OK;
+    esp_err_t disk_error = book_store_flash_ready() ? disk_read(key, data, len, NULL) : ESP_ERR_INVALID_STATE;
+    if (disk_error == ESP_OK) return ESP_OK;
+    if (!h) return disk_error;
+    esp_err_t legacy = nvs_get_blob(h, key, data, len);
+    // 不能把暂时读不到/损坏的文件当作从未读过，否则开书会把旧进度覆盖为零。
+    // Never turn an unreadable/corrupt file into "no history" and overwrite it with page zero.
+    return legacy == ESP_ERR_NVS_NOT_FOUND && disk_error != ESP_ERR_NVS_NOT_FOUND ? disk_error : legacy;
+#else
+    return h ? nvs_get_blob(h, key, data, len) : ESP_ERR_NVS_NOT_FOUND;
 #endif
-    if (!h) return ESP_ERR_NVS_NOT_FOUND;
-    return nvs_get_blob(h, key, data, len);
 }
 
-static bool progress_read(nvs_handle_t h, const char* path, uint32_t size, book_progress_t* out) {
-    if (!path_valid(path) || out == NULL) return false;
+// 旧18/19px记录仍有效，仅迁移字号，保留原阅读位置。/ Legacy 18/19px records retain their position while their size migrates to the new minimum.
+static esp_err_t progress_read_checked(nvs_handle_t h, const char* path, uint32_t size, book_progress_t* out) {
+    if (!path_valid(path) || !out) return ESP_ERR_INVALID_ARG;
     char key[11];
     make_key(path, key);
     uint8_t data[RECORD_CAP];
     size_t len = sizeof(data);
     esp_err_t err = read_record(h, key, data, &len);
-    if (err != ESP_OK || !record_valid(data, len) ||
-        strcmp((const char*)data + HEADER_SIZE, path) != 0 || get32(data + 4) != size ||
-        data[14] < BOOK_READER_PX_MIN || data[14] > BOOK_READER_PX_MAX || data[15] > 100) return false;
+    if (err != ESP_OK) return err;
+    if (!record_valid(data, len) || strcmp((const char*)data + HEADER_SIZE, path) ||
+        data[14] < 18 || data[14] > BOOK_READER_PX_MAX || data[15] > 100)
+        return ESP_ERR_INVALID_STATE;
+    if (get32(data + 4) != size) return ESP_ERR_NVS_NOT_FOUND;
     *out = (book_progress_t){
         .file_size = get32(data + 4), .chapter = (uint16_t)(data[8] | (data[9] << 8)),
-        .byte_off = get32(data + 10), .px = data[14], .pct = data[15],
+        .byte_off = get32(data + 10), .px = data[14] < BOOK_READER_PX_MIN ? BOOK_READER_PX_MIN : data[14], .pct = data[15],
         .last_open_s = data[3] == 2 ? get32(data + 16) : 0,
     };
-    return true;
+    return ESP_OK;
+}
+static bool progress_read(nvs_handle_t h, const char* path, uint32_t size, book_progress_t* out) {
+    return progress_read_checked(h, path, size, out) == ESP_OK;
+}
+
+esp_err_t book_progress_load_checked(const char* path, uint32_t size, book_progress_t* out) {
+    if (!path_valid(path) || !out) return ESP_ERR_INVALID_ARG;
+#ifdef ESP_PLATFORM
+    esp_err_t storage = book_store_prepare_flash();
+    if (storage != ESP_OK) return storage;
+#endif
+    nvs_handle_t h = 0;
+    esp_err_t opened = nvs_open(NS, NVS_READONLY, &h);
+    if (opened != ESP_OK && opened != ESP_ERR_NVS_NOT_FOUND) {
+#ifdef ESP_PLATFORM
+        esp_err_t existing = progress_read_checked(0, path, size, out);
+        return existing == ESP_OK ? ESP_OK : opened;
+#else
+        return opened;
+#endif
+    }
+    esp_err_t err = progress_read_checked(h, path, size, out);
+    if (h) nvs_close(h);
+    return err;
 }
 
 bool book_progress_load(const char* path, uint32_t size, book_progress_t* out) {
-    if (!path_valid(path) || !out) return false;
-    nvs_handle_t h = 0;
-    esp_err_t err = nvs_open(NS, NVS_READONLY, &h);
-    if (err != ESP_OK) {
-#ifdef ESP_PLATFORM
-        if (disk_available()) return progress_read(0, path, size, out);
-#endif
-        return false;
-    }
-#ifdef ESP_PLATFORM
-    (void)disk_available();
-#endif
-    bool ok = progress_read(h, path, size, out);
-    nvs_close(h);
-    return ok;
+    return book_progress_load_checked(path, size, out) == ESP_OK;
 }
 
 bool book_progress_load_batch(book_progress_query_t *queries, size_t count) {
@@ -228,10 +247,10 @@ static esp_err_t visit_progress(const char *key, const uint8_t *data, size_t len
     (void)key;
     (void)len;
     progress_walk_t *walk = ctx;
-    if (data[14] < BOOK_READER_PX_MIN || data[14] > BOOK_READER_PX_MAX || data[15] > 100) return ESP_OK;
+    if (data[14] < 18 || data[14] > BOOK_READER_PX_MAX || data[15] > 100) return ESP_OK;
     book_progress_t value = {
         .file_size = get32(data + 4), .chapter = (uint16_t)(data[8] | (data[9] << 8)),
-        .byte_off = get32(data + 10), .px = data[14], .pct = data[15],
+        .byte_off = get32(data + 10), .px = data[14] < BOOK_READER_PX_MIN ? BOOK_READER_PX_MIN : data[14], .pct = data[15],
         .last_open_s = data[3] == 2 ? get32(data + 16) : 0,
     };
     return walk->visit((const char *)data + HEADER_SIZE, &value, walk->ctx) ? ESP_OK : ESP_ERR_NOT_FINISHED;
@@ -309,6 +328,39 @@ esp_err_t book_progress_save(const char* path, const book_progress_t* progress) 
     nvs_close(h);
     book_progress_notify_changed();
     return warn_error(err);
+}
+
+// Copy a rename/move without pretending the book was read again; retain the source for rollback.
+esp_err_t book_progress_copy_to(const char *old_path,const char *new_path,uint32_t size){
+    if(!path_valid(old_path)||!path_valid(new_path))return ESP_ERR_INVALID_ARG;
+    book_progress_t progress;esp_err_t err=book_progress_load_checked(old_path,size,&progress);
+    bool source_found=err==ESP_OK;
+    if(err!=ESP_OK&&err!=ESP_ERR_NVS_NOT_FOUND)return err;
+    nvs_handle_t h;err=nvs_open(NS,NVS_READWRITE,&h);if(err!=ESP_OK)return err;
+    char old_key[11],key[11];make_key(old_path,old_key);make_key(new_path,key);
+    uint8_t target[RECORD_CAP];size_t target_length=sizeof(target);
+    esp_err_t target_error=read_record(h,key,target,&target_length);
+    if(!source_found){nvs_close(h);return target_error==ESP_ERR_NVS_NOT_FOUND?ESP_OK:target_error==ESP_OK?BOOK_PROGRESS_MOVE_CONFLICT:target_error;}
+    uint8_t data[RECORD_CAP];size_t length=sizeof(data);err=read_record(h,old_key,data,&length);
+    if(err==ESP_OK)err=check_owner(h,key,new_path);
+    if(err==ESP_OK){
+        size_t path_length=strlen(new_path)+1;data[22]=(uint8_t)path_length;data[23]=(uint8_t)(path_length>>8);
+        memcpy(data+HEADER_SIZE,new_path,path_length);length=HEADER_SIZE+path_length;
+        // A reused path can contain a newer unrelated sequence. Never let that record
+        // win slot selection or resume the moved book at another book's position.
+        if(target_error==ESP_OK){
+            bool same=target_length==length&&!memcmp(target,data,length);nvs_close(h);
+            return same?ESP_OK:BOOK_PROGRESS_MOVE_CONFLICT;
+        }
+        if(target_error!=ESP_ERR_NVS_NOT_FOUND){nvs_close(h);return target_error;}
+#ifdef ESP_PLATFORM
+        err=disk_write(key,data,length);
+#else
+        err=nvs_set_blob(h,key,data,length);
+#endif
+        if(err==ESP_OK)err=nvs_commit(h);
+    }
+    nvs_close(h);book_progress_notify_changed();return warn_error(err);
 }
 
 esp_err_t book_progress_clear(const char* path) {

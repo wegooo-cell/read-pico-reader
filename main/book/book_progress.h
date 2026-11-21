@@ -63,6 +63,9 @@ typedef struct {
 } book_progress_t;
 
 /// 校验版本、完整路径与文件大小后恢复；失败不改 out。/ Restore after version, full-path and size validation; leave out unchanged on failure.
+/// ESP_OK为已有进度，NVS_NOT_FOUND为未读/文件替换；其他错误不允许自动写入零进度。
+/// Distinguish absence from storage failure; a failed read must never start an automatic zero save.
+esp_err_t book_progress_load_checked(const char* path, uint32_t size, book_progress_t* out);
 bool book_progress_load(const char* path, uint32_t size, book_progress_t* out);
 
 enum { BOOK_PROGRESS_BATCH_MAX = 64 };
@@ -89,6 +92,9 @@ esp_err_t book_progress_list(book_progress_visit_fn visit, void* ctx);
 /// Save v2 progress, replacing input last_open_s with a reserved persistent sequence; paths up to 287 bytes, reject collision overwrites.
 esp_err_t book_progress_save(const char* path, const book_progress_t* progress);
 /// 清除此路径的进度，不删除碰撞记录。/ Clear this path without deleting colliding records.
+#define BOOK_PROGRESS_MOVE_CONFLICT ((esp_err_t)0x6b01)
+/// Copy progress without advancing recent order; preserve source and refuse conflicting target history.
+esp_err_t book_progress_copy_to(const char *old_path,const char *new_path,uint32_t size);
 esp_err_t book_progress_clear(const char* path);
 /// 清除此路径进度及匹配的 last；任一步失败返回错误，允许幂等重试，保留碰撞记录。
 /// Forget this path's progress and matching last; return any failure, allow idempotent retries, preserve colliding records.
