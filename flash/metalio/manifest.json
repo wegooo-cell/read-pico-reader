@@ -1,9 +1,10 @@
 {
   "name": "Metalio 4.7 V1.5",
-  "version": "0.3.3-rc116",
+  "version": "0.3.3-rc118",
   "board": "metalio47",
   "experimental_pie_pixels": true,
-  "experimental_text_ripple": false,
+  "experimental_text_ripple": true,
+  "experimental_rc110_ripple": true,
   "experimental_reader_panel37": true,
   "experimental_shelf37": true,
   "experimental_fast_reader_panels": false,
@@ -13,8 +14,8 @@
   "experimental_main_clean": false,
   "experimental_network_probe": false,
   "local_transfer_start_test": false,
-  "experimental_early_power_key": false,
-  "requires_bootloader_update": false,
+  "experimental_early_power_key": true,
+  "requires_bootloader_update": true,
   "project": "Kiikoread_Metalio_S31",
   "new_install_prompt_erase": true,
   "builds": [
@@ -24,8 +25,8 @@
         {
           "path": "bootloader.bin",
           "offset": 8192,
-          "size": 22448,
-          "sha256": "5ba09668dcbab2e53fa045f592460270cbd16bc516941609f8bbab26d41d7735"
+          "size": 24112,
+          "sha256": "7083a7e9854d01700feaa466545b1d3da6e1a73efd70c6d85ca9a2b85f9ebf18"
         },
         {
           "path": "partitions.bin",
@@ -36,8 +37,8 @@
         {
           "path": "firmware.bin",
           "offset": 65536,
-          "size": 5190240,
-          "sha256": "090c38c52a2739bc8889dedc49e9d2f85f3e7bb854d91b4c5a3040ee135abf9e"
+          "size": 5223856,
+          "sha256": "e0adb5dfb33ab8f17bee3d156f4b32b3c12a6371b7794324d608065df1c5307e"
         },
         {
           "path": "ota_data_initial.bin",
@@ -48,24 +49,25 @@
       ]
     }
   ],
-  "updated_at": "2026-11-19T12:28:46+08:00",
+  "updated_at": "2026-11-21T15:35:29+08:00",
   "pico_ota": {
     "layout": "metalio-s31-dual-5m-v1",
-    "base_version": "0.3.3-rc116",
+    "base_version": "0.3.3-rc118",
     "minimum_base_version": "0.3.3-rc98",
     "online_ota_base_version": "0.3.3-rc98",
     "rollback": true
   },
-  "previous_version": "0.3.3-rc115",
-  "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/metalio-s31-v0.3.3-rc116/kiikoread-metalio47-0.3.3-rc116-USB.zip",
-  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/metalio-s31-v0.3.3-rc116/kiikoread-metalio47-0.3.3-rc116-TF.zip",
+  "previous_version": "0.3.3-rc116",
+  "usb_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/metalio-s31-v0.3.3-rc118/kiikoread-metalio47-0.3.3-rc118-USB.zip",
+  "tf_package_url": "https://github.com/wegooo-cell/read-pico-reader/releases/download/metalio-s31-v0.3.3-rc118/kiikoread-metalio47-0.3.3-rc118-TF.zip",
   "release_notes": [
-    "优化 TXT/EPUB 章节识别、题头样式、卷页与章节分页，修复章首和段落异常留白。",
-    "修复后续页章名显示，保留精排 EPUB 的图片、题头及自带格式。",
-    "修复阅读线手势，新增保存格式，开关恢复样式、范围和位置。",
-    "优化大书分段加载、插图内存管理与异常开书恢复。",
-    "优化阅读进度存储，修复票根及拼贴锁屏的 TXT 封面。",
-    "新增设备间设置和阅读资料同步。",
-    "优化普通和水波纹翻页、工具栏与目录刷新，减少多余全刷，修复启动重启。"
+    "书架管理分为Books目录和已上架书籍，按真实文件夹导入；列表13项、封面4×3，本页全选/取消。",
+    "修复首次空书架返回导入提示、中文及阅读进度排序、长作者遮挡；主动开书自动入架。",
+    "重新扫描清空上架列表后重新选书，源书和阅读进度保留，取消及失败状态可安全重试。",
+    "字号20–120、行高100%–300%、段距−100%–100%且每次10%；修复滑动调节、进度保存和锁屏恢复。",
+    "兼容标准与完整设置备份，修复首页继续阅读进度和首次未导入空态，改善设备同步失败提示。",
+    "阅读水波纹恢复S31 RC110的擦白顺序与八条带节奏，保留正文裁剪、局部信息更新及可靠失败恢复。",
+    "保留普通、快速、开机与锁屏修复，以及PR107蓝牙HID手柄支持；不含PR99。",
+    "完整开机修复请使用网页USB安装匹配引导程序；TF/OTA仅更新应用，设置与书籍保留。"
   ]
 }

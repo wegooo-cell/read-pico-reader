@@ -1,3 +1,12 @@
+## S31 0.3.3-rc118 — 2026-11-21
+
+- 恢复S31 RC110的阅读水波纹擦白顺序与八条带节奏，保留当前正文裁剪、上下栏局刷和逐页数字；中断后从白重建目标页，失败保持可重试。
+- Reader ripple restores the S31 RC110 erase order and eight-band cadence,retaining body crops,local metadata and page counters; interrupted scans rebuild from white with checked retries.
+- 包含当前书架双视图、真实目录导入、13行/4×3封面、本页选择、严格排序、排版范围及进度/配置恢复；保留普通、快速、长按开机修复和PR107蓝牙HID手柄支持。PR99未纳入。
+- Retain current library/import/selection/sorting,typography,progress/settings recovery,ordinary/FastBW,startup fixes and PR107 BLE HID gamepads. Exclude PR99.
+- 官网、TF/USB和OTA同步RC118；完整开机修复需网页USB安装匹配引导程序。RC117继续撤回，保留原RC116及历史字节，PICO RC110保持。
+- Publish matching web,TF/USB and OTA RC118; startup fixes require the matching USB bootloader. Keep RC117 withdrawn,original RC116/history immutable and Pico RC110 unchanged.
+
 ## 本地测试 / Local test — 2026-11-21（S31 RC110阅读水波纹）
 
 - S31显式测试构建恢复RC110的28相、八条带和末尾六相擦白，保留当前正文裁剪、普通模式及书架/排版/进度修复；沿用RC116，只生成本地测试包。
