@@ -972,6 +972,55 @@ static enum EpdDrawError reader_gl37_turn_unlocked(EpdiyHighlevelState* hl, EpdR
     return result;
 }
 
+#if KIIKO_S31_RC110_RIPPLE
+// 本地回退只替换阅读水波纹；沿用当前正文裁剪和更新失败契约。
+// The local comparison replaces reader ripple, retaining current body crops and failure handling.
+static enum EpdDrawError reader_rc110_ripple_unlocked(EpdiyHighlevelState* hl, EpdRect area,
+    e0470_turn_dir_t dir, bool image) {
+    const bool background = app_settings_book_background_path()[0];
+    // RC110的插图/背景不量化文字；保留完整灰阶及现有同步呈现。
+    // RC110 excludes images/backgrounds from text quantization; retain full-gray synchronous output.
+    if (image || background)
+        return reader_gray_present_unlocked(hl, area,
+            image ? DISPLAY_READER_GRAY_IMAGE : DISPLAY_READER_GRAY_BACKGROUND, false);
+    const EpdWaveform *wave = metalio_text_ripple_rc110_waveform();
+    if (!wave || !metalio_text_ripple_prepare(hl, area))
+        return reader_gray_present_unlocked(hl, area, DISPLAY_READER_GRAY_PAGE, true);
+    const int prior_tick = e0470_page_turn_tick_us();
+    e0470_page_turn_set_tick_us(E0470_TURN_FAST_TICK_US);
+    read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FAST);
+    epd_lcd_set_prefill_lines(s_bulk_io ? 127 : 64);
+    epd_poweron();
+    enum EpdDrawError result = e0470_reader_ripple_with_waveform(
+        hl, area, dir, wave, METALIO_TEXT_RIPPLE_BANDS);
+    e0470_page_turn_set_tick_us(prior_tick);
+    use_scan_for(&E0470_WAVEFORM, MODE_GL16);
+    rails_keepalive();
+    if (result == EPD_DRAW_SUCCESS) {
+        reader_rails_schedule_check();
+        return result;
+    }
+    metalio_text_ripple_disable();
+    if (result == EPD_DRAW_NO_PHASES_AVAILABLE)
+        return reader_gray_present_unlocked(hl, area, DISPLAY_READER_GRAY_PAGE, true);
+    // 部分扫描后的物理灰阶未知；沿RC110从白重建完整目标，失败交给现有上层重试。
+    // A partial scan leaves unknown physical grays; rebuild from white as RC110 did, retaining upstream retries.
+    if (result & EPD_DRAW_EMPTY_LINE_QUEUE) {
+        s_pclk_mhz = DISPLAY_PCLK_SAFE_MHZ;
+        read_pico_epd_set_pclk(DISPLAY_PCLK_SAFE_MHZ);
+    }
+    use_scan_for(&E0470_FULL_WAVEFORM, MODE_GC16);
+    epd_poweron();
+    epd_hl_waveform(hl, &E0470_FULL_WAVEFORM);
+    epd_clear();
+    enum EpdDrawError recovered = epd_hl_update_screen_from_white(hl, MODE_GC16, 25);
+    epd_hl_waveform(hl, &E0470_WAVEFORM);
+    ui_page_cleaned(recovered);
+    rails_keepalive();
+    return recovered;
+}
+#endif
+
 static bool s_reader_phase_prefill_failed;
 static enum EpdDrawError update_display_reader_turn_unlocked(EpdiyHighlevelState* hl, EpdRect area,
                                              e0470_turn_dir_t dir, unsigned bands, bool main_gray,
@@ -979,6 +1028,10 @@ static enum EpdDrawError update_display_reader_turn_unlocked(EpdiyHighlevelState
     enum EpdDrawError intercepted;
     if (main_before_update(hl, &intercepted)) return intercepted;
     if(s_system_binary&&!main_gray)system_normalize(hl);
+#if KIIKO_S31_RC110_RIPPLE
+    if (!main_gray && !s_system_binary && bands > 1 && app_settings_reader_turn_effect() == 1)
+        return reader_rc110_ripple_unlocked(hl, area, dir, image_waveform != NULL);
+#endif
     if (!main_gray && !s_system_binary && app_settings_reader_turn_effect() != 2)
         return reader_gl37_turn_unlocked(hl, area, dir, bands, image_waveform != NULL);
     const bool reader = !main_gray && !s_system_binary;

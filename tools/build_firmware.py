@@ -90,6 +90,7 @@ def export(build, output, board):
     cache = build / 'CMakeCache.txt'
     experimental_pie = board == 'metalio47' and cache.exists() and 'METALIO_PIE_PIXELS:BOOL=ON' in cache.read_text(encoding='utf-8')
     experimental_ripple = board == 'metalio47' and cache.exists() and 'METALIO_TEXT_RIPPLE_EXPERIMENT:BOOL=ON' in cache.read_text(encoding='utf-8')
+    rc110_ripple = board == 'metalio47' and cache.exists() and 'METALIO_RC110_RIPPLE_EXPERIMENT:BOOL=ON' in cache.read_text(encoding='utf-8')
     experimental_panel37 = board == 'metalio47' and cache.exists() and 'METALIO_READER_PANEL37_EXPERIMENT:BOOL=ON' in cache.read_text(encoding='utf-8')
     experimental_shelf37 = board == 'metalio47' and cache.exists() and 'METALIO_SHELF37_EXPERIMENT:BOOL=ON' in cache.read_text(encoding='utf-8')
     experimental_fast_panels = board == 'metalio47' and cache.exists() and 'METALIO_FAST_READER_PANELS:BOOL=ON' in cache.read_text(encoding='utf-8')
@@ -106,7 +107,8 @@ def export(build, output, board):
         raise ValueError('S31 early-key bootloader exceeds the existing 0x2000..0x8000 region')
     manifest = {'name': info['name'], 'version': identity['version'], 'board': board,
                 'experimental_pie_pixels': bool(experimental_pie),
-                'experimental_text_ripple': bool(experimental_ripple),
+                'experimental_text_ripple': bool(experimental_ripple or rc110_ripple),
+                'experimental_rc110_ripple': bool(rc110_ripple),
                 'experimental_reader_panel37': bool(experimental_panel37),
                 'experimental_shelf37': bool(experimental_shelf37),
                 'experimental_fast_reader_panels': bool(experimental_fast_panels),
@@ -159,7 +161,8 @@ def export(build, output, board):
               'partitions': entries, 'bootloader_offset': expected_offsets['bootloader'],
               'esptool_stub': loader['stub'], 'free_app_bytes': entries['ota_0'][3] - identity['size'],
               'experimental_pie_pixels': bool(experimental_pie),
-              'experimental_text_ripple': bool(experimental_ripple),
+              'experimental_text_ripple': bool(experimental_ripple or rc110_ripple),
+                'experimental_rc110_ripple': bool(rc110_ripple),
               'experimental_reader_panel37': bool(experimental_panel37),
               'experimental_shelf37': bool(experimental_shelf37),
               'experimental_fast_reader_panels': bool(experimental_fast_panels),
@@ -198,6 +201,7 @@ def build_one(board, args):
                '-DCCACHE_ENABLE=OFF', '-DMETALIO_LOCAL_LATENCY=OFF',
                '-DMETALIO_PIE_PIXELS=' + ('ON' if board == 'metalio47' and args.s31_pie else 'OFF'),
                '-DMETALIO_TEXT_RIPPLE_EXPERIMENT=' + ('ON' if board == 'metalio47' and args.s31_text_ripple else 'OFF'),
+               '-DMETALIO_RC110_RIPPLE_EXPERIMENT=' + ('ON' if board == 'metalio47' and getattr(args,'s31_rc110_ripple',False) else 'OFF'),
                '-DMETALIO_READER_PANEL37_EXPERIMENT=' + ('ON' if board == 'metalio47' and args.s31_reader_panel37 else 'OFF'),
                '-DMETALIO_SHELF37_EXPERIMENT=' + ('ON' if board == 'metalio47' and args.s31_shelf37 else 'OFF'),
                '-DMETALIO_FAST_READER_PANELS=' + ('ON' if board == 'metalio47' and args.s31_fast_reader_panels else 'OFF'),
@@ -308,6 +312,7 @@ def main():
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--list', action='store_true')
     parser.add_argument('--s31-pie', action='store_true', help='Explicit local S31 PIE experiment; normal builds stay C')
+    parser.add_argument('--s31-rc110-ripple', action='store_true', help='Local S31 RC110 reading ripple; retain ordinary turns and other fixes')
     parser.add_argument('--s31-text-ripple', action='store_true', help='Explicit local S31 four-level text-ripple experiment; ordinary builds remain full grayscale')
     parser.add_argument('--s31-reader-panel37', action='store_true', help='Explicit local S31 GL37 panel experiment; cleanup and normal builds stay native48')
     parser.add_argument('--s31-shelf37', action='store_true', help='Explicit local S31 GL37 shelf art/chrome experiment; other pages/cleanup stay unchanged')
@@ -324,6 +329,8 @@ def main():
     args.board = canonical_board(args.board)
     if args.s31_pie and args.board == 'pico':
         parser.error('--s31-pie requires metalio47 or all')
+    if args.s31_rc110_ripple and args.board == 'pico':
+        parser.error('--s31-rc110-ripple requires metalio47 or all')
     if args.s31_text_ripple and args.board == 'pico':
         parser.error('--s31-text-ripple requires metalio47 or all')
     if args.s31_reader_panel37 and args.board == 'pico':

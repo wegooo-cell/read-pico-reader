@@ -266,6 +266,17 @@ int main(void) {
         assert(e0470_phase_action(cp,f,to,from)==want);
     }
     reader_tail_test(&hl,clean,28);
+#if KIIKO_S31_RC110_RIPPLE
+    const EpdWaveform *rc110 = metalio_text_ripple_rc110_waveform();
+    const EpdWaveformPhases *rp = e0470_waveform_phases(rc110, MODE_GL16);
+    assert(rp && rp->phases == 28);
+    for (int f=0; f<28; ++f) for (int to=0; to<16; ++to) for (int from=0; from<16; ++from) {
+        int expected = f<18 ? e0470_phase_action(p,f,to,from) : f<24 && to==15 ? 2 : 0;
+        assert(e0470_phase_action(rp,f,to,from)==expected);
+    }
+    reader_tail_test(&hl,rc110,28);
+    puts("PASS: original RC110 all256 transitions/28 phases,8 staggered bands/34 ticks,all crop/rotation/failure paths");
+#endif
     metalio_text_ripple_disable();fill();assert(!display_reader_fast_ripple_enabled()&&!metalio_text_ripple_waveform());
     assert(!metalio_text_ripple_prepare(&hl,(EpdRect){0,0,H,W})&&!memcmp(front,saved_front,N));
     printf("PASS: %u action cells; four rotations/crops,22 phases/10 bands/31 ticks,31 scan failures,slow scan,OOM and boot-local fallback\n",checked);

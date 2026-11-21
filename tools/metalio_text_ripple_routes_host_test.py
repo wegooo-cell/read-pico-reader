@@ -96,6 +96,7 @@ typedef enum{DISPLAY_READER_GRAY_PAGE,DISPLAY_READER_GRAY_TEXT,DISPLAY_READER_GR
 static bool background;
 static const char *app_settings_book_background_path(void){return background?"art":"";}
 static const EpdWaveform *display_reader_gray_waveform(display_reader_gray_profile_t p){return &gray_profiles[p];}
+static const EpdWaveform *display_reader_ripple_waveform(display_reader_gray_profile_t p){return display_reader_gray_waveform(p);}
 static int padded_calls,full_calls;
 static enum EpdDrawError epd_hl_update_area_padded(EpdiyHighlevelState*,int,int,EpdRect,int,int);
 static enum EpdDrawError epd_hl_update_area_full_exact(EpdiyHighlevelState*,int,int,EpdRect);
@@ -140,6 +141,9 @@ static void use_scan_for(const EpdWaveform*w,int mode){(void)w;(void)mode;}
 static enum EpdDrawError e0470_page_turn_with_waveform_compact(EpdiyHighlevelState*h,EpdRect a,int d,const EpdWaveform*w,unsigned b){(void)h;(void)a;(void)d;++compact_calls;prefill_at_scan=s_prefill_lines;last_wave=w;last_bands=b;return result;}
 static enum EpdDrawError e0470_reader_ripple_with_waveform(EpdiyHighlevelState*h,EpdRect a,int d,const EpdWaveform*w,unsigned b){
  (void)h;(void)a;(void)d;++reader_calls;prefill_at_scan=s_prefill_lines;last_wave=w;last_bands=b;return result;
+}
+static enum EpdDrawError e0470_reader_ripple_with_waveform_timed(EpdiyHighlevelState*h,EpdRect a,int d,const EpdWaveform*w,unsigned b,unsigned ticks){
+ assert(b==4&&ticks==3);return e0470_reader_ripple_with_waveform(h,a,d,w,b);
 }
 static enum EpdDrawError e0470_text_turn_with_waveform(EpdiyHighlevelState*h,EpdRect a,int d,const EpdWaveform*w){return e0470_page_turn_with_waveform_compact(h,a,d,w,1);}
 static enum EpdDrawError update_display_area_with(EpdiyHighlevelState*h,const EpdWaveform*w,int mode,EpdRect a){(void)h;(void)a;assert(w==&E0470_WAVEFORM&&mode==MODE_GL16);++regular;return EPD_DRAW_SUCCESS;}

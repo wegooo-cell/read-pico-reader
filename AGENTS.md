@@ -8,6 +8,11 @@ Agent entry for this tree. Humans can read it too. Product overview, hardware, p
 
 Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Taking over an in-flight task: read [docs/HANDOFF.md](docs/HANDOFF.md) first.
 
+## 2026-11-21 · S31 RC110水波纹本地测试 / Local S31 RC110 ripple comparison
+
+用户明确只做S31测试版本，把阅读水波纹恢复为S31 RC110原28相/八带/末对同拍及六相尾部补白；保留当前普通、书架、排版、进度和安全开机修复。使用显式--s31-rc110-ripple，仅本地包，沿用RC116版本号；不发布官网/Release/OTA，不刷物理设备，PICO与PR99状态保持。
+The user requests an S31-only test restoring RC110 reader ripple: original28 phases,eight paired-tail bands and six tail white phases. Retain current ordinary turns,library,typography,progress and safe-start fixes. Use explicit --s31-rc110-ripple and local RC116 packages; no website/Release/OTA publication or device flashing. Preserve Pico and PR99 status.
+
 ## 2026-11-21 · S31 RC117撤回 / S31 RC117 withdrawal
 
 用户在双板发布后取消S31更新。S31官网刷机、TF/USB下载和Pages OTA恢复原正式RC116字节与清单，RC117 Release转草稿保留附件和标签、不再推荐；源码改动保留为未发布状态。PICO RC110及其他已发布历史版本保持，PR99仍关闭不合并。本条取代下方S31 RC117继续发布授权。

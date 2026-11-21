@@ -25,7 +25,7 @@ with tempfile.TemporaryDirectory(prefix='s31-text-ripple-') as folder:
                str(root/'boards/metalio47/src/components/e0470_page_turn/e0470_page_turn.c'),
                str(root/'boards/metalio47/src/components/e0470_epaper_waveform/e0470_epaper_waveform.c'),
                str(root/'components/e0470_epaper_waveform/e0470_waveform_trim.c')]
-    for enabled in (0,1):
-        binary=temp/f'ripple-{enabled}'
-        subprocess.run(command+[f'-DKIIKO_S31_TEXT_RIPPLE={enabled}','-o',str(binary)],check=True)
+    for enabled,rc110 in ((0,0),(1,0),(1,1)):
+        binary=temp/f'ripple-{enabled}-{rc110}'
+        subprocess.run(command+[f'-DKIIKO_S31_TEXT_RIPPLE={enabled}',f'-DKIIKO_S31_RC110_RIPPLE={rc110}','-o',str(binary)],check=True)
         subprocess.run([str(binary)],check=True)

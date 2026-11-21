@@ -1,3 +1,8 @@
+## 本地测试 / Local test — 2026-11-21（S31 RC110阅读水波纹）
+
+- S31显式测试构建恢复RC110的28相、八条带和末尾六相擦白，保留当前正文裁剪、普通模式及书架/排版/进度修复；沿用RC116，只生成本地测试包。
+- Explicit S31 comparison builds restore RC110's28-phase,eight-band ripple and six tail white phases,retaining body crops,ordinary mode and library/typography/progress fixes. Keep RC116 and local packages only.
+
 ## 0.3.3-rc110（PICO）/ 0.3.3-rc117（S31） · 2026-11-21
 
 S31 RC117已按用户要求撤回；官网、TF与OTA恢复原正式RC116。以下S31变更仅保留源码及本地包，PICO RC110继续发布。 / S31 RC117 is withdrawn; web, TF and OTA return to original RC116. Later S31 changes remain in source/local builds; Pico RC110 stays published.
