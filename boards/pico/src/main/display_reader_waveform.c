@@ -11,6 +11,7 @@
  * phases before the original three settle holds; the underlying37-phase function stays unchanged.
  */
 #include "display_reader_waveform.h"
+#include "settings.h"
 #include "e0470_epaper_waveform.h"
 #include <stdbool.h>
 #include <string.h>
@@ -81,6 +82,7 @@ static EpdWaveform s_soft_waveform = {
     .num_modes = 1, .num_temp_ranges = 1, .mode_data = s_soft_modes
 };
 static bool s_soft_ready;
+static bool s_soft_low;
 
 static void set_action_in(uint8_t (*data)[16][4], int phase, int to, int from, int action) {
     const int shift = 6 - 2 * (from % 4);
@@ -133,12 +135,19 @@ static bool build_turn_phases(const EpdWaveformPhases* gl, int extra, int black,
 }
 
 const EpdWaveform* display_reader_soft_turn_waveform(void) {
-    if (s_soft_ready) return &s_soft_waveform;
+    // 低残影模式保留额外擦白/重推黑；关闭时去掉这些白刷，回到 DC 平衡的厂商序列。
+    // Low-ghost keeps the extra white and black pulses; disabling drops the extra white push so
+    // the sequence returns to the DC-balanced vendor table.
+    const bool low = app_settings_low_ghost();
+    if (s_soft_ready && s_soft_low == low) return &s_soft_waveform;
+    s_soft_ready = false;
     if (!build_turn_phases(e0470_waveform_phases(&E0470_WAVEFORM, MODE_GL16),
-                           READER_SOFT_TURN_SETTLE_EXTRA, READER_SOFT_TURN_BLACK_EXTRA,
+                           low ? READER_SOFT_TURN_SETTLE_EXTRA : 0,
+                           low ? READER_SOFT_TURN_BLACK_EXTRA : 0,
                            s_soft_data, &s_soft_phases))
         return &E0470_WAVEFORM;
     s_soft_waveform.temp_intervals = E0470_WAVEFORM.temp_intervals;
+    s_soft_low = low;
     s_soft_ready = true;
     return &s_soft_waveform;
 }
@@ -165,14 +174,19 @@ static EpdWaveform s_gray8_turn_waveform = {
     .num_modes = 1, .num_temp_ranges = 1, .mode_data = s_gray8_turn_modes
 };
 static bool s_gray8_turn_ready;
+static bool s_gray8_low;
 
 const EpdWaveform* display_reader_gray8_turn_waveform(void) {
-    if (s_gray8_turn_ready) return &s_gray8_turn_waveform;
+    const bool low = app_settings_low_ghost();
+    if (s_gray8_turn_ready && s_gray8_low == low) return &s_gray8_turn_waveform;
+    s_gray8_turn_ready = false;
     if (!build_turn_phases(e0470_gray8_gl16_phases_only(),
-                           READER_GRAY8_TURN_SETTLE_EXTRA, READER_GRAY8_TURN_BLACK_EXTRA,
+                           low ? READER_GRAY8_TURN_SETTLE_EXTRA : 0,
+                           low ? READER_GRAY8_TURN_BLACK_EXTRA : 0,
                            s_gray8_turn_data, &s_gray8_turn_phases))
         return display_reader_soft_turn_waveform();
     s_gray8_turn_waveform.temp_intervals = E0470_WAVEFORM.temp_intervals;
+    s_gray8_low = low;
     s_gray8_turn_ready = true;
     return &s_gray8_turn_waveform;
 }
@@ -267,6 +281,9 @@ static EpdWaveform s_water_waveform = {
 static bool s_water_ready;
 
 const EpdWaveform* display_reader_water_waveform(void) {
+    // 关闭低残影模式时水波纹直接用原文字表：没有额外白刷，DC 平衡。
+    // With low-ghost off the ripple uses the plain text table: no extra white push, DC balanced.
+    if (!app_settings_low_ghost()) return display_reader_text_waveform();
     if (s_water_ready) return &s_water_waveform;
     const EpdWaveform* source=display_reader_text_waveform();
     const EpdWaveformPhases* phases=e0470_waveform_phases(source,MODE_GL16);

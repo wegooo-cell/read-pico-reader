@@ -4821,15 +4821,20 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         // 翻页动画与页脚刷新独立：全屏没有页脚，仍使用用户选择的水波纹。
         // The turn effect is independent of the footer: full-screen turns still use the selected water effect.
         EpdRect turn_area=s_area;
+        // 普通翻页把信息栏并进同一次扫描：正文擦白的同时信息栏白底也一起推白。
+        // The ordinary turn includes the metadata bars in the same scan, so their whites are pushed
+        // together with the body's erase instead of a second pass.
+        bool whole_panel = false;
         if (s_water_turn_pending) {
             err = update_display_water_turn(ctx->hl, turn_area, s_water_turn_dir);
         } else if (s_reader_turn_pending && s_mode == MODE_GL16) {
-            // 正文保留普通/快速波形，上下信息栏独立局刷，不参与擦白。
-            // Retain ordinary/fast body waveforms; independently diff metadata without erasing it.
+            // 整屏一次驱动：正文与上下信息栏的白底在同一次扫描里一起擦白。
+            // Drive the whole panel in one pass: the body and both metadata bars erase together.
             err = update_display_reader_area(ctx->hl, app_settings_reader_turn_effect() == 3
                                                  ? display_reader_gray8_turn_waveform()
                                                  : display_reader_soft_turn_waveform(),
-                                             s_mode, turn_area, true);
+                                             s_mode, (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT}, true);
+            whole_panel = true;
         } else if (separate_metadata) {
             err = update_display_reader_area(ctx->hl,
                 s_mode == MODE_DU ? &E0470_FOLLOW_WAVEFORM : display_reader_soft_turn_waveform(),
@@ -4838,6 +4843,15 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
             err = update_display_area_diff_with(ctx->hl,
                 s_mode == MODE_DU ? &E0470_FOLLOW_WAVEFORM : display_reader_soft_turn_waveform(),
                 s_mode, s_area);
+        }
+        // 每次翻页把上下信息栏的白底再推一次白：只驱动目标为白的像素，文字和图标保持不动。
+        // Re-whiten both metadata bars on every turn: only white targets are driven, text and icons hold.
+        if ((s_water_turn_pending || s_reader_turn_pending) && !whole_panel &&
+            app_settings_low_ghost() && err == EPD_DRAW_SUCCESS && s_view == READING) {
+            const EpdWaveform *white = display_reader_white_push_waveform();
+            err = update_display_area_full_with(ctx->hl, white, MODE_GL16, reader_status_area());
+            if (err == EPD_DRAW_SUCCESS)
+                err = update_display_area_full_with(ctx->hl, white, MODE_GL16, progress_rect());
         }
         if (s_water_turn_pending) e0470_page_turn_set_tick_us(prior_tick);
     }
@@ -9200,6 +9214,9 @@ static app_redraw_t shelf_cover_tick(app_ctx_t *ctx) {
 }
 
 static app_redraw_t on_tick(app_ctx_t* ctx) {
+    // 低残影模式只在阅读正文期间保持高压轨；离开阅读立即恢复原来的空闲断电。
+    // Low-ghost holds the rails only while the reader is visible; leaving restores idle power-off.
+    display_set_rail_hold(s_view == READING && s_text && app_settings_low_ghost());
     if(s_import_candidates&&book_import_running())return library_import_tick(ctx);
     if((s_view==SHELF&&s_library_setup_pending)||s_rescan_prompt)return APP_REDRAW_NONE;
     if (s_shelf_open_queued && resume_media_wait(ctx)) return APP_REDRAW_NONE;

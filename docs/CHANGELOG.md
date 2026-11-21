@@ -26,6 +26,12 @@ S31 RC117已按用户要求撤回；官网、TF与OTA恢复原正式RC116。以�
 
 # 版本变更 / Changelog
 
+## 本地测试 / Local test — 2026-11-21（低残影模式）
+
+- 显示设置新增「低残影模式」开关（默认开启）：开启后阅读原文时持续保持面板供电，翻页保留额外擦白/重推黑；关闭后翻页波形去掉额外白刷，回到 DC 平衡。开启前弹窗提示续航大约减少 5%。
+- 普通翻页把状态栏与进度条并入同一次整屏擦白，白底随正文一起退白。
+- Add a “low ghosting” display switch (on by default): while reading, the panel supply stays up and turns keep the extra whitening. Turning it off drops those extra white pulses for a DC-balanced waveform. A dialog warns about roughly 5% shorter battery life. Ordinary turns now whiten the status and progress bars in the same full-panel erase.
+
 ## 本地测试 / Local test — 2026-11-21（12 小时制）
 
 - 日期与时间新增 24/12 小时制切换：点「当前时间」那一行即可切换，状态栏时钟与日期时间页按所选制式显示；该设置写入 NVS 并随备份/设备同步保存。
