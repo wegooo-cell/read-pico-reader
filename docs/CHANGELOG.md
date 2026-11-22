@@ -26,6 +26,11 @@ S31 RC117已按用户要求撤回；官网、TF与OTA恢复原正式RC116。以�
 
 # 版本变更 / Changelog
 
+## 本地测试 / Local test — 2026-11-22（重启/关机）
+
+- 修复重启或关机后恢复记录未清除、下次开机被当成「从睡眠恢复」而停在锁屏浅睡的问题；现在重启与关机都从主页冷启动。
+- Fix restart and power-off leaving the resume record behind, which made the next boot treat it as a sleep resume and wait in light sleep on the lock screen; both actions now cold-boot to Home.
+
 ## 本地测试 / Local test — 2026-11-21（JPEGDEC 基线解码）
 
 - 封面与插图解码：基线 JPEG 先走 JPEGDEC 的全平面 8 位灰度（按目标尺寸选 1/1~1/8，清晰度与 TJpgDec 同级），渐进式继续用 1/8 平面，失败回落 TJpgDec。
