@@ -997,6 +997,10 @@ static void run_power_action(app_ctx_t *ctx, const app_desc_t *current, bool res
     guard_draw_result(ctx->hl, update_display_full(ctx->hl));
     app_lock_wait_key_idle(800);
     epd_poweroff();
+    // 电源动作前清掉恢复记录：重启/关机应从主页冷启动，而不是恢复成锁屏或上次页面。
+    // Clear the resume record before the handoff so restart or power-off boots cold to Home
+    // instead of resuming the lock screen or the previous page.
+    pico_boot_clear_resume();
     if (restart) app_restart_host();
     esp_err_t error = app_enter_host_sleep(APP_SLEEP_OFF);
     if (error != ESP_OK) ESP_LOGW(TAG, "power off failed: %s", esp_err_to_name(error));
