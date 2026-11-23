@@ -1073,6 +1073,21 @@ static void no_art_remember(const cover_cache_header_t *key) {
     remove(temp);
 }
 
+/* ---- 解码内存 / Decode headroom ---- */
+// 用户2026-11-23：200本书库实测，翻几页后内存封面缓存把空闲PSRAM压到解码保留线，之后每本封面预算都不足而失败。
+// 可用预算不到1 MiB时，先按缺口让出最久未用的内存封面（可重建，TF缓存仍在）再计算。
+// User 2026-11-23: on a 200-book shelf the RAM cover cache pressed free PSRAM down to the decode reserve
+// after a few pages, so every later cover failed for lack of budget. Below 1 MiB, yield least-recently-used
+// RAM covers (rebuildable; the TF cache remains) for the shortfall before computing the budget.
+#define COVER_DECODE_ROOM (1024u * 1024u)
+static size_t cover_decode_budget(size_t reserve) {
+    size_t free_bytes = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    size_t budget = free_bytes > reserve ? free_bytes - reserve : 0;
+    if (budget >= COVER_DECODE_ROOM || !metalio_cover_cache_yield(COVER_DECODE_ROOM - budget)) return budget;
+    free_bytes = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return free_bytes > reserve ? free_bytes - reserve : 0;
+}
+
 static bool book_cover_load_gray_impl(const char *path, const char *title, const char *author,
                           uint8_t out[BOOK_COVER_W * BOOK_COVER_H],
                           bool allow_decode, bool *pending, bool allow_auto, bool *auto_cache) {
@@ -1102,8 +1117,7 @@ static bool book_cover_load_gray_impl(const char *path, const char *title, const
         uint8_t *data = NULL;
         size_t size = 0;
         bool png = false;
-        size_t free_bytes=heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-        size_t budget=free_bytes>2u*1024u*1024u?free_bytes-2u*1024u*1024u:0;
+        size_t budget=cover_decode_budget(2u*1024u*1024u);
         esp_err_t err = ESP_ERR_NOT_FOUND;
         if (!no_art_known(&key)) {
             err = budget ? book_epub_cover_bounded(path,&data,&size,&png,budget) : ESP_ERR_NO_MEM;
@@ -1231,8 +1245,7 @@ static bool book_cover_load_list_gray_sized_impl(const char *path, const char *t
     const char *ext = strrchr(path, '.');
     if (!good && ext && !strcasecmp(ext, ".epub")) {
         uint8_t *data = NULL; size_t size = 0; bool png = false;
-        size_t available = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        size_t budget = available > 1536u*1024u ? available - 1536u*1024u : 0;
+        size_t budget = cover_decode_budget(1536u*1024u);
         if (budget > 4u*1024u*1024u) budget = 4u*1024u*1024u;
         esp_err_t error = ESP_ERR_NOT_FOUND;
         if (!no_art_known(&key)) {

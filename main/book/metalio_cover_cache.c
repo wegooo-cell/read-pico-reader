@@ -126,6 +126,14 @@ bool metalio_cover_cache_get_rows(const metalio_cover_key_t *key,void *out,size_
 void metalio_cover_cache_trim(size_t budget) {
     lock(); while(stats.bytes>budget && evict()) {} unlock();
 }
+size_t metalio_cover_cache_yield(size_t bytes) {
+    lock();
+    const size_t before=stats.bytes;
+    // 只写卡的预热不为远处书目让出当前页的内存封面。/ Card-only warming never evicts visible covers for distant books.
+    if(!admission_held()) while(before-stats.bytes<bytes && evict()) {}
+    const size_t freed=before-stats.bytes;
+    unlock(); return freed;
+}
 void metalio_cover_cache_clear(void) {
     lock(); while(evict()) {} free(entries); entries=NULL; unlock();
 }

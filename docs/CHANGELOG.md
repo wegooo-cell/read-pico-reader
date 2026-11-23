@@ -59,6 +59,8 @@ S31 RC117已按用户要求撤回；官网、TF与OTA恢复原正式RC116。以�
 - Shelf covers appear one by one: each finished cover refreshes its own cell while pending cells keep their title cards, instead of waiting for the whole page; the composed page cache is still written only once complete.
 - 设置 › 个性化功能新增「书架封面显示」开关（默认开启）：关闭后书架只显示书名卡，不读取、解码或预热封面，翻页更快；书架管理与主页封面不受影响。开关随完整配置备份（v28）保存，旧版本恢复标准备份时封面保持显示。
 - Settings › Personalisation adds a "Shelf covers" switch (on by default): when off the shelf shows title cards only and never reads, decodes or warms covers, so pages turn faster; management and Home covers are unchanged. The switch is kept in the full settings backup (v28); older firmware restoring the standard backup keeps covers on.
+- 大书库封面不再中途失效：翻过几页后内存封面缓存会把空闲内存压到解码保留线，之后每本封面都解码失败；现在解码前预算不足 1 MiB 时先让出最久未用的内存封面（TF 缓存仍在），只写卡的后台预热不让出。
+- Large libraries keep loading covers: after a few pages the RAM cover cache used to press free memory down to the decode reserve so every later cover failed; decoding now yields least-recently-used RAM covers (the TF cache remains) when its budget falls below 1 MiB, while card-only warming never does.
 
 ## 本地测试 / Local test — 2026-11-21（JPEGDEC 基线解码）
 

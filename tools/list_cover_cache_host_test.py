@@ -57,6 +57,8 @@ typedef struct {unsigned width,height;bool edge;} metalio_cover_meta_t;
 static __attribute__((unused)) metalio_cover_key_t ram_key(const cover_cache_header_t*k,unsigned v){(void)k;(void)v;return(metalio_cover_key_t){0};}
 static __attribute__((unused)) bool metalio_cover_cache_get(const metalio_cover_key_t*k,uint8_t*p,size_t n,metalio_cover_meta_t*m){(void)k;(void)p;(void)n;(void)m;return false;}
 static __attribute__((unused)) void metalio_cover_cache_put(const metalio_cover_key_t*k,const uint8_t*p,size_t n,metalio_cover_meta_t m){(void)k;(void)p;(void)n;(void)m;}
+static size_t ram_bytes,yields;
+static size_t metalio_cover_cache_yield(size_t n){++yields;size_t f=n<ram_bytes?n:ram_bytes;ram_bytes-=f;available+=f;return f;}
 '''
 text = source.read_text()
 unit += text[text.index('#define NO_ART_MAGIC'):text.index('static bool book_cover_load_gray_impl')]
@@ -76,6 +78,13 @@ int main(int argc,char **argv){
  source_w=1000;source_h=250;assert(book_cover_load_list_gray(path,"title","author",out,true,&pending,&w,&h)&&w==176&&h==44);assert(!remove(cache));
  source_w=500;source_h=500;assert(book_cover_load_list_gray(path,"title","author",out,true,&pending,&w,&h)&&w==176&&h==176);assert(!remove(cache));
  available=1536u*1024u;unsigned before=requests;assert(book_cover_load_list_gray(path,"title","author",out,true,&pending,&w,&h)&&w==176&&h==240&&requests==before);assert(stat(cache,&(struct stat){0})!=0);
+ // 预算不足1 MiB时先让出内存封面缓存的缺口，再按回收后的空闲内存读封面。
+ // Below a 1 MiB budget the RAM cover cache yields the shortfall before the cover is read.
+ available=1536u*1024u+256u*1024u;ram_bytes=2u*1024u*1024u;yields=0;before=requests;
+ assert(book_cover_load_list_gray(path,"title","author",out,true,&pending,&w,&h)&&w==176&&h==176&&requests==before+1&&yields==1);
+ assert(ram_bytes==1280u*1024u&&available==1536u*1024u+1024u*1024u);assert(!remove(cache));
+ yields=0;assert(book_cover_load_list_gray(path,"title","author",out,true,&pending,&w,&h)&&!yields);assert(!remove(cache));
+ ram_bytes=0;
  available=8u*1024u*1024u;error=ESP_ERR_NO_MEM;assert(book_cover_load_list_gray(path,"title","author",out,true,&pending,&w,&h));assert(stat(cache,&(struct stat){0})!=0);
  error=ESP_OK;decode_fail=true;assert(book_cover_load_list_gray(path,"title","author",out,true,&pending,&w,&h));assert(stat(cache,&(struct stat){0})!=0);
  decode_fail=false;assert(book_cover_load_list_gray(path,"title","author",out,true,&pending,&w,&h));assert(!remove(cache));
@@ -103,7 +112,7 @@ int main(int argc,char **argv){
  book_cover_store_sized(path,"title","author",out,51,70,st.st_size,st.st_mtime+1);assert(stat(small,&(struct stat){0}));
  book_cover_store_sized(path,"title","author",out,51,70,st.st_size,st.st_mtime);assert(!stat(small,&(struct stat){0}));
  memset(out,0,3570);assert(book_cover_load_sized_io(path,"title","author",out,51,70,&auto_cache)==1&&out[0]==33);
- puts("PASS: persisted no-artwork marker skips archive reads until the book changes; compact3570-byte exact bounds, legacy thumbnail reuse without EPUB reads, checksum repair, warm hits and source-checked generated storage; uncropped wide/tall/square covers, exact cache dimensions, 30 warm reads, corrupt metadata, 1.5MiB reserve, OOM/decode failure retry and generated fallback bounds");
+ puts("PASS: low budgets reclaim the RAM cover cache shortfall before reading; persisted no-artwork marker skips archive reads until the book changes; compact3570-byte exact bounds, legacy thumbnail reuse without EPUB reads, checksum repair, warm hits and source-checked generated storage; uncropped wide/tall/square covers, exact cache dimensions, 30 warm reads, corrupt metadata, 1.5MiB reserve, OOM/decode failure retry and generated fallback bounds");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='plc-') as folder:

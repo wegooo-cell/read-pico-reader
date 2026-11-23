@@ -96,9 +96,19 @@ int main(void) {
     assert(metalio_cover_cache_get(&kept,target,sizeof(target),NULL)&&metalio_cover_cache_stats().entries==1);
     pthread_t other;void *admitted=NULL;assert(!pthread_create(&other,NULL,other_put,&other)&&!pthread_join(other,&admitted)&&admitted);
     assert(metalio_cover_cache_stats().entries==2);
+    // 暂停收录的任务不为解码让出缓存。/ A task holding admission yields nothing for decoding.
+    assert(!metalio_cover_cache_yield(SIZE_MAX)&&metalio_cover_cache_stats().entries==2);
     metalio_cover_cache_hold_admission(false);
     assert(metalio_cover_cache_put(&held,source,sizeof(source),(metalio_cover_meta_t){7,19,false})&&metalio_cover_cache_stats().entries==3);
+    // 解码让出：按最久未用逐项释放，够数即停，报告实际释放字节。
+    // Decode yield evicts least-recently-used entries until enough is freed and reports the bytes.
+    // 最久未用的是另一线程写入的16字节项。/ The least recent entry is the other thread's 16-byte put.
+    assert(metalio_cover_cache_get(&kept,target,sizeof(target),NULL));
+    assert(metalio_cover_cache_yield(1)==sizeof(s_other_pixels)&&metalio_cover_cache_stats().entries==2);
+    assert(metalio_cover_cache_get(&kept,target,sizeof(target),NULL)&&metalio_cover_cache_get(&held,target,sizeof(target),NULL));
+    assert(metalio_cover_cache_yield(sizeof(source)+1)==2*sizeof(source)&&!metalio_cover_cache_stats().entries);
+    assert(!metalio_cover_cache_yield(sizeof(source)));
     metalio_cover_cache_clear();
-    puts("PASS: per-task admission hold ignores puts without evicting; dynamic 4MiB cap, LRU recency, copy ownership, raster metadata, file-version invalidation, 2.5MiB shared reserve, trim/OOM fallback and 4000 concurrent copy cycles");
+    puts("PASS: decode yield evicts LRU entries until the shortfall is freed and never under an admission hold; per-task admission hold ignores puts without evicting; dynamic 4MiB cap, LRU recency, copy ownership, raster metadata, file-version invalidation, 2.5MiB shared reserve, trim/OOM fallback and 4000 concurrent copy cycles");
     return 0;
 }

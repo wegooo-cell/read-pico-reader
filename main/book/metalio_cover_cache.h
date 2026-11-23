@@ -19,5 +19,8 @@ bool metalio_cover_cache_put_rows(const metalio_cover_key_t*,const void*,size_t 
 /// Applies to the calling task only: while held its puts are ignored and reads still hit; used by card-only warming.
 void metalio_cover_cache_hold_admission(bool hold);
 void metalio_cover_cache_trim(size_t budget);
+/// 按最久未用让出至少 bytes 的缓存给解码；调用任务暂停收录时不让出。返回实际释放字节。
+/// Evict least-recently-used entries until at least bytes are freed for decoding; a task holding admission frees nothing. Returns the bytes freed.
+size_t metalio_cover_cache_yield(size_t bytes);
 void metalio_cover_cache_clear(void);
 metalio_cover_stats_t metalio_cover_cache_stats(void);
