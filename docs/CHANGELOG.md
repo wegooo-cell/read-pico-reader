@@ -26,6 +26,11 @@ S31 RC117已按用户要求撤回；官网、TF与OTA恢复原正式RC116。以�
 
 # 版本变更 / Changelog
 
+## 本地测试 / Local test — 2026-11-23（Pico 网页刷机）
+
+- Pico 网页刷机改为与 Metalio 相同的自制安装器与专用弹窗：刷机前读取设备 0x8000 分区表，官方布局保留机内设置，非官方布局（如 app0/font/spiffs）提示外来分区并要求勾选「清除机内设置」后整机重装；写入后复核分区表与四件套 SHA。
+- Pico web flashing now uses the same self-made installer and dialog as Metalio: it reads the device 0x8000 partition table first, keeps settings on the official layout, flags foreign layouts (app0/font/spiffs) and requires the clear-settings checkbox before a full reinstall, then verifies the partition table and part hashes after writing.
+
 ## 本地测试 / Local test — 2026-11-23（触摸采样）
 
 - 主循环空转 5ms→2ms，并每轮补采两次触摸，减少快速轻点漏识别。

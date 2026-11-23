@@ -8,27 +8,27 @@
   const download=document.getElementById('bin-download'), help=document.getElementById('flash-help');
   const title=document.getElementById('flash-help-title'), hint=document.getElementById('firmware-choice-hint');
   const metalioButton=document.getElementById('metalio-installer');
-  let installer=document.getElementById('flash-installer');
+  const picoButton=document.getElementById('pico-installer');
   const models={
     pico:{name:'小纸 Pico',manifest:'./manifest.json',catalog:'./releases.json',feed:'./update.json',family:'ESP32-S3',prefix:'Pico-update',filename:'Pico-update.bin',tag:'v',package:'kiikoread',description:'RDP-G01-W · ESP32-S3'},
     metalio:{name:'Metalio EINK 4 Plus',manifest:'./metalio/manifest.json',catalog:'./metalio/releases.json',feed:'./metalio-s31-update.json',family:'ESP32-S31',prefix:'Metalio-S31-update',filename:'Metalio-S31-update.bin',tag:'metalio-s31-v',package:'kiikoread-metalio47',description:'V1.5 · 34Pin · E0470A14-AF · ESP32-S31'}
   };
   const query=new URLSearchParams(location.search);
   let device=query.get('device')==='metalio'?'metalio':'pico';
-  let request=0, catalogReady=false, manifestReady=false, serialReady=false, selected=null;
+  let request=0, catalogReady=false, manifestReady=false, selected=null;
   let releases=new Map();
-  function busy(){return !!document.querySelector('ewt-install-dialog,dialog.metalio-dialog[open]');}
+  function busy(){return !!document.querySelector('dialog.pico-dialog[open],dialog.metalio-dialog[open]');}
   function syncControls(){selector.disabled=!catalogReady||busy();radios.forEach(r=>r.disabled=busy());}
   function showInstaller(){
     const ready=window.isSecureContext&&'serial' in navigator&&manifestReady;
-    installer.hidden=!(ready&&serialReady&&device==='pico');
+    picoButton.hidden=!(ready&&device==='pico'&&window.PicoInstaller);
     metalioButton.hidden=!(ready&&device==='metalio'&&window.MetalioInstaller);
-    help.hidden=device==='pico'?!installer.hidden:!metalioButton.hidden;
+    help.hidden=device==='pico'?!picoButton.hidden:!metalioButton.hidden;
   }
   async function readJSON(url){const response=await fetch(url,{cache:'no-store'});if(!response.ok)throw Error('清单暂不可用');return response.json();}
   function hideDownloads(){
     for(const id of ['bin-download','tf-package-download','usb-package-download']){const link=document.getElementById(id);link.hidden=true;link.removeAttribute('href');}
-    installer.hidden=metalioButton.hidden=true;
+    picoButton.hidden=metalioButton.hidden=true;
   }
   function packageLink(kind,manifest,choice,model){
     const link=document.getElementById(`${kind.toLowerCase()}-package-download`);
@@ -54,12 +54,8 @@
       if(Number.isFinite(date.getTime())){updated.dateTime=date.toISOString();updated.textContent=new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(date).replace(/\//g,'-');}else updated.textContent='暂未提供';
       const snapshot={device:clickedDevice,manifest:JSON.parse(JSON.stringify(manifest)),manifestURL,files:choice.files};
       selected=snapshot;
-      if(clickedDevice==='pico'){
-        const next=installer.cloneNode(true);next.manifest=manifestURL;next.setAttribute('manifest',manifestURL);
-        next.prepareManifest=()=>window.KiikoreadFlasher.prepare(snapshot.manifest,manifestURL,snapshot.files,'pico');
-        next.querySelector('button').textContent=`连接小纸 Pico，刷入 ${manifest.version.split('-').pop()}`;
-        installer.replaceWith(next);installer=next;
-      }else metalioButton.textContent=`连接 Metalio，刷入 ${manifest.version.split('-').pop()}`;
+      if(clickedDevice==='pico')picoButton.textContent=`连接小纸 Pico，刷入 ${manifest.version.split('-').pop()}`;
+      else metalioButton.textContent=`连接 Metalio，刷入 ${manifest.version.split('-').pop()}`;
       download.href=new URL(latest?`./${model.prefix}-${manifest.version}.bin`:choice.bin,document.baseURI).href;
       download.download=model.filename;download.textContent=`下载 ${manifest.version.split('-').pop()} TF 卡升级 Bin ↓`;download.hidden=false;
       packageLink('TF',manifest,choice,model);packageLink('USB',manifest,choice,model);
@@ -77,7 +73,7 @@
     document.getElementById('usb-guide').href=device==='metalio'?'./metalio/#usb':'./manual/#first-use';
     document.getElementById('tf-guide').href=device==='metalio'?'./metalio/#tf':'./manual/#update';
     document.getElementById('tf-instructions').replaceChildren(document.createTextNode('升级文件名保持 '),Object.assign(document.createElement('code'),{textContent:model.filename}),document.createTextNode('，放入 TF 卡根目录。这是应用升级包，不能代替完整 USB 包。'));
-    document.getElementById('usb-instructions').textContent=device==='metalio'?'支持直接从当前 S31 固件刷入，无需先恢复官方系统。进入 BOOT 下载模式再连接，关闭其他占用串口的页面。兼容分区默认保留设置；校验后直接刷入，不做刷前备份，写后由设备核验 MD5。':'安装时保留数据：不要勾选「擦除设备」。无法连接时，先在设置中进入 BOOT 模式。';
+    document.getElementById('usb-instructions').textContent=device==='metalio'?'支持直接从当前 S31 固件刷入，无需先恢复官方系统。进入 BOOT 下载模式再连接，关闭其他占用串口的页面。兼容分区默认保留设置；校验后直接刷入，不做刷前备份，写后由设备核验 MD5。':'安装前会读取设备分区表：官方布局保留机内设置；检测到非官方分区表时需勾选「整机重装」。无法连接时，先在设置中进入 BOOT 模式。';
     document.getElementById('ota-instructions').textContent=device==='metalio'?'先通过 USB 或 TF 卡安装兼容的 Metalio 基础包，再连接 Wi-Fi，在「设置 → 系统升级」检查更新。GitHub Pages 优先，官网备用；保留设置与 TF 文件。':'连接 Wi-Fi，在「设置 → 系统升级」检查更新。GitHub Pages 优先，官网作为备用来源；旧版本先按兼容说明升级基础包。';
     hint.textContent='设备、版本与刷机包一一对应。安装前会校验固件身份与完整性。';
     releases=new Map([[model.manifest,{manifest:model.manifest}]]);
@@ -98,11 +94,12 @@
   }
   if(location.protocol==='file:'){version.textContent=updated.textContent='请打开官网刷机页';return;}
   if(!window.isSecureContext)title.textContent='请使用 HTTPS 刷机页。';else if(!('serial' in navigator))title.textContent='请使用电脑 Chrome 或 Edge 连接串口。';
-  customElements.whenDefined('esp-web-install-button').then(()=>{serialReady=true;showInstaller();});
+  window.addEventListener('pico-installer-ready',showInstaller);
   window.addEventListener('metalio-installer-ready',showInstaller);
   new MutationObserver(syncControls).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['open']});
   radios.forEach(r=>r.addEventListener('change',()=>{if(r.checked&&!busy()){device=r.value;selectDevice();}}));
   selector.addEventListener('change',selectRelease);
+  picoButton.addEventListener('click',()=>{if(selected?.device==='pico')window.PicoInstaller.open(selected);});
   metalioButton.addEventListener('click',()=>{if(selected?.device==='metalio')window.MetalioInstaller.open(selected);});
   selectDevice(query.get('version'));
 })();
