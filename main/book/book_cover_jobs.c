@@ -174,7 +174,11 @@ static void worker(void *unused) {
         if(slot<0){s_running=false;portEXIT_CRITICAL(&s_lock);break;}
         job=s_jobs[slot];s_jobs[slot].automatic=NULL;s_jobs[slot].state=RUNNING;generation=s_generation;
         portEXIT_CRITICAL(&s_lock);
+        // 只写卡的预热不收录到内存缓存，当前页的封面不会被远处书目挤掉。
+        // Card-only warming skips RAM admission so distant books never evict the visible page.
+        if(job.request.disk_only)metalio_cover_cache_hold_admission(true);
         prepare(&job,generation);
+        if(job.request.disk_only)metalio_cover_cache_hold_admission(false);
         portENTER_CRITICAL(&s_lock);
         if(!s_paused&&generation==s_generation){
             s_jobs[slot].auto_cache = job.auto_cache;
@@ -220,7 +224,7 @@ unsigned book_cover_jobs_begin(void) {
 }
 static bool same_request(const book_cover_job_t *a,const book_cover_job_t *b) {
     return !strcmp(a->path,b->path)&&!strcmp(a->title,b->title)&&!strcmp(a->author,b->author)&&
-        a->metadata_only==b->metadata_only&&a->with_chapters==b->with_chapters&&a->list==b->list&&a->fast==b->fast&&a->natural==b->natural&&a->artwork_only==b->artwork_only&&a->width==b->width&&a->height==b->height&&
+        a->metadata_only==b->metadata_only&&a->disk_only==b->disk_only&&a->with_chapters==b->with_chapters&&a->list==b->list&&a->fast==b->fast&&a->natural==b->natural&&a->artwork_only==b->artwork_only&&a->width==b->width&&a->height==b->height&&
         a->stride==b->stride&&a->contrast==b->contrast&&a->phase==b->phase&&a->x==b->x&&a->y==b->y;
 }
 bool book_cover_jobs_submit(unsigned generation,unsigned slot,const book_cover_job_t *request) {

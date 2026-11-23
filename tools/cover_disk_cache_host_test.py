@@ -34,7 +34,8 @@ static void map(const char *p,char out[1024]){assert(!strncmp(p,"/sdcard",7));as
 static FILE *mapped_open(const char *p,const char *m){assert(!deny_storage);char out[1024];map(p,out);return write_fail&&strchr(m,'w')?NULL:fopen(out,m);}
 static int mapped_stat(const char *p,struct stat *s){assert(!deny_storage);char out[1024];map(p,out);return stat(out,s);}
 static int mapped_mkdir(const char *p,int mode){char out[1024];map(p,out);return mkdir(out,mode);}
-static int mapped_rename(const char *p,const char *q){char a[1024],b[1024];map(p,a);map(q,b);return rename(a,b);}
+// 与 ESP-IDF FAT 一致：目标已存在时 rename 失败（EEXIST）。/ Match ESP-IDF FAT: rename fails with EEXIST on an existing target.
+static int mapped_rename(const char *p,const char *q){char a[1024],b[1024];map(p,a);map(q,b);struct stat s;if(!stat(b,&s)){errno=EEXIST;return -1;}return rename(a,b);}
 static int mapped_remove(const char *p){char a[1024];map(p,a);return remove(a);}
 #define fopen mapped_open
 #define stat(p,s) mapped_stat(p,s)
@@ -153,8 +154,16 @@ int main(int argc,char **argv){
  assert(book_cover_fast_cache_read(path,"name","author",key,out,&edge)&&edge&&!memcmp(out,bits,4494));
  assert(metalio_cover_cache_stats().hits==hits+1);metalio_cover_cache_clear();
  assert(!book_cover_fast_cache_read(path,"name","author",key,out,&edge));
+ // 同一本书换到另一抖动相位的格子：新点阵必须替换卡上旧文件。
+ // The same book moved to a cell with another dither phase must replace the old file on the card.
+ book_fast_cover_key_t moved=key;moved.phase=3;uint8_t moved_bits[4494];
+ book_cover_fast_cache_write(path,"name","author",key,bits,true);assert(!stat(cache,&(struct stat){0}));
+ for(int i=0;i<4494;++i)moved_bits[i]=(uint8_t)(i*13+5);
+ book_cover_fast_cache_write(path,"name","author",moved,moved_bits,false);metalio_cover_cache_clear();
+ assert(book_cover_fast_cache_read(path,"name","author",moved,out,&edge)&&!edge&&!memcmp(out,moved_bits,4494));
+ metalio_cover_cache_clear();assert(!book_cover_fast_cache_read(path,"name","author",key,out,&edge));
  ram_enabled=false;remove(path);assert(!load_shelf_cover_fast(0,0)&&!live);
- puts("PASS: real TF-to-RAM raster reuse (80 warm copies, no gray/JPEG workspace); grid/list exact pixels and one 4494B resident representation; source/contrast/phase/dimension invalidation; CRC, trailing bytes, reserve/OOM, blocked book, mode isolation, write failure and missing source");
+ puts("PASS: FAT-style rename replaces a re-phased raster; real TF-to-RAM raster reuse (80 warm copies, no gray/JPEG workspace); grid/list exact pixels and one 4494B resident representation; source/contrast/phase/dimension invalidation; CRC, trailing bytes, reserve/OOM, blocked book, mode isolation, write failure and missing source");
 }
 '''
 with tempfile.TemporaryDirectory(dir=ROOT/'build') as directory:

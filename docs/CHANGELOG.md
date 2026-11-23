@@ -51,6 +51,11 @@ S31 RC117已按用户要求撤回；官网、TF与OTA恢复原正式RC116。以�
 - 修复重启或关机后恢复记录未清除、下次开机被当成「从睡眠恢复」而停在锁屏浅睡的问题；现在重启与关机都从主页冷启动。
 - Fix restart and power-off leaving the resume record behind, which made the next boot treat it as a sleep resume and wait in light sleep on the lock screen; both actions now cold-boot to Home.
 
+## 本地测试 / Local test — 2026-11-23（书架封面加载）
+
+- 大书库书架提速：没有封面的EPUB记一次标记，之后开机不再反复解析；快速模式封面缓存可正常覆盖；附近页预热完后，空闲时后台把其余书的封面写入TF缓存，触屏即让路并可续做，不挤占当前页内存缓存。
+- Faster large libraries: EPUBs without artwork are marked once instead of re-parsed every boot; Fast-mode cover rasters overwrite correctly; after nearby pages warm, idle time writes the rest of the library's covers to TF, yielding to input, resuming later and leaving the current page's RAM cache intact.
+
 ## 本地测试 / Local test — 2026-11-21（JPEGDEC 基线解码）
 
 - 封面与插图解码：基线 JPEG 先走 JPEGDEC 的全平面 8 位灰度（按目标尺寸选 1/1~1/8，清晰度与 TJpgDec 同级），渐进式继续用 1/8 平面，失败回落 TJpgDec。

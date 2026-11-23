@@ -27,6 +27,11 @@ static void *parallel(void *arg) {
     }
     return NULL;
 }
+static uint8_t s_other_pixels[16];
+static void *other_put(void *arg) {
+    metalio_cover_key_t k=key(83);(void)arg;
+    return metalio_cover_cache_put(&k,s_other_pixels,sizeof(s_other_pixels),(metalio_cover_meta_t){4,4,false})?arg:NULL;
+}
 int main(void) {
     enum {CHUNK=512*1024};
     uint8_t *pixels=malloc(CHUNK),*out=malloc(CHUNK);assert(pixels&&out);
@@ -81,7 +86,19 @@ int main(void) {
     assert(!metalio_cover_cache_put_rows(&k,source,19,SIZE_MAX,7));
     assert(!metalio_cover_cache_put_rows(&k,source,SIZE_MAX,1,7));
     metalio_cover_cache_trim(0);assert(!metalio_cover_cache_get_rows(&k,target,19,11,7));
+    // 暂停收录只影响调用线程：写入被忽略且不淘汰已有项，读取仍命中，解除后恢复。
+    // A hold affects the calling thread only: puts are ignored without evicting, reads still hit, release restores.
+    metalio_cover_key_t kept=key(81),held=key(82);
+    assert(metalio_cover_cache_put(&kept,source,sizeof(source),(metalio_cover_meta_t){7,19,false}));
+    metalio_cover_cache_hold_admission(true);
+    assert(!metalio_cover_cache_put(&held,source,sizeof(source),(metalio_cover_meta_t){7,19,false}));
+    assert(!metalio_cover_cache_get(&held,target,sizeof(target),NULL));
+    assert(metalio_cover_cache_get(&kept,target,sizeof(target),NULL)&&metalio_cover_cache_stats().entries==1);
+    pthread_t other;void *admitted=NULL;assert(!pthread_create(&other,NULL,other_put,&other)&&!pthread_join(other,&admitted)&&admitted);
+    assert(metalio_cover_cache_stats().entries==2);
+    metalio_cover_cache_hold_admission(false);
+    assert(metalio_cover_cache_put(&held,source,sizeof(source),(metalio_cover_meta_t){7,19,false})&&metalio_cover_cache_stats().entries==3);
     metalio_cover_cache_clear();
-    puts("PASS: dynamic 4MiB cap, LRU recency, copy ownership, raster metadata, file-version invalidation, 2.5MiB shared reserve, trim/OOM fallback and 4000 concurrent copy cycles");
+    puts("PASS: per-task admission hold ignores puts without evicting; dynamic 4MiB cap, LRU recency, copy ownership, raster metadata, file-version invalidation, 2.5MiB shared reserve, trim/OOM fallback and 4000 concurrent copy cycles");
     return 0;
 }

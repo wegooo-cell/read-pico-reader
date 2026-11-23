@@ -20,15 +20,22 @@ enum {SHELF,READING};
 typedef struct {int x,y,width,height;} EpdRect;
 typedef struct {bool touched;} touch_t;
 typedef struct {int leaf;int64_t now_ms;bool consumed,request_app,request_menu,request_return;touch_t *touch;} app_ctx_t;
-typedef struct {char path[288],name[256],author[128];uint32_t size;uint16_t chapters;bool chapters_checked,removed;} shelf_entry_t;
-static shelf_entry_t s_shelf[25];static int s_visible_count=25,s_view=SHELF;
+typedef struct {char path[288],name[256],author[128];uint32_t size;int64_t modified;uint16_t chapters;bool chapters_checked,removed,is_dir,cover_identity_known;} shelf_entry_t;
+static shelf_entry_t s_shelf[64];static int s_visible_count=25,s_view=SHELF;
 static unsigned s_cover_pending_mask,s_chapters_pending,s_cover_generation;
 static bool s_chapters_started,s_chapters_changed,s_prefetch_active,s_clear_confirm,s_batch_confirm;
 static bool s_shelf_page_pending __attribute__((unused));
 static bool s_category_menu __attribute__((unused)), s_sort_menu __attribute__((unused));
 static bool pico_online_busy(void){return false;}
 static bool shelf_is_txt(const char *p){return strstr(p,".txt")!=NULL;}
-static bool shelf_cover_ram_hit(int index,int row,bool load){(void)index;(void)row;assert(!load);return false;}
+static bool ram_hit[64];
+static bool shelf_cover_ram_hit(int index,int row,bool load){(void)row;assert(!load);return ram_hit[index];}
+static uint32_t s_shelf_catalog_epoch;static uint32_t progress_revision;static int s_category_selected;static char s_query[8];
+static uint32_t book_progress_revision(void){return progress_revision;}
+static unsigned app_settings_shelf_order(void){return 0;}
+static int epd_get_rotation(void){return 0;}
+static uint64_t book_auto_cover_font_key(void){return 0;}
+static bool sd_ready=true;static bool read_pico_sd_io_ready(void){return sd_ready;}
 static void shelf_record_cover_result(int index,int state,const book_cover_result_t *result){
  if(state>0&&result->metadata){s_shelf[index].chapters=result->chapters;s_shelf[index].chapters_checked=true;}
 }
@@ -46,14 +53,22 @@ static void copy_text(char*d,size_t n,const char*s){snprintf(d,n,"%s",s?s:"");}
 static EpdRect shelf_cover_image(int row){return(EpdRect){48,197+row*96,51,70};}
 unsigned book_cover_jobs_begin(void){++begins;memset(queued,0,sizeof(queued));memset(complete,0,sizeof(complete));return ++generation;}
 bool book_cover_jobs_submit(unsigned g,unsigned slot,const book_cover_job_t*q){assert(g==generation&&slot<9);if(fail_submit)return false;assert(!queued[slot]);queued[slot]=true;requests[slot]=*q;++submitted;return true;}
-int book_cover_jobs_take(unsigned g,unsigned slot,book_cover_result_t*r){if(g!=generation||!queued[slot])return -1;if(!complete[slot])return 0;queued[slot]=false;*r=(book_cover_result_t){.metadata=true,.chapters=slot==2?0:37,.size=100};return 1;}
+int book_cover_jobs_take(unsigned g,unsigned slot,book_cover_result_t*r){if(g!=generation||!queued[slot])return -1;if(!complete[slot])return 0;queued[slot]=false;*r=(book_cover_result_t){.metadata=true,.chapters=slot==2?0:37,.size=100,.modified=777};return 1;}
 int book_cover_jobs_take_ready(unsigned g,unsigned slot,book_cover_result_t*r){return book_cover_jobs_take(g,slot,r);}
 void book_cover_jobs_cancel(unsigned g){if(g==generation)++generation;}
 bool book_cover_jobs_idle(void){return idle;}
 """
 # The shared source has conditional implementations; select the S31 path.
 u += '#define KIIKO_BOARD_METALIO47 1\n'
-for name in ('shelf_chapters_tick', 'shelf_record_prefetch_result', 'shelf_prefetch_tick'):
+text=source.read_text()
+# 近页窗口随板型不同（S31提前四页、Pico三页），全书库预热从窗口之后开始。
+# The nearby window differs per board (S31 four pages ahead, Pico three); library warming starts after it.
+u += '#define WARM_FIRST %d\n' % (40 if 'shelf_library_warm_submit(ctx->leaf * rows, rows * 5' in text else 32)
+state=text.index('static struct {\n    uint64_t key;\n    int next, index;')
+u += text[state:text.index('} s_library_warm;',state)+len('} s_library_warm;')] + '\n'
+u += 'static int shelf_library_warm_take(unsigned generation);\n'
+for name in ('shelf_library_warm_abort','shelf_chapters_tick', 'shelf_record_prefetch_result', 'shelf_library_warm_key',
+             'shelf_library_warm_submit', 'shelf_library_warm_take', 'shelf_prefetch_tick'):
     u += function(name, source) + '\n'
 u+=r"""
 int main(void){
@@ -75,7 +90,36 @@ int main(void){
  // Metadata submit failure is marked checked once and never loops through the full library.
  s_chapters_started=false;for(int i=0;i<8;++i)s_shelf[i].chapters_checked=false;fail_submit=true;
  assert(!shelf_chapters_tick(&ctx)&&!s_chapters_pending);assert(!shelf_chapters_tick(&ctx));fail_submit=false;
- puts("PASS: visible metadata first, then sequential forward shelf warming with input priority");
+ // 近页预热之后：逐本为整个书库只写卡（跳过当前页及相邻四页与TXT），按格位取尺寸。
+ // After nearby warming: card-only warming walks the rest of the library (skipping the visible page,
+ // the four pages ahead and TXT), sized by each book's cell.
+ for(int i=25;i<64;++i){snprintf(s_shelf[i].path,sizeof(s_shelf[i].path),i==45?"book%d.txt":"book%d",i);s_shelf[i].size=100;}
+ s_visible_count=64;ram_hit[41]=true;s_prefetch_active=false;int warmed[64]={0},order[64],count=0;
+ for(int step=0;step<80;++step){
+  ctx.now_ms+=1000;shelf_prefetch_tick(&ctx);
+  if(s_prefetch_active&&s_library_warm.active){
+   const book_cover_job_t *q=&requests[0];int index=atoi(q->path+4);
+   assert(q->disk_only&&q->artwork_only&&!q->with_chapters&&!q->metadata_only&&index>=WARM_FIRST&&index!=41&&index!=45);
+   assert(q->width==51&&q->height==70);++warmed[index];order[count++]=index;
+  }
+  complete[0]=true;shelf_prefetch_tick(&ctx);
+ }
+ int expected=0;for(int i=WARM_FIRST;i<64;++i)if(i!=41&&i!=45){assert(order[expected]==i);++expected;}
+ assert(count==expected);for(int i=WARM_FIRST;i<64;++i)assert(warmed[i]==(i!=41&&i!=45));
+ assert(s_shelf[40].cover_identity_known&&s_shelf[40].modified==777&&!s_shelf[41].cover_identity_known);
+ // 一轮完成后不再重复；书目变化（键变化）后重来一轮。/ A finished pass stays idle until the catalog key changes.
+ int before=submitted;for(int step=0;step<10;++step){ctx.now_ms+=1000;shelf_prefetch_tick(&ctx);}assert(submitted==before);
+ // 进行中被翻页打断：回退游标，下一轮重新提交同一本。/ An interrupted book rewinds the cursor and is submitted again.
+ char first[16];snprintf(first,sizeof(first),"book%d",WARM_FIRST);
+ ++s_store_revision;ctx.now_ms+=1000;shelf_prefetch_tick(&ctx);assert(s_prefetch_active&&!strcmp(requests[0].path,first));
+ s_prefetch_active=false;shelf_library_warm_abort();assert(!s_library_warm.active&&s_library_warm.next==WARM_FIRST);
+ ctx.now_ms+=1000;shelf_prefetch_tick(&ctx);assert(s_prefetch_active&&!strcmp(requests[0].path,first));
+ // TF 卡挂载交接中：保留游标稍后再试。/ During a mount handoff keep the cursor and retry later.
+ int media=WARM_FIRST+1;while(media==41||media==45)++media;char media_path[32];snprintf(media_path,sizeof(media_path),"/sdcard/book%d",media);
+ complete[0]=true;shelf_prefetch_tick(&ctx);strcpy(s_shelf[media].path,media_path);sd_ready=false;before=submitted;
+ ctx.now_ms+=1000;shelf_prefetch_tick(&ctx);assert(!s_prefetch_active&&submitted==before&&s_library_warm.next==media);
+ sd_ready=true;ctx.now_ms+=1000;shelf_prefetch_tick(&ctx);assert(s_prefetch_active&&!strcmp(requests[0].path,media_path));
+ puts("PASS: visible metadata first, sequential forward shelf warming with input priority, then one card-only pass over the remaining library with resume, rewind and media-handoff retry");
 }
 """
 with tempfile.TemporaryDirectory(prefix='kiiko-cold-start-') as d:

@@ -12,6 +12,7 @@ typedef struct {
     // Reader idle preparation must never render placeholder glyphs with the reading face.
     bool artwork_only;
     bool metadata_only,with_chapters; ///< 当前页元数据/相邻页预热 / Visible metadata or neighbor warming
+    bool disk_only; ///< 全书库预热：只写TF成品缓存，不进内存缓存 / Library warming: card cache only, never the RAM cache
     unsigned width,height,stride,contrast,phase;
     int x,y;
 } book_cover_job_t;

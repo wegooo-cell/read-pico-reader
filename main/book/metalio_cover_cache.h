@@ -15,6 +15,9 @@ bool metalio_cover_cache_put(const metalio_cover_key_t *key,const void *pixels,s
 /// 在同一LRU预算内复制已处理的物理像素行，不借出缓存指针。/ Copy finished physical raster rows within the same LRU budget, without lending pointers.
 bool metalio_cover_cache_get_rows(const metalio_cover_key_t*,void*,size_t stride,size_t span,size_t rows);
 bool metalio_cover_cache_put_rows(const metalio_cover_key_t*,const void*,size_t stride,size_t span,size_t rows);
+/// 仅对调用任务生效：true 时该任务的写入被忽略，读取不受影响；用于只写卡的后台预热。
+/// Applies to the calling task only: while held its puts are ignored and reads still hit; used by card-only warming.
+void metalio_cover_cache_hold_admission(bool hold);
 void metalio_cover_cache_trim(size_t budget);
 void metalio_cover_cache_clear(void);
 metalio_cover_stats_t metalio_cover_cache_stats(void);

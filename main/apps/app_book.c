@@ -949,11 +949,26 @@ static struct {
     unsigned pending;
     int64_t next_ms;
 } s_first_page_warm;
+// 全书库预热游标：近页准备完后，空闲时逐本只写TF成品缓存；书目、排序或样式变化后重来一轮。
+// Whole-library warming cursor: once nearby pages are ready, idle time writes card-only rasters one
+// book at a time; catalog, order or style changes start a new pass.
+static struct {
+    uint64_t key;
+    int next, index;
+    bool active, home;
+} s_library_warm;
+static void shelf_library_warm_abort(void) {
+    if (!s_library_warm.active) return;
+    s_library_warm.active = false;
+    s_library_warm.next = s_library_warm.index;
+}
+static int shelf_library_warm_take(unsigned generation);
 static bool s_shelf_index_preloaded;
 static int64_t s_shelf_input_ms;
 #endif
 static void invalidate_covers(void) {
 #if KIIKO_BOARD_METALIO47
+    if (!s_library_warm.home) shelf_library_warm_abort();
     s_shelf_no_artwork_mask = 0;
 #else
     book_shelf_page_pause();
@@ -1159,8 +1174,10 @@ static void shelf_record_cover_result(int index, int state, const book_cover_res
 static bool prepare_shelf_page(app_ctx_t *ctx) {
 #if KIIKO_BOARD_METALIO47
     if (s_prefetch_active && (!s_shelf_page_key_valid ||
-        s_covers[0].index != ctx->leaf * shelf_rows()))
-        (void)shelf_record_prefetch_result(s_cover_generation, 0, s_prefetch_index, false);
+        s_covers[0].index != ctx->leaf * shelf_rows())) {
+        if (s_library_warm.active && !s_library_warm.home) (void)shelf_library_warm_take(s_cover_generation);
+        else (void)shelf_record_prefetch_result(s_cover_generation, 0, s_prefetch_index, false);
+    }
 #endif
     book_shelf_page_key_t base;book_shelf_page_key_init(&base);
     const int options[]={ctx->leaf,shelf_rows(),shelf_display_style(),
@@ -1502,6 +1519,83 @@ static int shelf_record_prefetch_result(unsigned generation, unsigned slot, int 
     free(result.pixels);
     return state;
 }
+
+// 书目、排序、筛选与封面几何的摘要；变化后从头再预热一轮。
+// Digest of catalog, order, filter and cover geometry; a change restarts the warming pass.
+static uint64_t shelf_library_warm_key(void) {
+    const uint64_t parts[] = {
+        s_shelf_catalog_epoch, book_store_revision(), book_progress_revision(), (uint64_t)s_visible_count,
+        (uint64_t)shelf_rows(), (uint64_t)shelf_display_style(), app_settings_main_fast_refresh(),
+        (uint64_t)app_settings_system_contrast(), (uint64_t)app_settings_shelf_order(),
+        (uint64_t)s_category_selected, (uint64_t)epd_get_rotation(), book_auto_cover_font_key(),
+    };
+    uint64_t hash = UINT64_C(14695981039346656037);
+    const uint8_t *bytes = (const uint8_t *)parts;
+    for (size_t i = 0; i < sizeof(parts); ++i) hash = (hash ^ bytes[i]) * UINT64_C(1099511628211);
+    for (const char *q = s_query; *q; ++q) hash = (hash ^ (uint8_t)*q) * UINT64_C(1099511628211);
+    return hash;
+}
+// 提交下一本需要预热的书；[skip_first, skip_first+skip_count) 由近页预热负责。
+// 与正常显示用同一请求（格位决定尺寸与抖动相位），只是不进内存缓存、不生成标题封面。
+// Submit the next book needing a card raster; [skip_first, skip_first+skip_count) belongs to nearby
+// warming. The request matches on-page display (the cell sets size and dither phase) but stays out
+// of the RAM cache and never renders title art.
+static bool shelf_library_warm_submit(int skip_first, int skip_count, unsigned *generation) {
+    const uint64_t key = shelf_library_warm_key();
+    if (key != s_library_warm.key) {
+        s_library_warm.key = key;
+        s_library_warm.next = 0;
+    }
+    const int rows = shelf_rows();
+    const bool list = shelf_display_style() == 5;
+    while (rows > 0 && s_library_warm.next < s_visible_count) {
+        const int index = s_library_warm.next++;
+        if (index >= skip_first && index < skip_first + skip_count) continue;
+        const shelf_entry_t *item = &s_shelf[index];
+        if (item->removed || item->is_dir || shelf_is_txt(item->path) || !pico_boot_asset_allowed(item->path)) continue;
+        if (!strncmp(item->path, "/sdcard/", 8) && !read_pico_sd_io_ready()) {
+            --s_library_warm.next;
+            return false;
+        }
+        const int row = index % rows;
+        if (shelf_cover_ram_hit(index, row, false)) continue;
+        const EpdRect image = shelf_cover_image(row);
+        book_cover_job_t q = {
+            .list = list, .fast = app_settings_main_fast_refresh(), .artwork_only = true, .disk_only = true,
+            .width = image.width, .height = image.height, .stride = SHELF_FAST_COVER_STRIDE,
+            .contrast = app_settings_system_contrast(), .phase = (image.x & 3) | ((image.y & 3) << 2),
+            .x = image.x, .y = image.y,
+        };
+        copy_text(q.path, sizeof(q.path), item->path);
+        copy_text(q.title, sizeof(q.title), item->name);
+        copy_text(q.author, sizeof(q.author), item->author);
+        *generation = book_cover_jobs_begin();
+        if (!book_cover_jobs_submit(*generation, 0, &q)) {
+            --s_library_warm.next;
+            return false;
+        }
+        s_library_warm.index = index;
+        s_library_warm.active = true;
+        return true;
+    }
+    return false;
+}
+// 收取预热结果，只记录文件身份；像素已在工作线程写卡，这里直接释放。
+// Collect a warming result and record only the file identity; the worker already wrote the card.
+static int shelf_library_warm_take(unsigned generation) {
+    book_cover_result_t result = {0};
+    const int state = book_cover_jobs_take_ready(generation, 0, &result);
+    if (!state) return 0;
+    const int index = s_library_warm.index;
+    s_library_warm.active = false;
+    if ((state > 0 || state == BOOK_COVER_JOB_NO_ARTWORK) && index >= 0 && index < s_visible_count &&
+        s_store_revision == book_store_revision() && result.size == s_shelf[index].size) {
+        s_shelf[index].modified = result.modified;
+        s_shelf[index].cover_identity_known = true;
+    }
+    free(result.pixels);
+    return state;
+}
 #endif
 
 
@@ -1524,7 +1618,9 @@ static void shelf_prefetch_tick(app_ctx_t *ctx) {
     if(ctx->now_ms<s_prefetch_after)return;
     if(s_prefetch_active){
 #if KIIKO_BOARD_METALIO47
-        if (!shelf_record_prefetch_result(s_cover_generation, 0, s_prefetch_index, true)) return;
+        if (s_library_warm.active && !s_library_warm.home) {
+            if (!shelf_library_warm_take(s_cover_generation)) return;
+        } else if (!shelf_record_prefetch_result(s_cover_generation, 0, s_prefetch_index, true)) return;
         s_prefetch_active = false;
         s_prefetch_after = ctx->now_ms + 25;
 #else
@@ -1539,8 +1635,16 @@ static void shelf_prefetch_tick(app_ctx_t *ctx) {
 #if KIIKO_BOARD_METALIO47
     // 提前准备四页；用户前进后再补，防止远页挤掉马上要用的封面。
     // Keep four pages ahead and refill as the user advances, so distant pages cannot evict imminent covers.
-    if(s_prefetch_step>=rows*4 || s_prefetch_step>=s_visible_count-(ctx->leaf+1)*rows ||
-       !book_cover_jobs_idle())return;
+    if(!book_cover_jobs_idle())return;
+    if(s_prefetch_step>=rows*4 || s_prefetch_step>=s_visible_count-(ctx->leaf+1)*rows){
+        // 近页已就绪：继续为整个书库逐本写卡缓存，之后翻到任意页都不再现场解码。
+        // Nearby pages are ready: keep writing card rasters for the rest of the library, so any later page skips live decoding.
+        shelf_library_warm_abort();
+        s_library_warm.home = false;
+        s_prefetch_active = shelf_library_warm_submit(ctx->leaf * rows, rows * 5, &s_cover_generation);
+        if (!s_prefetch_active && s_library_warm.next < s_visible_count) s_prefetch_after = ctx->now_ms + 500;
+        return;
+    }
     int step=s_prefetch_step++,row=step%rows,index=(ctx->leaf+1)*rows+step;
 #else
     if(s_prefetch_step>=rows*2)return;
@@ -6924,6 +7028,10 @@ static bool shelf_cache_load(app_ctx_t* ctx, bool background) {
 #if KIIKO_BOARD_METALIO47
 void app_book_shelf_prefetch_cancel(void) {
     if (s_first_page_warm.generation) {
+        // 首页借用的全书库预热：已完成就收取，否则回退游标，下次空闲重新提交。
+        // Home-owned library warming: collect a finished book, otherwise rewind for the next idle pass.
+        if (s_library_warm.active && s_library_warm.home &&
+            !shelf_library_warm_take(s_first_page_warm.generation)) shelf_library_warm_abort();
         for (int row = 0; row < BOOK_GRID_ROWS && row < s_visible_count && s_first_page_warm.pending; ++row) {
             const unsigned bit = 1u << row;
             if (!(s_first_page_warm.pending & bit)) continue;
@@ -6941,10 +7049,17 @@ void app_book_shelf_prefetch_reset(void) {
     s_shelf_cache_valid = false;
     s_shelf_index_preloaded = false;
     metalio_cover_cache_clear();
+    memset(&s_library_warm, 0, sizeof(s_library_warm));
 }
 void app_book_shelf_prefetch_first(app_ctx_t *ctx) {
     if(s_manage_books)return;
     if (ctx->now_ms < s_first_page_warm.next_ms || app_touch_input_pending(ctx)) return;
+    if (s_first_page_warm.generation && s_library_warm.active && s_library_warm.home) {
+        if (!shelf_library_warm_take(s_first_page_warm.generation)) return;
+        app_book_shelf_prefetch_cancel();
+        s_first_page_warm.next_ms = ctx->now_ms + 25;
+        return;
+    }
     if (s_first_page_warm.generation) {
         for (int row = 0; row < BOOK_GRID_ROWS; ++row) {
             const unsigned bit = 1u << row;
@@ -7015,11 +7130,18 @@ void app_book_shelf_prefetch_first(app_ctx_t *ctx) {
         if (book_cover_jobs_submit(s_first_page_warm.generation, row, &request))
             s_first_page_warm.pending |= 1u << row;
     }
-    s_view = previous_view;
     if (!s_first_page_warm.pending) {
         app_book_shelf_prefetch_cancel();
-        s_first_page_warm.next_ms = ctx->now_ms + 2000;
+        // 首页封面已就绪：主页空闲时继续逐本为整个书库写卡缓存。
+        // First-page covers are ready: keep warming the whole library on the card while Home is idle.
+        unsigned generation = 0;
+        if (!app_touch_input_pending(ctx) && shelf_library_warm_submit(0, rows, &generation)) {
+            s_library_warm.home = true;
+            s_first_page_warm.generation = generation;
+        }
     }
+    s_view = previous_view;
+    if (!s_first_page_warm.generation) s_first_page_warm.next_ms = ctx->now_ms + 2000;
 }
 #endif
 static void scan_shelf(app_ctx_t* ctx) {

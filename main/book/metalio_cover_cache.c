@@ -10,6 +10,7 @@
 #ifdef ESP_PLATFORM
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 static StaticSemaphore_t mutex_storage;
 static SemaphoreHandle_t mutex;
 static portMUX_TYPE init_lock=portMUX_INITIALIZER_UNLOCKED;
@@ -25,6 +26,19 @@ static void unlock(void) { xSemaphoreGive(mutex); }
 static pthread_mutex_t mutex=PTHREAD_MUTEX_INITIALIZER;
 static void lock(void) { pthread_mutex_lock(&mutex); }
 static void unlock(void) { pthread_mutex_unlock(&mutex); }
+#endif
+// 后台全书库预热只写卡：在该任务内暂停收录，避免挤掉当前页与相邻页的封面。
+// Whole-library warming writes the card only: suspend admission for that task so it cannot
+// evict the visible and neighboring pages' covers.
+#ifdef ESP_PLATFORM
+static TaskHandle_t s_hold_task;
+static bool admission_held(void) { return s_hold_task && s_hold_task==xTaskGetCurrentTaskHandle(); }
+void metalio_cover_cache_hold_admission(bool hold) { lock(); s_hold_task=hold?xTaskGetCurrentTaskHandle():NULL; unlock(); }
+#else
+static pthread_t s_hold_thread;
+static bool s_hold;
+static bool admission_held(void) { return s_hold && pthread_equal(s_hold_thread,pthread_self()); }
+void metalio_cover_cache_hold_admission(bool hold) { lock(); s_hold=hold; if(hold)s_hold_thread=pthread_self(); unlock(); }
 #endif
 #define CACHE_SLOTS KIIKO_BOARD_COVER_RAM_SLOTS
 #define CACHE_BUDGET (KIIKO_BOARD_COVER_RAM_BUDGET_KB * 1024u)
@@ -69,6 +83,7 @@ static bool put_rows(const metalio_cover_key_t *key,const void *pixels,size_t st
     size_t bytes=span*rows;
     if(!key || !pixels || !bytes || bytes>CACHE_BUDGET) return false;
     lock();
+    if(admission_held()) { unlock(); return false; }
     if(!entries) entries=heap_caps_calloc(CACHE_SLOTS,sizeof(*entries),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!entries) { unlock(); return false; }
     // 同一文件版本/光栅只存一份；书籍修改时移除旧版本。/ Replace same raster or stale file versions.

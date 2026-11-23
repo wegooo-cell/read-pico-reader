@@ -58,6 +58,8 @@ static __attribute__((unused)) metalio_cover_key_t ram_key(const cover_cache_hea
 static __attribute__((unused)) bool metalio_cover_cache_get(const metalio_cover_key_t*k,uint8_t*p,size_t n,metalio_cover_meta_t*m){(void)k;(void)p;(void)n;(void)m;return false;}
 static __attribute__((unused)) void metalio_cover_cache_put(const metalio_cover_key_t*k,const uint8_t*p,size_t n,metalio_cover_meta_t m){(void)k;(void)p;(void)n;(void)m;}
 '''
+text = source.read_text()
+unit += text[text.index('#define NO_ART_MAGIC'):text.index('static bool book_cover_load_gray_impl')]
 for name in ('cover_hash','cover_cache_identity','cover_cache_key','book_cover_crop','fast_cover_checksum','list_cache_path','list_cache_commit','book_cover_load_list_gray_sized_impl','book_cover_load_list_gray_impl','book_cover_load_list_gray','book_cover_load_sized_io','book_cover_store_sized'):
     unit += function(name, source) + '\n'
 unit += r'''
@@ -79,8 +81,13 @@ int main(int argc,char **argv){
  decode_fail=false;assert(book_cover_load_list_gray(path,"title","author",out,true,&pending,&w,&h));assert(!remove(cache));
  error=ESP_ERR_NOT_FOUND;assert(book_cover_load_list_gray(path,"title","author",out,true,&pending,&w,&h)&&w==176&&h==240);assert(!book_cover_load_list_gray(path,"title","author",out,false,&pending,&w,&h)&&pending);
  for(unsigned i=176*240;i<sizeof(out);++i)assert(out[i]==0xab);
- error=ESP_OK;assert(stat(cache,&(struct stat){0})!=0);source_w=300;source_h=600;
- assert(book_cover_load_list_gray(path,"title","author",out,true,&pending,&w,&h));
+ // 无封面结果落盘：同一文件之后不再打开压缩包；文件改变后重新探测。
+ // A persisted no-artwork result skips the archive for the same file; a changed file is probed again.
+ unsigned probes=requests;error=ESP_OK;
+ for(int i=0;i<5;++i)assert(book_cover_load_list_gray(path,"title","author",out,true,&pending,&w,&h)&&w==176&&h==240&&requests==probes);
+ assert(stat(cache,&(struct stat){0})!=0);
+ f=fopen(path,"ab");assert(f&&fputc('!',f)!=EOF&&!fclose(f));source_w=300;source_h=600;
+ assert(book_cover_load_list_gray(path,"title","author",out,true,&pending,&w,&h)&&w==120&&h==240&&requests==probes+1);
  unsigned old_requests=requests;bool auto_cache=false;memset(out,0xab,sizeof(out));
  assert(book_cover_load_sized_io(path,"title","author",out,51,70,&auto_cache)==1&&requests==old_requests);
  for(unsigned i=3570;i<sizeof(out);++i)assert(out[i]==0xab);
@@ -96,7 +103,7 @@ int main(int argc,char **argv){
  book_cover_store_sized(path,"title","author",out,51,70,st.st_size,st.st_mtime+1);assert(stat(small,&(struct stat){0}));
  book_cover_store_sized(path,"title","author",out,51,70,st.st_size,st.st_mtime);assert(!stat(small,&(struct stat){0}));
  memset(out,0,3570);assert(book_cover_load_sized_io(path,"title","author",out,51,70,&auto_cache)==1&&out[0]==33);
- puts("PASS: compact3570-byte exact bounds, legacy thumbnail reuse without EPUB reads, checksum repair, warm hits and source-checked generated storage; uncropped wide/tall/square covers, exact cache dimensions, 30 warm reads, corrupt metadata, 1.5MiB reserve, OOM/decode failure retry and generated fallback bounds");
+ puts("PASS: persisted no-artwork marker skips archive reads until the book changes; compact3570-byte exact bounds, legacy thumbnail reuse without EPUB reads, checksum repair, warm hits and source-checked generated storage; uncropped wide/tall/square covers, exact cache dimensions, 30 warm reads, corrupt metadata, 1.5MiB reserve, OOM/decode failure retry and generated fallback bounds");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='plc-') as folder:

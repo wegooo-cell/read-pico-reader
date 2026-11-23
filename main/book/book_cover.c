@@ -1025,6 +1025,54 @@ static void cover_cache_write(const char *path, const cover_cache_header_t *head
     remove(temp);
 }
 
+/* ---- 无封面标记 / No-artwork marker ---- */
+// 书内确认没有封面图时落盘一个小标记，按原书路径、大小与修改时间失效；
+// 之后开机或翻回该页不再打开压缩包解析目录。改进封面查找规则时递增版本以重新探测。
+// Persist a small marker once a book is confirmed to carry no cover image, invalidated by the
+// source path, size and mtime, so later boots and page visits skip reopening the archive.
+// Bump the revision when cover discovery improves so every book is probed again.
+#define NO_ART_MAGIC UINT32_C(0x5241414E)
+#define NO_ART_REVISION 1u
+typedef struct {
+    uint32_t magic, revision;
+    uint64_t path_hash, file_size;
+    int64_t modified;
+} no_art_marker_t;
+static bool no_art_path(const cover_cache_header_t *key, char path[120]) {
+    return snprintf(path, 120, "/sdcard/.kiikoread/covers/%016llx-noart.bin",
+                    (unsigned long long)key->path_hash) < 120;
+}
+static bool no_art_known(const cover_cache_header_t *key) {
+    char path[120];
+    if (!no_art_path(key, path)) return false;
+    FILE *file = fopen(path, "rb");
+    if (!file) return false;
+    no_art_marker_t found;
+    bool ok = fread(&found, 1, sizeof(found), file) == sizeof(found) && fgetc(file) == EOF &&
+              found.magic == NO_ART_MAGIC && found.revision == NO_ART_REVISION &&
+              found.path_hash == key->path_hash && found.file_size == key->file_size &&
+              found.modified == key->modified;
+    fclose(file);
+    return ok;
+}
+static void no_art_remember(const cover_cache_header_t *key) {
+    char path[120], temp[128];
+    if (!no_art_path(key, path) || snprintf(temp, sizeof(temp), "%s.tmp", path) >= (int)sizeof(temp)) return;
+    if ((mkdir("/sdcard/.kiikoread", 0777) && errno != EEXIST) ||
+        (mkdir("/sdcard/.kiikoread/covers", 0777) && errno != EEXIST)) return;
+    const no_art_marker_t marker = {NO_ART_MAGIC, NO_ART_REVISION, key->path_hash, key->file_size, key->modified};
+    FILE *file = fopen(temp, "wb");
+    if (!file) return;
+    bool ok = fwrite(&marker, 1, sizeof(marker), file) == sizeof(marker);
+    if (fclose(file)) ok = false;
+    // FAT 的 rename 不覆盖已有文件，先删除旧标记。/ FAT rename never replaces a file, so drop the old marker first.
+    if (ok) {
+        remove(path);
+        if (!rename(temp, path)) return;
+    }
+    remove(temp);
+}
+
 static bool book_cover_load_gray_impl(const char *path, const char *title, const char *author,
                           uint8_t out[BOOK_COVER_W * BOOK_COVER_H],
                           bool allow_decode, bool *pending, bool allow_auto, bool *auto_cache) {
@@ -1056,7 +1104,11 @@ static bool book_cover_load_gray_impl(const char *path, const char *title, const
         bool png = false;
         size_t free_bytes=heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
         size_t budget=free_bytes>2u*1024u*1024u?free_bytes-2u*1024u*1024u:0;
-        esp_err_t err = budget ? book_epub_cover_bounded(path,&data,&size,&png,budget) : ESP_ERR_NO_MEM;
+        esp_err_t err = ESP_ERR_NOT_FOUND;
+        if (!no_art_known(&key)) {
+            err = budget ? book_epub_cover_bounded(path,&data,&size,&png,budget) : ESP_ERR_NO_MEM;
+            if (err == ESP_ERR_NOT_FOUND) no_art_remember(&key);
+        }
         if (err == ESP_OK) good = book_cover_thumbnail(data, size, png, out);
 #ifdef ESP_PLATFORM
         else ESP_LOGW("cover", "epub cover fail %s err=%d", path, (int)err);
@@ -1182,7 +1234,11 @@ static bool book_cover_load_list_gray_sized_impl(const char *path, const char *t
         size_t available = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         size_t budget = available > 1536u*1024u ? available - 1536u*1024u : 0;
         if (budget > 4u*1024u*1024u) budget = 4u*1024u*1024u;
-        esp_err_t error = budget ? book_epub_cover_bounded(path, &data, &size, &png, budget) : ESP_ERR_NO_MEM;
+        esp_err_t error = ESP_ERR_NOT_FOUND;
+        if (!no_art_known(&key)) {
+            error = budget ? book_epub_cover_bounded(path, &data, &size, &png, budget) : ESP_ERR_NO_MEM;
+            if (error == ESP_ERR_NOT_FOUND) no_art_remember(&key);
+        }
 #ifdef ESP_PLATFORM
         if (error != ESP_OK) ESP_LOGW("cover", "epub cover fail(list) %s err=%d", path, (int)error);
 #endif
@@ -1452,7 +1508,13 @@ static void fast_cache_write(const char *source,const char *title,const char *au
     FILE *file = fopen(temp, "wb"); if (!file) return;
     bool ok = fwrite(&header, 1, sizeof(header), file) == sizeof(header) && fwrite(out, 1, bytes, file) == bytes;
     if (fclose(file)) ok = false;
-    if (ok && !rename(temp, path)) return;
+    // FAT 的 rename 遇到已有文件直接失败；格子换了抖动相位后旧点阵必须能被替换。
+    // FAT rename fails on an existing name; a cell with a new dither phase must replace the old raster.
+    if (ok) {
+        int result = rename(temp, path);
+        if (result && errno == EEXIST && !remove(path)) result = rename(temp, path);
+        if (!result) return;
+    }
     (void)remove(temp);
 }
 
