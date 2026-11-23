@@ -26,6 +26,11 @@ S31 RC117已按用户要求撤回；官网、TF与OTA恢复原正式RC116。以�
 
 # 版本变更 / Changelog
 
+## 本地测试 / Local test — 2026-11-23（电量显示）
+
+- 电量百分比改为双中位数 + 2% 滞回 + 按时间限速，并以电压作硬下限：不再一分钟内掉到 15%，也不再虚高显示 95%。
+- Battery percentage now uses a dual median, a 2% hysteresis band, time-based slew limits and a voltage floor, so it neither cliffs to 15% within a minute nor stays at an optimistic 95%.
+
 ## 本地测试 / Local test — 2026-11-22（重启/关机）
 
 - 修复重启或关机后恢复记录未清除、下次开机被当成「从睡眠恢复」而停在锁屏浅睡的问题；现在重启与关机都从主页冷启动。
