@@ -770,6 +770,9 @@ static EpdRect progress_rect(void) { return ui_reader_footer_for(s_reader_fullsc
 // 搜索只覆盖当前显示样式，不写用户已保存的书架样式。
 // Search overrides the current presentation without changing the saved shelf preference.
 static int shelf_display_style(void) { return s_query[0]?5:app_settings_shelf_style(); }
+// 用户2026-11-23：可关闭书架封面以整体提速；关闭时书架只画书名卡，不读取、解码或预热封面，管理页与主页照常。
+// User 2026-11-23: shelf covers can be switched off for speed; the shelf then draws title cards without reading, decoding or warming covers, while management and Home are unchanged.
+static bool shelf_covers_hidden(void) { return s_view == SHELF && !app_settings_shelf_covers(); }
 static int shelf_rows(void) {
     if(s_view==BULK)return ui_book_manage_rows(s_bulk_grid);
     return s_view==SHELF&&shelf_display_style()==5?8:BOOK_GRID_ROWS;
@@ -1098,11 +1101,14 @@ static bool prepare_shelf_page(app_ctx_t *ctx) {
     book_shelf_page_key_add(&base,&layout,sizeof(layout));
     const uint32_t catalog[] = {s_shelf_catalog_epoch, book_store_revision()};
     book_shelf_page_key_add(&base, catalog, sizeof(catalog));
+    // 关闭封面的页单独成键，且不读写成品页缓存。/ Hidden-cover pages get their own key and never use the composed page cache.
+    const bool covers_hidden = shelf_covers_hidden();
+    if (covers_hidden) book_shelf_page_key_add(&base, "no-covers", 10);
     if(s_shelf_page_key_valid&&!memcmp(&base,&s_shelf_page_base,sizeof(base)))
         return s_shelf_page_cached||s_shelf_page_loading;
     invalidate_covers();s_shelf_page_base=base;s_shelf_page_key_valid=true;
-    s_shelf_page_cache_allowed = layout.count > 0;
-    book_shelf_page_state_t state = book_shelf_page_request_memory(base, layout);
+    s_shelf_page_cache_allowed = layout.count > 0 && !covers_hidden;
+    book_shelf_page_state_t state = covers_hidden ? BOOK_SHELF_PAGE_MISS : book_shelf_page_request_memory(base, layout);
     s_shelf_page_cached=state==BOOK_SHELF_PAGE_HIT;
     s_shelf_page_loading=state==BOOK_SHELF_PAGE_WAIT;
     if(state==BOOK_SHELF_PAGE_MISS)return false;
@@ -1235,7 +1241,7 @@ static void prepare_shelf_cover_slots(app_ctx_t *ctx) {
         const int index = ctx->leaf * rows + row;
         if (index >= s_visible_count) break;
         s_covers[row].index = index;
-        if (!s_shelf[index].removed &&
+        if (!shelf_covers_hidden() && !s_shelf[index].removed &&
             pico_boot_asset_allowed(s_shelf[index].path) && !shelf_cover_ram_hit(index, row, true))
             s_cover_pending_mask |= 1u << row;
     }
@@ -1382,6 +1388,7 @@ static uint64_t shelf_library_warm_key(void) {
 // warming. The request matches on-page display (the cell sets size and dither phase) but stays out
 // of the RAM cache and never renders title art.
 static bool shelf_library_warm_submit(int skip_first, int skip_count, unsigned *generation) {
+    if (!app_settings_shelf_covers()) return false; // 关闭封面时不预热。/ No warming while covers are off.
     const uint64_t key = shelf_library_warm_key();
     if (key != s_library_warm.key) {
         s_library_warm.key = key;
@@ -1439,7 +1446,7 @@ static int shelf_library_warm_take(unsigned generation) {
 }
 
 static void shelf_prefetch_tick(app_ctx_t *ctx) {
-    if(s_view!=SHELF||s_cover_pending_mask||s_chapters_pending||ctx->consumed||ctx->request_app||ctx->request_menu||ctx->request_return||
+    if(s_view!=SHELF||shelf_covers_hidden()||s_cover_pending_mask||s_chapters_pending||ctx->consumed||ctx->request_app||ctx->request_menu||ctx->request_return||
        (ctx->touch&&ctx->touch->touched)||s_clear_confirm||s_batch_confirm)return;
     if (s_shelf_page_pending || s_category_menu || s_sort_menu || pico_online_busy()) return;
     if(!s_prefetch_after){
@@ -1572,7 +1579,7 @@ static void draw_shelf_cover_favorite(uint8_t *fb,int row,EpdRect image,bool fav
 static void draw_shelf_cover(uint8_t* fb, EpdRect card, int row, const char* name, bool favorite) {
     EpdRect image = shelf_cover_image(row);
     image.y += card.y - row_rect(row).y;
-    const bool artwork = shelf_cover_frame_ready();
+    const bool artwork = !shelf_covers_hidden() && shelf_cover_frame_ready();
     ui_root_shadow(fb,image,2);
     if (s_view == SHELF && shelf_display_style() == 6) {
         // 阴影在不透明封面外；合成只影响下方挡条，不让封面主体透底。
@@ -6395,7 +6402,8 @@ void app_book_shelf_prefetch_first(app_ctx_t *ctx) {
     s_view = SHELF;
     const int rows = shelf_rows();
     const bool list = shelf_display_style() == 5;
-    for (int row = 0; row < rows && row < s_visible_count && !app_touch_input_pending(ctx); ++row) {
+    // 关闭封面时只建目录，不预热首页封面。/ With covers off, build the catalog without warming first-page covers.
+    for (int row = 0; app_settings_shelf_covers() && row < rows && row < s_visible_count && !app_touch_input_pending(ctx); ++row) {
         const shelf_entry_t *item = &s_shelf[row];
         if (item->removed || !pico_boot_asset_allowed(item->path)) continue;
         const bool raster_ready = shelf_cover_ram_hit(row, row, false);

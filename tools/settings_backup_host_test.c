@@ -81,7 +81,12 @@ static esp_err_t native_fixture_save(void) {
         assert(!fseek(file,0,SEEK_SET));
         assert(fwrite(&header,1,sizeof(header),file)==sizeof(header));
         assert(fwrite(ext,1,sizeof(ext),file)==sizeof(ext));
-        assert(fwrite(&profile,1,sizeof(profile),file)==sizeof(profile));assert(!fclose(file));
+        assert(fwrite(&profile,1,sizeof(profile),file)==sizeof(profile));
+        // v26原生流没有v28封面开关块：删去它并保留阅读资料尾。/ The v26 native stream lacks the v28 cover block: drop it and keep the history tail.
+        char history[8];assert(!fseek(file,0,SEEK_END));long size=ftell(file);
+        assert(size>13&&!fseek(file,size-8,SEEK_SET)&&fread(history,1,8,file)==8);
+        assert(!fseek(file,size-13,SEEK_SET)&&fwrite(history,1,8,file)==8&&!fflush(file)&&!ftruncate(fileno(file),size-5));
+        assert(!fclose(file));
     }
     (void)remove(BACKUP_PREVIOUS); // Isolate legacy single-file corruption tests from recovery copies.
     return error;
@@ -1117,10 +1122,14 @@ int main(void) {
     uint8_t *guide_sync=NULL;size_t guide_bytes=0;
     assert(app_settings_sync_export(&guide_sync,&guide_bytes)==ESP_OK&&guide_bytes>8);
     s_book_rule_saved=1;assert(app_settings_sync_import(guide_sync,guide_bytes)==ESP_OK&&s_book_rule_saved==guide_preset);
-    int guide_commits=commit_count;guide_sync[guide_bytes-8-sizeof(settings_backup_hold_t)+1]^=1;
+    // v28在引导块后追加独立校验的封面开关块。/ V28 appends an independently sealed cover block after the guide.
+    const size_t covers_at=guide_bytes-8-sizeof(settings_backup_hold_t),guide_at=covers_at-sizeof(settings_backup_hold_t);
+    int guide_commits=commit_count;const uint8_t covers_value=guide_sync[covers_at];guide_sync[covers_at]=2;
+    assert(app_settings_sync_import(guide_sync,guide_bytes)==ESP_ERR_INVALID_RESPONSE&&commit_count==guide_commits);
+    guide_sync[covers_at]=covers_value;guide_sync[guide_at+1]^=1;
     assert(app_settings_sync_import(guide_sync,guide_bytes)==ESP_ERR_INVALID_RESPONSE&&commit_count==guide_commits&&s_book_rule_saved==guide_preset);
     // V25 has shelf settings but no saved-guide block; retain its current guide as the fallback preset.
-    guide_sync[guide_bytes-8-sizeof(settings_backup_hold_t)+1]^=1;
+    guide_sync[guide_at+1]^=1;
     settings_backup_v1_t *v25=(void*)guide_sync;memcpy(v25->magic,"PICOSETP",8);
     v25->flags[BK_BOOK_PX]=v25->flags[BK_BOOK_PX]>90?90:v25->flags[BK_BOOK_PX];
     v25->flags[BK_LINE_SPACING]=book_reader_legacy_line((int)v25->flags[BK_LINE_SPACING]+100);
@@ -1131,8 +1140,8 @@ int main(void) {
     for(unsigned i=0;i<4;++i)v25_ext[3+i]=(uint8_t)(v25_hash>>(8*i));
     v25_hash=backup_profile_checksum(v25,v25_ext[0],v25_ext[1],v25_ext[2],v25_profile);
     for(unsigned i=0;i<4;++i)v25_profile->checksum[i]=(uint8_t)(v25_hash>>(8*i));
-    memmove(guide_sync+guide_bytes-8-sizeof(settings_backup_hold_t),guide_sync+guide_bytes-8,8);
-    assert(app_settings_sync_import(guide_sync,guide_bytes-sizeof(settings_backup_hold_t))==ESP_OK&&s_book_rule_saved==0);
+    memmove(guide_sync+guide_at,guide_sync+guide_bytes-8,8);
+    assert(app_settings_sync_import(guide_sync,guide_bytes-2*sizeof(settings_backup_hold_t))==ESP_OK&&s_book_rule_saved==0);
     assert(app_settings_toggle_book_reading_line()&&!s_book_reading_line&&s_book_rule_saved==guide_preset);
     assert(app_settings_toggle_book_reading_line()&&s_book_reading_line==2&&s_book_rule_full&&s_book_rule_offset==7);
     free(guide_sync);

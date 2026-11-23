@@ -25,7 +25,7 @@ int main(void){
   s_book_line=0;app_settings_init();assert(app_settings_book_line_spacing()==line);
   assert(app_settings_backup_save()==ESP_OK);
   settings_backup_v1_t legacy=read_base(BACKUP_FILE),full=read_base(BACKUP_FULL);
-  assert(backup_version(&legacy)==25&&backup_version(&full)==27);
+  assert(backup_version(&legacy)==25&&backup_version(&full)==28);
   assert(legacy.flags[BK_LINE_SPACING]==book_reader_legacy_line(line));
   assert(full.flags[BK_LINE_SPACING]==line-100);
   s_book_line=0;assert(app_settings_backup_restore()==ESP_OK&&s_book_line==line);

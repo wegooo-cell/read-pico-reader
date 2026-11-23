@@ -48,6 +48,8 @@ static int app_settings_shelf_style(void){return style;}
 static int shelf_rows(void){return style==5?8:9;}
 static bool app_settings_main_fast_refresh(void){return false;}
 static unsigned app_settings_system_contrast(void){return 100;}
+static bool covers_off;
+static bool app_settings_shelf_covers(void){return !covers_off;}
 static bool pico_boot_asset_allowed(const char*p){return p&&*p;}
 static void copy_text(char*d,size_t n,const char*s){snprintf(d,n,"%s",s?s:"");}
 static EpdRect shelf_cover_image(int row){return(EpdRect){48,197+row*96,51,70};}
@@ -67,7 +69,7 @@ u += '#define WARM_FIRST %d\n' % (40 if 'shelf_library_warm_submit(ctx->leaf * r
 state=text.index('static struct {\n    uint64_t key;\n    int next, index;')
 u += text[state:text.index('} s_library_warm;',state)+len('} s_library_warm;')] + '\n'
 u += 'static int shelf_library_warm_take(unsigned generation);\n'
-for name in ('shelf_library_warm_abort','shelf_chapters_tick', 'shelf_record_prefetch_result', 'shelf_library_warm_key',
+for name in ('shelf_covers_hidden','shelf_library_warm_abort','shelf_chapters_tick', 'shelf_record_prefetch_result', 'shelf_library_warm_key',
              'shelf_library_warm_submit', 'shelf_library_warm_take', 'shelf_prefetch_tick'):
     u += function(name, source) + '\n'
 u+=r"""
@@ -119,6 +121,13 @@ int main(void){
  complete[0]=true;shelf_prefetch_tick(&ctx);strcpy(s_shelf[media].path,media_path);sd_ready=false;before=submitted;
  ctx.now_ms+=1000;shelf_prefetch_tick(&ctx);assert(!s_prefetch_active&&submitted==before&&s_library_warm.next==media);
  sd_ready=true;ctx.now_ms+=1000;shelf_prefetch_tick(&ctx);assert(s_prefetch_active&&!strcmp(requests[0].path,media_path));
+ // 关闭封面：不再预热相邻页或整个书库。/ Covers off: no neighbour or whole-library warming.
+ complete[0]=true;shelf_prefetch_tick(&ctx);s_prefetch_active=false;shelf_library_warm_abort();
+ covers_off=true;++s_store_revision;before=submitted;unsigned warm_generation=0;
+ assert(!shelf_library_warm_submit(0,8,&warm_generation)&&!s_library_warm.active);
+ for(int step=0;step<10;++step){ctx.now_ms+=1000;shelf_prefetch_tick(&ctx);}
+ assert(submitted==before&&!s_prefetch_active);covers_off=false;
+ puts("PASS: switched-off shelf covers skip neighbour and whole-library warming");
  puts("PASS: visible metadata first, sequential forward shelf warming with input priority, then one card-only pass over the remaining library with resume, rewind and media-handoff retry");
 }
 """

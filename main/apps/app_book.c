@@ -858,6 +858,9 @@ static EpdRect progress_rect(void) { return ui_reader_footer_for(s_reader_fullsc
 // 搜索只覆盖当前显示样式，不写用户已保存的书架样式。
 // Search overrides the current presentation without changing the saved shelf preference.
 static int shelf_display_style(void) { return s_query[0]?5:app_settings_shelf_style(); }
+// 用户2026-11-23：可关闭书架封面以整体提速；关闭时书架只画书名卡，不读取、解码或预热封面，管理页与主页照常。
+// User 2026-11-23: shelf covers can be switched off for speed; the shelf then draws title cards without reading, decoding or warming covers, while management and Home are unchanged.
+static bool shelf_covers_hidden(void) { return s_view == SHELF && !app_settings_shelf_covers(); }
 static int shelf_rows(void) {
     if(s_view==BULK)return ui_book_manage_rows(s_bulk_grid);
     return s_view==SHELF&&shelf_display_style()==5?8:BOOK_GRID_ROWS;
@@ -1211,17 +1214,20 @@ static bool prepare_shelf_page(app_ctx_t *ctx) {
     const uint32_t catalog[] = {s_shelf_catalog_epoch, book_store_revision()};
     book_shelf_page_key_add(&base, catalog, sizeof(catalog));
 #endif
+    // 关闭封面的页单独成键，且不读写成品页缓存。/ Hidden-cover pages get their own key and never use the composed page cache.
+    const bool covers_hidden = shelf_covers_hidden();
+    if (covers_hidden) book_shelf_page_key_add(&base, "no-covers", 10);
     if(s_shelf_page_key_valid&&!memcmp(&base,&s_shelf_page_base,sizeof(base)))
         return s_shelf_page_cached||s_shelf_page_loading;
     invalidate_covers();s_shelf_page_base=base;s_shelf_page_key_valid=true;
 #if KIIKO_BOARD_METALIO47
-    s_shelf_page_cache_allowed = layout.count > 0;
-    book_shelf_page_state_t state = book_shelf_page_request_memory(base, layout);
+    s_shelf_page_cache_allowed = layout.count > 0 && !covers_hidden;
+    book_shelf_page_state_t state = covers_hidden ? BOOK_SHELF_PAGE_MISS : book_shelf_page_request_memory(base, layout);
 #else
     book_shelf_page_key_t key=base;
     // 只在换页/重新进入时读取文件身份；render和命中后的重画不访问TF。
     // Stat only on page changes/re-entry; rendering and repeated redraws never access SD.
-    bool valid=layout.count>0;
+    bool valid=layout.count>0&&!covers_hidden;
     for(unsigned row=0;row<layout.count;++row){
         struct stat st;const char *path=s_shelf[ctx->leaf*shelf_rows()+row].path;
         if(stat(path,&st)||!S_ISREG(st.st_mode)){valid=false;break;}
@@ -1395,7 +1401,7 @@ static void prepare_shelf_cover_slots(app_ctx_t *ctx) {
         const int index = ctx->leaf * rows + row;
         if (index >= s_visible_count) break;
         s_covers[row].index = index;
-        if (!s_shelf[index].removed &&
+        if (!shelf_covers_hidden() && !s_shelf[index].removed &&
             pico_boot_asset_allowed(s_shelf[index].path) && !shelf_cover_ram_hit(index, row, true))
             s_cover_pending_mask |= 1u << row;
     }
@@ -1544,6 +1550,7 @@ static uint64_t shelf_library_warm_key(void) {
 // warming. The request matches on-page display (the cell sets size and dither phase) but stays out
 // of the RAM cache and never renders title art.
 static bool shelf_library_warm_submit(int skip_first, int skip_count, unsigned *generation) {
+    if (!app_settings_shelf_covers()) return false; // 关闭封面时不预热。/ No warming while covers are off.
     const uint64_t key = shelf_library_warm_key();
     if (key != s_library_warm.key) {
         s_library_warm.key = key;
@@ -1605,7 +1612,7 @@ static int shelf_library_warm_take(unsigned generation) {
 // 空闲时一次预热一本相邻页封面和章节；整页命中仍预热，切页沿用代次取消。
 // Warm one neighbor cover/count at a time even after composed hits; page changes cancel by generation.
 static void shelf_prefetch_tick(app_ctx_t *ctx) {
-    if(s_view!=SHELF||s_cover_pending_mask||s_chapters_pending||ctx->consumed||ctx->request_app||ctx->request_menu||ctx->request_return||
+    if(s_view!=SHELF||shelf_covers_hidden()||s_cover_pending_mask||s_chapters_pending||ctx->consumed||ctx->request_app||ctx->request_menu||ctx->request_return||
        (ctx->touch&&ctx->touch->touched)||s_clear_confirm||s_batch_confirm)return;
 #if KIIKO_BOARD_METALIO47
     if (s_shelf_page_pending || pico_online_busy()) return;
@@ -1868,9 +1875,9 @@ static void draw_shelf_cover(uint8_t* fb, EpdRect card, int row, const char* nam
     image.y += card.y - row_rect(row).y;
 #if KIIKO_BOARD_METALIO47
     // Even incidental rerenders (menus and clock updates) use the same page-wide gate.
-    const bool artwork = shelf_cover_frame_ready();
+    const bool artwork = !shelf_covers_hidden() && shelf_cover_frame_ready();
 #else
-    const bool artwork = s_view != SHELF || !(s_cover_pending_mask & (1u << row));
+    const bool artwork = !shelf_covers_hidden() && (s_view != SHELF || !(s_cover_pending_mask & (1u << row)));
 #endif
     ui_root_shadow(fb,image,2);
     if (s_view == SHELF && shelf_display_style() == 6) {
@@ -7111,7 +7118,8 @@ void app_book_shelf_prefetch_first(app_ctx_t *ctx) {
     s_view = SHELF;
     const int rows = shelf_rows();
     const bool list = shelf_display_style() == 5;
-    for (int row = 0; row < rows && row < s_visible_count && !app_touch_input_pending(ctx); ++row) {
+    // 关闭封面时只建目录，不预热首页封面。/ With covers off, build the catalog without warming first-page covers.
+    for (int row = 0; app_settings_shelf_covers() && row < rows && row < s_visible_count && !app_touch_input_pending(ctx); ++row) {
         const shelf_entry_t *item = &s_shelf[row];
         if (item->removed || !pico_boot_asset_allowed(item->path)) continue;
         const bool raster_ready = shelf_cover_ram_hit(row, row, false);
