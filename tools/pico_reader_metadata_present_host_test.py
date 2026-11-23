@@ -43,6 +43,9 @@ static const EpdWaveform *display_main_normal_waveform(void){return &E0470_WAVEF
 static const EpdWaveform *display_reader_soft_turn_waveform(void){return &E0470_SOFT_TEXTTURN_WAVEFORM;}
 static const EpdWaveform *display_reader_gray8_turn_waveform(void){static const int wave=8;return &wave;}
 static void reader_prefetch_end(bool prep){(void)prep;}
+// 低残影（fe154b3）默认关闭，本测试覆盖默认推屏路由。/ Low-ghost (fe154b3) defaults off; this test covers the default route.
+static bool app_settings_low_ghost(void){return false;}
+static const EpdWaveform *display_reader_white_push_waveform(void){static const int wave=9;return &wave;}
 static void pico_boot_book_end(bool ok){(void)ok;}
 static void ui_image_bw_rect(uint8_t *fb,EpdRect rect){(void)fb;(void)rect;}
 static int epd_width(void){return 684;}
@@ -53,9 +56,11 @@ static unsigned pixel(const uint8_t *p,int x,int y){return(p[y*684/2+x/2]>>(4*(x
 static void put(uint8_t *p,int x,int y,unsigned v){unsigned shift=4*(x&1);p[y*684/2+x/2]=(p[y*684/2+x/2]&~(15u<<shift))|(v<<shift);}
 static void model_drive(int left,int top,int width,int height,bool full){
  EpdRect body=reader_area();
- // 无变化的信息栏不得参加正文的强制擦白；局刷需以物理back为起点。
- // Unchanged metadata must never enter body erasure; local updates start from physical back.
- if(full)assert(top>=body.y&&top+height<=body.y+body.height);
+ // 水波纹与周期清理只擦正文；普通/快速翻页按fe154b3整屏一次擦白，信息栏白底同扫。局刷以物理back为起点。
+ // Ripple and cleanup erase only the body; ordinary/fast turns erase the whole panel in one pass
+ // (fe154b3) so the metadata whites sweep with it. Local updates start from physical back.
+ const bool whole=!left&&!top&&width==UI_LOCK_WIDTH&&height==UI_LOCK_HEIGHT;
+ if(full)assert((top>=body.y&&top+height<=body.y+body.height)||(whole&&s_reader_turn_pending&&!s_water_turn_pending&&!s_reader_cleanup));
  if(test_push_error)return;
  for(int y=top;y<top+height;++y)for(int x=left;x<left+width;++x)put(back,x,y,pixel(front,x,y));
 }
@@ -112,11 +117,12 @@ int main(void){
   assert(present(&ctx,APP_REDRAW_FULL)&&trace_count==1&&trace_route[0]==FULL);
   reset(effects[i],style);s_reader_image_refresh_pending=true;trace_count=0;
   assert(present(&ctx,APP_REDRAW_AREA)&&trace_route[0]==90&&!memcmp(front,back,sizeof(front)));
-  // 正文失败不提交信息栏；顶部或底部失败保持独立重试。
-  // Body failures leave metadata pending; header/footer failures retry independently.
+  // 正文失败不提交信息栏；顶部或底部失败保持独立重试。普通翻页已整屏同扫，信息栏独立推送只剩水波纹。
+  // Body failures leave metadata pending; header/footer failures retry independently. Ordinary turns
+  // now sweep the whole panel, so ripple is the route that still pushes metadata separately.
   for(int region=0;region<3;++region){
    if(region==1&&!reader_area().y)continue;
-   reset(0,style);fail_region=region;assert(present(&ctx,APP_REDRAW_AREA));
+   reset(region?1:0,style);fail_region=region;assert(present(&ctx,APP_REDRAW_AREA));
    if(!region){assert(pixel(back,12,progress_rect().y+5)!=pixel(front,12,progress_rect().y+5));continue;}
    assert(s_reader_footer_pending&&s_reader_footer_due_ms==1150);
    ctx.now_ms=1149;assert(reader_metadata_tick(&ctx)==APP_REDRAW_NONE);
@@ -124,7 +130,7 @@ int main(void){
    assert(reader_metadata_tick(&ctx)==APP_REDRAW_DONE&&!s_reader_footer_pending&&!memcmp(front,back,sizeof(front)));
   }
  }
- puts("PASS: actual Pico presenter ordinary/ripple/fast body-only output, changed header/footer digits both ways, three fullscreen styles and independent failed-metadata retries");
+ puts("PASS: actual Pico presenter ordinary/fast whole-panel and ripple body-only output, changed header/footer digits both ways, three fullscreen styles and independent failed-metadata retries");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='kiiko-pico-meta-') as directory:

@@ -285,7 +285,6 @@ bool ui_nav_refresh_power(uint8_t *fb) {
 EpdRect ui_nav_status_area(void) {return (EpdRect){0,12,684,56};}
 read_pico_pmu_key_action_t read_pico_pmu_take_key_action(void) {return step==power_trigger_step?READ_PICO_PMU_KEY_LONG:READ_PICO_PMU_KEY_SHORT;}
 void enter_lock_and_sleep(EpdiyHighlevelState*h,int64_t*t,void*a,void*tp,bool reader) {(void)tp;(void)h;(void)t;(void)a;(void)reader;assert(!nav_armed);if(check_clean_action)assert(frame[0]==0x11&&panel_marker==0x11);++idle_locks;lock_due=false;time_offset+=1000000;}
-void app_lock_set_resume_ready(bool ready) {(void)ready;}
 void app_lock_feedback(EpdiyHighlevelState*h) {(void)h;++lock_feedback_calls;if(feedback_enabled){assert(!before_locks&&!idle_locks);++lock_badges;}}
 void app_lock_wait_key_idle(int ms) {(void)ms;}
 esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {assert(mode==APP_SLEEP_OFF);++shutdowns;longjmp(done,1);}

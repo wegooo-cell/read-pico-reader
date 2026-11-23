@@ -85,7 +85,7 @@ static enum EpdDrawError epd_draw_base(EpdRect a,const uint8_t*d,EpdRect crop,en
 }
 '''
 highlevel=ROOT/'components/epdiy/src/highlevel.c'
-unit+='\n'.join(function(n,highlevel) for n in ('_inverse_rotated_area','hl_update_area','epd_hl_update_area_full_exact','epd_hl_update_area_diff_exact'))+'\n'
+unit+='\n'.join(function(n,highlevel) for n in ('_inverse_rotated_area','reader_dilate_masks','hl_update_area','epd_hl_update_area_full_exact','epd_hl_update_area_diff_exact'))+'\n'
 unit+=r'''
 static enum EpdDrawError update_display_reader_area(EpdiyHighlevelState*h,const EpdWaveform*w,int m,EpdRect a,bool full){(void)h;(void)a;assert(w==&normal&&m==MODE_GL16&&!full);++regular;return result;}
 static enum EpdDrawError update_display_full_unlocked(EpdiyHighlevelState*h){(void)h;++fulls;return result;}

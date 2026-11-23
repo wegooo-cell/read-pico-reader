@@ -38,6 +38,10 @@ static bool home_full;
 static void ttf_font_scan(void){}
 static bool app_settings_home_full_refresh(void){return home_full;}
 static void app_settings_set_home_full_refresh(bool on){home_full=on;}
+// 低残影行（fe154b3）：开启时点按立即关闭，关闭时先弹确认。/ Low-ghost row (fe154b3): on turns off at once, off asks first.
+static bool low_ghost=true,s_lowghost_dialog;
+static bool app_settings_low_ghost(void){return low_ghost;}
+static void app_settings_set_low_ghost(bool on){low_ghost=on;}
 '''
 for name in ('settings_profile_height','settings_main_row_height'):
     unit+=function(name,ROOT/'main/apps/app_device_settings.c')+'\n'
@@ -91,7 +95,7 @@ int main(void){
  reload_wake(true,2);assert(app_settings_wake_presses()==2);
  reload_wake(true,1);assert(app_settings_wake_presses()==1);
  for(unsigned i=0;i<256;i++)if(i!=1&&i!=2){reload_wake(true,i);assert(app_settings_wake_presses()==1);}
- assert(SETTINGS_DISPLAY_ROWS==8);
+ assert(SETTINGS_DISPLAY_ROWS==9);
  const int top=SETTINGS_DISPLAY_Y+5*SETTINGS_ROW_H,scroll=500;
  assert(setting_tap(36,top-scroll,scroll)==APP_REDRAW_PAGE&&s_wake_presses==2&&s_page==SETTINGS_MAIN);
  assert(setting_tap(647,top+SETTINGS_ROW_H-1-scroll,scroll)==APP_REDRAW_PAGE&&s_wake_presses==1&&s_page==SETTINGS_MAIN);
@@ -101,6 +105,10 @@ int main(void){
  s_page=SETTINGS_MAIN;
  assert(setting_tap(300,top+SETTINGS_ROW_H-scroll,scroll)==APP_REDRAW_PAGE&&s_page==SETTINGS_POWER_SLEEP&&s_wake_presses==1);
  assert(setting_tap(300,UI_NAV_TOP,0)==APP_REDRAW_NONE);
+ const int low_row=SETTINGS_DISPLAY_Y+8*SETTINGS_ROW_H;
+ assert(setting_tap(300,low_row-scroll,scroll)==APP_REDRAW_PAGE&&!low_ghost&&!s_lowghost_dialog);
+ assert(setting_tap(300,low_row-scroll,scroll)==APP_REDRAW_PAGE&&!low_ghost&&s_lowghost_dialog);
+ s_page=SETTINGS_MAIN;
  for(unsigned resume=0;resume<2;++resume)for(unsigned password=0;password<2;++password)
  for(unsigned key=0;key<2;++key)for(unsigned count=1;count<=2;++count){
   s_wake_presses=count;pin=password;boot_press=key;late_press=false;gate=ready=held=rearms=0;

@@ -35,6 +35,9 @@ static void heap_caps_free(void *p){free(p);}
 '''
 for name in ('cover_alloc', 'luminance', 'scale_axis', 'scale_map', 'scale_next', 'bilinear4', 'book_cover_crop'):
     unit += function(name, source) + '\n'
+# 适配器经 image_work_budget() 读取剩余 PSRAM；它只在 ESP_PLATFORM 下查询，这里打开以覆盖低内存失败。
+# The adapter reads free PSRAM through image_work_budget(), which only queries under ESP_PLATFORM; enable it to cover low-memory failure.
+unit += '#define ESP_PLATFORM 1\n' + function('image_work_budget', source) + '\n#undef ESP_PLATFORM\n'
 start = text.index('typedef struct { const uint8_t *data; size_t size, pos; } lowzag_mem_input_t;')
 end = text.index('#endif', start)
 unit += text[start:end]

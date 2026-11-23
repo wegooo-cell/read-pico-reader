@@ -6,6 +6,12 @@ import json,os,struct,subprocess,tempfile,sys,zlib,hashlib
 from font_hanzi_host_support import font_hanzi_host_sources,subset_without_xing
 ROOT=Path(__file__).resolve().parents[1]
 AA_MODE=int('#include "ui_hanzi_aa_scale.h"' in (ROOT/'main/font/ttf_font.c').read_text())
+# S31按实机标定的覆盖率gamma 0.800与补字墨量122%（1d6b4d0）有意偏离完整轮廓墨量，实测最低0.847、平均偏差6.4%；
+# 放宽到这次标定的范围，Pico仍守原来的0.89–1.08/2.5%。
+# S31's hardware-tuned coverage gamma 0.800 and 122% supplement ink (1d6b4d0) intentionally depart from full-outline
+# ink (measured min 0.847, mean deviation 6.4%), so S31 gets a band around that tuning; Pico keeps 0.89-1.08/2.5%.
+S31_TUNED='ttf_aa_tune_set_cover_gamma' in (ROOT/'main/font/ttf_font.c').read_text()
+INK_LO,INK_HI,INK_MEAN=('.83','1.08','.07') if S31_TUNED else ('.89','1.08','.025')
 chars=[]
 for hi in range(0xb0,0xf8):
  for lo in range(0xa1,0xff):
@@ -137,11 +143,11 @@ int main(int argc,char**argv){
    const glyph_entry_t*q=get_glyph(reference_ink[i].cp,reference_sizes[j]);assert(q);
    uint32_t ink=0;for(size_t p=0;p<q->bitmap_bytes;++p)ink+=s_cover[q->bitmap[p]];
    double ratio=(double)ink/reference_ink[i].ink[j];
-   if(ratio<.89||ratio>1.08)fprintf(stderr,"ink U+%04X px=%d ratio=%.4f\n",reference_ink[i].cp,reference_sizes[j],ratio);
-   assert(ratio>=.89&&ratio<=1.08);relative_error+=fabs(ratio-1);++comparisons;
+   if(ratio<INK_LO||ratio>INK_HI)fprintf(stderr,"ink U+%04X px=%d ratio=%.4f\n",reference_ink[i].cp,reference_sizes[j],ratio);
+   assert(ratio>=INK_LO&&ratio<=INK_HI);relative_error+=fabs(ratio-1);++comparisons;
   }
  }
- assert(comparisons>800&&relative_error/comparisons<.025);
+ assert(comparisons>800&&relative_error/comparisons<INK_MEAN);
  printf("Reader ink: %u independent full-outline comparisons, mean absolute error %.3f%%\n",comparisons,100*relative_error/comparisons);
 #endif
  // Allocation failure never inserts a .notdef into the requested character's cache.
@@ -208,6 +214,7 @@ int main(int argc,char**argv){
  ttf_font_unload();printf("PASS:6763 real GB2312 reader glyphs (%u native/%u supplemental), native/supplement coverage, AA on/off gray pixels, cold/warm advances,12–160px/strokes/AA/vertical, OOM retry, imported/embedded face/slot retention and released workspace; peak=%zu\n",matched,supplemental,peak);
 }
 '''.replace('AA_MODE',str(AA_MODE)).replace('EXTRA_CORPUS',','.join(map(str,extras)) or '0').replace('CORPUS',','.join(map(str,chars)))
+ unit=unit.replace('INK_LO',INK_LO).replace('INK_HI',INK_HI).replace('INK_MEAN',INK_MEAN)
  unit=unit.replace('QUALITY_SIZES',','.join(map(str,quality['sizes'])) if quality else '0')
  unit=unit.replace('QUALITY_ROWS',','.join('{'+str(row['cp'])+',{'+','.join(map(str,row['ink']))+'}}' for row in quality['glyphs']) if quality else '{0,{0}}')
  (w/'test.c').write_text(unit)
