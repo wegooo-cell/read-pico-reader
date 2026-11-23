@@ -79,6 +79,18 @@ int main(void) {
     pico_boot_init(false); assert(pico_boot_recovery() && !pico_boot_take_resume(&out));
     assert(s_recovery_reasons==BOOT_RECOVERY_STARTING);
     pico_boot_ready(); pico_boot_init(false); assert(!pico_boot_recovery()); pico_boot_ready();
+    // 主机USB复位（开串口）打断未完成启动不算故障，正常加载TF字体；中断开书仍进入保护。
+    // A host USB reset of an unfinished startup is not a fault and loads TF fonts; interrupted opening still recovers.
+    pico_boot_init(false); pico_boot_init_reset(false, true);
+    assert(!pico_boot_recovery() && s_recovery_reasons==BOOT_RECOVERY_STARTING && durable.starting);
+    pico_boot_ready(); assert(!durable.starting);
+    assert(pico_boot_book_begin("/sdcard/books/host.epub") == ESP_OK);
+    pico_boot_init_reset(false, true);
+    assert(pico_boot_recovery() && s_recovery_reasons==BOOT_RECOVERY_OPENING);
+    pico_boot_ready(); pico_boot_leave_book_recovery(); pico_boot_forget_interrupted_book();
+    assert(!pico_boot_recovery() && pico_boot_asset_allowed("/sdcard/books/host.epub"));
+    pico_boot_init_reset(true, false); assert(pico_boot_recovery()); pico_boot_ready();
+    pico_boot_init(false); assert(!pico_boot_recovery()); pico_boot_ready();
     // 密码取消/深睡再次开机不能丢失恢复，但实际开书前必须消费。
     // PIN cancellation and another deep boot retain resume; actual opening still consumes it.
     assert(pico_boot_save_resume(&resume) == ESP_OK);
