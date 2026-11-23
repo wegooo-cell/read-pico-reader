@@ -6,12 +6,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 typedef struct {
-    uint16_t samples[5],shown;
-    uint32_t sampled_ms,changed_ms,budget_ms;
+    uint16_t samples[5],mvs[5],shown;
+    uint32_t sampled_ms,changed_ms,budget_ms,hold_ms;
     uint8_t count,next;
     bool valid,powered;
 } pico_soc_filter_t;
-/// 输入有效的原始千分比；插拔后短暂观察，高段按时间收敛，低压/低电量立即采用原值。
-/// Feed valid raw permille; briefly observe cable transitions, converge upper SOC by time and accept low readings immediately.
+/// 输入有效的原始千分比：中位数去抖、按时间限速变化，并用电压作硬下限。
+/// Feed valid raw permille: median de-noise, time-based slew limits, and voltage as a hard floor.
 uint16_t pico_soc_filter_update(pico_soc_filter_t *state,uint16_t raw,uint16_t mv,
                                bool powered,bool full,bool low,uint32_t now_ms);
