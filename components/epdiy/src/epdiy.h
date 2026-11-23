@@ -572,6 +572,14 @@ void epd_set_leading_skip(bool enable);
 int epd_last_leading_skip(void);
 
 /**
+ * 开机以来经 `epd_draw_base` 发出的扫描次数、实际扫描帧数与跳过的前导相位累计。只增不减，
+ * 调用方取前后两次的差值。仅 Pico 实现。
+ * Cumulative scans, scanned frames and skipped leading phases issued through `epd_draw_base`
+ * since boot. Monotonic; callers diff two samples. Implemented on Pico only.
+ */
+void epd_scan_totals(uint32_t* scans, uint32_t* frames, uint32_t* skipped);
+
+/**
  * 每帧开扫前先算好的行数（LCD 输出路径）。这是帧间空档的主要来源，行队列只要跑在
  * DMA 前面就够，调小能压缩每相之间的间隙；太小会欠载并置 EPD_DRAW_EMPTY_LINE_QUEUE。
  */

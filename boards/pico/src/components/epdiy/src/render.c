@@ -133,6 +133,16 @@ int epd_last_leading_skip(void) {
     return s_last_leading_skip;
 }
 
+// 扫描计数只在显示锁内由 epd_draw_base 递增，读取方取差值，不需要原子操作。
+// Scan totals only grow inside epd_draw_base under the display lock; readers diff samples.
+static uint32_t s_scan_count, s_scan_frames, s_scan_skipped;
+
+void epd_scan_totals(uint32_t* scans, uint32_t* frames, uint32_t* skipped) {
+    if (scans) *scans = s_scan_count;
+    if (frames) *frames = s_scan_frames;
+    if (skipped) *skipped = s_scan_skipped;
+}
+
 static void build_first_active(const EpdWaveformPhases* phases) {
     const uint8_t(*luts)[16][4] = (const uint8_t(*)[16][4])phases->luts;
     for (int to = 0; to < 16; to++) {
@@ -316,6 +326,9 @@ enum EpdDrawError IRAM_ATTR epd_draw_base(
 
     render_context.current_frame = skip;
     render_context.cycle_frames = frame_count - skip;
+    ++s_scan_count;
+    s_scan_frames += (uint32_t)(frame_count - skip);
+    s_scan_skipped += (uint32_t)skip;
     render_context.phase_times = NULL;
     if (waveform_phases != NULL && waveform_phases->phase_times != NULL) {
         render_context.phase_times = waveform_phases->phase_times;

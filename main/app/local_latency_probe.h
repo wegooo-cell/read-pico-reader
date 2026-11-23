@@ -10,6 +10,8 @@
 #include <string.h>
 #include "esp_heap_caps.h"
 #include "esp_system.h"
+#include <sys/stat.h>
+#include "book/book_progress.h"
 #if KIIKO_BOARD_METALIO47
 void epd_pie_pixels_enable(bool enabled);
 bool epd_pie_pixels_enabled(void);
@@ -19,6 +21,7 @@ void epd_pipeline_test(void);
 void epd_lcd_cache_probe_arm(int phases);
 int epd_lcd_cache_probe_completed(void);
 #endif
+extern const app_desc_t app_book;
 static int64_t local_probe_contact_start_us;
 static void click_present(app_ctx_t *ctx,const app_desc_t *current,EpdRect area);
 static void local_probe_quick(app_ctx_t *ctx,const app_desc_t *current,bool open);
@@ -42,6 +45,8 @@ static app_redraw_t local_latency_poll(app_ctx_t *ctx,const app_desc_t *current)
                 app_index_of(current),app_settings_main_refresh_mode(),app_settings_auto_lock_minutes(),app_settings_home_component(),
                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),(unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),(unsigned)uxTaskGetStackHighWaterMark(NULL));
+            ESP_LOGI("latency","READER fx=%d lg=%d px=%d",app_settings_reader_turn_effect(),
+                app_settings_low_ghost(),app_settings_book_px());
 #if KIIKO_BOARD_METALIO47
             ESP_LOGI("latency","CONTEXT recovery=%d radio=%d font=%s",pico_boot_recovery(),read_pico_transfer_radio_busy(),ttf_font_path());
 #endif
@@ -87,6 +92,31 @@ static app_redraw_t local_latency_poll(app_ctx_t *ctx,const app_desc_t *current)
             return error==ESP_OK?APP_REDRAW_PAGE:APP_REDRAW_NONE;
         } else if(!strcmp(line,"perf back")&&current->on_key) {
             return current->on_key(ctx,UI_KEY_1);
+        } else if(sscanf(line,"perf key %d",&a)==1&&a>=1&&a<=3&&current->on_key) {
+            // 重放三键短按，阅读页按用户的按键设置翻页；用于无人值守采集翻页计时。
+            // Replay a short key press; the reader maps it through the user's key settings. For unattended turn timing.
+            ESP_LOGI("latency","KEY %d",a);
+            return current->on_key(ctx,a-1);
+        } else if(sscanf(line,"perf turnfx %d",&a)==1&&a>=0&&a<=3) {
+            app_settings_set_reader_turn_effect((uint8_t)a);
+            ESP_LOGI("latency","TURNFX %d",app_settings_reader_turn_effect());
+        } else if(sscanf(line,"perf lowghost %d",&a)==1&&(a==0||a==1)) {
+            app_settings_set_low_ghost(a!=0);
+            ESP_LOGI("latency","LOWGHOST %d",app_settings_low_ghost());
+        } else if(sscanf(line,"perf open %d %n",&a,&b)==1&&b>0&&a>=0&&a<1000) {
+            // 只允许基准书：写入目标章首的进度后按路径打开，测试从固定位置开始，不碰用户书籍。
+            // Bench book only: seed progress at the chapter start, then open by path from a fixed spot.
+            const char *path=line+b;struct stat st;
+            book_progress_t p={0};
+            esp_err_t err=!strstr(path,"kiiko-bench")?ESP_ERR_INVALID_ARG:stat(path,&st)?ESP_ERR_NOT_FOUND:ESP_OK;
+            if(err==ESP_OK) {
+                p.file_size=(uint32_t)st.st_size;p.chapter=(uint16_t)a;p.px=app_settings_book_px();
+                err=book_progress_save(path,&p);
+            }
+            if(err==ESP_OK&&!app_book_request_open(path))err=ESP_FAIL;
+            if(err==ESP_OK)ctx->request_app=&app_book;
+            ESP_LOGI("latency","OPEN chapter=%d error=%s size=%u path=%s",a,esp_err_to_name(err),
+                (unsigned)p.file_size,path);
         } else if(!strcmp(line,"perf repaint"))return APP_REDRAW_PAGE;
         else ESP_LOGI("latency","UNKNOWN");
     }

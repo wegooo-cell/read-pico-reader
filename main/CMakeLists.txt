@@ -412,6 +412,13 @@ if(NOT KIIKO_BOARD_METALIO47)
     if(PICO_MAIN_CLEAN_EXPERIMENT)
         target_compile_definitions(${COMPONENT_LIB} PRIVATE KIIKO_PICO_MAIN_CLEAN=1)
     endif()
+    # 本地翻页分段计时：每次翻页串口打一行 TURN 汇总，并接收 USB 测时命令以便无人值守翻页；交付构建关闭。
+    # Local per-turn stage timing: one TURN summary per page turn, plus the USB probe commands for
+    # unattended turns; off for delivery.
+    option(PICO_TURN_TIMING "Local Pico per-turn stage timing log; never enable for delivery" OFF)
+    if(PICO_TURN_TIMING)
+        target_compile_definitions(${COMPONENT_LIB} PRIVATE KIIKO_TURN_TIMING=1 KIIKO_LOCAL_LATENCY=1)
+    endif()
 endif()
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE KIIKO_UI_LOCALIZATION=1)

@@ -99,6 +99,7 @@ def export(build, output, board):
     experimental_trimmed_waveform = board == 'metalio47' and cache.exists() and 'METALIO_TRIMMED_WAVEFORM:BOOL=ON' in cache.read_text(encoding='utf-8')
     experimental_main_clean = board == 'metalio47' and cache.exists() and 'METALIO_MAIN_CLEAN_EXPERIMENT:BOOL=ON' in cache.read_text(encoding='utf-8')
     experimental_main_clean |= board == 'pico' and cache.exists() and 'PICO_MAIN_CLEAN_EXPERIMENT:BOOL=ON' in cache.read_text(encoding='utf-8')
+    turn_timing = board == 'pico' and cache.exists() and 'PICO_TURN_TIMING:BOOL=ON' in cache.read_text(encoding='utf-8')
     experimental_network = board == 'metalio47' and cache.exists() and 'METALIO_NETWORK_PROBE:BOOL=ON' in cache.read_text(encoding='utf-8')
     transfer_start = board == 'metalio47' and cache.exists() and 'METALIO_LOCAL_TRANSFER_START:BOOL=ON' in cache.read_text(encoding='utf-8')
     config_header=build/'config/sdkconfig.h'
@@ -117,6 +118,7 @@ def export(build, output, board):
                 'experimental_trimmed_waveform': bool(experimental_trimmed_waveform),
               'experimental_main_clean': bool(experimental_main_clean),
                 'experimental_network_probe': bool(experimental_network),
+                'local_turn_timing': bool(turn_timing),
                 'local_transfer_start_test': bool(transfer_start),
                 'experimental_early_power_key': bool(early_key),
                 'requires_bootloader_update': bool(early_key),
@@ -210,6 +212,7 @@ def build_one(board, args):
                '-DMETALIO_TRIMMED_WAVEFORM=' + ('ON' if board == 'metalio47' and args.s31_trimmed_waveform else 'OFF'),
                '-DMETALIO_MAIN_CLEAN_EXPERIMENT=' + ('ON' if board == 'metalio47' and args.s31_main_clean else 'OFF'),
                '-DPICO_MAIN_CLEAN_EXPERIMENT=' + ('ON' if board == 'pico' and args.pico_main_clean else 'OFF'),
+               '-DPICO_TURN_TIMING=' + ('ON' if board == 'pico' and getattr(args, 'pico_turn_timing', False) else 'OFF'),
                '-DMETALIO_UI_GRAY22_EXPERIMENT=OFF',
                '-DMETALIO_NETWORK_PROBE=' + ('ON' if board == 'metalio47' and args.s31_network_probe else 'OFF'),
                '-DMETALIO_LOCAL_TRANSFER_START=' + ('ON' if board == 'metalio47' and getattr(args, 's31_transfer_startup_test', False) else 'OFF'),
@@ -321,6 +324,7 @@ def main():
     parser.add_argument('--s31-settings-short-motion', action='store_true', help='Local S31 settings-motion-only DU14; reader/other pages and idle white recovery stay unchanged')
     parser.add_argument('--s31-trimmed-waveform', action='store_true', help='Local S31 rollback to the trimmed 37-phase waveform; normal builds keep vendor full 48')
     parser.add_argument('--pico-main-clean', action='store_true', help='Local Pico root-switch erasure using its own LUTs within40 phases')
+    parser.add_argument('--pico-turn-timing', action='store_true', help='Local Pico per-turn stage timing log on the console; never deliver')
     parser.add_argument('--s31-main-clean', action='store_true', help='Local S31 root-switch quality: six/eight changed-white drives plus two release holds')
     parser.add_argument('--s31-network-probe', action='store_true', help='Local S31 read-only radio counters; not a delivery default')
     parser.add_argument('--s31-transfer-startup-test', action='store_true', help='Unattended local S31 transfer startup; never deliver')
@@ -347,6 +351,8 @@ def main():
         parser.error('--s31-trimmed-waveform requires metalio47 or all')
     if args.pico_main_clean and args.board == 'metalio47':
         parser.error('--pico-main-clean requires pico or all')
+    if args.pico_turn_timing and args.board == 'metalio47':
+        parser.error('--pico-turn-timing requires pico or all')
     if args.s31_main_clean and args.board == 'pico':
         parser.error('--s31-main-clean requires metalio47 or all')
     if args.s31_network_probe and args.board == 'pico':
