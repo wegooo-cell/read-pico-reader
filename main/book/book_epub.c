@@ -2127,8 +2127,11 @@ static size_t epub_collect_ext_notes(book_epub_t* book, const char* chapter_path
                                  resolve_path(chapter_path, file, target));
                 int index = duplicate || !resolved ? -1 : zip_find(book->zip, target);
                 size_t n = index >= 0 ? zip_entry_size(book->zip, index) : 0;
-                if (!duplicate && n > 0 && n <= EPUB_NOTE_FILE_MAX &&
-                    (n <= EPUB_PART_THRESHOLD || strcmp(chapter_path, target))) {
+                // 同文件注号也要抽文本：本书注6/7 的 href 带本文件名，且整章大于分片阈值；
+                // 旧规则只信跨文件，大章节里的同文件注号就拿不到脚注表条目。
+                // Same-file notes need extraction too: the href names the current file and the
+                // chapter exceeds the part threshold; the cross-file-only rule dropped them.
+                if (!duplicate && n > 0 && n <= EPUB_NOTE_FILE_MAX) {
                     char* page = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                     if (page && zip_extract(book->zip, index, page, n) == ESP_OK) {
                         size_t text_len = 0;

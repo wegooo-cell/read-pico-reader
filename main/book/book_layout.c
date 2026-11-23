@@ -611,7 +611,9 @@ bool book_layout_page_note_marker_rect(size_t page, int i, int* note, int* x, in
         if (seen++ != i) continue;
         if (note) *note = (int)s_note_markers[k].note;
         if (x) *x = s_note_markers[k].x;
-        if (y) *y = s_note_markers[k].y+book_layout_page_top_padding(page);
+        // y 在排版里是相对正文区的，命中矩形要给整屏坐标，和 x 一样加上正文原点。
+        // The stored y is body-relative; return panel coordinates like x, adding the body origin.
+        if (y) *y = s_rect.y + s_note_markers[k].y + book_layout_page_top_padding(page);
         if (w) *w = s_note_markers[k].w;
         if (h) *h = s_note_markers[k].h;
         return true;
