@@ -55,6 +55,8 @@ S31 RC117已按用户要求撤回；官网、TF与OTA恢复原正式RC116。以�
 
 - 大书库书架提速：没有封面的EPUB记一次标记，之后开机不再反复解析；快速模式封面缓存可正常覆盖；附近页预热完后，空闲时后台把其余书的封面写入TF缓存，触屏即让路并可续做，不挤占当前页内存缓存。
 - Faster large libraries: EPUBs without artwork are marked once instead of re-parsed every boot; Fast-mode cover rasters overwrite correctly; after nearby pages warm, idle time writes the rest of the library's covers to TF, yielding to input, resuming later and leaving the current page's RAM cache intact.
+- 书架封面逐本显示：每本封面准备好即局刷所在格，未完成的格先保留书名卡，不再等同页全部封面；整页齐备后才写成品页缓存。
+- Shelf covers appear one by one: each finished cover refreshes its own cell while pending cells keep their title cards, instead of waiting for the whole page; the composed page cache is still written only once complete.
 
 ## 本地测试 / Local test — 2026-11-21（JPEGDEC 基线解码）
 

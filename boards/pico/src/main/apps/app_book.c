@@ -70,8 +70,10 @@
  * 用户2026-10-23确认：阅读统计内增加本章页码跳转，减/加逐页预选、数字键盘确认，跳转后短暂提供返回原位置。
  * User approval 2026-10-23: chapter page jumping in reading statistics, stepwise drafts and numeric confirmation, with a short-lived return anchor.
  * 用户修订：阅读进度条无外伸刻度并使用圆角；继续阅读区显示最近书籍封面。
- * 用户修订：书架整页读取成品缓存后一次显示；首次生成有界分批处理，但整页封面一起显现，不逐本推屏。
- * User revision: read the page's finished caches before its first frame; cold generation is bounded, but cover artwork is revealed together.
+ * 用户修订：书架整页读取成品缓存后一次显示；首次生成有界分批处理。
+ * User revision: read the page's finished caches before its first frame; cold generation is bounded.
+ * 用户2026-11-23：大书库整页等齐太慢，冷封面改为逐本显示——每本完成即局刷所在格，未完成格保留书名卡；整页齐备后才存成品页缓存。
+ * User 2026-11-23: waiting for a whole page is too slow on large libraries, so cold covers appear one by one; each finished cover refreshes its cell, pending cells keep title cards, and the composed page is cached only once complete.
  * 用户修订：字号和间距重排只保存最终进度，字号使用现有闲置灰阶整理。
  * 用户修订：阅读设置滑杆可拖动并在松手后重排；字体选择可纵向翻页；统计入口显示真实明细与近30天数据。
  * 用户修复：间距滑杆点按和拖动共用完整档位，字间距每次1px，段距按显示档位递进。
@@ -121,8 +123,8 @@
  * User revision: a horizontal minus/plus pill adjusts coverage by 1/16 pixel per tap, preserving advances/proportions without another font.
  * 用户确认：字体/字重与书内字体/排版分别并排，移除阅读背景入口；字号和阅读线继续可调。
  * User approval: pair face/weight and embedded-face/typography, removing the background entry while keeping size and reading rules adjustable.
- * 用户增加阅读抗锯齿开关，默认开；书架整页封面合并显示；正文底部上滑固定呼出工具栏，不受翻页/按键设置影响。
- * User adds default-on reading AA and grouped shelf artwork; upward swipes from the body bottom always open tools independently of tap/key modes.
+ * 用户增加阅读抗锯齿开关，默认开；正文底部上滑固定呼出工具栏，不受翻页/按键设置影响。
+ * User adds default-on reading AA; upward swipes from the body bottom always open tools independently of tap/key modes.
  * 用户修订：底部上滑固定呼出工具栏，不随按键及翻页模式变化；取消短按或长按必须保留工具栏的限制。
  * User revision: bottom-edge swipes always open tools independently of key/tap modes; short and hold actions no longer require a toolbar mapping.
  * User revision: input refreshes changed regions without repainting headers, covers or body; release lookup caches on exit.
@@ -1216,10 +1218,10 @@ static unsigned prepare_cover_batch(app_ctx_t *ctx,bool cache_only) {
     return changed;
 }
 
-// 分批只用于准备，不能让几张已解码封面先出现在屏幕或点击反馈中。
-// Chunk preparation only: neither page painting nor press feedback reveals an incomplete cover group.
+// 用户2026-11-23：封面逐本显示，已完成的封面不再等同页其他封面。
+// User 2026-11-23: covers appear one by one; a finished cover no longer waits for the rest of its page.
 static bool shelf_cover_frame_ready(void) {
-    return s_view != SHELF || s_cover_pending_mask == 0;
+    return true;
 }
 static unsigned shelf_cover_reveal_mask(void) {
     if (!shelf_cover_frame_ready()) return 0;
@@ -1757,7 +1759,7 @@ static void draw_shelf_page_artwork(app_ctx_t *ctx,uint8_t *fb) {
     const bool lifting=s_pressed_control>=0&&s_pressed_control<shelf_rows();
     const bool restored=!lifting&&s_shelf_page_cached&&book_shelf_page_restore(fb);
     if(!restored){
-        bool complete=s_shelf_page_cache_allowed&&!lifting&&!s_shelf_page_loading&&shelf_cover_frame_ready();
+        bool complete=s_shelf_page_cache_allowed&&!lifting&&!s_shelf_page_loading&&!s_cover_pending_mask;
         unsigned edges=0;
         bool has_artwork = false;
         for(int row=0;row<shelf_rows();++row){

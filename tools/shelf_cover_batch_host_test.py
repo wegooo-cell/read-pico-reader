@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""中文：真实书架整页合并异步封面结果、失败退避重试，触摸和切页优先。/ English: Actual shelf batches cover reveals, retries transient failures, and prioritizes navigation.
+"""中文：真实书架逐本显示异步封面结果、失败退避重试，触摸和切页优先。/ English: Actual shelf reveals each async cover as it finishes, retries transient failures, and prioritizes navigation.
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
@@ -146,11 +146,12 @@ static void reset(app_ctx_t *ctx){for(unsigned i=0;i<9;++i){free(s_covers[i].gra
 }
 int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
  for(int mode=0;mode<3;++mode){fast=mode==1;reset(&ctx);
-  assert(!prepare_cover_batch(&ctx,true)&&queued==511&&!shelf_cover_frame_ready());
+  assert(!prepare_cover_batch(&ctx,true)&&queued==511&&s_cover_pending_mask==511&&shelf_cover_frame_ready());
   ready_mask=7;assert(prepare_cover_batch(&ctx,false)==7&&s_cover_dirty_mask==7);
-  assert(shelf_cover_reveal_mask()==0);
+  // 逐本显示：已完成的三本立即可推，不等同页其余封面。/ One by one: finished covers reveal without waiting for the page.
+  assert(shelf_cover_reveal_mask()==7);
   s_cover_batch_present_pending=false;ack_present(APP_REDRAW_PAGE,EPD_DRAW_SUCCESS);
-  assert(s_cover_dirty_mask==7);
+  assert(!s_cover_dirty_mask);
   s_cover_dirty_mask=7; // Reproduce a failed partial submission carrying all three groups.
   ready_mask=511;assert(prepare_cover_batch(&ctx,false)==504&&shelf_cover_reveal_mask()==511);
   s_cover_batch_present_pending=true;s_cover_present_mask=511;ack_present(APP_REDRAW_AREA,EPD_DRAW_FAULT);assert(s_cover_dirty_mask==511);
@@ -161,13 +162,13 @@ int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
  // A failure is not dropped forever: retry twice with backoff, then leave a placeholder.
  reset(&ctx);ready_mask=511;failed_mask=4;
  assert(prepare_cover_batch(&ctx,true)==507);
- assert(!shelf_cover_frame_ready());
+ assert(s_cover_pending_mask==4);
  assert(!s_covers[2].gray&&!s_covers[2].fast_bits);
  assert(s_cover_retry_count[2]==1&&s_cover_retry_ms[2]>ctx.now_ms);
- assert(s_cover_retry_ms[2]==60&&!shelf_cover_reveal_mask());
+ assert(s_cover_retry_ms[2]==60&&shelf_cover_reveal_mask()==507);
  assert(prepare_cover_batch(&ctx,true)==0);assert(s_cover_retry_count[2]==1);
  ctx.now_ms=s_cover_retry_ms[2];assert(prepare_cover_batch(&ctx,true)==0&&s_cover_retry_count[2]==2);
- assert(shelf_cover_frame_ready());
+ assert(!s_cover_pending_mask);
  assert(!s_covers[2].gray&&!s_covers[2].fast_bits);
  reset(&ctx);s_scan_pending=true;s_visible_count=0;
  render(&ctx,ctx.fb);assert(center_hint&&!slots_drawn);
@@ -184,29 +185,31 @@ int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
  queued_touch=true;
  assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&queued==0);
  queued_touch=false;
- assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&queued==15&&s_cover_dirty_mask==6);
- render(&ctx,ctx.fb);assert(!art_drawn);
- ack_present(APP_REDRAW_PAGE,EPD_DRAW_SUCCESS);assert(s_cover_dirty_mask==6);
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&queued==15&&s_cover_present_mask==6&&art_drawn==6);
+ assert(s_area.x==244&&s_area.y==192&&s_area.y+s_area.height==452&&!s_message[0]);
+ ack_present(APP_REDRAW_AREA,EPD_DRAW_SUCCESS);assert(!s_cover_dirty_mask);
  no_artwork_mask=8;
  assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&s_shelf_no_artwork_mask==8);
  assert(s_cover_retry_count[3]==0);
  ready_mask=7;
  queued_touch=true;
- assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&s_cover_dirty_mask==6);
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&!s_cover_dirty_mask);
  queued_touch=false;
- assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==7&&art_drawn==7);
- assert(s_area.y==192&&s_area.y+s_area.height==452&&!s_message[0]);
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==1&&art_drawn==7);
+ assert(s_area.x==36&&s_area.width==196&&s_area.y==192&&s_area.y+s_area.height==452&&!s_message[0]);
  ack_present(APP_REDRAW_AREA,EPD_DRAW_FAULT);
- assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==7);
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==1);
  ack_present(APP_REDRAW_AREA,EPD_DRAW_SUCCESS);
  assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE);
 
  reset(&ctx);s_visible_count=9;ready_mask=7;
- assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&s_cover_dirty_mask==7);
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==7);
+ ack_present(APP_REDRAW_AREA,EPD_DRAW_SUCCESS);
  ready_mask=63;
- assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&s_cover_dirty_mask==63);
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==56);
+ ack_present(APP_REDRAW_AREA,EPD_DRAW_SUCCESS);
  ready_mask=511;
- assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==511&&!s_message[0]);
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==448&&!s_message[0]);
  ack_present(APP_REDRAW_AREA,EPD_DRAW_SUCCESS);
  assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE);
  reset(&ctx);s_visible_count=9;
@@ -217,7 +220,7 @@ int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
  ack_present(APP_REDRAW_AREA,EPD_DRAW_SUCCESS);
  assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&queued==0);
  shelf_page_turn=false;
- puts("PASS: shelf holds partial results, includes TXT covers and skips known missing artwork, and reveals a completed page in one retry-safe update");
+ puts("PASS: shelf reveals each finished cover in its own retry-safe cell update, includes TXT covers and skips known missing artwork");
  (void)warm_calls;(void)s_cover_warm_mask;(void)s_cover_warm_after_ms;
  for(unsigned i=0;i<9;++i){free(s_covers[i].gray);free(s_covers[i].fast_bits);}
  puts("PASS: queue without IO, reveal ready cells, retain dirty covers through failed displays, retry with backoff and prioritize touch");
