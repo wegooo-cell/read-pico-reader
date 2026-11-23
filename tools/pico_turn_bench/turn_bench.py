@@ -358,6 +358,9 @@ def print_summary(summary):
               f'{s["push"]:>7.1f}{s["join"]:>6.1f}{s["total"]:>7.1f}{s["frames"]:>5.0f}{s["miss"]:>5.0f}')
     s = summary['_save']
     print(f'progress saves: {s["n"]} x median {s["median"]} ms (inside "total", excluded from "fn")')
+    if summary.get('_idle_save', {}).get('n'):
+        s = summary['_idle_save']
+        print(f'idle progress saves: {s["n"]} x median {s["median"]} ms (outside any turn)')
 
 
 def cmd_run(args):
@@ -398,6 +401,9 @@ def cmd_run(args):
     finally:
         dev.close()
     summary = summarize(bench.turns)
+    # 空闲时写入的进度不在任何一次翻页里，单独从日志里统计。/ Idle saves happen outside turns; count them from the log.
+    idle = [float(m.group(1)) for m in re.finditer(r'turn: SAVE idle=([\d.]+)', open(log_path, errors='replace').read())]
+    summary['_idle_save'] = {'n': len(idle), 'median': round(statistics.median(idle), 1) if idle else 0}
     result = {'meta': meta, 'summary': summary, 'warnings': bench.warnings, 'turns': bench.turns}
     json_path = os.path.join(args.out, name + '.json')
     json.dump(result, open(json_path, 'w'), ensure_ascii=False, indent=1)
