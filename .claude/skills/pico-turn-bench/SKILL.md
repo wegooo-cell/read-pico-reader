@@ -57,7 +57,7 @@ Tools live in `tools/pico_turn_bench/`. The scripts print one summary table; raw
 
 | 列 | 含义 |
 | --- | --- |
-| hit | 预绘命中率（下一页在翻页前已经画好） |
+| hit | 命中率：翻页前正文已经画好（预绘好的下一页，或保留的当前页与刚离开的页） |
 | fn | 翻页函数耗时，扣掉跨章载入和存进度 |
 | img | 插图/背景准备（TURN 行的 prep+pre） |
 | draw | 正文绘制（命中时约 10 ms，只是拷贝） |

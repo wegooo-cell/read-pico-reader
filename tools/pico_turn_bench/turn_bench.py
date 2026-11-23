@@ -337,7 +337,7 @@ def summarize(turns):
         med = lambda k: round(statistics.median(t[k] for t in ts), 1)
         out[label] = {
             'n': len(ts),
-            'hit_rate': round(sum(t['hit'] == 1 for t in ts) / len(ts), 2),
+            'hit_rate': round(sum(t['hit'] in (1, 3) for t in ts) / len(ts), 2),
             'fn': round(statistics.median(t['turn'] - t['save'] - t['load'] for t in ts), 1),
             'img': round(statistics.median(t['prep'] + t['pre'] for t in ts), 1),
             'turn': med('turn'), 'load': med('load'), 'join': med('join'), 'draw': med('draw'), 'push': med('push'),
