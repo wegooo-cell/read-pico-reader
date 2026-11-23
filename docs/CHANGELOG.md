@@ -26,6 +26,11 @@ S31 RC117已按用户要求撤回；官网、TF与OTA恢复原正式RC116。以�
 
 # 版本变更 / Changelog
 
+## 本地测试 / Local test — 2026-11-23（进书首帧）
+
+- 修复从书架进书首帧被压成黑白、正文出现抖动噪点、需要手动刷新才恢复的问题；现在直接用灰度帧 + 完整 GC16 入书。
+- Fix the shelf-to-reader entry frame being binarized: anti-aliased text no longer turns into dither noise and needs no manual refresh.
+
 ## 本地测试 / Local test — 2026-11-23（电量显示）
 
 - 电量百分比改为双中位数 + 2% 滞回 + 按时间限速，并以电压作硬下限：不再一分钟内掉到 15%，也不再虚高显示 95%。
