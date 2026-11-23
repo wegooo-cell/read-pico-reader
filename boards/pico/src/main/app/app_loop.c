@@ -95,7 +95,7 @@
 
 // 触摸芯片报点率远高于屏幕，主循环空转一轮只等这么久。
 // Touch reports far faster than the panel; idle this long per loop.
-#define LOOP_TICK_MS 5
+#define LOOP_TICK_MS 2
 // SD 卡插上或者刚挂好时，隔一会儿再试一次存在设置里的字体。
 // Retry the saved SD font shortly after a card appears or mounts.
 #define FONT_RETRY_INTERVAL_MS 750
@@ -796,6 +796,16 @@ void app_loop_run(const app_loop_config_t* config) {
         }
         cst836u_touch_t touch = { 0 };
         esp_err_t err = cst836u_read(config->tp, &touch);
+        // 一轮补采两次：主循环被渲染/存储拖长时，短促点击不会落在两次采样之间。
+        // Two extra reads per loop: a short tap cannot fall between samples when rendering or
+        // storage work stretches the iteration.
+        for (int extra = 0; extra < 2; ++extra) {
+            cst836u_touch_t again = { 0 };
+            if (cst836u_read(config->tp, &again) == ESP_OK && again.touched && !touch.touched) {
+                touch = again;
+                err = ESP_OK;
+            }
+        }
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "CST836U read failed: %s", esp_err_to_name(err));
             memset(&touch, 0, sizeof(touch));

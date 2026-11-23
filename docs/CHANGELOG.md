@@ -26,6 +26,11 @@ S31 RC117已按用户要求撤回；官网、TF与OTA恢复原正式RC116。以�
 
 # 版本变更 / Changelog
 
+## 本地测试 / Local test — 2026-11-23（触摸采样）
+
+- 主循环空转 5ms→2ms，并每轮补采两次触摸，减少快速轻点漏识别。
+- Loop tick 5ms→2ms with two extra touch reads per iteration to reduce missed quick taps.
+
 ## 本地测试 / Local test — 2026-11-23（进书首帧）
 
 - 修复从书架进书首帧被压成黑白、正文出现抖动噪点、需要手动刷新才恢复的问题；现在直接用灰度帧 + 完整 GC16 入书。
