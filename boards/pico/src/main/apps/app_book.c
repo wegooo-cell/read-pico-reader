@@ -4782,7 +4782,9 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     // 从书架打开直接全刷一次黑白目标帧。/ Present the shelf entry as one full binary frame.
     if (reader_entry) {
         const EpdRect frame = {0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT};
-        if (s_presented_view == SHELF || s_presented_view == BULK) ui_image_bw_rect(ctx->fb, frame);
+        // 不要再把首帧压成黑白：抗锯齿正文会被抖动成噪点，进入后要手动全刷才恢复。
+        // Do not binarize the entry frame: anti-aliased text turns into dither noise and only a
+        // manual full refresh restores it. Present the real frame with the full GC16 waveform.
         err = update_display_area_full_with(ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16, frame);
     } else if (image_gray_refresh && redraw == APP_REDRAW_AREA && !s_reader_cleanup && s_presented_view == (int)READING) {
         // 图文翻页只擦白内容区；界面操作仍可提交完整目标页。/ Image turns erase content only; UI changes retain complete target-page output.
