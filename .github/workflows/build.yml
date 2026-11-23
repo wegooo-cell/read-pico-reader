@@ -131,6 +131,7 @@ jobs:
           python3 tools/test_book_toc.py
           node tools/flasher_integrity_host_test.cjs
           node tools/metalio_direct_install_host_test.cjs
+          node tools/pico_flash_host_test.cjs
           python3 tools/vertical_punctuation_host_test.py
           python3 tools/vertical_number_host_test.py
 
