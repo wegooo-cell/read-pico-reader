@@ -52,6 +52,7 @@ static bool book_author_clean_display(char*p,size_t c){(void)p;(void)c;return fa
 static bool read_pico_search_match(const char*s,const char*q){return !*q||strstr(s,q)!=NULL;}
 '''
 unit+=(R/'main/apps/book_directory_ui.inc').read_text()+'\n'
+unit+=function('shelf_search_match',R/'main/apps/app_book.c')+'\n'
 unit+=function('scan_shelf_dir',R/'main/apps/app_book.c')+'\n'
 unit+=r'''
 static void scan(app_ctx_t*c){bool t=false,u=false,k=false;s_count=0;scan_shelf_dir(c,books_directory_current(),false,0,0,&t,&u,&k);assert(!t&&!u&&!k);}

@@ -2,6 +2,7 @@
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
+import re
 import subprocess,tempfile
 from home_cover_cache_host_test import function
 ROOT=Path(__file__).resolve().parents[1]
@@ -48,7 +49,8 @@ typedef struct {unsigned width,height,stride,contrast,phase;} book_fast_cover_ke
 unit+=s[s.index('#define COVER_CACHE_MAGIC'):s.index('static uint64_t cover_hash')]
 revision=s.index('#define FAST_COVER_REVISION')
 unit+=s[revision:s.index('static uint64_t fast_cover_checksum',revision)]
-for n in ('cover_hash','cover_cache_identity','cover_cache_key','ram_key','fast_cover_checksum','fast_cover_key','finished_fast_ram_key','shelf_cover_identity','book_cover_shelf_no_artwork','shelf_cover_raster_key','book_cover_shelf_ram_read','book_cover_shelf_ram_store','book_cover_fast_cache_read','fast_cache_write','book_cover_fast_cache_write','book_cover_fast_cache_write_checked'):
+unit+=re.search(r'#define COVER_DIR [^\n]*\n',s)[0]
+for n in ('cover_hash','cover_cache_identity','cover_file_path','cover_dir_ready','cover_cache_key','ram_key','fast_cover_checksum','fast_cover_key','finished_fast_ram_key','shelf_cover_identity','book_cover_shelf_no_artwork','shelf_cover_raster_key','book_cover_shelf_ram_read','book_cover_shelf_ram_store','book_cover_fast_cache_read','fast_cache_write','book_cover_fast_cache_write','book_cover_fast_cache_write_checked'):
  unit+=function(n,cover)+'\n'
 unit+=r'''
 #define MALLOC_CAP_SPIRAM 1

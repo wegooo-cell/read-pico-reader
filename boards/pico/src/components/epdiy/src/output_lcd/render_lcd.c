@@ -76,7 +76,18 @@ static void IRAM_ATTR handle_lcd_frame_done(void* payload) {
     portYIELD_FROM_ISR();
 }
 
+// 扫屏开始与结束时通知应用，默认不做事；Pico 应用借此在扫屏期间挂起封面后台，避免供数欠载。
+// Notify the application at scan start and end (no-op by default); the Pico app suspends its cover worker
+// during scans to avoid line-queue underruns.
+__attribute__((weak)) void epd_scan_hook(bool active) { (void)active; }
+
+// 无欠载完成的扫屏次数；应用据此判断降频后能否再试回默认像素时钟。
+// Count of scans finished without underrun; the app uses it to decide when to retry the default clock.
+static volatile uint32_t s_clean_scans;
+uint32_t epd_lcd_clean_scans(void) { return s_clean_scans; }
+
 void lcd_do_update(RenderContext_t* ctx) {
+    epd_scan_hook(true);
     epd_set_mode(1);
 
     for (uint8_t k = 0; k < ctx->cycle_frames; k++) {
@@ -113,6 +124,8 @@ void lcd_do_update(RenderContext_t* ctx) {
     epd_lcd_frame_done_cb(NULL, NULL);
 
     epd_set_mode(0);
+    if (!ctx->error) s_clean_scans++;
+    epd_scan_hook(false);
 }
 
 __attribute__((optimize("O3"))) static bool IRAM_ATTR

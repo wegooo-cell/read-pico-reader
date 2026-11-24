@@ -59,6 +59,7 @@ int book_cover_jobs_take(unsigned g,unsigned slot,book_cover_result_t*r){if(g!=g
 int book_cover_jobs_take_ready(unsigned g,unsigned slot,book_cover_result_t*r){return book_cover_jobs_take(g,slot,r);}
 void book_cover_jobs_cancel(unsigned g){if(g==generation)++generation;}
 bool book_cover_jobs_idle(void){return idle;}
+static int sweeps;void book_cover_jobs_sweep_legacy(void){++sweeps;}
 """
 # The shared source has conditional implementations; select the S31 path.
 u += '#define KIIKO_BOARD_METALIO47 1\n'
@@ -66,7 +67,7 @@ text=source.read_text()
 # 近页窗口随板型不同（S31提前四页、Pico三页），全书库预热从窗口之后开始。
 # The nearby window differs per board (S31 four pages ahead, Pico three); library warming starts after it.
 u += '#define WARM_FIRST %d\n' % (40 if 'shelf_library_warm_submit(ctx->leaf * rows, rows * 5' in text else 32)
-state=text.index('static struct {\n    uint64_t key;\n    int next, index;')
+state=text.index('static struct {\n    uint64_t key;\n    int next, index, walked;')
 u += text[state:text.index('} s_library_warm;',state)+len('} s_library_warm;')] + '\n'
 u += 'static int shelf_library_warm_take(unsigned generation);\n'
 for name in ('shelf_covers_hidden','shelf_library_warm_abort','shelf_chapters_tick', 'shelf_record_prefetch_result', 'shelf_library_warm_key',
@@ -96,10 +97,13 @@ int main(void){
  // After nearby warming: card-only warming walks the rest of the library (skipping the visible page,
  // the four pages ahead and TXT), sized by each book's cell.
  for(int i=25;i<64;++i){snprintf(s_shelf[i].path,sizeof(s_shelf[i].path),i==45?"book%d.txt":"book%d",i);s_shelf[i].size=100;}
+ // 预热未完成前不迁移旧封面目录。/ No old cover folder migration before the pass completes.
+ sweeps=0;
  s_visible_count=64;ram_hit[41]=true;s_prefetch_active=false;int warmed[64]={0},order[64],count=0;
  for(int step=0;step<80;++step){
   ctx.now_ms+=1000;shelf_prefetch_tick(&ctx);
   if(s_prefetch_active&&s_library_warm.active){
+   assert(!sweeps);
    const book_cover_job_t *q=&requests[0];int index=atoi(q->path+4);
    assert(q->disk_only&&q->artwork_only&&!q->with_chapters&&!q->metadata_only&&index>=WARM_FIRST&&index!=41&&index!=45);
    assert(q->width==51&&q->height==70);++warmed[index];order[count++]=index;
@@ -110,7 +114,7 @@ int main(void){
  assert(count==expected);for(int i=WARM_FIRST;i<64;++i)assert(warmed[i]==(i!=41&&i!=45));
  assert(s_shelf[40].cover_identity_known&&s_shelf[40].modified==777&&!s_shelf[41].cover_identity_known);
  // 一轮完成后不再重复；书目变化（键变化）后重来一轮。/ A finished pass stays idle until the catalog key changes.
- int before=submitted;for(int step=0;step<10;++step){ctx.now_ms+=1000;shelf_prefetch_tick(&ctx);}assert(submitted==before);
+ int before=submitted;for(int step=0;step<10;++step){ctx.now_ms+=1000;shelf_prefetch_tick(&ctx);}assert(submitted==before&&sweeps>0);
  // 进行中被翻页打断：回退游标，下一轮重新提交同一本。/ An interrupted book rewinds the cursor and is submitted again.
  char first[16];snprintf(first,sizeof(first),"book%d",WARM_FIRST);
  ++s_store_revision;ctx.now_ms+=1000;shelf_prefetch_tick(&ctx);assert(s_prefetch_active&&!strcmp(requests[0].path,first));
@@ -121,6 +125,14 @@ int main(void){
  complete[0]=true;shelf_prefetch_tick(&ctx);strcpy(s_shelf[media].path,media_path);sd_ready=false;before=submitted;
  ctx.now_ms+=1000;shelf_prefetch_tick(&ctx);assert(!s_prefetch_active&&submitted==before&&s_library_warm.next==media);
  sd_ready=true;ctx.now_ms+=1000;shelf_prefetch_tick(&ctx);assert(s_prefetch_active&&!strcmp(requests[0].path,media_path));
+ // 窗口在书库中段：从窗口之后开始，到末尾后绕回开头，跳过窗口本身。
+ // A mid-library window: start just past it, wrap to the start, and skip the window itself.
+ complete[0]=true;shelf_prefetch_tick(&ctx);s_prefetch_active=false;shelf_library_warm_abort();
+ ++s_store_revision;{unsigned g=0;int seen[64],n=0;
+  while(shelf_library_warm_submit(8,48,&g)){seen[n++]=atoi(requests[0].path+(requests[0].path[0]=='/'?12:4));s_library_warm.active=false;}
+  int want[64],m=0;for(int i=56;i<64;++i)want[m++]=i;for(int i=0;i<8;++i)want[m++]=i;
+  assert(n==m);for(int i=0;i<n;++i)assert(seen[i]==want[i]);
+  assert(!shelf_library_warm_submit(8,48,&g));}
  // 关闭封面：不再预热相邻页或整个书库。/ Covers off: no neighbour or whole-library warming.
  complete[0]=true;shelf_prefetch_tick(&ctx);s_prefetch_active=false;shelf_library_warm_abort();
  covers_off=true;++s_store_revision;before=submitted;unsigned warm_generation=0;

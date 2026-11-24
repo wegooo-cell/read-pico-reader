@@ -3,6 +3,7 @@
 # 中文：列表封面尺寸/缓存/低内存边界，执行实际加载函数。
 # English: Execute actual list-cover loading across aspect, cache and memory boundaries.
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 from home_cover_cache_host_test import function
@@ -61,8 +62,11 @@ static size_t ram_bytes,yields;
 static size_t metalio_cover_cache_yield(size_t n){++yields;size_t f=n<ram_bytes?n:ram_bytes;ram_bytes-=f;available+=f;return f;}
 '''
 text = source.read_text()
+unit += re.search(r'#define COVER_DIR [^\n]*\n', text)[0]
+for name in ('cover_file_path', 'cover_dir_ready', 'cover_legacy_open'):
+    unit += function(name, source) + '\n'
 unit += text[text.index('#define NO_ART_MAGIC'):text.index('static bool book_cover_load_gray_impl')]
-for name in ('cover_hash','cover_cache_identity','cover_cache_key','book_cover_crop','fast_cover_checksum','list_cache_path','list_cache_commit','book_cover_load_list_gray_sized_impl','book_cover_load_list_gray_impl','book_cover_load_list_gray','book_cover_load_sized_io','book_cover_store_sized'):
+for name in ('cover_hash','cover_cache_identity','cover_cache_key','book_cover_crop','fast_cover_checksum','cover_cache_write','cover_cache_read','list_cache_path','list_cache_commit','book_cover_load_list_gray_sized_impl','book_cover_load_list_gray_impl','book_cover_load_list_gray','book_cover_load_sized_io','book_cover_store_sized'):
     unit += function(name, source) + '\n'
 unit += r'''
 int main(int argc,char **argv){
@@ -112,7 +116,27 @@ int main(int argc,char **argv){
  book_cover_store_sized(path,"title","author",out,51,70,st.st_size,st.st_mtime+1);assert(stat(small,&(struct stat){0}));
  book_cover_store_sized(path,"title","author",out,51,70,st.st_size,st.st_mtime);assert(!stat(small,&(struct stat){0}));
  memset(out,0,3570);assert(book_cover_load_sized_io(path,"title","author",out,51,70,&auto_cache)==1&&out[0]==33);
- puts("PASS: low budgets reclaim the RAM cover cache shortfall before reading; persisted no-artwork marker skips archive reads until the book changes; compact3570-byte exact bounds, legacy thumbnail reuse without EPUB reads, checksum repair, warm hits and source-checked generated storage; uncropped wide/tall/square covers, exact cache dimensions, 30 warm reads, corrupt metadata, 1.5MiB reserve, OOM/decode failure retry and generated fallback bounds");
+ // 网格灰度缓存在卡上而列表缓存缺失时，按窗口平均缩出小图，不打开EPUB。
+ // With only the grid gray cache on the card, the thumbnail is box-averaged from it without opening the EPUB.
+ remove(small);remove(cache);char grid[120];cover_cache_header_t grid_key;assert(cover_cache_key(path,"title","author",grid,sizeof(grid),&grid_key));
+ static uint8_t gray[176*240];for(unsigned y=0;y<240;++y)for(unsigned x=0;x<176;++x)gray[y*176+x]=x<88?20:220;
+ cover_cache_write(grid,&grid_key,gray);old_requests=requests;memset(out,0xab,sizeof(out));
+ assert(book_cover_load_sized_io(path,"title","author",out,51,70,&auto_cache)==1&&requests==old_requests);
+ assert(out[0]==20&&out[50]==220&&out[69*51]==20&&out[69*51+50]==220);
+ for(unsigned i=3570;i<sizeof(out);++i)assert(out[i]==0xab);
+ assert(!stat(small,&st));memset(out,0,3570);
+ assert(book_cover_load_sized_io(path,"title","author",out,51,70,&auto_cache)==1&&out[50]==220&&requests==old_requests);
+ // 缓存在按路径哈希高6位分的子目录里。/ Caches live in the group folder named by the top six hash bits.
+ char group[16];snprintf(group,sizeof(group),"/%02x/",(unsigned)(grid_key.path_hash>>58));
+ assert(strstr(grid,"/coverdb/")&&strstr(grid,group)&&strstr(small,"/coverdb/")&&strstr(small,group));
+ // 旧平铺目录里的灰度封面能读回，并复制进分组目录，下次直接命中。
+ // A gray cover in the old flat folder is read back and copied into its group folder for later hits.
+ char flat[200];snprintf(flat,sizeof(flat),"%s/card/covers%s",argv[1],strrchr(grid,'/'));
+ assert(!remove(grid)&&!remove(small));remove(cache);cover_cache_write(flat,&grid_key,gray);assert(!stat(flat,&st)&&stat(grid,&st));
+ old_requests=requests;memset(out,0,3570);
+ assert(book_cover_load_sized_io(path,"title","author",out,51,70,&auto_cache)==1&&out[0]==20&&out[50]==220&&requests==old_requests);
+ assert(!stat(grid,&st)&&!stat(small,&st));
+ puts("PASS: caches live in hash-grouped folders and old flat gray covers are read back and copied forward; compact thumbnails derive from the grid gray cache without EPUB reads; low budgets reclaim the RAM cover cache shortfall before reading; persisted no-artwork marker skips archive reads until the book changes; compact3570-byte exact bounds, legacy thumbnail reuse without EPUB reads, checksum repair, warm hits and source-checked generated storage; uncropped wide/tall/square covers, exact cache dimensions, 30 warm reads, corrupt metadata, 1.5MiB reserve, OOM/decode failure retry and generated fallback bounds");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='plc-') as folder:

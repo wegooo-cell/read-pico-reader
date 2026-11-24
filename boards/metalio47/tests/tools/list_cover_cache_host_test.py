@@ -3,6 +3,7 @@
 # 中文：列表封面尺寸/缓存/低内存边界，执行实际加载函数。
 # English: Execute actual list-cover loading across aspect, cache and memory boundaries.
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 from home_cover_cache_host_test import function
@@ -55,8 +56,11 @@ static bool book_image_grayscale(const uint8_t *data,size_t bytes,bool png,unsig
 static bool book_auto_cover_render(const char *t,const char *a,unsigned w,unsigned h,uint8_t *out){(void)t;(void)a;assert(w==176&&h==240);memset(out,191,w*h);return true;}
 '''
 text = source.read_text()
+unit += re.search(r'#define COVER_DIR [^\n]*\n', text)[0]
+for name in ('cover_file_path', 'cover_dir_ready', 'cover_legacy_open'):
+    unit += function(name, source) + '\n'
 unit += text[text.index('#define NO_ART_MAGIC'):text.index('static bool book_cover_load_gray_impl')]
-for name in ('cover_hash', 'cover_cache_identity', 'cover_cache_key', 'ram_key', 'book_cover_crop', 'fast_cover_checksum', 'list_cache_path', 'list_cache_commit', 'book_cover_load_list_gray_sized_impl','book_cover_load_list_gray_impl', 'book_cover_load_list_gray'):
+for name in ('cover_hash', 'cover_cache_identity', 'cover_cache_key', 'ram_key', 'book_cover_crop', 'fast_cover_checksum', 'cover_cache_write', 'cover_cache_read', 'list_cache_path', 'list_cache_commit', 'book_cover_load_list_gray_sized_impl','book_cover_load_list_gray_impl', 'book_cover_load_list_gray'):
     unit += function(name, source) + '\n'
 unit += r'''
 int main(int argc,char **argv){

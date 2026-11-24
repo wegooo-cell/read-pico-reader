@@ -55,6 +55,16 @@ typedef struct {
     uint64_t size; int64_t modified; uint32_t magic;
     book_weread_path_t source; book_name_t name;
 } cover_record_t;
+#define MALLOC_CAP_SPIRAM 1
+#define MALLOC_CAP_8BIT 2
+#define heap_caps_malloc(size, flags) malloc(size)
+static bool save_record(const char *path, const struct stat *expected, const book_name_t *name,
+                        const uint8_t *pixels);
+typedef struct { bool allowed, active; } read_pico_sd_access_scope_t;
+__attribute__((unused)) static read_pico_sd_access_scope_t read_pico_sd_access_scope(const char *path) {
+    (void)path; return (read_pico_sd_access_scope_t){.allowed = true};
+}
+__attribute__((unused)) static void read_pico_sd_access_scope_end(read_pico_sd_access_scope_t *scope) { (void)scope; }
 static bool tf_ready = true, cancel, custom;
 static bool cancelled(void) { return cancel; }
 static bool read_pico_sd_io_ready(void) { return tf_ready; }
@@ -64,7 +74,8 @@ bool book_title_get(const char *path, char *title, size_t cap) {
     return snprintf(title, cap, "自定义") > 0;
 }
 '''
-    unit += f'#define COVER_DIRECTORY "{root}/.kiikoread/covers"\n'
+    unit += f'#define COVER_DIRECTORY "{root}/.kiikoread/coverdb"\n'
+    unit += f'#define COVER_LEGACY_DIRECTORY "{root}/.kiikoread/covers"\n'
     # Keep the actual local parser, while replacing the NVS-only display wrapper.
     title = (ROOT / "main/book/book_title.c").read_text()
     unit += title[title.index("typedef struct { const char *p;"):title.index("bool book_title_from_path")]
@@ -385,6 +396,21 @@ int main(int argc, char **argv) {
     assert(!strcmp(title, "活着") && !strcmp(author, "余华"));
     assert(book_weread_cover_read(TEST_BOOK, loaded, BOOK_COVER_W, BOOK_COVER_H));
     assert(!memcmp(pixels, loaded, sizeof(pixels)));
+    // 记录在分组目录；旧平铺目录里的记录照样读出，并另存一份进分组目录，旧文件保留。
+    // Records live in a group folder; a record in the old flat folder still reads, is copied forward, and stays.
+    {
+        char grouped[128], legacy[128];
+        record_path(TEST_BOOK, &st, grouped, false);
+        record_path(TEST_BOOK, &st, legacy, true);
+        assert(strstr(grouped, "/.kiikoread/coverdb/") && !access(grouped, F_OK));
+        assert(!mkdir(COVER_LEGACY_DIRECTORY, 0777) || errno == EEXIST);
+        assert(!rename(grouped, legacy) && access(grouped, F_OK));
+        memset(loaded, 0, sizeof(loaded));
+        assert(book_weread_cover_read(TEST_BOOK, loaded, BOOK_COVER_W, BOOK_COVER_H));
+        assert(!memcmp(pixels, loaded, sizeof(pixels)));
+        assert(!access(grouped, F_OK) && !access(legacy, F_OK));
+        assert(!unlink(legacy));
+    }
     assert(book_weread_cover_read(TEST_BOOK, loaded, 80, 108));
     custom = true;
     assert(book_weread_cover_metadata(TEST_BOOK, title, sizeof(title), NULL, 0));

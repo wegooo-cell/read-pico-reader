@@ -3,7 +3,7 @@
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
-import subprocess,tempfile
+import re,subprocess,tempfile
 from home_cover_cache_host_test import function
 ROOT=Path(__file__).resolve().parents[1];book=ROOT/'main/apps/app_book.c'
 source = book.read_text()
@@ -136,6 +136,8 @@ static void render(app_ctx_t *ctx,uint8_t *fb){
  draw_shelf_page_artwork(ctx,fb);
 }
 '''
+unit += ''.join(re.findall(r'#define SHELF_COVER_GATHER_(?:SLOW_)?MS[^\n]*\n', book.read_text()))
+unit += 'static int64_t s_cover_ready_since_ms;static bool s_cover_gathering;\n' + function('shelf_cover_gather_ms', book) + '\n' + function('shelf_cover_gather_wait', book) + '\n'
 unit += function('shelf_cover_tick', book) + '\n'
 unit += 'static void ack_present(int redraw,int err){'+ack+'}\n'
 unit+=r'''
@@ -187,6 +189,9 @@ int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
  queued_touch=true;
  assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&queued==0);
  queued_touch=false;
+ // 第0、3格仍在做：先到的两张最多等一个合并窗口再一起补画。/ Cells 0 and 3 are still in flight: the first two wait one gather window.
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&!s_cover_present_mask&&!art_drawn);
+ ctx.now_ms+=shelf_cover_gather_ms();
  assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&queued==15&&s_cover_present_mask==6&&art_drawn==6);
  assert(s_area.x==244&&s_area.y==192&&s_area.y+s_area.height==452&&!s_message[0]);
  ack_present(APP_REDRAW_AREA,EPD_DRAW_SUCCESS);assert(!s_cover_dirty_mask);
@@ -204,10 +209,17 @@ int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
  ack_present(APP_REDRAW_AREA,EPD_DRAW_SUCCESS);
  assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE);
 
+ // 其他格仍在做时每批先等一个合并窗口；最后一批不再等待。/ Batches wait one gather window while others are in flight; the last batch never waits.
+ // 快速模式局刷便宜，窗口短；普通/水波纹局刷贵，窗口长。/ Cheap fast reveals use the short window; costly normal/ripple reveals use the long one.
+ fast=true;assert(shelf_cover_gather_ms()==SHELF_COVER_GATHER_MS);fast=false;assert(shelf_cover_gather_ms()==SHELF_COVER_GATHER_SLOW_MS&&SHELF_COVER_GATHER_SLOW_MS>SHELF_COVER_GATHER_MS);
  reset(&ctx);s_visible_count=9;ready_mask=7;
- assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==7);
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&s_cover_gathering);
+ ctx.now_ms+=shelf_cover_gather_ms()-1;assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE);
+ ctx.now_ms+=1;assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==7&&!s_cover_gathering);
  ack_present(APP_REDRAW_AREA,EPD_DRAW_SUCCESS);
  ready_mask=63;
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE);
+ ctx.now_ms+=shelf_cover_gather_ms();
  assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==56);
  ack_present(APP_REDRAW_AREA,EPD_DRAW_SUCCESS);
  ready_mask=511;
@@ -233,7 +245,7 @@ int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
  assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&queued==0);
  covers_off=false;
  puts("PASS: shelf covers can be switched off: title cards only, no cover jobs or RAM reads");
- puts("PASS: shelf reveals each finished cover in its own retry-safe cell update, includes TXT covers and skips known missing artwork");
+ puts("PASS: shelf gathers finished covers for at most one window while others are in flight, reveals them in retry-safe cell updates, includes TXT covers and skips known missing artwork");
  (void)warm_calls;(void)s_cover_warm_mask;(void)s_cover_warm_after_ms;
  for(unsigned i=0;i<9;++i){free(s_covers[i].gray);free(s_covers[i].fast_bits);}
  puts("PASS: queue without IO, reveal ready cells, retain dirty covers through failed displays, retry with backoff and prioritize touch");

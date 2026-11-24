@@ -41,4 +41,7 @@ void book_cover_jobs_cancel(unsigned generation);
 bool book_cover_jobs_quiesce(unsigned timeout_ms);
 
 /// 仅在没有待接收/运行作业时让后台预热借用队列。/ Background warming may borrow only an empty/quiescent queue.
+/// 请求在空闲时迁移旧平铺封面目录；本次开机完成后再调用无效果。
+/// Request migration of the old flat cover folder while idle; a no-op once done this boot.
+void book_cover_jobs_sweep_legacy(void);
 bool book_cover_jobs_idle(void);
