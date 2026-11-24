@@ -25,7 +25,7 @@ typedef enum{APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE}app_redraw_t;
 typedef struct{int x,y,width,height;}EpdRect;
 typedef struct{bool consumed;uint8_t *fb;}app_ctx_t;
 typedef struct{int type,x0,y0,x,y;}ui_gesture_event_t;
-static int s_view=READING,s_reader_panel=READER_PANEL_NONE,s_px=48,s_margin=24,s_mode;
+static int s_view=READING,s_reader_panel=READER_PANEL_NONE,s_px=48,s_margin=24,s_margin_y,s_mode;
 static const char *s_text="text";static bool s_clear_confirm,s_scan_pending;
 static bool s_rc_side_active,s_rc_side_captured;static int s_rc_side_index,s_rc_side_action,s_rc_side_value,s_rc_side_start;
 static EpdRect s_area;static struct{int sides[2];}controls;
@@ -44,7 +44,7 @@ static int metalio_frontlight_position(bool warmth){(void)warmth;return 120;}
 static void metalio_frontlight_preview_position(int b,int w){(void)b;(void)w;}
 static void metalio_frontlight_commit(void){}
 #endif
-static app_redraw_t apply_reader_layout(app_ctx_t *c,int px,int margin,int l,int para){
+static app_redraw_t apply_reader_layout(app_ctx_t *c,int px,int margin,int l,int para, int margin_y){(void)margin_y;
  (void)c;assert(px>=20&&px<=120&&l>=100&&l<=300&&margin==24&&para==-100);s_px=px;line=l;++commits;return APP_REDRAW_PAGE;
 }
 static app_redraw_t side_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev,bool *handled){

@@ -48,7 +48,7 @@ typedef enum{DISPLAY_READER_GRAY_PAGE,DISPLAY_READER_GRAY_BACKGROUND}display_rea
 static int four_pushes,entry_pushes;static bool erased_underlay;
 static display_reader_gray_profile_t last_profile;static bool last_full;
 static bool display_reader_fast_panels_enabled(void){return fast_panels;}
-static int s_reader_slider=-1,s_px=40,s_margin=10,s_reader_preview_px=40,s_reader_preview_margin=10,s_reader_preview_line=120,s_reader_preview_para=110,s_reader_preview_tracking=2;
+static int s_reader_slider=-1,s_px=40,s_margin=10,s_margin_y,s_reader_preview_px=40,s_reader_preview_margin=10,s_reader_preview_margin_y,s_reader_preview_line=120,s_reader_preview_para=110,s_reader_preview_tracking=2;
 static bool s_reader_slider_endpoint;
 static unsigned committed;
 enum{UI_GESTURE_PRESS,UI_GESTURE_MOVE,UI_GESTURE_TAP,UI_GESTURE_CANCEL,UI_GESTURE_SWIPE_L,UI_GESTURE_SWIPE_R,UI_GESTURE_SWIPE_U,UI_GESTURE_SWIPE_D,UI_GESTURE_LONG_PRESS};
@@ -61,7 +61,7 @@ static int reader_slider_at(int x,int y){(void)x;return y==700?0:-1;}
 static void reader_slider_begin(int slider,int x){s_reader_slider=slider;s_reader_slider_endpoint=false;s_reader_preview_px=x;}
 static void reader_slider_move(int x){s_reader_preview_px=x;}
 static app_redraw_t apply_reader_typography(app_ctx_t*c,int t){(void)c;(void)t;++committed;return APP_REDRAW_PAGE;}
-static app_redraw_t apply_reader_layout(app_ctx_t*c,int p,int m,int l,uint8_t pa){(void)c;(void)p;(void)m;(void)l;(void)pa;++committed;return APP_REDRAW_PAGE;}
+static app_redraw_t apply_reader_layout(app_ctx_t*c,int p,int m,int l,uint8_t pa, int margin_y){(void)margin_y;(void)c;(void)p;(void)m;(void)l;(void)pa;++committed;return APP_REDRAW_PAGE;}
 static void render(app_ctx_t*c,uint8_t*f){(void)c;(void)f;++full_draws;}
 
 static EpdRect area,s_area;
@@ -109,6 +109,8 @@ static void invalidate_prep(void){++invalidates;}
 '''
 a=source.rindex('static struct {',0,source.index('static void reader_panel_record('));b=source.index('} s_reader_panel_frame;',a)+len('} s_reader_panel_frame;')
 unit+=source[a:b]+'\n'
+# 排版面板顶边与固件同源。/ Take the layout sheet top from the firmware source.
+unit+=next(l for l in source.splitlines() if l.startswith('#define READER_LAYOUT_TOP '))+'\n'
 for name in ['reader_fast_panel_rect','reader_panel_record','reader_panel_short_ready','reader_toolbar_panel','reader_toolbar_transition','reader_sheet_profile','reader_closing_panel_to_text','reader_panel_fast_present','reader_slider_overlay_ready','reader_slider_feedback_present','reader_slider_value','reader_slider_feedback','reader_slider_commit','draw_reader_cached','pause_reader_prep']:unit+=function(name,book)+'\n'
 start=source.index('    if (s_view == READING &&\n        (s_reader_panel == READER_PANEL_FONT_SETTINGS',source.index('static app_redraw_t gesture_event('))
 at=source.index('{',start)+1;depth=1

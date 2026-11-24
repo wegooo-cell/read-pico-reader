@@ -279,6 +279,8 @@ int app_settings_book_line_spacing(void);
 void app_settings_set_book_line_spacing(int percent);
 /// 阅读页左右边距，0..48 像素。/ Reader horizontal margin: 0..48 pixels.
 uint8_t app_settings_book_margin(void);
+/// Extra inset at both vertical edges of the reader body, 0..48 px.
+uint8_t app_settings_book_margin_y(void);
 void app_settings_set_book_margin(uint8_t px);
 /// 段距-100..100%，每10%一档，共21档。/ Paragraph gaps: -100..100% in 21 stops spaced by 10%.
 #define APP_BOOK_PARAGRAPH_COUNT 21
@@ -287,7 +289,7 @@ uint8_t app_settings_book_paragraph_level(int percent);
 int app_settings_book_paragraph_spacing(void);
 void app_settings_set_book_paragraph_spacing(int percent);
 /// 同一次提交保存阅读排版，失败保留当前运行设置。/ Commit reader layout together, retaining live settings on failure.
-bool app_settings_try_book_layout(uint8_t px, uint8_t margin, int line, int paragraph);
+bool app_settings_try_book_layout(uint8_t px, uint8_t margin, int line, int paragraph, uint8_t margin_y);
 /// 书架样式：1 深色书轨、2 亚克力、5 列表、6 液态玻璃；旧3/4安全回退2。/ Shelf styles: rail (1), acrylic (2), list (5), liquid glass (6); retired IDs 3/4 fall back to 2.
 uint8_t app_settings_shelf_style(void);
 /// 三种封面书架的进度角标，不影响列表进度。/ Progress badges on cover shelves, independent of list metadata.

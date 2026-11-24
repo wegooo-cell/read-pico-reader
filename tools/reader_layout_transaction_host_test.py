@@ -21,7 +21,7 @@ unit=r'''
 #define APP_BOOK_TRACK_COUNT 31
 typedef struct {int unused;}app_ctx_t;
 typedef enum{APP_REDRAW_NONE,APP_REDRAW_PAGE}app_redraw_t;
-static int s_px=48,s_margin=24,s_line_spacing=130,line=130,para=50,tracking=15,indent=2,adjustment;
+static int s_px=48,s_margin=24,s_margin_y,s_line_spacing=130,line=130,para=50,tracking=15,indent=2,adjustment;
 static const char *s_text="text";static size_t s_text_len=4,s_page=7,s_block_count;static const void *s_blocks;
 static int layout_line=130,layout_para=50,layout_tracking,layout_indent=2,layout_adjustment;
 static int failures,builds,saves,writes;static bool locked,persist_failure;
@@ -39,7 +39,7 @@ static void app_settings_set_book_paragraph_spacing(int p){para=p;++writes;}
 static void app_settings_set_book_tracking(uint8_t p){tracking=p;++writes;}
 static void app_settings_set_book_indent(uint8_t p){indent=p;++writes;}
 static void app_settings_set_book_indent_adjust(int8_t p){adjustment=p;++writes;}
-static bool app_settings_try_book_layout(uint8_t px,uint8_t margin,int l,int p){
+static bool app_settings_try_book_layout(uint8_t px,uint8_t margin,int l,int p, uint8_t margin_y){assert(margin_y==s_margin_y);
  if(persist_failure)return false;
  app_settings_set_book_px(px);app_settings_set_book_margin(margin);app_settings_set_book_line_spacing(l);app_settings_set_book_paragraph_spacing(p);return true;
 }
@@ -66,25 +66,27 @@ for name in ['apply_reader_layout','apply_reader_typography','apply_reader_inden
 unit+=r'''
 static void verify(void){assert(!locked&&s_page==7&&layout_line==line&&layout_para==para&&layout_tracking==tracking-15&&layout_indent==indent&&layout_adjustment==adjustment);}
 int main(void){app_ctx_t ctx={0};
- for(int px=20;px<=120;++px){apply_reader_layout(&ctx,px,s_margin,line,para);assert(s_px==px);verify();}
- for(int margin=0;margin<=48;++margin){apply_reader_layout(&ctx,s_px,margin,line,para);assert(s_margin==margin);verify();}
- for(int l=100;l<=300;++l){apply_reader_layout(&ctx,s_px,s_margin,l,para);assert(line==l&&s_line_spacing==l);verify();}
- for(int p=-100;p<=100;p+=10){apply_reader_layout(&ctx,s_px,s_margin,line,p);assert(para==p);verify();}
+ for(int px=20;px<=120;++px){apply_reader_layout(&ctx,px,s_margin,line,para, s_margin_y);assert(s_px==px);verify();}
+ for(int margin=0;margin<=48;++margin){apply_reader_layout(&ctx,s_px,margin,line,para, s_margin_y);assert(s_margin==margin);verify();}
+ for(int y=0;y<=48;++y){apply_reader_layout(&ctx,s_px,s_margin,line,para,y);assert(s_margin_y==y);verify();}
+ persist_failure=true;assert(apply_reader_layout(&ctx,s_px,s_margin,line,para,0)==APP_REDRAW_NONE&&s_margin_y==48);persist_failure=false;
+ for(int l=100;l<=300;++l){apply_reader_layout(&ctx,s_px,s_margin,l,para, s_margin_y);assert(line==l&&s_line_spacing==l);verify();}
+ for(int p=-100;p<=100;p+=10){apply_reader_layout(&ctx,s_px,s_margin,line,p, s_margin_y);assert(para==p);verify();}
  for(int t=0;t<31;++t){apply_reader_typography(&ctx,t);assert(tracking==t);verify();}
  for(int em=0;em<=3;++em)for(int adj=-100;adj<=100;++adj){apply_reader_indent(&ctx,em,adj);assert(indent==em&&adjustment==adj);verify();}
  int old_writes=writes,old_saves=saves;
- assert(apply_reader_layout(&ctx,19,s_margin,line,para)==APP_REDRAW_NONE);
- assert(apply_reader_layout(&ctx,121,s_margin,line,para)==APP_REDRAW_NONE);
- assert(apply_reader_layout(&ctx,s_px,-1,line,para)==APP_REDRAW_NONE);
- assert(apply_reader_layout(&ctx,s_px,49,line,para)==APP_REDRAW_NONE);
- assert(apply_reader_layout(&ctx,s_px,s_margin,99,para)==APP_REDRAW_NONE);
- assert(apply_reader_layout(&ctx,s_px,s_margin,301,para)==APP_REDRAW_NONE);
- assert(apply_reader_layout(&ctx,s_px,s_margin,line,-101)==APP_REDRAW_NONE);
- assert(apply_reader_layout(&ctx,s_px,s_margin,line,101)==APP_REDRAW_NONE);
- assert(apply_reader_layout(&ctx,s_px,s_margin,line,5)==APP_REDRAW_NONE);
+ assert(apply_reader_layout(&ctx,19,s_margin,line,para, s_margin_y)==APP_REDRAW_NONE);
+ assert(apply_reader_layout(&ctx,121,s_margin,line,para, s_margin_y)==APP_REDRAW_NONE);
+ assert(apply_reader_layout(&ctx,s_px,-1,line,para, s_margin_y)==APP_REDRAW_NONE);
+ assert(apply_reader_layout(&ctx,s_px,49,line,para, s_margin_y)==APP_REDRAW_NONE);
+ assert(apply_reader_layout(&ctx,s_px,s_margin,99,para, s_margin_y)==APP_REDRAW_NONE);
+ assert(apply_reader_layout(&ctx,s_px,s_margin,301,para, s_margin_y)==APP_REDRAW_NONE);
+ assert(apply_reader_layout(&ctx,s_px,s_margin,line,-101, s_margin_y)==APP_REDRAW_NONE);
+ assert(apply_reader_layout(&ctx,s_px,s_margin,line,101, s_margin_y)==APP_REDRAW_NONE);
+ assert(apply_reader_layout(&ctx,s_px,s_margin,line,5, s_margin_y)==APP_REDRAW_NONE);
  assert(old_writes==writes&&old_saves==saves);
- persist_failure=true;assert(apply_reader_layout(&ctx,48,24,100,-100)==APP_REDRAW_NONE);verify();persist_failure=false;
- failures=1;assert(apply_reader_layout(&ctx,48,24,100,-100)==APP_REDRAW_NONE);verify();
+ persist_failure=true;assert(apply_reader_layout(&ctx,48,24,100,-100, s_margin_y)==APP_REDRAW_NONE);verify();persist_failure=false;
+ failures=1;assert(apply_reader_layout(&ctx,48,24,100,-100, s_margin_y)==APP_REDRAW_NONE);verify();
  failures=1;assert(apply_reader_typography(&ctx,15)==APP_REDRAW_NONE);verify();
  failures=1;assert(apply_reader_indent(&ctx,2,0)==APP_REDRAW_NONE);verify();
  assert(old_writes==writes&&old_saves==saves&&builds>1000);

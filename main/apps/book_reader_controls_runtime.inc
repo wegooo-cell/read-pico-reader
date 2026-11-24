@@ -343,8 +343,8 @@ static app_redraw_t rc_gesture(app_ctx_t*ctx,const ui_gesture_event_t*ev,bool*ha
 #if KIIKO_BOARD_METALIO47
             if(s_rc_side_action==RC_SIDE_BRIGHTNESS||s_rc_side_action==RC_SIDE_WARMTH)metalio_frontlight_commit();
 #endif
-            if(s_rc_side_action==RC_SIDE_FONT)return apply_reader_layout(ctx,value,s_margin,app_settings_book_line_spacing(),app_settings_book_paragraph_spacing());
-            if(s_rc_side_action==RC_SIDE_LINE)return apply_reader_layout(ctx,s_px,s_margin,value,app_settings_book_paragraph_spacing());
+            if(s_rc_side_action==RC_SIDE_FONT)return apply_reader_layout(ctx,value,s_margin,app_settings_book_line_spacing(),app_settings_book_paragraph_spacing(), s_margin_y);
+            if(s_rc_side_action==RC_SIDE_LINE)return apply_reader_layout(ctx,s_px,s_margin,value,app_settings_book_paragraph_spacing(), s_margin_y);
             return APP_REDRAW_PAGE;
         }
         if(changed){char text[64];snprintf(text,sizeof(text),"%s %d",rc_side_name(s_rc_side_action),value);rc_notice(ctx,text);render(ctx,ctx->fb);s_area=(EpdRect){208,150,268,68};s_mode=MODE_GL16;return APP_REDRAW_AREA;}

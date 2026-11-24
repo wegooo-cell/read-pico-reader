@@ -18,6 +18,15 @@ static settings_backup_v1_t read_base(const char *path){
 }
 int main(void){
  remove_backup_files();app_settings_init();
+ loaded_margin=36;loaded_margin_y=-1;loaded_vertical=1;app_settings_init();
+ assert(s_book_margin==24&&s_book_margin_y==36);
+ app_settings_set_book_vertical(false);app_settings_init();assert(s_book_margin==24&&s_book_margin_y==36);
+ loaded_margin=30;loaded_margin_y=-1;app_settings_init();assert(s_book_margin==30&&s_book_margin_y==0);
+ assert(app_settings_try_book_layout(48,18,130,50,42));app_settings_init();
+ assert(s_book_margin==18&&s_book_margin_y==42);
+ assert(app_settings_backup_save()==ESP_OK);
+ assert(app_settings_try_book_layout(48,0,130,50,0));
+ assert(app_settings_backup_restore()==ESP_OK&&s_book_margin==18&&s_book_margin_y==42);
  assert(BOOK_READER_PX_MIN==20&&BOOK_READER_PX_MAX==120);
  for(int line=100;line<=300;++line){
   app_settings_set_book_line_spacing(line);assert(app_settings_book_line_spacing()==line);
@@ -57,7 +66,7 @@ int main(void){
  app_settings_set_book_line_spacing(301);app_settings_set_book_line_spacing(99);
  app_settings_set_book_paragraph_spacing(-110);app_settings_set_book_paragraph_spacing(101);app_settings_set_book_paragraph_spacing(1);
  assert(s_book_line==300&&s_book_para==-100);
- commit_fails=true;assert(!app_settings_try_book_layout(48,24,100,0)&&s_book_px==120&&s_book_line==300&&s_book_para==-100);app_settings_set_book_line_spacing(200);app_settings_set_book_paragraph_spacing(50);commit_fails=false;
+ commit_fails=true;assert(!app_settings_try_book_layout(48,24,100,0,12)&&s_book_px==120&&s_book_line==300&&s_book_para==-100);app_settings_set_book_line_spacing(200);app_settings_set_book_paragraph_spacing(50);commit_fails=false;
  assert(s_book_line==300&&s_book_para==-100);
  uint8_t *wire=NULL;size_t size=0;
  assert(app_settings_sync_export(&wire,&size)==ESP_OK);

@@ -15,6 +15,7 @@ unit = r'''
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -24,8 +25,8 @@ unit = r'''
 typedef struct {int x,y,width,height;} EpdRect;
 typedef struct {int unused;} app_ctx_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE} app_redraw_t;
-static int s_px=36,s_margin=24,s_reader_slider=-1;
-static int s_reader_preview_px,s_reader_preview_margin,s_reader_preview_line;
+static int s_px=36,s_margin=24,s_margin_y,s_reader_slider=-1;
+static int s_reader_preview_px,s_reader_preview_margin,s_reader_preview_margin_y,s_reader_preview_line;
 static int s_reader_preview_para,s_reader_preview_tracking;
 static bool s_reader_slider_endpoint,fail_layout;
 static uint8_t s_book_tracking=15;static int s_book_para=30;
@@ -44,16 +45,13 @@ static void nvs_put_u8(const char *key,uint8_t value){
 }
 static uint8_t app_settings_book_line_spacing(void){return 130;}
 static int reader_ui_extra(int pixels){(void)pixels;return 0;}
-static int reader_margin_input(EpdRect r,int x,int current,int px,int tr){
- (void)r;(void)x;(void)px;(void)tr;return current;
-}
-static int reader_margin_levels(int px,int tr,int *widths,int *values){
- (void)px;(void)tr;(void)widths;(void)values;return 9;
-}
 #define BOOK_MARGIN_CHOICES 9
-static int reader_margin_for_level(int level,int current,int px,int tr){
- (void)current;(void)px;(void)tr;return level*6;
-}
+#define BOOK_MARGIN_MIN 0
+#define BOOK_MARGIN_MAX 48
+#define UI_LOCK_WIDTH 684
+enum {READER_PANEL_FONT_SETTINGS, READER_PANEL_LAYOUT_SETTINGS};
+static int s_reader_panel=READER_PANEL_LAYOUT_SETTINGS;
+static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}
 static EpdRect body_rect_for_tracking(int tracking){
  (void)tracking;return (EpdRect){24,188,636,940};
 }
@@ -73,9 +71,10 @@ static void save_progress(void){++saves;}
 unit+=r'''
 #define NVS_KEY_BOOK_PARA_FULL "bk_para_full"
 #define s_book_px s_px
+#define s_book_margin_y s_margin_y
 #define s_book_margin s_margin
 #define s_book_line 130
-static bool app_settings_try_book_layout(uint8_t px,uint8_t margin,int line,int para){(void)px;(void)margin;(void)line;++writes;stored_para=s_book_para=para;return true;}
+static bool app_settings_try_book_layout(uint8_t px,uint8_t margin,int line,int para, uint8_t margin_y){(void)margin_y;(void)px;(void)margin;(void)line;++writes;stored_para=s_book_para=para;return true;}
 '''
 header = (root / 'main/settings.h').read_text()
 for name in ('APP_BOOK_TRACK_MIN', 'APP_BOOK_TRACK_MAX', 'APP_BOOK_TRACK_COUNT', 'APP_BOOK_PARAGRAPH_COUNT'):
@@ -85,17 +84,40 @@ for name in ('app_settings_book_paragraph_value', 'app_settings_book_paragraph_l
              'app_settings_book_paragraph_spacing', 'app_settings_set_book_paragraph_spacing'):
     unit += function(name, settings) + '\n'
 unit += r'''
-static app_redraw_t apply_reader_layout(app_ctx_t *ctx,int px,int margin,int line,int para){
- (void)ctx;assert(px==s_px&&margin==s_margin&&line==130);
+static app_redraw_t apply_reader_layout(app_ctx_t *ctx,int px,int margin,int line,int para, int margin_y){(void)margin_y;
+ (void)ctx;assert(px==s_px&&line==130);
+ if(fail_layout)return APP_REDRAW_NONE;
+ s_margin=margin;s_margin_y=margin_y;
  app_settings_set_book_paragraph_spacing(para);save_progress();return APP_REDRAW_PAGE;
 }
 '''
 for name in ('apply_reader_typography', 'slider_index', 'reader_slider_rect',
-             'reader_slider_map', 'reader_slider_begin', 'reader_slider_move', 'reader_slider_commit'):
+             'reader_slider_at','reader_margin_width','reader_margin_levels','reader_margin_level_for',
+             'reader_margin_for_level','reader_margin_input','reader_slider_map', 'reader_slider_begin', 'reader_slider_move', 'reader_slider_commit'):
     unit += function(name, reader) + '\n'
 unit += r'''
 int main(void){
  app_ctx_t ctx={0};
+ // 行距/段距/字间距占整行，边距成对；所有滑杆互不重叠。/ Line, paragraph and tracking rails span full rows; margins pair; no rails overlap.
+ for(int i=2;i<=4;++i)assert(reader_slider_rect(i).x==36&&reader_slider_rect(i).width==612);
+ assert(reader_slider_rect(1).y==reader_slider_rect(5).y&&reader_slider_rect(1).width==294&&reader_slider_rect(5).width==294);
+ for(int a=1;a<=5;++a)for(int b=a+1;b<=5;++b){EpdRect A=reader_slider_rect(a),B=reader_slider_rect(b);
+  assert(A.x+A.width<=B.x||B.x+B.width<=A.x||A.y+A.height<=B.y||B.y+B.height<=A.y);}
+ for(int axis=0;axis<2;++axis){
+  int slider=axis?5:1; EpdRect r=reader_slider_rect(slider);
+  assert(reader_slider_at(r.x+r.width/2,r.y+r.height/2)==slider);
+  for(int i=0;i<=8;++i){
+   int other=axis?s_margin:s_margin_y;
+   reader_slider_begin(slider,r.x+r.width/2);
+   reader_slider_move(r.x+64+(i*(r.width-128)+4)/8);
+   assert((axis?s_reader_preview_margin_y:s_reader_preview_margin)==6*i);
+   reader_slider_commit(&ctx);
+   assert((axis?s_margin_y:s_margin)==6*i&&(axis?s_margin:s_margin_y)==other);
+  }
+  reader_slider_begin(slider,r.x);fail_layout=true;
+  assert(reader_slider_commit(&ctx)==APP_REDRAW_PAGE&&(axis?s_margin_y:s_margin)==48);
+  fail_layout=false;
+ }
  EpdRect track=reader_slider_rect(4),para=reader_slider_rect(3);
  for(int start=0;start<APP_BOOK_TRACK_COUNT;++start)for(int direction=-1;direction<=1;direction+=2){
   s_book_tracking=start;stored_tracking=192+start;typography=start+APP_BOOK_TRACK_MIN;
@@ -150,7 +172,7 @@ int main(void){
  s_px=120;reader_slider_begin(0,648);assert(s_reader_preview_px==120);
  s_px=20;reader_slider_begin(0,36);assert(s_reader_preview_px==20);
  reader_slider_begin(2,648);assert(s_reader_preview_line==131);
- reader_slider_begin(2,354);assert(s_reader_preview_line==129);
+ reader_slider_begin(2,36);assert(s_reader_preview_line==129);
  assert(invalidations&&saves&&writes);
  puts("PASS: actual press/drag/commit for all 31 tracking and 21 paragraph stops, endpoint bounds, NVS encoding, anchored reflow and unchanged saved spacing on reflow failure");
 }

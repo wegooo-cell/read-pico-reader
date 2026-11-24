@@ -245,7 +245,7 @@ static bool app_settings_reader_default_fullscreen(void){return false;}
 static bool app_settings_set_reader_default_fullscreen(bool on){(void)on;return true;}
 static int test_open_calls;
 static char* s_text;
-static int s_unsaved,s_px=48,s_margin=36,s_line_spacing=130;
+static int s_unsaved,s_px=48,s_margin=36,s_margin_y,s_line_spacing=130;
 static uint32_t s_file_size=1000;
 static size_t s_chapter,s_page;
 static bool s_book_fonts_applied;
@@ -288,7 +288,7 @@ static void ttf_font_scan(void){}
 static reader_panel_t s_reader_panel;
 static int s_reader_slider=-1;
 static bool s_reader_slider_endpoint;
-static int s_reader_preview_px,s_reader_preview_margin,s_reader_preview_line,s_reader_preview_para,s_reader_preview_tracking;
+static int s_reader_preview_px,s_reader_preview_margin,s_reader_preview_margin_y,s_reader_preview_line,s_reader_preview_para,s_reader_preview_tracking;
 static bool s_requested_manage,s_bulk_selecting,s_bulk_grid;
 static int s_presented_view;
 static uint8_t* s_editor_cover;
@@ -360,6 +360,7 @@ static void* s_prep_task,*s_prep_done,*s_draw_lock,*s_next_fb;
 static void ensure_prep(void){}
 static int app_settings_book_px(void){return 48;}
 static int test_saved_margin=36;
+static int app_settings_book_margin_y(void){return s_margin_y;}
 static int app_settings_book_margin(void){return test_saved_margin;}
 static void app_settings_set_book_px(uint8_t px){assert(px==48);}
 static void app_settings_set_book_margin(uint8_t margin){test_saved_margin=margin;}
@@ -574,12 +575,12 @@ int main(void) {
     for(int margin=0;margin<=48;margin+=6){
         s_margin=margin==0?48:0;test_saved_margin=s_margin;s_px=48;s_page=2;
         int before=test_reflows;
-        assert(apply_reader_layout(&margin_ctx,48,margin,130,50)==APP_REDRAW_PAGE);
+        assert(apply_reader_layout(&margin_ctx,48,margin,130,50, s_margin_y)==APP_REDRAW_PAGE);
         assert(s_margin==margin&&test_saved_margin==margin&&test_reflows==before+1&&s_page==2);
         assert(test_reflow_rect.width==reader_margin_width(margin,48,0));
     }
-    assert(apply_reader_layout(&margin_ctx,48,-1,130,50)==APP_REDRAW_NONE);
-    assert(apply_reader_layout(&margin_ctx,48,49,130,50)==APP_REDRAW_NONE);
+    assert(apply_reader_layout(&margin_ctx,48,-1,130,50, s_margin_y)==APP_REDRAW_NONE);
+    assert(apply_reader_layout(&margin_ctx,48,49,130,50, s_margin_y)==APP_REDRAW_NONE);
     s_margin=test_saved_margin=24;s_reader_slider_endpoint=false;
     reader_slider_begin(1,40);assert(s_reader_slider_endpoint&&s_reader_preview_margin==18);
     assert(reader_slider_commit(&margin_ctx)==APP_REDRAW_PAGE&&s_margin==18&&test_saved_margin==18);
@@ -589,8 +590,13 @@ int main(void) {
     assert(reader_slider_commit(&margin_ctx)==APP_REDRAW_PAGE&&s_margin==0&&test_saved_margin==0);
     assert(body_rect().width==reader_margin_width(0,48,0));
     s_margin=test_saved_margin=24;test_reflow_failures=1;
-    assert(apply_reader_layout(&margin_ctx,48,0,130,50)==APP_REDRAW_NONE);
+    assert(apply_reader_layout(&margin_ctx,48,0,130,50, s_margin_y)==APP_REDRAW_NONE);
     assert(s_margin==24&&test_saved_margin==24&&!test_draw_locked);
+    s_margin_y=0;s_margin=24;
+    reader_slider_begin(5,645);assert(s_reader_preview_margin_y==6);
+    assert(reader_slider_commit(&margin_ctx)==APP_REDRAW_PAGE&&s_margin_y==6&&s_margin==24);
+    EpdRect inset_body=body_rect();assert(inset_body.x==24&&inset_body.y==90);
+    s_margin_y=0;
     s_margin=test_saved_margin=36;s_page=0;test_reflows=0;
     reader_bookmarks_t marks={.count=6};
     for(unsigned i=0;i<marks.count;++i)marks.entries[i].byte_off=(i+1)*100;

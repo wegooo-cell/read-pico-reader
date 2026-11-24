@@ -41,7 +41,7 @@ typedef enum {APP_REDRAW_NONE,APP_REDRAW_DONE} app_redraw_t;
 typedef struct {uint8_t *fb;void *hl;int64_t now_ms;} app_ctx_t;
 static bool s_reader_fullscreen,immersive,vertical,s_reader_favorite,s_zoom_active;
 static size_t s_page=1;
-static int s_reader_panel,s_px=48,s_margin=24,s_chapter_lead_height,s_chapter_lead_width;
+static int s_reader_panel,s_px=48,s_margin=24,s_margin_y,s_chapter_lead_height,s_chapter_lead_width;
 static char s_book_title[128]="Title",s_title[128]="Title",s_chapter_heading_title[128],s_chapter_heading_label[128],s_reader_notice[128];
 static app_book_heading_style_t heading_style;
 static app_book_heading_align_t heading_align;

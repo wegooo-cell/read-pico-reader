@@ -42,7 +42,7 @@ int main(void){
  // Both chrome states feed identical geometry to the real paginator, including vertical text.
  for(int style=0;style<2;++style)for(int vertical=0;vertical<2;++vertical){
   book_layout_set_vertical(vertical);
-  EpdRect a=ui_reader_body(true,style,24,vertical),b=ui_reader_body(false,style,24,vertical);
+  EpdRect a=ui_reader_body(true,style,24,18),b=ui_reader_body(false,style,24,18);
   assert(a.x==b.x&&a.y==b.y&&a.width==b.width&&a.height==b.height);
   assert(book_layout_build(text,11999,a,48));
   size_t pages=book_layout_page_count(),offsets[1024];assert(pages<1024);

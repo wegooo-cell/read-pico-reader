@@ -18,8 +18,8 @@ static bool overlaps(EpdRect a,EpdRect b){return a.x<b.x+b.width&&b.x<a.x+a.widt
 static void bounds(EpdRect a){assert(a.x>=0&&a.y>=0&&a.width>0&&a.height>0&&a.x+a.width<=684&&a.y+a.height<=1216);}
 int main(void){
  for(int full=0;full<2;++full)for(int immersive=0;immersive<2;++immersive)for(int vertical=0;vertical<2;++vertical)for(int margin=0;margin<=48;++margin){
-  EpdRect body=ui_reader_body(full,immersive,margin,vertical);bounds(body);
-  EpdRect hidden=ui_reader_body(!full,immersive,margin,vertical);
+  EpdRect body=ui_reader_body(full,immersive,margin,48-margin);bounds(body);
+  EpdRect hidden=ui_reader_body(!full,immersive,margin,48-margin);
   assert(body.x==hidden.x&&body.y==hidden.y&&body.width==hidden.width&&body.height==hidden.height);
   EpdRect controls=full?ui_reader_footer_for(full,immersive):(EpdRect){0,1096,684,120};bounds(controls);
   EpdRect visible=ui_reader_area(full,immersive);bounds(visible);assert(!overlaps(visible,controls));
