@@ -4813,7 +4813,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         err = display_dc_recover_light(ctx->hl);
     } else if (image_gray_refresh && redraw == APP_REDRAW_AREA && !s_reader_cleanup && s_presented_view == (int)READING) {
         // 图文翻页只擦白内容区；界面操作仍可提交完整目标页。/ Image turns erase content only; UI changes retain complete target-page output.
-        const EpdWaveform *wave = display_reader_soft_turn_waveform();
+        const EpdWaveform *wave = display_reader_image_turn_waveform();
         err = separate_metadata ? update_display_reader_area(ctx->hl, wave, MODE_GL16, body_area, true)
             : update_display_area_full_with(ctx->hl, wave, MODE_GL16, (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT});
     }
@@ -4822,7 +4822,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         // Whole-page image repaints also drive changed pixels only; explicit full refreshes still run
         // the complete GC16.
         err = redraw != APP_REDRAW_FULL
-            ? update_display_area_full_with(ctx->hl, display_reader_soft_turn_waveform(), MODE_GL16,
+            ? update_display_area_full_with(ctx->hl, display_reader_image_turn_waveform(), MODE_GL16,
                                             (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT})
             : update_display_with(ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16);
     }

@@ -155,6 +155,40 @@ const EpdWaveform* display_reader_soft_turn_waveform(void) {
     return &s_soft_waveform;
 }
 
+// 插图页翻页：图片的浅色/白底需要比正文更强的擦白，否则上一页会残留在插图上。
+// 低残影开启时恢复原来的 12 相整屏擦白，关闭时不加额外相——与旧的图片页行为一致。
+// Image-page turns: illustrations need the stronger white push the text path dropped, otherwise
+// the previous page stays on the illustration. Low-ghost restores the original twelve whole-panel
+// erase phases and off adds none, matching the previous image behaviour.
+#define READER_IMAGE_TURN_SETTLE_EXTRA 12
+static uint8_t s_image_turn_data[64][16][4];
+static EpdWaveformPhases s_image_turn_phases = {
+    48, (const uint8_t*)s_image_turn_data, NULL
+};
+static const EpdWaveformPhases* s_image_turn_ranges[] = {&s_image_turn_phases};
+static const EpdWaveformMode s_image_turn_mode = {MODE_GL16, 1, s_image_turn_ranges};
+static const EpdWaveformMode* s_image_turn_modes[] = {&s_image_turn_mode};
+static EpdWaveform s_image_turn_waveform = {
+    .num_modes = 1, .num_temp_ranges = 1, .mode_data = s_image_turn_modes
+};
+static bool s_image_turn_ready;
+static bool s_image_turn_low;
+
+const EpdWaveform* display_reader_image_turn_waveform(void) {
+    const bool low = app_settings_low_ghost();
+    if (s_image_turn_ready && s_image_turn_low == low) return &s_image_turn_waveform;
+    s_image_turn_ready = false;
+    if (!build_turn_phases(e0470_waveform_phases(&E0470_WAVEFORM, MODE_GL16),
+                           low ? READER_IMAGE_TURN_SETTLE_EXTRA : 0,
+                           low ? READER_SOFT_TURN_BLACK_EXTRA : 0,
+                           s_image_turn_data, &s_image_turn_phases))
+        return &E0470_WAVEFORM;
+    s_image_turn_waveform.temp_intervals = E0470_WAVEFORM.temp_intervals;
+    s_image_turn_low = low;
+    s_image_turn_ready = true;
+    return &s_image_turn_waveform;
+}
+
 // 快速灰阶翻页：用官方 GRAY8 的 GL16（30 相，8 级可分辨灰）代替默认 GL16（37 相），同样去掉“黑→黑”的擦白。
 // 实屏验收：不加额外相时白底残影明显，追加 4 相整屏擦白后可接受；不加重推黑。两个宏可在编译时覆盖。
 // 只给纯文字翻页用，封面/插图/周期全刷仍走原路径。
