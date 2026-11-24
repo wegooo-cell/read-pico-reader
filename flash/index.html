@@ -17,10 +17,10 @@
   <link rel="stylesheet" href="./assets/manual-helper.css">
   <script src="./assets/manual-search.js" defer></script>
   <script src="./assets/manual-helper.js?v=simulator-20261020" data-index="./manual/manual-index.json" data-manual="./manual/" defer></script>
-  <script type="module" src="./vendor/web/install-button.js?v=retained-20261021"></script>
   <script src="./flasher-integrity.js?v=dual-device-20261024" defer></script>
+  <script type="module" src="./pico-installer.js?v=pico-partitions-20261123"></script>
   <script type="module" src="./metalio-installer.js?v=rc117-bootloader"></script>
-  <script src="./versions.js?v=rc110-rc118" defer></script>
+  <script src="./versions.js?v=pico-partitions-20261123" defer></script>
 </head>
 <body>
 <a class="skip" href="#main">跳到正文</a>
@@ -69,7 +69,7 @@
   <div class="release-picker"><div class="select-wrap"><label for="firmware-choice">02 / 选择固件版本</label><select id="firmware-choice" disabled><option value="./manifest.json">最新正式版 · 读取中</option></select></div><dl class="release-meta"><div><dt>版本</dt><dd id="firmware-version">读取中…</dd></div><div><dt>更新时间 · 北京时间</dt><dd><time id="firmware-updated">读取中…</time></dd></div></dl></div>
   <p class="picker-hint" id="firmware-choice-hint">刷机、Bin 下载和更新日志均对应当前选择的版本。</p>
   <div class="install-grid">
-    <article class="install-card"><span class="card-number">01 / USB</span><h3>连接电脑，网页刷机</h3><p>适合第一次安装、修复系统或切换历史版本。<br>用数据线连接墨水屏，按提示选择设备。</p><div class="install-action"><esp-web-install-button id="flash-installer" hidden manifest="./manifest.json"><button slot="activate" class="button primary" type="button">连接墨水屏，开始刷机</button></esp-web-install-button><button id="metalio-installer" class="button primary" type="button" hidden>连接 Metalio，开始刷机</button><div id="flash-help" class="browser-help"><strong id="flash-help-title">正在加载刷机按钮…</strong><p>请在电脑上使用 Chrome 或 Edge，通过 HTTPS 或本地预览地址打开此页。</p></div></div><a id="usb-package-download" class="text-link" hidden>下载全量包（USB）ZIP ↓</a><p class="card-footnote" id="usb-instructions">安装时保留数据：不要勾选「擦除设备」。<br>无法连接时，先在「设置 → 升级和恢复」进入 BOOT 模式。</p><a id="usb-guide" href="./manual/#first-use" class="text-link">查看完整刷机步骤 <span aria-hidden="true">→</span></a></article>
+    <article class="install-card"><span class="card-number">01 / USB</span><h3>连接电脑，网页刷机</h3><p>适合第一次安装、修复系统或切换历史版本。<br>用数据线连接墨水屏，按提示选择设备。</p><div class="install-action"><button id="pico-installer" class="button primary" type="button" hidden>连接小纸 Pico，开始刷机</button><button id="metalio-installer" class="button primary" type="button" hidden>连接 Metalio，开始刷机</button><div id="flash-help" class="browser-help"><strong id="flash-help-title">正在加载刷机按钮…</strong><p>请在电脑上使用 Chrome 或 Edge，通过 HTTPS 或本地预览地址打开此页。</p></div></div><a id="usb-package-download" class="text-link" hidden>下载全量包（USB）ZIP ↓</a><p class="card-footnote" id="usb-instructions">安装前会读取设备分区表：官方布局保留机内设置；非官方分区表需勾选「整机重装」。<br>无法连接时，先在「设置 → 升级和恢复」进入 BOOT 模式。</p><a id="usb-guide" href="./manual/#first-use" class="text-link">查看完整刷机步骤 <span aria-hidden="true">→</span></a></article>
     <article class="install-card"><span class="card-number">02 / TF CARD</span><h3>TF 卡升级包</h3><p>已安装兼容基础包？把升级文件放进 TF 卡根目录，<br>在墨水屏的「升级和恢复」中开始升级。</p><div class="install-action"><a class="button secondary" id="bin-download" hidden download="Pico-update.bin">下载 TF 卡升级 Bin</a><a id="tf-package-download" class="text-link" hidden>下载 TF 卡升级包 ZIP ↓</a></div><a class="text-link archive-bin" id="rc88-bin-download" href="./Pico-update-0.3.3-rc88.bin" download="Pico-update.bin">下载 rc88 正式版 Bin <img src="./assets/icons/download.svg" width="18" height="18" alt=""></a><p class="card-footnote" id="tf-instructions">文件名保持 <code>Pico-update.bin</code>，以兼容已有固件。<br>这是应用升级包，不能作为完整包刷到地址 0。</p><a id="tf-guide" href="./manual/#update" class="text-link">查看升级与兼容说明 <span aria-hidden="true">→</span></a></article>
   </div>
   <aside class="ota-guide" aria-labelledby="ota-guide-title"><span class="card-number">03 / ONLINE UPDATE</span><div><h3 id="ota-guide-title">下一次，在设备上更新。</h3><p id="ota-instructions">连接 Wi-Fi，在「设置 → 系统升级」检查更新。下载优先使用 GitHub Pages，官网作为备用来源。</p></div><span class="ota-source">GitHub 优先 ↗</span></aside>
