@@ -892,6 +892,44 @@ enum EpdDrawError display_panel_repair(EpdiyHighlevelState* hl) {
     return result;
 }
 
+// DC 恢复：恢复一次推完，压黑 (net+13) 帧，再补 13 帧擦白把面板停回白场，净负偏置 = net；
+// 最后用完整 48 相 GC16 把当前页重新落屏。
+// One pass: (net+13) darken frames followed by 13 erase frames that leave the panel white, so the
+// net negative bias equals net.
+#define DISPLAY_DC_RECOVER_WHITE 13
+static enum EpdDrawError dc_recover_net(EpdiyHighlevelState* hl, int net_frames) {
+    if (!hl || !hl->front_fb || !hl->back_fb || net_frames <= 0) return EPD_DRAW_INVALID_CROP;
+    const int black_frames = net_frames + DISPLAY_DC_RECOVER_WHITE;
+    LATENCY_DISPLAY_BEGIN();
+    bool held = pico_online_display_begin();
+    continuous_du_reset();
+    s_full_refresh_requested = false;
+    display_main_transition_cancel();
+    epd_poweroff();
+    vTaskDelay(pdMS_TO_TICKS(DISPLAY_REPAIR_OFF_MS));
+    const EpdRect area = epd_full_screen();
+    epd_poweron();
+    for (int i = 0; i < black_frames; ++i) epd_push_pixels(area, DISPLAY_REPAIR_TIME, 0);
+    for (int i = 0; i < DISPLAY_DC_RECOVER_WHITE; ++i) epd_push_pixels(area, DISPLAY_REPAIR_TIME, 1);
+    for (int i = 0; i < 3; ++i) epd_push_pixels(area, DISPLAY_REPAIR_TIME, 2);
+    enum EpdDrawError result = update_display_from_white_with_unlocked(hl, &E0470_FULL_WAVEFORM, MODE_GC16);
+    if (result != EPD_DRAW_SUCCESS) result = main_recover(hl, result);
+    s_main_fault = result != EPD_DRAW_SUCCESS;
+    if (s_main_fault) s_full_refresh_requested = true;
+    rails_keepalive();
+    pico_online_display_end(held);
+    LATENCY_DISPLAY_END();
+    return result;
+}
+
+// 设置页手动恢复：点一下 360 相净负偏置（约 6 秒）。
+// Manual recovery from Settings: one tap drives a net -360 frames (about six seconds).
+enum EpdDrawError display_dc_recover(EpdiyHighlevelState* hl) { return dc_recover_net(hl, 360); }
+
+// 低残影阅读每 15 页一次：净 −30 相，对应 15 页 × 2 相推白。
+// Low-ghost reading every fifteen turns: net -30 frames for fifteen turns of two white phases.
+enum EpdDrawError display_dc_recover_light(EpdiyHighlevelState* hl) { return dc_recover_net(hl, 30); }
+
 enum EpdDrawError update_display_image_gray(EpdiyHighlevelState* hl) {
     LATENCY_DISPLAY_BEGIN();
     bool held = pico_online_display_begin();

@@ -55,6 +55,7 @@
 #define NVS_KEY_HOME_FULL "home_full"
 #define NVS_KEY_CLOCK_12H "clk12"
 #define NVS_KEY_LOW_GHOST "lowghost"
+#define NVS_KEY_LOW_GHOST_RESTORE "lgmig2"
 #define NVS_KEY_HOME_COMPONENT "home_widget"
 #define NVS_KEY_HOME_GOAL "home_goal"
 #define NVS_KEY_MAIN_REFRESH "main_mode"
@@ -271,6 +272,15 @@ void app_settings_init(void) {
     if (nvs_get_u8(h, NVS_KEY_CLOCK_12H, &raw) == ESP_OK) s_clock_12h = raw != 0;
     raw = 0;
     if (nvs_get_u8(h, NVS_KEY_LOW_GHOST, &raw) == ESP_OK) s_low_ghost = raw != 0;
+    // 实验版的“默认关闭”迁移可能把 lowghost 写成了 0；本版一次性恢复为开，之后按用户开关。
+    // The experiment's default-off migration may have stored 0; restore it once here, then follow
+    // the user's switch.
+    uint8_t low_restore = 0;
+    if (nvs_get_u8(h, NVS_KEY_LOW_GHOST_RESTORE, &low_restore) != ESP_OK) {
+        s_low_ghost = true;
+        nvs_put_u8(NVS_KEY_LOW_GHOST, 1);
+        nvs_put_u8(NVS_KEY_LOW_GHOST_RESTORE, 1);
+    }
     raw = 0;
     s_home_component = nvs_get_u8(h, NVS_KEY_HOME_COMPONENT, &raw) == ESP_OK && raw < APP_HOME_COMPONENT_COUNT
         ? (raw == 3 ? APP_HOME_CLOCK : (app_home_component_t)raw) : APP_HOME_MOON;

@@ -601,6 +601,8 @@ static EpdRect s_area;
 static enum EpdDrawMode s_mode = MODE_GL16;
 static bool s_input_settle;
 static bool s_reader_cleanup;
+static bool s_reader_dc_recover;
+static uint8_t s_dc_recover_pages;
 static bool s_reader_footer_pending;
 static int64_t s_reader_footer_due_ms;
 static bool s_water_turn_pending;
@@ -4803,6 +4805,12 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         // Do not binarize the entry frame: anti-aliased text turns into dither noise and only a
         // manual full refresh restores it. Present the real frame with the full GC16 waveform.
         err = update_display_area_full_with(ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16, frame);
+    } else if (s_reader_dc_recover && redraw != APP_REDRAW_FULL) {
+        // 低残影 15 页一次的 DC 恢复：整屏负偏置盲刷后重画当前页。
+        // Low-ghost DC recovery every 15 turns: blind negative-biased drive, then redraw the page.
+        s_reader_dc_recover = false;
+        s_reader_cleanup = false;
+        err = display_dc_recover_light(ctx->hl);
     } else if (image_gray_refresh && redraw == APP_REDRAW_AREA && !s_reader_cleanup && s_presented_view == (int)READING) {
         // 图文翻页只擦白内容区；界面操作仍可提交完整目标页。/ Image turns erase content only; UI changes retain complete target-page output.
         const EpdWaveform *wave = display_reader_soft_turn_waveform();
@@ -6644,6 +6652,14 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
     else s_turns = 0;
     s_reader_cleanup = full_pages > 0 && s_turns >= full_pages;
     if (s_reader_cleanup) s_turns = 0;
+    // 低残影模式每 15 页做一次 DC 恢复，抵消整屏推白累积的电荷。
+    // Low-ghost mode runs a DC recovery every 15 turns to offset the charge accumulated by the
+    // whole-screen white push.
+    if (app_settings_low_ghost()) {
+        if (++s_dc_recover_pages >= 15) { s_dc_recover_pages = 0; s_reader_dc_recover = true; }
+    } else {
+        s_dc_recover_pages = 0;
+    }
     if (s_unsaved < 8) ++s_unsaved;
     if (s_unsaved >= 8 && !s_save_failed) save_progress();
     ESP_LOGI(TAG, "turn chapter=%u page=%u/%u pct=%u", (unsigned)s_chapter, (unsigned)s_page + 1, (unsigned)book_layout_page_count(), percent(s_page));
@@ -6844,6 +6860,7 @@ static app_redraw_t reader_manual_refresh(app_ctx_t* ctx) {
     s_reader_slider = -1;
     s_reader_footer_pending = s_reader_image_refresh_pending = false;
     s_water_turn_pending = s_reader_cleanup = false;
+    s_reader_dc_recover = false;
     s_du_count = s_turns = 0;
     invalidate_prep();
     return APP_REDRAW_FULL;
@@ -8244,6 +8261,8 @@ static void on_enter(app_ctx_t* ctx) {
     s_shelf_feedback_pending = false;
     s_cover_batch_present_pending = false;
     s_reader_cleanup = false;
+    s_reader_dc_recover = false;
+    s_dc_recover_pages = 0;
     s_poll_ms = 0;
     read_pico_sd_info_t sd = {0};
     esp_err_t media_err = read_pico_sd_get_info(&sd);

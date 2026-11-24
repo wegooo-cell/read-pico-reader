@@ -68,7 +68,10 @@ const EpdWaveform* display_reader_text_waveform(void) {
     return &s_waveform;
 }
 
-#define READER_SOFT_TURN_SETTLE_EXTRA 12
+// 用户2026-11-24：每页只推 2 相白，15 页累计 30 相，正好由一次 30 相净负偏置的轻量 DC 恢复抵消。
+// User2026-11-24: two white phases per turn, so fifteen turns accumulate thirty frames, cancelled
+// by one light DC-recovery pass with thirty frames of net negative bias.
+#define READER_SOFT_TURN_SETTLE_EXTRA 2
 #define READER_SOFT_TURN_BLACK_EXTRA 4
 #define READER_SOFT_TURN_HOLD_PHASES 3
 static uint8_t s_soft_data[64][16][4];

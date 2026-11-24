@@ -217,6 +217,7 @@ static bool s_config_confirm;
 // Panel repair: one tap starts it. The blind full-screen drive takes seconds, so the work goes to the
 // tick rather than a touch callback.
 static bool s_panel_repair_pending;
+static bool s_dc_recover_pending;
 static bool s_boot_pending;
 static bool s_upgrade_confirm, s_upgrade_online, s_local_pending, s_upgrade_restart;
 static pico_ota_info_t s_local_update;
@@ -381,7 +382,7 @@ static int settings_main_row_height(void) {
 #define SETTINGS_WIRELESS_ROWS 4
 #define SETTINGS_DISPLAY_ROWS 9
 #define SETTINGS_PERSONAL_ROWS 5
-#define SETTINGS_MAINTENANCE_ROWS 5
+#define SETTINGS_MAINTENANCE_ROWS 6
 #define SETTINGS_WIRELESS_Y (180 + settings_profile_height() + 77)
 #define SETTINGS_DISPLAY_Y (SETTINGS_WIRELESS_Y + SETTINGS_WIRELESS_ROWS * SETTINGS_ROW_H + 78)
 #define SETTINGS_PERSONAL_Y (SETTINGS_DISPLAY_Y + SETTINGS_DISPLAY_ROWS * SETTINGS_ROW_H + 78)
@@ -1744,9 +1745,9 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
     const int personal_icons[]={4,20,5,16,10};
     setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
                   personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
-    const char *maintenance_labels[]={"系统升级","保存与恢复","屏幕修复","BOOT 刷机","恢复出厂设置"};
-    const char *maintenance_values[]={"OTA / TF 卡","配置","清除条纹","电脑刷机","重置系统"};
-    const int maintenance_icons[]={12,8,17,13,11};
+    const char *maintenance_labels[]={"系统升级","保存与恢复","屏幕修复","DC 恢复","BOOT 刷机","恢复出厂设置"};
+    const char *maintenance_values[]={"OTA / TF 卡","配置","清除条纹","平衡电荷","电脑刷机","重置系统"};
+    const int maintenance_icons[]={12,8,17,11,13,11};
     setting_group(fb,SETTINGS_MAINTENANCE_Y-49,"升级和恢复",SETTINGS_MAINTENANCE_Y,
                   maintenance_icons,maintenance_labels,maintenance_values,SETTINGS_MAINTENANCE_ROWS);
     // 主列表也要有一行提示位：确认、修复结果都写在这里，不然点了没有任何回音。
@@ -2136,6 +2137,7 @@ static void on_enter(app_ctx_t *ctx) {
     s_devsync_role = -1; s_devsync_code = 0; s_devsync_percent = -1;
     s_devsync_state = KIIKO_SYNC_IDLE; s_devsync_done_ms = 0; s_devsync_start_error = ESP_OK;
     s_panel_repair_pending = false;
+    s_dc_recover_pending = false;
     s_boot_pending = s_local_pending = s_upgrade_restart = false;
     s_upgrade_offer_pending = s_upgrade_confirm = false;
     (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved);
@@ -2210,6 +2212,18 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
         snprintf(s_notice, sizeof(s_notice), "屏幕修复完成；若条纹仍在可再做一次");
         render(ctx, ctx->fb);
         if (display_panel_repair(ctx->hl) != EPD_DRAW_SUCCESS) {
+            snprintf(s_notice, sizeof(s_notice), "屏幕输出未完成，请稍后重试");
+            return APP_REDRAW_FULL;
+        }
+        return APP_REDRAW_DONE;
+    }
+    if (s_dc_recover_pending) {
+        s_dc_recover_pending = false;
+        if (s_page != SETTINGS_MAIN) return APP_REDRAW_NONE;
+        s_scroll_present_pending = false;
+        snprintf(s_notice, sizeof(s_notice), "DC 恢复完成");
+        render(ctx, ctx->fb);
+        if (display_dc_recover(ctx->hl) != EPD_DRAW_SUCCESS) {
             snprintf(s_notice, sizeof(s_notice), "屏幕输出未完成，请稍后重试");
             return APP_REDRAW_FULL;
         }
@@ -3047,7 +3061,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     }
     if(y>=SETTINGS_MAINTENANCE_Y && y<SETTINGS_MAINTENANCE_Y+SETTINGS_MAINTENANCE_ROWS*SETTINGS_ROW_H) {
         row=(y-SETTINGS_MAINTENANCE_Y)/SETTINGS_ROW_H;
-        if(row==4) {s_page=SETTINGS_FACTORY_RESET;s_reset_confirm=s_reset_pending=false;s_reset_notice[0]=0;}
+        if(row==5) {s_page=SETTINGS_FACTORY_RESET;s_reset_confirm=s_reset_pending=false;s_reset_notice[0]=0;}
         else if(row==0)upgrade_open();
         else if(row==1){s_page=SETTINGS_CONFIG;s_config_confirm=false;s_notice[0]=0;}
         else if(row==2){
@@ -3058,6 +3072,11 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             // then pushes the current page -- navigation bar included -- back onto the panel.
             s_panel_repair_pending=true;
             snprintf(s_notice,sizeof(s_notice),"屏幕修复中…");
+            return APP_REDRAW_PAGE;
+        }
+        else if(row==3){
+            s_dc_recover_pending=true;
+            snprintf(s_notice,sizeof(s_notice),"DC 恢复中…");
             return APP_REDRAW_PAGE;
         }
         else {s_boot_pending=false;s_page=SETTINGS_BOOT;}

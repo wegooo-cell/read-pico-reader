@@ -115,6 +115,12 @@ enum EpdDrawError update_display_from_white_with(
 enum EpdDrawError update_display_white(EpdiyHighlevelState* hl);
 enum EpdDrawError update_display_full(EpdiyHighlevelState* hl);
 
+/// DC 恢复：整屏负偏置盲刷，抵消长期单向推白累积的电荷，再整屏 GC16 重画当前页。
+/// / DC recovery: blind full-screen rounds with a negative bias to offset charge accumulated by
+/// one-sided white pushes, then a full GC16 redraw of the current page.
+enum EpdDrawError display_dc_recover(EpdiyHighlevelState* hl);
+/// 低残影阅读的轻量恢复：净 −30 相，每 15 页一次。/ Light reader recovery: net -30 frames, every 15 turns.
+enum EpdDrawError display_dc_recover_light(EpdiyHighlevelState* hl);
 /// 面板修复：不看 framebuffer 的整屏盲刷，专治刷新中途断电留下的条纹。
 /// Panel repair: a blind full-screen drive that ignores the framebuffer, for the stripes a power
 /// cut in the middle of a refresh leaves behind.
