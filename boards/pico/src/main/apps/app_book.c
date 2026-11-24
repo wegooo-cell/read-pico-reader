@@ -4113,6 +4113,19 @@ static int reader_footnote_hit(uint16_t x, uint16_t y, EpdRect *marker) {
     // Hotspot pads the 1em icon by ~half a font above/below and ~one font left/right.
     const int pad_x = s_px > 0 ? s_px : 20;
     const int pad_y = s_px > 0 ? s_px / 2 : 10;
+    // 文字注号按排版记下的行内矩形命中（注号是正文文字，没有图标）。
+    // Text markers hit-test their in-line rect: they are body text, not icons.
+    const int text_markers = book_layout_page_note_marker_count(s_page);
+    for (int i = 0; i < text_markers; ++i) {
+        int note = -1, mx = 0, my = 0, mw = 0, mh = 0;
+        if (!book_layout_page_note_marker_rect(s_page, i, &note, &mx, &my, &mw, &mh)) continue;
+        if (note < 0 || (size_t)note >= s_note_count) continue;
+        EpdRect rect = {mx, my, mw > 0 ? mw : pad_x, mh > 0 ? mh : pad_x};
+        EpdRect hot = {mx - pad_x, my - pad_y, rect.width + pad_x * 2, mh + pad_y * 2};
+        if (!ui_rect_hit(hot, x, y)) continue;
+        if (marker) *marker = rect;
+        return note;
+    }
     for (int i = 0; i < reader_image_slots(s_page); ++i) {
         int index = -1, raw_x = -1, slot_y = 0, width = 0, height = 0;
         if (!book_layout_page_image_rect(s_page, i, &index, &raw_x, &slot_y, &width, &height)) continue;
@@ -4145,28 +4158,32 @@ static void draw_reader_footnote_card(uint8_t *fb, size_t page, EpdRect body) {
     if (bottom > visible.y + visible.height) bottom = visible.y + visible.height;
     body.height = bottom - body.y;
     const html_note_t *note = &s_notes[s_footnote_note];
-    if (!note->text_len || note->text_start + note->text_len > s_text_len) return;
+    if (!note->text_len) return;
+    // 跨文件注号自带文本；同章注号仍切当前正文。
+    // Cross-file notes carry their own text; same-chapter notes slice the body.
+    if (!note->owned_text && note->text_start + note->text_len > s_text_len) return;
+    const char *note_src = note->owned_text ? note->owned_text : s_text + note->text_start;
     static char text[1024];
     // 注释里常夹零宽字符（U+200B 等），直接画会变成缺字方框；先清洗掉再折行。
     // EPUB notes often carry zero-width characters (U+200B etc.); drawing them raw shows tofu
     // boxes, so strip them before wrapping.
     size_t len = 0;
     for (size_t i = 0; i < note->text_len && len + 4 < sizeof(text);) {
-        unsigned char c = (unsigned char)s_text[note->text_start + i];
+        unsigned char c = (unsigned char)note_src[i];
         size_t n = 1;
         if (c >= 0xf0) n = 4;
         else if (c >= 0xe0) n = 3;
         else if (c >= 0xc0) n = 2;
         if (i + n > note->text_len) break;
         uint32_t cp = c;
-        if (n == 2) cp = ((uint32_t)(c & 0x1f) << 6) | ((unsigned char)s_text[note->text_start + i + 1] & 0x3f);
+        if (n == 2) cp = ((uint32_t)(c & 0x1f) << 6) | ((unsigned char)note_src[i + 1] & 0x3f);
         else if (n == 3) cp = ((uint32_t)(c & 0x0f) << 12) |
-            (((unsigned char)s_text[note->text_start + i + 1] & 0x3f) << 6) |
-            ((unsigned char)s_text[note->text_start + i + 2] & 0x3f);
+            (((unsigned char)note_src[i + 1] & 0x3f) << 6) |
+            ((unsigned char)note_src[i + 2] & 0x3f);
         else if (n == 4) cp = ((uint32_t)(c & 0x07) << 18) |
-            (((unsigned char)s_text[note->text_start + i + 1] & 0x3f) << 12) |
-            (((unsigned char)s_text[note->text_start + i + 2] & 0x3f) << 6) |
-            ((unsigned char)s_text[note->text_start + i + 3] & 0x3f);
+            (((unsigned char)note_src[i + 1] & 0x3f) << 12) |
+            (((unsigned char)note_src[i + 2] & 0x3f) << 6) |
+            ((unsigned char)note_src[i + 3] & 0x3f);
         i += n;
         if (cp == 0x200b || cp == 0x200c || cp == 0x200d || cp == 0x2060 || cp == 0xfeff || cp == 0x00ad)
             continue;
@@ -5000,7 +5017,7 @@ static void free_book(void) {
     free(s_blocks);
     free(s_runs);
     book_layout_set_inline_images(NULL, 0);
-    free(s_notes); s_notes = NULL; s_note_count = 0; s_footnote_note = -1;
+    html_notes_free(s_notes, s_note_count); s_notes = NULL; s_note_count = 0; s_footnote_note = -1;
     for (size_t i = 0; i < s_image_count; ++i) free(s_images[i]);
     free(s_images);
     s_images = NULL; s_image_count = 0;
@@ -5228,7 +5245,7 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     free(s_text);
     free(s_blocks);
     free(s_runs);
-    free(s_notes);
+    html_notes_free(s_notes, s_note_count);
     s_notes = loaded.notes; s_note_count = loaded.note_count; s_footnote_note = -1;
     s_text = loaded.utf8;
     s_text_len = loaded.len;
