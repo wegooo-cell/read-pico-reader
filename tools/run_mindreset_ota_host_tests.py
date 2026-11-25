@@ -27,7 +27,7 @@ def main():
         binaries.mkdir(parents=True, exist_ok=True)
         for test in ('ota_release', 'ota_online'):
             binary = binaries / test
-            command = ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-Wno-deprecated-declarations',
+            command = ['cc', '-std=c11', '-D_DEFAULT_SOURCE', '-Wall', '-Wextra', '-Werror', '-Wno-deprecated-declarations',
                        '-fsanitize=address,undefined', '-DKIIKO_BOARD_METALIO47=' + ('1' if board == 'metalio47' else '0'),
                        '-Itools/ota_stubs', '-Imain', '-I' + str(cjson), 'tools/' + test + '_host_test.c',
                        'main/ota_release.c', str(cjson / 'cJSON.c'), '-lm', '-pthread', '-o', str(binary)]
@@ -46,7 +46,7 @@ def main():
             parser.error('Choose recorded replay or live HTTPS explicitly')
         view = output / 'pico-view'
         binary = output / 'pico/ota_mindreset_live'
-        command = ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-Wno-deprecated-declarations',
+        command = ['cc', '-std=c11', '-D_DEFAULT_SOURCE', '-Wall', '-Wextra', '-Werror', '-Wno-deprecated-declarations',
                    '-Wno-unused-function', '-Wno-unused-variable', '-fsanitize=address,undefined',
                    '-DKIIKO_BOARD_METALIO47=0', '-Itools/ota_stubs', '-Imain', '-I' + str(cjson),
                    'tools/ota_mindreset_live_host.c', 'main/ota_release.c', str(cjson / 'cJSON.c'),
