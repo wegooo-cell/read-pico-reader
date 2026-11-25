@@ -1,3 +1,10 @@
+## 第二批修正（未发布 / Unreleased）
+
+- 封面迁移遇到建目录、读取目标状态或改名失败时保留唯一旧缓存；目标已存在时保留旧副本供损坏回退，不阻塞其他文件迁移。
+- 网页刷机按串口库的真实三参数读取回调计算进度，避免出现 NaN；对应测试使用真实回调形状并拒绝非有限进度。
+- 回翻缓存与图片页预绘补充低内存、解码余量、排版代际失效、方向及图文边界回归；保留封面扫屏暂停，欠载降频后不自动提高像素时钟，等待独立验收。
+- Preserve original cover caches on migration IO failures and existing-target alternates. Use the vendor's three-argument read callback in the web installer. Exercise retained-page/image-to-text cache boundaries while keeping cover-worker scan pause and deferring automatic PCLK promotion after underrun recovery.
+
 ## 本地测试 · Pico RC110 / S31 RC118 · 2026-11-24
 
 - 阅读排版新增独立的左右与上下页边距，两项均支持 0～48 px，每档 6 px。横竖排切换保留两个方向的设置，旧版单边距按原排版方向迁移；页首插图随上下留白一起下移，竖排用户升级后插图位置会与正文对齐。

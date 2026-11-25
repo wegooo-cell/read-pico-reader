@@ -1,5 +1,10 @@
 # AGENTS.md
 
+## 2026-11-25 · 第二批PR修正 / Second-batch PR hardening
+
+用户通过截图确认本轮仅合并#115回翻缓存、#116图页预绘、#123封面加速及#122网页刷机（已由#125/#126拆分替代）的第二批修正。补齐缓存边界测试、迁移失败原件保护和真实串口回调；保留扫屏时暂停封面工作，像素时钟自动回升另行验收。整合草稿#130及其他批次不整体合并，本轮不刷机、重建存储或发布固件；原始波形、VCOM、分区与已发布下载保持。
+The user identifies the second batch by screenshot: PR115/116/123 and PR122, whose split replacements125/126 are already merged. Merge focused cache-boundary coverage, original-cache retention on migration errors and the real serial callback fix. Retain cover-worker scan pause; defer automatic PCLK promotion. Do not merge the whole integration draft130 or publish/flash/rebuild storage as part of this task. Preserve raw waveforms, VCOM, partitions and published downloads.
+
 面向 AI agent 的仓库入口。人类也可读。产品概述、硬件表、引脚、编译命令见 [README.md](README.md)。
 
 Agent entry for this tree. Humans can read it too. Product overview, hardware, pinout and flash commands live in [README.md](README.md).
