@@ -67,7 +67,7 @@ function setupInstaller(deviceTable,fail={}){
   const bundle=bundleFor(),manifest=manifestFor(bundle),writes=[],reads=[],requests={ports:0,prepares:0},fields=new Map();
   const memory=new Uint8Array(0x1000000).fill(255);memory.set(deviceTable,0x8000);
   let dialog;
-  function element(){return {checked:false,disabled:false,hidden:false,textContent:'',listeners:{},addEventListener(name,callback){this.listeners[name]=callback;}};}
+  function element(){return {set value(v){assert.ok(Number.isFinite(v),'progress must stay finite with the real esptool callback');this.progressValue=v;},get value(){return this.progressValue;},checked:false,disabled:false,hidden:false,textContent:'',listeners:{},addEventListener(name,callback){this.listeners[name]=callback;}};}
   class FakeTransport{async disconnect(){}}
   class FakeLoader{
     constructor(){this.chip={CHIP_NAME:'ESP32-S3',IMAGE_CHIP_ID:9,readMac:async()=>'test-pico'};this.IS_STUB=false;}
@@ -76,7 +76,7 @@ function setupInstaller(deviceTable,fail={}){
     async detectFlashSize(){return '16MB';}
     flashSizeBytes(){return 0x1000000;}
     async runStub(){this.IS_STUB=true;}
-    async readFlash(address,size,progress){reads.push([address,size]);if(progress)progress(size,size);return new Uint8Array(memory.subarray(address,address+size));}
+    async readFlash(address,size,progress){reads.push([address,size]);if(progress)progress(new Uint8Array(memory.subarray(address,address+size)),size,size);return new Uint8Array(memory.subarray(address,address+size));}
     async writeFlash(options){writes.push(options);if(fail.write)throw Error('模拟写入失败');if(options.eraseAll)memory.fill(255);for(const part of options.fileArray)memory.set(part.data,part.address);if(fail.verify){const firmware=options.fileArray.find(part=>part.address===0x10000);memory[0x10000]^=1;}}
     async after(){}
   }

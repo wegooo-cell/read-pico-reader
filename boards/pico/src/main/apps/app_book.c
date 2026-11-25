@@ -6827,7 +6827,9 @@ static void scan_shelf(app_ctx_t* ctx) {
     char previous_message[sizeof(s_message)], previous_storage[sizeof(s_storage)];
     char previous_warning[sizeof(s_shelf_warning)];
     s_shelf_scan_cancelled = false;
-    s_shelf_scan_yield_to_touch = s_background_index_scan || (s_view == SHELF && previous_visible > 0);
+    // 空书架首扫也可中断，导航不必等待整目录扫描结束。
+    // The first scan of an empty shelf yields too: navigation never waits for the whole catalog.
+    s_shelf_scan_yield_to_touch = s_background_index_scan || s_view == SHELF;
     if (s_shelf_scan_yield_to_touch) {
         for (int i = 0; i < previous_categories; ++i) previous_available[i] = s_categories[i].available;
         memcpy(previous_message, s_message, sizeof(previous_message));
@@ -6846,7 +6848,11 @@ static void scan_shelf(app_ctx_t* ctx) {
     book_store_root_t roots[BOOK_STORE_ROOT_MAX];
     int n = 0;
     esp_err_t root_err = book_store_roots(roots, &n);
-    bool truncated = false, unreadable = root_err != ESP_OK || book_store_roots_degraded(), skipped = false;
+    unsigned source_errors = book_store_root_errors();
+    const bool card_only = s_import_candidates || s_manage_books;
+    if (card_only) source_errors &= BOOK_STORE_ROOT_ERROR_CARD;
+    bool card_available = false;
+    bool truncated = false, unreadable = root_err != ESP_OK, skipped = false;
     nvs_handle_t favorites = 0;
     nvs_handle_t hidden = 0;
     (void)nvs_open("rp_favs", NVS_READONLY, &favorites);
@@ -6854,6 +6860,7 @@ static void scan_shelf(app_ctx_t* ctx) {
     s_storage[0] = 0;
     for (int i = 0; i < n; ++i) {
         if((s_import_candidates||s_manage_books)&&(roots[i].is_flash||strcmp(roots[i].path,app_settings_books_dir())))continue;
+        if (!roots[i].is_flash) card_available = true;
         if (i == 0 || roots[i].is_flash || roots[i - 1].is_flash) {
             char capacity[64];
             snprintf(capacity, sizeof(capacity), "%s%s %.1f MB", s_storage[0] ? " · " : "",
@@ -6864,6 +6871,7 @@ static void scan_shelf(app_ctx_t* ctx) {
         scan_shelf_dir(ctx, (s_manage_books||s_import_candidates)?books_directory_current():roots[i].path, roots[i].is_flash, favorites, hidden,
                        &truncated, &unreadable, &skipped);
     }
+    if (card_only && !card_available) source_errors |= BOOK_STORE_ROOT_ERROR_CARD;
     if (ctx->request_app
         && !s_shelf_scan_yield_to_touch
     ) {
@@ -6949,7 +6957,13 @@ static void scan_shelf(app_ctx_t* ctx) {
     }
     if (!n) copy_text(s_storage, sizeof(s_storage), "存储不可用，请检查 TF 卡");
     if (truncated) snprintf(s_shelf_warning, sizeof(s_shelf_warning), "内存不足，仅列 %d 本；释放后重扫", s_count);
-    else if (unreadable) copy_text(s_shelf_warning, sizeof(s_shelf_warning), "部分位置暂时无法读取，请在管理页点重新扫描");
+    else if (source_errors & BOOK_STORE_ROOT_ERROR_CARD)
+        copy_text(s_shelf_warning, sizeof(s_shelf_warning), "TF 书目录暂不可用，请检查存储卡");
+    else if (unreadable)
+        copy_text(s_shelf_warning, sizeof(s_shelf_warning), "部分图书目录读取失败，请检查存储后重试");
+    else if (source_errors & BOOK_STORE_ROOT_ERROR_FLASH)
+        copy_text(s_shelf_warning, sizeof(s_shelf_warning), card_available ?
+                  "内置存储暂不可用，TF 书籍仍可使用" : "内置存储暂不可用，原数据已保留");
     else if (skipped) copy_text(s_shelf_warning, sizeof(s_shelf_warning), "部分文件过大或名称过长，未列入");
     else if (s_pending_invalidated) copy_text(s_shelf_warning, sizeof(s_shelf_warning), "图书已更新，旧待保存进度已作废");
     if (!s_count && !unreadable && !truncated) copy_text(s_message, sizeof(s_message), "暂无图书，请传入 TXT 或 EPUB");
@@ -6960,8 +6974,11 @@ static void scan_shelf(app_ctx_t* ctx) {
     s_cache_shelf_style = app_settings_shelf_style();
     s_store_revision = book_store_revision();
     s_progress_revision = progress_revision;
-    s_shelf_cache_valid = !unreadable && !truncated;
-    if(s_shelf_cache_valid&&!s_import_candidates&&!s_manage_books&&book_library_mode()==BOOK_LIBRARY_ALL){
+    // 内置来源不可用不否定已扫描的TF目录，但不完整结果不能覆盖原书架名册或磁盘索引。
+    // Keep the usable TF catalog in RAM; an incomplete source set must not replace enrollment or the disk index.
+    s_shelf_cache_valid = !unreadable && !truncated && !(source_errors & BOOK_STORE_ROOT_ERROR_CARD);
+    const bool complete = s_shelf_cache_valid && !source_errors;
+    if(complete&&!s_import_candidates&&!s_manage_books&&book_library_mode()==BOOK_LIBRARY_ALL){
         esp_err_t error=book_library_begin_snapshot();
         for(int i=0;error==ESP_OK&&i<s_count;++i)error=book_library_add(s_shelf[i].path);
         if(error==ESP_OK)error=book_library_commit();
@@ -6971,8 +6988,9 @@ static void scan_shelf(app_ctx_t* ctx) {
     s_shelf_index_preloaded = false;
     // 扫描完成后更新位置索引，下次开机先按索引上屏。
     // Refresh the position index after a complete scan so the next boot can paint from it first.
-    if (s_shelf_cache_valid && !s_import_candidates&&!s_manage_books) shelf_cache_save();
-    ESP_LOGI(TAG, "shelf books=%d roots=%d", s_count, n);
+    if (complete && !s_import_candidates&&!s_manage_books) shelf_cache_save();
+    ESP_LOGI(TAG, "shelf books=%d roots=%d source_errors=0x%x directory_error=%d", s_count, n,
+             source_errors, (int)unreadable);
 }
 
 static book_shelf_page_key_t shelf_visible_frame_key(const app_ctx_t *ctx) {
@@ -8333,13 +8351,13 @@ static app_redraw_t bulk_action(app_ctx_t* ctx,uint16_t x,uint16_t y) {
         search_begin();
         return APP_REDRAW_PAGE;
     }
+    if(!s_import_candidates&&!s_manage_books&&ui_rect_hit(batch_rect(6),x,y))return library_restart_import(ctx);
     if(s_scan_pending)return APP_REDRAW_NONE;
     EpdRect all=s_import_candidates?ui_book_import_select():ui_book_manage_select();
     EpdRect cancel=s_import_candidates?ui_book_import_cancel():ui_book_manage_cancel();
     if(ui_rect_hit(all,x,y)){s_batch_message[0]=0;library_page_selection(ctx,true);s_bulk_selecting=true;return APP_REDRAW_PAGE;}
     if(ui_rect_hit(cancel,x,y)){s_batch_message[0]=0;library_page_selection(ctx,false);return APP_REDRAW_PAGE;}
     if(!s_import_candidates)for(int i=0;i<4;++i)if(ui_rect_hit(batch_rect(i+3),x,y)){
-        if(!s_manage_books&&i==3)return library_restart_import(ctx);
         unsigned count=selected_count();if(!count){copy_text(s_batch_message,sizeof(s_batch_message),"请先选择书籍");return APP_REDRAW_PAGE;}
         if(i==0||(s_manage_books&&i==2)){
             if(count!=1){copy_text(s_batch_message,sizeof(s_batch_message),i==0?"重命名时请选择一本书":"移动时请选择一本书");return APP_REDRAW_PAGE;}
@@ -9747,6 +9765,8 @@ static app_redraw_t reader_font_recovery_tick(app_ctx_t *ctx) {
     return APP_REDRAW_DONE;
 }
 static app_redraw_t shelf_cover_tick(app_ctx_t *ctx) {
+    if (ctx->consumed || ctx->request_app || ctx->request_menu || ctx->request_return ||
+        (s_view == SHELF && app_touch_input_pending(ctx))) return APP_REDRAW_NONE;
     if(s_import_candidates&&(!s_bulk_grid||book_import_running()))return APP_REDRAW_NONE;
     if ((s_view != SHELF && s_view != MANAGE && s_view != BULK) ||
         (ctx->touch && ctx->touch->touched)) return APP_REDRAW_NONE;
@@ -9777,6 +9797,8 @@ static app_redraw_t shelf_cover_tick(app_ctx_t *ctx) {
 }
 
 static app_redraw_t on_tick(app_ctx_t* ctx) {
+    app_redraw_t rescan_notice=library_rescan_notice_tick();
+    if(rescan_notice!=APP_REDRAW_NONE)return rescan_notice;
     // 低残影模式只在阅读正文期间保持高压轨；离开阅读立即恢复原来的空闲断电。
     // Low-ghost holds the rails only while the reader is visible; leaving restores idle power-off.
     display_set_rail_hold(s_view == READING && s_text && app_settings_low_ghost());

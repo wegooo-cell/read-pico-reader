@@ -123,15 +123,15 @@ int main(void) {
     const char *stale = "/sdcard/books/stale.epub";
     assert(put(0,"last",NVS_TYPE_STR,stale,strlen(stale)+1)==ESP_OK);
     assert(put(3,"f_deadbeef",NVS_TYPE_U8,&favorite,1)==ESP_OK);
-    // 旧备份不含移出状态，恢复时清除机器上后加的隐藏记录。/ Legacy restore clears later removals.
+    // 旧备份缺失的收藏/移出状态仍保留。/ Preserve records absent from legacy backups.
     snprintf(key,sizeof(key),"h_%08x",path_hash);
     assert(put(5,key,NVS_TYPE_STR,path,path_len)==ESP_OK);
     unsigned before_restore = progress_changes;
     assert(book_history_backup_restore(f)==ESP_OK);
     assert(progress_changes > before_restore);
-    assert(counts[1]==counts[0]);
-    assert(!find_record(3,"f_deadbeef"));
-    assert(!find_record(5,key));
+    assert(counts[1]==counts[0]+2);
+    assert(find_record(3,"f_deadbeef"));
+    assert(find_record(5,key));
     for (int i=0;i<counts[0];++i) {
         record_t *a=&records[0][i], *b=find_record(a->ns,a->key);
         assert(b && b->type==a->type && b->len==a->len && !memcmp(a->data,b->data,a->len));
@@ -144,7 +144,7 @@ int main(void) {
     assert(book_history_backup_write(f)==ESP_OK);
     rewind(f); assert(book_history_backup_validate(f));
     active=1; rewind(f);
-    assert(book_history_backup_restore(f)==ESP_OK && counts[1]==counts[0]);
+    assert(book_history_backup_restore(f)==ESP_OK && counts[1]==counts[0]+1);
     for (int i=0;i<counts[0];++i) {
         record_t *a=&records[0][i], *b=find_record(a->ns,a->key);
         assert(b && b->type==a->type && b->len==a->len && !memcmp(a->data,b->data,a->len));

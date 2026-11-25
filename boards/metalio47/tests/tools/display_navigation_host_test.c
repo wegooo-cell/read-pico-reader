@@ -9,6 +9,7 @@
 #include "display.h"
 #include "app_config.h"
 #include "settings.h"
+#include "display_reader_waveform.h"
 #include "ui/ui_nav_layout.h"
 #include "ui/ui_image_dither.h"
 
@@ -29,6 +30,10 @@ static const EpdWaveform shelf37_soft={12},shelf37_art={13};
 static bool shelf37_enabled;
 static const EpdWaveform water37={15};
 static bool water37_enabled;
+const char *app_settings_book_background_path(void){return "";}
+const EpdWaveform *display_reader_gray_waveform(display_reader_gray_profile_t profile){(void)profile;return water37_enabled?&water37:NULL;}
+const EpdWaveform *display_reader_ripple_waveform(display_reader_gray_profile_t profile){return display_reader_gray_waveform(profile);}
+
 const EpdWaveform* display_reader_panel37_waveform(void){return water37_enabled?&water37:NULL;}
 const EpdWaveform* display_ui37_waveform(void){return water37_enabled?&water37:NULL;}
 static int shelf37_regions;
@@ -139,6 +144,9 @@ enum EpdDrawError e0470_reader_ripple_with_waveform(EpdiyHighlevelState* hl,EpdR
     e0470_turn_dir_t dir,const EpdWaveform* waveform,unsigned bands) {
     return e0470_page_turn_with_waveform_compact(hl,area,dir,waveform,bands);
 }
+enum EpdDrawError e0470_reader_ripple_with_waveform_timed(EpdiyHighlevelState *hl,EpdRect area,e0470_turn_dir_t dir,const EpdWaveform *wave,unsigned bands,unsigned launch_ticks){
+    assert(wave&&bands==4&&launch_ticks==3);return e0470_page_turn(hl,area,dir);
+}
 enum EpdDrawError e0470_page_turn_with_waveform_compact(EpdiyHighlevelState* state, EpdRect area,
     e0470_turn_dir_t dir, const EpdWaveform* waveform, unsigned bands) {
     assert(ota_display_depth);
@@ -225,12 +233,16 @@ enum EpdDrawError epd_hl_update_screen_full(EpdiyHighlevelState* state, enum Epd
 enum EpdDrawError epd_hl_update_area(EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area) {
     assert(temperature == 25); return draw(state, mode, false, &area);
 }
+enum EpdDrawError epd_hl_update_area_padded(EpdiyHighlevelState *hl,enum EpdDrawMode mode,int temp,EpdRect area,int x,int y){
+    assert(x==1&&y==1);return epd_hl_update_area(hl,mode,temp,area);
+}
 enum EpdDrawError epd_hl_update_area_diff_exact(EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area) {
     return epd_hl_update_area(state, mode, temperature, area);
 }
 enum EpdDrawError epd_hl_update_area_full(EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area) {
     assert(temperature == 25); return draw(state, mode, true, &area);
 }
+enum EpdDrawError epd_hl_update_area_full_exact(EpdiyHighlevelState *hl,enum EpdDrawMode mode,int temp,EpdRect area){return epd_hl_update_area_full(hl,mode,temp,area);}
 enum EpdDrawError epd_hl_update_screen_from_white(EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature) {
     memset(state->back_fb, 255, BYTES);
     return epd_hl_update_screen_full(state, mode, temperature);

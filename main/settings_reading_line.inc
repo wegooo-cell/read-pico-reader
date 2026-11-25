@@ -10,7 +10,7 @@ static uint8_t book_rule_format(void) {
 }
 static void book_rule_saved_load(nvs_handle_t h) {
     uint8_t value=0;
-    s_book_rule_saved=nvs_get_u8(h,NVS_KEY_BOOK_RULE_SAVED,&value)==ESP_OK && value && book_rule_saved_valid(value)
+    s_book_rule_saved=nvs_get_u8(h,NVS_KEY_BOOK_RULE_SAVED,&value)==ESP_OK && book_rule_saved_valid(value)
         ? value : book_rule_format();
 }
 bool app_settings_save_book_reading_line(void) {

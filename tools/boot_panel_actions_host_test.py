@@ -69,15 +69,23 @@ ACTIONS = r'''
 #include <string.h>
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE,APP_REDRAW_FULL,APP_REDRAW_DONE} app_redraw_t;
 typedef struct { void *hl; uint8_t *fb; } app_ctx_t;
-enum { SETTINGS_MAIN, SETTINGS_CONFIG, SETTINGS_BOOT, SETTINGS_FACTORY_RESET };
+enum { SETTINGS_MAIN, SETTINGS_CONFIG, SETTINGS_BOOT, SETTINGS_FACTORY_RESET, SETTINGS_STORAGE_REPAIR };
 enum EpdDrawError { EPD_DRAW_SUCCESS, EPD_DRAW_ERROR };
 #define SETTINGS_MAINTENANCE_Y 500
-#define SETTINGS_MAINTENANCE_ROWS 5
+#ifdef TEST_STORAGE_REPAIR_MENU
+#define SETTINGS_MAINTENANCE_ROWS 7
+#else
+#define SETTINGS_MAINTENANCE_ROWS 6
+#endif
 #define SETTINGS_ROW_H 68
 static int s_page, repairs, paints, upgrades;
+static bool s_dc_recover_pending;
+static enum EpdDrawError display_dc_recover(void *hl){assert(hl);return EPD_DRAW_SUCCESS;}
 static bool s_panel_repair_pending, s_scroll_present_pending, s_boot_pending, s_config_confirm;
 static char s_notice[96],s_reset_notice[96];
 static bool s_reset_confirm,s_reset_pending;
+bool s_storage_rebuild_question;
+void app_storage_repair_cancel(void){s_storage_rebuild_question=false;}
 static enum EpdDrawError result;
 static void upgrade_open(void) { ++upgrades; }
 static void render(app_ctx_t *ctx, uint8_t *fb) {
@@ -114,10 +122,84 @@ int main(void) {
     assert(tap(SETTINGS_MAINTENANCE_Y+2*SETTINGS_ROW_H)==APP_REDRAW_PAGE);
     s_page=SETTINGS_CONFIG;
     assert(tick(&ctx)==APP_REDRAW_NONE && repairs==2 && !s_panel_repair_pending);
-    assert(tap(SETTINGS_MAINTENANCE_Y+3*SETTINGS_ROW_H)==APP_REDRAW_PAGE && s_page==SETTINGS_BOOT);
-    assert(tap(SETTINGS_MAINTENANCE_Y+4*SETTINGS_ROW_H)==APP_REDRAW_PAGE && s_page==SETTINGS_FACTORY_RESET);
-    assert(tap(SETTINGS_MAINTENANCE_Y+5*SETTINGS_ROW_H)==APP_REDRAW_NONE);
+    assert(tap(SETTINGS_MAINTENANCE_Y+4*SETTINGS_ROW_H)==APP_REDRAW_PAGE && s_page==SETTINGS_BOOT);
+    assert(tap(SETTINGS_MAINTENANCE_Y+5*SETTINGS_ROW_H)==APP_REDRAW_PAGE && s_page==SETTINGS_FACTORY_RESET);
+#ifdef TEST_STORAGE_REPAIR_MENU
+    s_storage_rebuild_question=true;
+    assert(tap(SETTINGS_MAINTENANCE_Y+6*SETTINGS_ROW_H)==APP_REDRAW_PAGE&&s_page==SETTINGS_STORAGE_REPAIR&&!s_storage_rebuild_question);
+    assert(tap(SETTINGS_MAINTENANCE_Y+7*SETTINGS_ROW_H)==APP_REDRAW_NONE);
+#else
+    assert(tap(SETTINGS_MAINTENANCE_Y+6*SETTINGS_ROW_H)==APP_REDRAW_NONE);
+#endif
     puts("PASS: actual Settings repair row defers work, cancels after leaving, paints final notice once and reports output failure");
+}
+'''
+
+if 'SETTINGS_STORAGE_REPAIR' in gesture:
+    ACTIONS = '#define TEST_STORAGE_REPAIR_MENU 1\n' + ACTIONS
+
+if 'SETTINGS_SYSTEM_REPAIR' in gesture:
+    repair_ui = ROOT / 'main/apps/storage_repair_ui.inc'
+    ACTIONS = r'''
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+typedef enum{APP_REDRAW_NONE,APP_REDRAW_PAGE,APP_REDRAW_FULL,APP_REDRAW_DONE}app_redraw_t;
+typedef struct{void*hl;uint8_t*fb;}app_ctx_t;
+typedef struct{int x,y,width,height;}EpdRect;
+typedef struct{int type,x0,y0;}ui_gesture_event_t;
+enum{UI_GESTURE_TAP,UI_GESTURE_MOVE,SETTINGS_MAIN,SETTINGS_CONFIG,SETTINGS_BOOT,SETTINGS_FACTORY_RESET,SETTINGS_STORAGE_REPAIR,SETTINGS_SYSTEM_REPAIR};
+enum EpdDrawError{EPD_DRAW_SUCCESS,EPD_DRAW_ERROR};
+#define SETTINGS_MAINTENANCE_Y 500
+#define SETTINGS_MAINTENANCE_ROWS 5
+#define SETTINGS_ROW_H 68
+static int s_page,repairs,paints,upgrades,dc_repairs,navigation;
+static bool s_panel_repair_pending,s_dc_recover_pending,s_scroll_present_pending,s_boot_pending,s_config_confirm;
+static bool s_reset_confirm,s_reset_pending,s_storage_rebuild_question,s_storage_wait_release;
+static char s_notice[96],s_reset_notice[96];
+static enum EpdDrawError result;
+static void upgrade_open(void){++upgrades;}
+static void app_storage_repair_cancel(void){s_storage_rebuild_question=false;}
+static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&y>=r.y&&x<r.x+r.width&&y<r.y+r.height;}
+static int settings_nav_hit(int x,int y){(void)x;return y>=1096?2:-1;}
+static void ui_nav_request(app_ctx_t*ctx,int tab){(void)ctx;navigation=tab;}
+static void render(app_ctx_t*ctx,uint8_t*fb){assert(ctx->fb==fb&&strstr(s_notice,"完成"));++paints;}
+static enum EpdDrawError display_panel_repair(void*hl){assert(hl&&paints==repairs+dc_repairs+1&&!s_scroll_present_pending);++repairs;return result;}
+static enum EpdDrawError display_dc_recover(void*hl){assert(hl);++dc_repairs;return result;}
+''' + function('system_repair_button', repair_ui) + '\n' + function('system_repair_gesture', repair_ui) + r'''
+static app_redraw_t tick(app_ctx_t*ctx){
+''' + tick + r'''
+return APP_REDRAW_NONE;}
+static app_redraw_t tap(int y){int row;
+''' + gesture + r'''
+return APP_REDRAW_NONE;}
+static app_redraw_t repair_tap(app_ctx_t*ctx,int row){EpdRect r=system_repair_button(row);ui_gesture_event_t e={UI_GESTURE_TAP,r.x+1,r.y+1};return system_repair_gesture(ctx,&e);}
+int main(void){uint8_t fb=0;app_ctx_t ctx={&fb,&fb};
+ assert(tap(SETTINGS_MAINTENANCE_Y)==APP_REDRAW_PAGE&&upgrades==1);
+ assert(tap(SETTINGS_MAINTENANCE_Y+SETTINGS_ROW_H)==APP_REDRAW_PAGE&&s_page==SETTINGS_CONFIG);
+ assert(tap(SETTINGS_MAINTENANCE_Y+2*SETTINGS_ROW_H)==APP_REDRAW_PAGE&&s_page==SETTINGS_SYSTEM_REPAIR&&!repairs&&!dc_repairs&&!s_panel_repair_pending&&!s_dc_recover_pending);
+ s_scroll_present_pending=true;
+ assert(repair_tap(&ctx,0)==APP_REDRAW_PAGE&&s_panel_repair_pending&&!repairs&&strstr(s_notice,"修复中"));
+ assert(repair_tap(&ctx,0)==APP_REDRAW_NONE&&s_panel_repair_pending);
+ assert(tick(&ctx)==APP_REDRAW_DONE&&repairs==1&&paints==1&&!s_panel_repair_pending);
+ assert(tick(&ctx)==APP_REDRAW_NONE&&repairs==1);
+ assert(repair_tap(&ctx,1)==APP_REDRAW_PAGE&&s_dc_recover_pending);
+ assert(tick(&ctx)==APP_REDRAW_DONE&&dc_repairs==1&&paints==2&&!s_dc_recover_pending);
+ assert(repair_tap(&ctx,0)==APP_REDRAW_PAGE);result=EPD_DRAW_ERROR;
+ assert(tick(&ctx)==APP_REDRAW_FULL&&repairs==2&&strstr(s_notice,"未完成"));
+ result=EPD_DRAW_SUCCESS;assert(repair_tap(&ctx,0)==APP_REDRAW_PAGE);s_page=SETTINGS_CONFIG;
+ assert(tick(&ctx)==APP_REDRAW_NONE&&!s_panel_repair_pending&&repairs==2);
+ s_page=SETTINGS_SYSTEM_REPAIR;assert(repair_tap(&ctx,2)==APP_REDRAW_PAGE&&s_page==SETTINGS_STORAGE_REPAIR&&!s_storage_rebuild_question);
+ s_page=SETTINGS_SYSTEM_REPAIR;assert(repair_tap(&ctx,0)==APP_REDRAW_PAGE);
+ ui_gesture_event_t back={UI_GESTURE_TAP,60,100};assert(system_repair_gesture(&ctx,&back)==APP_REDRAW_PAGE&&s_page==SETTINGS_MAIN&&!s_panel_repair_pending);
+ assert(tap(SETTINGS_MAINTENANCE_Y+3*SETTINGS_ROW_H)==APP_REDRAW_PAGE&&s_page==SETTINGS_BOOT);
+ assert(tap(SETTINGS_MAINTENANCE_Y+4*SETTINGS_ROW_H)==APP_REDRAW_PAGE&&s_page==SETTINGS_FACTORY_RESET);
+ assert(tap(SETTINGS_MAINTENANCE_Y+5*SETTINGS_ROW_H)==APP_REDRAW_NONE);
+ s_page=SETTINGS_SYSTEM_REPAIR;assert(repair_tap(&ctx,1)==APP_REDRAW_PAGE);
+ ui_gesture_event_t nav={UI_GESTURE_TAP,500,1150};assert(system_repair_gesture(&ctx,&nav)==APP_REDRAW_NONE&&navigation==2&&!s_dc_recover_pending);
+ puts("PASS: grouped system-repair entry, all three children, deferred single repair, output error, cancellation, navigation and preserved BOOT/reset mapping");
 }
 '''
 

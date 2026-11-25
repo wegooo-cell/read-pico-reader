@@ -29,6 +29,31 @@ static uint32_t backup_pair_seal(const uint32_t pair[6]) {
         hash=(hash^(uint8_t)(pair[i]>>shift))*UINT32_C(16777619);
     return hash;
 }
+// FatFs不能重命名覆盖同名文件；保留旧副本，目标空出后再安装新文件。
+// FatFs rejects overwriting rename destinations. Retain the old copy before installing a new file.
+static esp_err_t backup_replace_retaining(const char *source,const char *target) {
+    struct stat st;char previous[384]={0};bool moved=false;
+    if(!stat(target,&st)){
+        if(!S_ISREG(st.st_mode))return ESP_ERR_INVALID_STATE;
+        bool available=false;
+        for(unsigned i=1;i<=1024;++i){
+            int n=snprintf(previous,sizeof(previous),"%s.previous.%04u",target,i);
+            if(n<0||(size_t)n>=sizeof(previous))return ESP_ERR_INVALID_SIZE;
+            if(!stat(previous,&st))continue;
+            if(errno!=ENOENT)return ESP_FAIL;
+            available=true;break;
+        }
+        if(!available)return ESP_ERR_INVALID_STATE;
+        if(rename(target,previous))return ESP_FAIL;
+        moved=true;
+    }else if(errno!=ENOENT)return ESP_FAIL;
+    if(!rename(source,target))return ESP_OK;
+    // 新文件安装失败时尽力恢复原名字，原副本始终保留在至少一个路径上。
+    // Restore the old name when installation fails; never delete either valid copy.
+    if(moved&&stat(target,&st)&&errno==ENOENT)(void)rename(previous,target);
+    return ESP_FAIL;
+}
+
 static esp_err_t backup_pair_commit(void) {
     uint32_t pair[6]={UINT32_C(0x3150424b)};
     if (!backup_fingerprint(BACKUP_FILE,pair+1) || !backup_fingerprint(BACKUP_FULL_TEMP,pair+3)) return ESP_FAIL;
@@ -38,7 +63,8 @@ static esp_err_t backup_pair_commit(void) {
     bool ok=fwrite(pair,1,sizeof(pair),file)==sizeof(pair)&&fflush(file)==0&&fsync(fileno(file))==0;
     if(fclose(file))ok=false;
     if(!ok)return ESP_FAIL;
-    if(rename(BACKUP_FULL_TEMP,BACKUP_FULL)||rename(BACKUP_PAIR_TEMP,BACKUP_PAIR))return ESP_FAIL;
+    if(backup_replace_retaining(BACKUP_FULL_TEMP,BACKUP_FULL)!=ESP_OK ||
+       backup_replace_retaining(BACKUP_PAIR_TEMP,BACKUP_PAIR)!=ESP_OK)return ESP_FAIL;
     return ESP_OK;
 }
 static bool backup_pair_matches(const char *base) {

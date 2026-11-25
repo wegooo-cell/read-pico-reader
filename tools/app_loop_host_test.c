@@ -12,6 +12,8 @@ uint8_t app_settings_system_contrast(void) {return 100;}
 void pico_boot_ready(void) {}
 void app_book_cover_mode_changed(void) {}
 void app_home_cover_mode_changed(void) {}
+static bool test_storage_repair_busy;
+bool app_storage_repair_busy(void) { return test_storage_repair_busy; }
 static bool resume_checkpoint_live,resume_checkpoint_saved;
 esp_err_t pico_boot_save_resume(const pico_resume_t *resume) { (void)resume; resume_checkpoint_live=resume_checkpoint_saved=true; return ESP_OK; }
 void pico_boot_clear_resume(void) { resume_checkpoint_live=false; }
@@ -281,6 +283,7 @@ static app_redraw_t tick(app_ctx_t*c) {
 }
 static app_redraw_t consume_power(app_ctx_t*c) {(void)c;lock_due=false;return APP_REDRAW_DONE;}
 static void reset(void) {
+    test_storage_repair_busy=false;
     wake_present_before=network_resumes=0;resume_test=fresh_key_sent=resume_drain_blocked=false;resume_delay_us=fresh_key_at_us=0;resume_queued_action=queued_action=resume_drains=0;
     edge_enabled=edge_blocked=power_reported=false;edge_returns=back_ripples=power_header_draws=0;power_change_step=-1;
     memset(frame,0,sizeof(frame));panel_marker=0;check_clean_action=false;clean_action_fulls=0;
@@ -342,6 +345,17 @@ void app_book_shelf_prefetch_reset(void) {}
 void app_book_shelf_prefetch_first(app_ctx_t *ctx) { (void)ctx; }
 
 int main(void) {
+#ifdef TEST_STORAGE_REPAIR_LOOP
+    reset();test_storage_repair_busy=true;idle_minutes=1;time_step=60000000;
+    first.on_gesture=gesture;lock_due=font_due=request_on_tick=menu_on_tick=true;
+    add(0,0,0,0);add(300,1141,1,0);add(0,0,0,0);run();
+    // 启动初始化可各探测一次；维护开始后的三个循环不能重复字体/媒体探测。
+    // Startup may probe once; the three maintenance iterations must not repeat font/media work.
+    if(ticks!=3||enters!=1||exits||touch_calls||menus||idle_locks||font_opens>1||health_polls>1)
+        fprintf(stderr,"maintenance ticks=%d enter=%d exit=%d touch=%d menu=%d lock=%d startup_font=%d media=%d\n",ticks,enters,exits,touch_calls,menus,idle_locks,font_opens,health_polls);
+    assert(ticks==3&&enters==1&&!exits&&!touch_calls&&!menus&&!idle_locks&&font_opens<=1&&health_polls<=1);
+    puts("PASS: actual storage-maintenance loop keeps page ticks alive while blocking navigation, touch, font/media retries and power/idle sleep");
+#endif
     for(int white=0;white<2;++white)for(int binary=0;binary<2;++binary){
         reset();child_view=false;first.enter_full=true;first.persistent_navigation=true;
         first.white_child_transition=white;first.binary_ui=binary;first.main_page_visible=child_root;first.on_tick=child_cycle;

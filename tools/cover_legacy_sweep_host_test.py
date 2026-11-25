@@ -57,21 +57,31 @@ int main(void) {
     put(COVER_DIR "/02/0800000000000003-176x240.bin", "fresh");
     int steps = 0;
     while (book_cover_legacy_sweep_step()) assert(++steps <= 8);
-    assert(steps == 8);
+    assert(steps == 7);
     expect(COVER_DIR "/3f/fc00000000000001-176x240.bin", "gray");
     expect(COVER_DIR "/01/0400000000000002-176x240-list.bin", "list");
-    // 分组已有同名文件：保留分组里的，删旧件。/ The group copy wins; the stale flat file is removed.
+    // 保留旧件以便目标损坏时回退。/ Retain the legacy alternate for a corrupt-target fallback.
     expect(COVER_DIR "/02/0800000000000003-176x240.bin", "fresh");
     assert(access(COVER_DIR "/03/0c00000000000004-noart.bin", F_OK));
     expect(COVER_LEGACY_DIR "/wr-0000000000000006-10-20.bin", "txt");
     DIR *dir = opendir(COVER_LEGACY_DIR); int left = 0;
     for (struct dirent *e; (e = readdir(dir));) if (e->d_name[0] != '.') ++left;
-    closedir(dir); assert(left == 1);
+    closedir(dir); assert(left == 2);
     // 只剩 TXT 记录：目录保留；记录也没了以后删除目录。/ Only TXT records left keeps the folder; once gone, remove it.
     assert(!book_cover_legacy_sweep_step() && !access(COVER_LEGACY_DIR, F_OK));
     snprintf(p, sizeof(p), "%s", COVER_LEGACY_DIR "/wr-0000000000000006-10-20.bin"); assert(!unlink(p));
+    assert(!book_cover_legacy_sweep_step() && !access(COVER_LEGACY_DIR, F_OK));
+    assert(!unlink(COVER_LEGACY_DIR "/0800000000000003-176x240.bin"));
     assert(!book_cover_legacy_sweep_step() && access(COVER_LEGACY_DIR, F_OK));
-    puts("PASS: old flat cover folder migrates gray and list covers, drops rebuildable caches and keeps TXT records");
+    assert(!mkdir(COVER_LEGACY_DIR,0777));
+    put(COVER_LEGACY_DIR "/1000000000000001-176x240.bin","only-copy");
+    put(COVER_DIR "/04","blocks-group-directory");
+    assert(!book_cover_legacy_sweep_step());
+    expect(COVER_LEGACY_DIR "/1000000000000001-176x240.bin","only-copy");
+    assert(!unlink(COVER_DIR "/04"));
+    assert(book_cover_legacy_sweep_step());
+    expect(COVER_DIR "/04/1000000000000001-176x240.bin","only-copy");
+    puts("PASS: cover migration retains existing alternates and sole sources on mkdir failures, then retries successfully");
     return 0;
 }
 '''

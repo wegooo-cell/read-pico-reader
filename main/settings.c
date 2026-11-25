@@ -134,7 +134,7 @@ static uint32_t s_pin_locked_at;
 #endif
 static bool s_home_full_refresh = true;
 static bool s_clock_12h;
-static bool s_low_ghost = true;
+static bool s_low_ghost = false;
 static app_home_component_t s_home_component = APP_HOME_MOON;
 static uint8_t s_home_goal_minutes = 30;
 static app_main_refresh_mode_t s_main_refresh;
@@ -283,6 +283,9 @@ void app_settings_init(void) {
         return;
     }
 
+#ifdef ESP_PLATFORM
+    (void)app_settings_restore_recover();
+#endif
     app_setup_init();
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READONLY, &h) != ESP_OK) return;
@@ -631,18 +634,15 @@ esp_err_t app_settings_set_home_goal_minutes(uint8_t minutes) {
 }
 
 bool app_settings_home_full_refresh(void) { return s_home_full_refresh; }
-bool app_settings_clock_12h(void) { return s_clock_12h; }
-bool app_settings_low_ghost(void) { return s_low_ghost; }
-void app_settings_set_low_ghost(bool enabled) {
-    if (enabled == s_low_ghost) return;
-    s_low_ghost = enabled;
-    nvs_put_u8(NVS_KEY_LOW_GHOST, enabled ? 1 : 0);
+bool app_settings_clock_12h(void){return s_clock_12h;}
+void app_settings_set_clock_12h(bool enabled){
+    if(enabled!=s_clock_12h&&shelf_preference_put(NVS_KEY_CLOCK_12H,enabled))s_clock_12h=enabled;
 }
-void app_settings_set_clock_12h(bool enabled) {
-    if (enabled == s_clock_12h) return;
-    s_clock_12h = enabled;
-    nvs_put_u8(NVS_KEY_CLOCK_12H, enabled ? 1 : 0);
+bool app_settings_low_ghost(void){return s_low_ghost;}
+void app_settings_set_low_ghost(bool enabled){
+    if(enabled!=s_low_ghost&&shelf_preference_put(NVS_KEY_LOW_GHOST,enabled))s_low_ghost=enabled;
 }
+
 app_main_refresh_mode_t app_settings_main_refresh_mode(void) { return s_main_refresh; }
 bool app_settings_main_fast_refresh(void) { return s_main_refresh == APP_MAIN_REFRESH_FAST; }
 void app_settings_set_main_refresh_mode(app_main_refresh_mode_t mode) {
@@ -1205,12 +1205,7 @@ static bool backup_hold_valid(const settings_backup_hold_t *hold) {
     return hold->action < APP_READER_KEY_COUNT && stored == backup_hold_checksum(hold);
 }
 // v26复用五字节校验块保存阅读线预设，不改变旧字段偏移。/ V26 seals the guide preset in five bytes without moving legacy fields.
-// v28只在完整备份追加书架封面开关；标准互换文件不变，旧版恢复时封面保持显示。
-// V28 appends the shelf-cover switch to the full backup only; the interchange file is unchanged and older restores keep covers on.
-static bool backup_shelf_covers_valid(const settings_backup_hold_t *covers) {
-    uint32_t sum=0;for(unsigned i=0;i<4;++i)sum|=(uint32_t)covers->checksum[i]<<(8*i);
-    return covers->action<=1&&sum==backup_hold_checksum(covers);
-}
+
 static bool backup_guide_valid(const settings_backup_hold_t *guide) {
     uint32_t sum=0;for(unsigned i=0;i<4;++i)sum|=(uint32_t)guide->checksum[i]<<(8*i);
     return book_rule_saved_valid(guide->action)&&sum==backup_hold_checksum(guide);
@@ -1260,7 +1255,7 @@ static bool backup_home_valid(const settings_backup_home_t *v) {
 static unsigned backup_version(const settings_backup_v1_t *backup) {
     if (memcmp(backup->magic, "PICOSET", 7)) return 0;
     unsigned char c = backup->magic[7];
-    return c >= '1' && c <= '9' ? c - '0' : c >= 'A' && c <= 'S' ? c - 'A' + 10 : 0;
+    return c >= '1' && c <= '9' ? c - '0' : c >= 'A' && c <= 'T' ? c - 'A' + 10 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1339,9 +1334,11 @@ static bool backup_card_ready(void) {
 
 // 备份先写进调用方给的流：TF 卡和内存导出共用同一份字节。
 // Write into a caller-owned stream so the card and memory exports share one byte layout.
+#include "settings_backup_extensions.inc"
+
 static esp_err_t backup_write_stream(FILE *file, bool rotate, bool compatible) {
     settings_backup_v1_t backup = {0};
-    memcpy(backup.magic, compatible ? "PICOSETP" : "PICOSETS", sizeof(backup.magic));
+    memcpy(backup.magic, compatible ? "PICOSETP" : "PICOSETT", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -1448,13 +1445,8 @@ static esp_err_t backup_write_stream(FILE *file, bool rotate, bool compatible) {
     uint32_t guide_hash=backup_hold_checksum(&guide);
     for(unsigned i=0;i<4;++i)guide.checksum[i]=guide_hash>>(8*i);
     if(ok && !compatible)ok=fwrite(&guide,1,sizeof(guide),file)==sizeof(guide);
-    settings_backup_hold_t covers={.action=s_shelf_covers};
-    uint32_t covers_hash=backup_hold_checksum(&covers);
-    for(unsigned i=0;i<4;++i)covers.checksum[i]=covers_hash>>(8*i);
-    if(ok && !compatible)ok=fwrite(&covers,1,sizeof(covers),file)==sizeof(covers);
-    // V28 appends the vertical inset and its check byte before history.
-    const uint8_t margin_y_block[] = {s_book_margin_y, (uint8_t)~s_book_margin_y};
-    if (ok && !compatible) ok = fwrite(margin_y_block, 1, 2, file) == 2;
+    if (ok && !compatible) ok = backup_extra_write(file);
+
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
     // memstream 没有文件描述符；只有卡上的文件需要 fsync。
@@ -1557,7 +1549,7 @@ static bool backup_file_exists(const char *path, bool directory) {
 // 应用一个只读备份流：卡上的文件与内存里收到的一段字节走同一条校验/写入路径。
 // Apply one read-only backup stream; the card file and the received memory block share
 // this validation and write path.
-static esp_err_t backup_apply_stream(FILE *file, bool apply) {
+static esp_err_t backup_apply_stream_raw(FILE *file, bool apply) {
     settings_backup_v1_t backup;
     bool ok = fread(&backup, 1, sizeof(backup), file) == sizeof(backup);
     unsigned version = ok ? backup_version(&backup) : 0;
@@ -1645,12 +1637,9 @@ static esp_err_t backup_apply_stream(FILE *file, bool apply) {
     if(ok&&version>=25)ok=fread(&shelf,1,sizeof(shelf),file)==sizeof(shelf)&&backup_shelf_valid(&shelf);
     settings_backup_hold_t guide={0};
     if(ok&&version>=26)ok=fread(&guide,1,sizeof(guide),file)==sizeof(guide)&&backup_guide_valid(&guide);
-    settings_backup_hold_t covers={.action=1};
-    if(ok&&version>=28)ok=fread(&covers,1,sizeof(covers),file)==sizeof(covers)&&backup_shelf_covers_valid(&covers);
-    uint8_t margin_y_block[2] = {0};
-    if (ok && version >= 28)
-        ok = fread(margin_y_block, 1, 2, file) == 2 && margin_y_block[0] <= 48 &&
-             (margin_y_block[0] ^ margin_y_block[1]) == 255;
+    settings_backup_extra_t extra = {0};
+    if (ok) ok = backup_extra_read(file, version, &extra);
+
     bool has_history = ok && version >= 6;
     if (has_history) {
         history_position = ftell(file);
@@ -1688,8 +1677,8 @@ static esp_err_t backup_apply_stream(FILE *file, bool apply) {
         backup.flags[BK_TRACKING]=(uint8_t)(px-APP_BOOK_TRACK_MIN);
     }
     backup.flags[BK_MARGIN] = backup.flags[BK_MARGIN] > 48 ? 48 : backup.flags[BK_MARGIN];
-    uint8_t margin_y = margin_y_block[0];
-    if (version < 28 && s_book_vertical) {
+    uint8_t margin_y = extra.margin_y;
+    if (!extra.has_margin_y && s_book_vertical) {
         margin_y = backup.flags[BK_MARGIN];
         backup.flags[BK_MARGIN] = 24;
     }
@@ -1736,7 +1725,8 @@ static esp_err_t backup_apply_stream(FILE *file, bool apply) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_VERTICAL_TURN, (profile.home_full_refresh & 32) != 0);
 
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOME_FULL, profile.home_full_refresh & 1);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_CLOCK_12H, (profile.home_full_refresh & 64) != 0);
+    if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_CLOCK_12H,(profile.home_full_refresh&64)!=0);
+    if(err==ESP_OK&&extra.has_lowghost)err=nvs_set_u8(h,NVS_KEY_LOW_GHOST,extra.lowghost);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_MAIN_REFRESH, (uint8_t)main_refresh);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOME_COMPONENT, home.component);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOME_GOAL, home.minutes);
@@ -1752,6 +1742,8 @@ static esp_err_t backup_apply_stream(FILE *file, bool apply) {
     BACKUP_SET_U8(NVS_KEY_BOOK_PX, BK_BOOK_PX);
 
     BACKUP_SET_U8(NVS_KEY_READER_FULL, BK_FULL_PAGES);
+    // 已明确恢复的全刷频率不再触发首次迁移。/ An explicitly restored interval is already migrated.
+    if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_FULL_OFF_MIGRATION,1);
     BACKUP_SET_U8(NVS_KEY_READER_TURN, BK_TURN);
     BACKUP_SET_U8(NVS_KEY_POWER_TURN, BK_POWER_TURN);
     if (err == ESP_OK) err = nvs_set_u8(h,NVS_KEY_IMMERSIVE,backup.flags[BK_IMMERSIVE]&1);
@@ -1791,67 +1783,12 @@ static esp_err_t backup_apply_stream(FILE *file, bool apply) {
 #undef BACKUP_SET_STR
     if(err==ESP_OK)err=nvs_set_blob(h,"rd_controls",&controls,sizeof(controls));
     if(err==ESP_OK)err=nvs_set_u8(h,"shelf_badges",shelf.badges);
-    if(err==ESP_OK)err=nvs_set_u8(h,"shelf_covers",covers.action);
+    if(err==ESP_OK)err=nvs_set_u8(h,"shelf_covers",extra.covers);
     if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_BOOK_RULE_SAVED,guide.action);
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
     if (err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); return err; }
 
-    s_reader_controls=controls;s_reader_controls_loaded=true;
-    memcpy(s_reader_keys, keys.actions, sizeof(s_reader_keys));
-    s_reader_hold_action = hold.action;
-    s_book_weight = fine_weight/APP_BOOK_WEIGHT_SUBSTEPS+2;
-    s_book_weight_fine = fine_weight;
-    s_book_antialias = antialias;
-    const uint8_t *f = backup.flags;
-    s_sleep = (app_sleep_mode_t)f[BK_SLEEP];
-    s_staged_shutdown = (staged_shutdown & 1) != 0;
-    s_auto_lock_minutes = idle_minutes;
-    s_ble_turner = (profile.home_full_refresh & 8) != 0;
-    s_reader_hold_refresh = (profile.home_full_refresh & 16) != 0;
-    s_reader_vertical_turn = (profile.home_full_refresh & 32) != 0;
-    s_home_full_refresh = (profile.home_full_refresh & 1) != 0;
-    s_clock_12h = (profile.home_full_refresh & 64) != 0;
-    s_main_refresh = main_refresh;
-    s_reader_hide_images = (profile.home_full_refresh & 2) != 0;
-    s_shelf_recent_sort = (profile.home_full_refresh & 4) != 0;
-    s_shelf_order=shelf.order;s_shelf_recent_sort=s_shelf_order==1||s_shelf_order==3;s_shelf_badges=shelf.badges;s_shelf_covers=covers.action;
-    strlcpy(s_device_name, profile.device_name, sizeof(s_device_name));
-    strlcpy(s_avatar, profile.avatar, sizeof(s_avatar));
-    strlcpy(s_status_signature, profile.status_signature, sizeof(s_status_signature));
-    s_pickup_wake = f[BK_PICKUP];
-    s_system_size = f[BK_SYS_SIZE];
-    s_system_contrast = f[BK_SYS_CONTRAST];
-    s_lock_style = f[BK_LOCK];
-    s_book_px = f[BK_BOOK_PX];
-
-    s_reader_full_pages = f[BK_FULL_PAGES];
-    s_reader_turn_effect = f[BK_TURN];
-    s_reader_power_turn = f[BK_POWER_TURN];
-    s_reader_immersive = (f[BK_IMMERSIVE]&1)!=0;
-    s_reader_default_fullscreen = version>=22 && (f[BK_IMMERSIVE]&2)!=0;
-    s_reader_equal_margins = version>=23 && (f[BK_IMMERSIVE]&4)!=0;
-    s_book_tracking = f[BK_TRACKING];
-    s_book_indent = indent;
-    s_book_indent_adjust = adjust.encoded;
-    s_book_reading_line = f[BK_READING_LINE] % 3;
-    s_book_rule_full = version >= 21 && f[BK_READING_LINE] >= 3;
-    s_book_rule_saved=guide.action;
-    s_book_rule_offset = rule_offset;
-    s_book_line = restored_line;
-    s_book_margin = f[BK_MARGIN];
-    s_book_margin_y = margin_y;
-    s_book_para = restored_para;
-    s_shelf_style = f[BK_SHELF];
-    strlcpy(s_book_background, background.path, sizeof(s_book_background));
-    s_home_component = (app_home_component_t)home.component;
-    s_home_goal_minutes = home.minutes;
-    strlcpy(s_books_dir,backup.books_dir,sizeof(s_books_dir));
-    strlcpy(s_fonts_dir,backup.fonts_dir,sizeof(s_fonts_dir));
-    strlcpy(s_font, backup.font, sizeof(s_font));
-    strlcpy(s_system_font, backup.system_font, sizeof(s_system_font));
-    strlcpy(s_wallpaper, backup.wallpaper, sizeof(s_wallpaper));
-    strlcpy(s_bookmark,bookmark.path,sizeof(s_bookmark));
     if (has_history) {
         // 同一个只读流回到阅读记录段，不再按路径重开。
         // Rewind the same read-only stream to the history section instead of reopening by path.
@@ -1866,6 +1803,8 @@ static esp_err_t backup_apply_stream(FILE *file, bool apply) {
     }
     return ESP_OK;
 }
+
+#include "settings_restore_transaction.inc"
 
 esp_err_t app_settings_backup_restore(void) {
     if (!backup_card_ready()) return ESP_ERR_INVALID_STATE;

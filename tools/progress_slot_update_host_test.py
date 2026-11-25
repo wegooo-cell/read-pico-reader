@@ -36,13 +36,13 @@ int main(void){
  book_progress_t p={.file_size=10000,.chapter=8,.byte_off=8200,.px=48,.pct=82},q;
  assert(book_progress_save(path,&p)==ESP_OK&&truncate_opens==1);
  p.byte_off=8300;p.pct=83;assert(book_progress_save(path,&p)==ESP_OK&&truncate_opens==2);
- char key[11],slot[PROGRESS_FILE_MAX];make_key(path,key);slot_path(slot,key,0);
+ char key[11],slot[PROGRESS_FILE_MAX];make_key(path,key);slot_path_at(slot,BOOK_PROGRESS_DIR,key,0);
  struct stat before,after;assert(!stat(slot,&before));
  p.byte_off=8400;p.pct=84;assert(book_progress_save(path,&p)==ESP_OK&&truncate_opens==2&&update_opens==3);
  assert(!stat(slot,&after)&&before.st_size==after.st_size&&before.st_ino==after.st_ino);
  assert(book_progress_load(path,p.file_size,&q)&&q.pct==84);
  // Wrong-sized inactive files use wb; the active checked copy remains available.
- slot_path(slot,key,1);FILE *file=fopen(slot,"wb");assert(file&&fputc(0,file)!=EOF&&!fclose(file));
+ slot_path_at(slot,BOOK_PROGRESS_DIR,key,1);FILE *file=fopen(slot,"wb");assert(file&&fputc(0,file)!=EOF&&!fclose(file));
  p.byte_off=8500;p.pct=85;assert(book_progress_save(path,&p)==ESP_OK&&truncate_opens==3);
  // fsync failure and a partial write invalidate only the target inactive slot.
  sync_failure=true;p.byte_off=8600;p.pct=86;assert(book_progress_save(path,&p)!=ESP_OK);sync_failure=false;

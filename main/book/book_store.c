@@ -42,13 +42,14 @@
 static const char* TAG = "book_store";
 static wl_handle_t s_wl = WL_INVALID_HANDLE;
 static unsigned s_revision;
-static bool s_roots_degraded;
+static unsigned s_root_errors;
 static esp_err_t s_flash_error;
 static int64_t s_flash_retry_us;
 
 void book_store_notify_changed(void) { ++s_revision; }
 unsigned book_store_revision(void) { return s_revision; }
-bool book_store_roots_degraded(void) { return s_roots_degraded; }
+bool book_store_roots_degraded(void) { return s_root_errors != 0; }
+unsigned book_store_root_errors(void) { return s_root_errors; }
 
 static esp_err_t ensure_dir(const char* path) {
     if (mkdir(path, 0777) == 0) return ESP_OK;
@@ -60,7 +61,7 @@ static esp_err_t ensure_dir(const char* path) {
     return ESP_FAIL;
 }
 
-static bool sd_ready(void) {
+bool book_store_card_ready(void) {
     read_pico_sd_info_t info = {0};
     read_pico_sd_get_info(&info);
     return info.present && info.mounted;
@@ -112,6 +113,10 @@ static esp_err_t flash_mount(bool force_retry) {
         }
         s_wl = handle;
         s_flash_retry_us = 0;
+        // 已失效的内置来源恢复后，让书架重新核对，补回暂不可见的图书。
+        // Reconcile the shelf when a failed flash source returns, restoring temporarily hidden books.
+        if (s_flash_error != ESP_OK) book_store_notify_changed();
+        s_flash_error = ESP_OK;
     }
     return ESP_OK;
 }
@@ -130,31 +135,31 @@ esp_err_t book_store_prepare_flash(void) {
 esp_err_t book_store_roots(book_store_root_t out[BOOK_STORE_ROOT_MAX], int* n) {
     if (out == NULL || n == NULL) return ESP_ERR_INVALID_ARG;
     *n = 0;
-    s_roots_degraded = false;
+    s_root_errors = 0;
     memset(out, 0, sizeof(*out) * BOOK_STORE_ROOT_MAX);
-    if (sd_ready()) {
+    if (book_store_card_ready()) {
         // Also show books already copied to a singular `book` directory.
         struct stat legacy;
         if (!strcmp(app_settings_books_dir(), "/sdcard/books") && stat("/sdcard/book", &legacy) == 0 && S_ISDIR(legacy.st_mode))
             out[(*n)++] = (book_store_root_t){.path = "/sdcard/book", .is_flash = false};
         if (ensure_dir(app_settings_books_dir()) == ESP_OK)
             snprintf(out[(*n)++].path, sizeof(out[0].path), "%s", app_settings_books_dir());
-        else s_roots_degraded = true;
+        else s_root_errors |= BOOK_STORE_ROOT_ERROR_CARD;
     } else {
         read_pico_sd_info_t info = {0};
         read_pico_sd_get_info(&info);
-        if (info.present) s_roots_degraded = true;
+        if (info.present) s_root_errors |= BOOK_STORE_ROOT_ERROR_CARD;
     }
     esp_err_t err = flash_root(&out[*n]);
     if (err == ESP_OK) ++*n;
-    else s_roots_degraded = true;
+    else s_root_errors |= BOOK_STORE_ROOT_ERROR_FLASH;
     return *n > 0 ? ESP_OK : err;
 }
 
 esp_err_t book_store_upload_root(book_store_root_t* out) {
     if (out == NULL) return ESP_ERR_INVALID_ARG;
     memset(out, 0, sizeof(*out));
-    if (!sd_ready()) {
+    if (!book_store_card_ready()) {
         read_pico_sd_info_t info = {0};
         read_pico_sd_get_info(&info);
         // 有卡但挂载失效时让用户显式重挂，不能悄悄改写内置目录。
@@ -174,7 +179,7 @@ size_t book_store_file_limit(const book_store_root_t* root) {
 
 uint64_t book_store_free_bytes(const book_store_root_t* root) {
     if (root == NULL) return 0;
-    if (!root->is_flash && !sd_ready()) return 0;
+    if (!root->is_flash && !book_store_card_ready()) return 0;
     uint64_t total = 0, free_bytes = 0;
     esp_err_t err = esp_vfs_fat_info(root->is_flash ? "/flash" : "/sdcard", &total, &free_bytes);
     if (err != ESP_OK) {
@@ -207,7 +212,7 @@ esp_err_t book_store_delete(const char* path, bool* removed) {
             // so deletion accepts any book file under the mounted SD root (including legacy book/).
             root = "/sdcard"; name = path + 8;
         } else return ESP_ERR_INVALID_ARG;
-        if (!sd_ready()) return ESP_ERR_INVALID_STATE;
+        if (!book_store_card_ready()) return ESP_ERR_INVALID_STATE;
     }
     size_t len = strlen(name);
     if (!len || name[0] == '/' || name[len - 1] == '/' || strstr(name, "//")) return ESP_ERR_INVALID_ARG;

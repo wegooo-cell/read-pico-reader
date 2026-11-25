@@ -76,6 +76,17 @@ for suffix,source in [('s31',R/'main/apps/app_book.c'),('pico',R/'boards/pico/sr
 unit+=r'''
 static void populate(void){s_count=s_visible_count=4;for(int i=0;i<4;++i){snprintf(s_shelf[i].path,40,"%d.txt",i);s_shelf[i].selected=false;s_shelf[i].shelved=false;}}
 int main(void){app_ctx_t ctx={20};uint8_t fb=0;
+ // A rescan tap during preparation paints feedback without changing enrollment or queuing a reset.
+ s_view=BULK;s_scan_pending=true;members[3]=true;
+ int initial_commits=commits;
+ for(int i=0;i<3;++i)assert(library_restart_import(&ctx)==APP_REDRAW_PAGE&&s_rescan_wait_notice&&members[3]&&commits==initial_commits&&strstr(s_batch_message,"正在准备"));
+ assert(library_rescan_notice_tick()==APP_REDRAW_NONE&&members[3]&&commits==initial_commits);
+ s_scan_pending=false;assert(library_rescan_notice_tick()==APP_REDRAW_PAGE&&!s_rescan_wait_notice&&strstr(s_batch_message,"已就绪")&&members[3]&&commits==initial_commits);
+ assert(library_rescan_notice_tick()==APP_REDRAW_NONE);
+ s_scan_pending=true;library_restart_import(&ctx);s_scan_pending=false;error=ESP_FAIL;
+ assert(library_rescan_notice_tick()==APP_REDRAW_PAGE&&strstr(s_batch_message,"准备失败")&&members[3]&&commits==initial_commits);error=0;
+ s_scan_pending=true;library_restart_import(&ctx);s_view=SHELF;assert(library_rescan_notice_tick()==APP_REDRAW_NONE&&!s_rescan_wait_notice&&members[3]);
+ s_scan_pending=false;members[3]=false;s_batch_message[0]=0;
  // 切页和关闭都不完成导入；下一次真实on_enter重新显示弹窗。
  // Navigation and dismissal retain enrollment; the actual entry branch restores the prompt.
  for(int board=0;board<2;++board)for(int page=0;page<3;++page){
@@ -120,7 +131,7 @@ int main(void){app_ctx_t ctx={20};uint8_t fb=0;
 
  // 重扫先清空持久成员；失败保留原列表，取消及切页不恢复旧成员。
  // Rescan resets membership first; failures preserve it and cancellation cannot restore it.
- s_view=BULK;s_manage_books=false;s_count=s_visible_count=2;s_library_setup_pending=false;
+ s_view=BULK;s_manage_books=false;s_count=s_visible_count=2;s_library_setup_pending=false;s_scan_pending=false;
  s_shelf[0].selected=true;s_sort_menu=true;ctx.leaf=4;strcpy(s_query,"old");
  int before_commits=commits;write_error=ESP_FAIL;
  assert(library_restart_import(&ctx)==APP_REDRAW_PAGE&&s_view==BULK&&s_count==2&&members[3]&&commits==before_commits&&!s_library_setup_pending&&s_batch_message[0]);
@@ -142,6 +153,6 @@ with tempfile.TemporaryDirectory(prefix='library-ui-') as d:
  subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-variable','-fsanitize=address,undefined','-I'+str(p),'-I'+str(R/'main/book'),str(p/'test.c'),'-o',str(p/'test')],check=True);subprocess.run([str(p/'test')],check=True)
 for source in [R/'main/apps/app_book.c',R/'boards/pico/src/main/apps/app_book.c']:
  text=source.read_text();assert '#include "apps/book_library_ui.inc"' in text
- assert 'if (s_shelf_cache_valid && !s_import_candidates&&!s_manage_books) shelf_cache_save();' in text
+ assert 'if (complete && !s_import_candidates&&!s_manage_books) shelf_cache_save();' in text
  assert 'if(!s_import_candidates&&!s_manage_books)shelf_added_load();' in text
  assert 's_import_candidates&&book_import_running()' in text

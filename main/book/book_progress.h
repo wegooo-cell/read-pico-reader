@@ -34,6 +34,13 @@ esp_err_t book_progress_records(book_progress_record_fn visit, void *ctx);
 #ifdef ESP_PLATFORM
 /// Prepare progress storage, initializing only an entirely erased data area; retain existing records.
 esp_err_t book_progress_prepare_storage(void);
+/// 先写独立副本，提交后才选用；中断不删除原记录。/ Stage records separately and select them only at commit; interruptions retain originals.
+esp_err_t book_progress_restore_begin(void);
+esp_err_t book_progress_restore_commit(void);
+uint32_t book_progress_restore_generation(void);
+esp_err_t book_progress_restore_rewind(uint32_t generation);
+void book_progress_restore_abort(void);
+bool book_progress_using_card_storage(void);
 esp_err_t book_progress_restore_record(const char *key, const uint8_t *data, size_t len);
 esp_err_t book_progress_clear_records(void);
 #endif

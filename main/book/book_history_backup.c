@@ -212,7 +212,9 @@ static esp_err_t read_stream(FILE *file, bool restore) {
             }
             if (result == ESP_OK) {
                 if (type == NVS_TYPE_U8) result = nvs_set_u8(h, key, value[0]);
-                else if (type == NVS_TYPE_U32) { uint32_t v; memcpy(&v, value, 4); result = nvs_set_u32(h, key, v); }
+                else if (type == NVS_TYPE_U32) { uint32_t v; memcpy(&v, value, 4); uint32_t current=0;
+                    if(!ns && !strcmp(key,"seq") && nvs_get_u32(h,key,&current)==ESP_OK && current>v)v=current;
+                    result = nvs_set_u32(h, key, v); }
                 else if (type == NVS_TYPE_STR) result = nvs_set_str(h, key, (const char *)value);
 #ifdef ESP_PLATFORM
                 else if (!ns) result = book_progress_restore_record(key, value, len);
@@ -245,22 +247,11 @@ esp_err_t book_history_backup_restore(FILE *file) {
     long start = ftell(file);
     if (start < 0 || !book_history_backup_validate(file) || fseek(file, start, SEEK_SET))
         return ESP_ERR_INVALID_RESPONSE;
-#ifdef ESP_PLATFORM
-    esp_err_t progress_err = book_progress_clear_records();
-    if (progress_err != ESP_OK) return progress_err;
-#endif
-    // Recovery replaces the old reading library. Merging leaves stale "last"
-    // and per-book records behind, so the restored shelf can appear unchanged.
-    // 恢复应替换旧阅读资料；合并会留下备份外的旧书进度与最近阅读排序。
-    for (unsigned ns = 0; ns < sizeof(namespaces) / sizeof(namespaces[0]); ++ns) {
-        nvs_handle_t h;
-        esp_err_t err = nvs_open(namespaces[ns], NVS_READWRITE, &h);
-        if (err != ESP_OK) return err;
-        err = nvs_erase_all(h);
-        if (err == ESP_OK) err = nvs_commit(h);
-        nvs_close(h);
-        book_progress_notify_changed();
-        if (err != ESP_OK) return err;
-    }
+    // 用户要求保留原数据；只替换备份含有的键，不清空书架或整块存储。
+    // Merge backed-up keys without clearing unrelated user records or whole namespaces.
     return read_stream(file, true);
 }
+
+#ifdef ESP_PLATFORM
+#include "book_history_checkpoint.inc"
+#endif

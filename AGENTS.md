@@ -1,5 +1,22 @@
 # AGENTS.md
 
+## PICO系统修复入口 / Pico system repair menu
+
+用户2026-11-25要求将“屏幕修复、DC恢复、存储检查与修复”收拢为“系统修复”子菜单；点击进入菜单不得执行修复，返回存储页的上一级为系统修复。书架尚未准备好时点击重新扫描须立即显示等待提示，未就绪时不得清空名册；准备好后提示再次点击。仅界面调整不授权执行机内存储重建，保留原双重确认和备份保护。
+Group screen repair, DC recovery and storage maintenance under Pico System repair. Opening the menu must not execute a repair; storage Back returns to System repair. Rescan taps during shelf preparation must visibly acknowledge waiting without resetting enrollment, then report readiness for a fresh tap. UI changes do not authorize a physical storage rebuild; retain backup and confirmation guards.
+
+## PICO机内修复 / Pico storage maintenance
+
+用户2026-11-25明确要求机内可操作修复，并确认新增“原始机内分区备份到TF并校验后，经两次确认重建机内存储”入口；仅实现功能，本轮不在实机执行。默认检查保留数据；重建会清空机内storage，须明确提示不自动恢复旧文件，保留设置和TF且不改VCOM。原始备份唯一命名、完整SHA256读回并与源比较，再次确认后重新核验；取消/锁屏/离页/复位/任何错误不得自动重建，未知数据不能静默格式化。
+The user requests on-device Pico repair and explicitly accepts a verified raw-backup-to-TF plus two-confirmation internal rebuild entry. Implement the feature without executing it on hardware this turn. Checks preserve data; the separate rebuild clears storage with explicit disclosure, retains settings/TF/VCOM and does not automatically restore old files. Use unique durable backups, full source/readback SHA256 verification and fresh confirmation/revalidation. Cancel, lock, exit, reset or errors must never authorize automatic rebuild.
+
+## 下一版 1.0.0 / Next 1.0.0
+
+用户要求PICO和S31下一版统一使用1.0.0；低残影默认关闭，保留已保存的明确选择，不再强制开启。PICO无论安装入口，OTA均采用MindReset主源、GitHub备用，正式/alpha/beta渠道隔离；S31保留原来源。用户接受PR整合与CI基线修复，硬件原始表、VCOM、分区和数据保护保持；封面缓存优化与PCLK自动重试独立验收，本轮暂不启用后者。测试包不等于正式发布或设备验收。
+
+The next Pico and S31 versions are1.0.0. Low-ghost defaults off while preserving explicit saved preferences. Every Pico installation uses MindReset first and GitHub fallback with isolated release/alpha/beta channels; S31 sources stay unchanged. Integrate reviewed PRs and repair stale host baselines without changing raw waveforms,VCOM,partitions or data protection. Defer PCLK automatic retry independently of cover caching. Local packages are not publication or physical acceptance.
+
+
 面向 AI agent 的仓库入口。人类也可读。产品概述、硬件表、引脚、编译命令见 [README.md](README.md)。
 
 Agent entry for this tree. Humans can read it too. Product overview, hardware, pinout and flash commands live in [README.md](README.md).

@@ -10,6 +10,10 @@ typedef struct nvs_iterator_opaque *nvs_iterator_t;
 typedef struct { char namespace_name[16]; char key[16]; nvs_type_t type; } nvs_entry_info_t;
 #define NVS_READONLY 0
 #define NVS_READWRITE 1
+#define NVS_DEFAULT_PART_NAME "nvs"
+typedef struct { size_t available_entries; } nvs_stats_t;
+esp_err_t nvs_get_stats(const char *, nvs_stats_t *);
+esp_err_t nvs_entry_find(const char *, const char *, nvs_type_t, nvs_iterator_t *);
 esp_err_t nvs_open(const char *, int, nvs_handle_t *);
 void nvs_close(nvs_handle_t);
 esp_err_t nvs_get_u8(nvs_handle_t, const char *, uint8_t *);

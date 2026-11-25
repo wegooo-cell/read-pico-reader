@@ -5,6 +5,8 @@
  * 冻结：禁止覆盖当前槽；离页或锁屏先等待任务结束。/ Frozen: never overwrite the running slot; join before leaving or locking.
  * 用户修订：分段擦除并串行化闪存与屏幕推送，启动前检查连续内存，低内存安全失败。
  * User revision: erase incrementally and serialize flash with display output; require memory headroom and fail safely on shortage.
+ * 用户2026-11-24：PICO内测仅使用MindReset ALPHA，禁用旧清单回退；HTTPS、校验、双槽与数据保护保持。
+ * User2026-11-24: Pico alpha uses MindReset ALPHA only, retaining HTTPS, integrity, inactive-slot and data guards without legacy feed fallback.
  */
 #include "ota_online.h"
 #include "esp_app_desc.h"
@@ -138,6 +140,9 @@ static bool online(bool *owned) {
 typedef struct {
     uint32_t start, end, size;
     bool valid;
+    unsigned range_headers, location_headers;
+    char *location;
+    bool invalid_location;
 } download_range_t;
 static esp_err_t range_header(esp_http_client_event_t *event) {
     download_range_t *range = event->user_data;
@@ -145,30 +150,47 @@ static esp_err_t range_header(esp_http_client_event_t *event) {
         return ESP_OK;
     if (!strcasecmp(event->header_key, "Content-Range")) {
         unsigned long start, end, size; char tail;
-        range->valid = strnlen(event->header_value, 96) < 96 &&
+        range->valid = ++range->range_headers == 1 && strnlen(event->header_value, 96) < 96 &&
             sscanf(event->header_value, "bytes %lu-%lu/%lu%c", &start, &end, &size, &tail) == 3 &&
             start <= end && end < size && size <= UINT32_MAX;
         if (range->valid) { range->start = start; range->end = end; range->size = size; }
     }
+    if (range->location && !strcasecmp(event->header_key, "Location")) {
+        size_t n = strnlen(event->header_value, PICO_MINDRESET_CDN_URL_MAX);
+        if (++range->location_headers != 1 || n >= PICO_MINDRESET_CDN_URL_MAX)
+            range->invalid_location = true;
+        else memcpy(range->location, event->header_value, n + 1);
+    }
     return ESP_OK;
 }
-static esp_http_client_handle_t open_http_range(const char *url, uint32_t offset,
-        download_range_t *range, int *status, int64_t *length) {
-    if (range) memset(range, 0, sizeof(*range));
+static esp_http_client_handle_t open_request(const char *url, const char *body, uint32_t offset,
+        download_range_t *range, char *location, int *status, int64_t *length) {
+    if (range) { memset(range, 0, sizeof(*range)); range->location = location; }
     esp_http_client_config_t cfg = {.url = url, .timeout_ms = 15000, .buffer_size = 2048,
         .buffer_size_tx = 1024, .crt_bundle_attach = esp_crt_bundle_attach,
         .disable_auto_redirect = true, .keep_alive_enable = true,
         .event_handler = range_header, .user_data = range};
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (!client) return NULL;
-    esp_http_client_set_header(client, "User-Agent", PICO_OTA_CAPABILITY);
-    esp_http_client_set_header(client, "Accept-Encoding", "identity");
-    esp_http_client_set_header(client, "Cache-Control", "no-cache");
+    if (esp_http_client_set_method(client, body ? HTTP_METHOD_POST : HTTP_METHOD_GET) != ESP_OK ||
+        esp_http_client_set_header(client, "User-Agent", PICO_OTA_CAPABILITY) != ESP_OK ||
+        esp_http_client_set_header(client, "Accept-Encoding", "identity") != ESP_OK ||
+        esp_http_client_set_header(client, "Cache-Control", "no-cache") != ESP_OK) goto fail;
+    size_t body_size = body ? strnlen(body, 512) : 0;
+    if (body_size >= 512 || (body && esp_http_client_set_header(client, "Content-Type", "application/json") != ESP_OK))
+        goto fail;
     if (offset) {
         char value[48]; snprintf(value, sizeof(value), "bytes=%lu-", (unsigned long)offset);
         if (esp_http_client_set_header(client, "Range", value) != ESP_OK) goto fail;
     }
-    if (esp_http_client_open(client, 0) != ESP_OK || atomic_load(&s_cancel)) goto fail;
+    if (esp_http_client_open(client, (int)body_size) != ESP_OK || atomic_load(&s_cancel)) goto fail;
+    int64_t write_deadline = esp_timer_get_time() + 15000000;
+    for (size_t written = 0; written < body_size;) {
+        if (esp_timer_get_time() >= write_deadline) goto fail;
+        int n = esp_http_client_write(client, body + written, (int)(body_size - written));
+        if (n <= 0 || (size_t)n > body_size - written || atomic_load(&s_cancel)) goto fail;
+        written += (size_t)n;
+    }
     *length = esp_http_client_fetch_headers(client);
     if (*length < 0 || atomic_load(&s_cancel)) goto fail;
     *status = esp_http_client_get_status_code(client);
@@ -178,8 +200,29 @@ fail:
     esp_http_client_cleanup(client);
     return NULL;
 }
-static esp_http_client_handle_t open_http(const char *url, int *status, int64_t *length) {
-    return open_http_range(url, 0, NULL, status, length);
+// 每次初始下载和续传均重新获取签名地址；不缓存短期链接，不向CDN发送组织凭据。
+// Resolve a fresh signed URL for every initial/resumed request; never cache it or send organization credentials.
+static esp_http_client_handle_t open_http_range(const char *url, uint32_t offset,
+        download_range_t *range, int *status, int64_t *length) {
+    if (atomic_load(&s_cancel)) return NULL;
+    if (pico_github_url_valid(url)) return open_request(url, NULL, offset, range, NULL, status, length);
+    if (!pico_mindreset_url_valid(url)) return NULL;
+    char *signed_url = heap_caps_calloc(PICO_MINDRESET_CDN_URL_MAX, 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!signed_url) return NULL;
+    download_range_t redirect;
+    esp_http_client_handle_t grant = open_request(url, NULL, 0, &redirect, signed_url, status, length);
+    bool received_grant = grant != NULL;
+    if (grant) esp_http_client_cleanup(grant);
+    bool valid = received_grant && *status == 302 && redirect.location_headers == 1 &&
+        !redirect.invalid_location && pico_mindreset_cdn_url_valid(signed_url) && !atomic_load(&s_cancel);
+    esp_http_client_handle_t client = valid ? open_request(signed_url, NULL, offset, range, NULL, status, length) : NULL;
+    heap_caps_free(signed_url);
+    // 过期签名和临时服务错误回到外层有界重试，重试时再次申请新签名。
+    // Expired signatures and temporary errors use the outer bounded retry, obtaining another fresh URL.
+    if (client && (*status == 403 || *status == 410 || *status == 408 || *status == 429 || *status >= 500)) {
+        esp_http_client_cleanup(client); client = NULL;
+    }
+    return client;
 }
 // 复用连接管理器等待短暂断网恢复，允许取消，不重启整个无线服务。
 // Wait for the connection manager to recover a short outage, with cancellation and no radio restart.
@@ -208,25 +251,66 @@ static int read_chunk(esp_http_client_handle_t client, uint8_t *buffer, int cap,
     }
     return -1;
 }
+// 主源不可用才查询同渠道GitHub；不改变合法的“已是最新”响应。
+// Consult same-channel GitHub only when the primary is unavailable; respect a valid latest response.
+static bool github_query(const esp_app_desc_t *running, char *json, pico_release_t *release, bool *need_update) {
+    const char *url=pico_github_feed_url(running->version);
+    if (!url || atomic_load(&s_cancel) || !wait_network()) return false;
+    int code=-1; int64_t length=-1;
+    esp_http_client_handle_t client=open_request(url,NULL,0,NULL,NULL,&code,&length);
+    if (!client) return false;
+    if (code!=200 || length>8192) {esp_http_client_cleanup(client);return false;}
+    size_t received=0; int n=-1; int64_t idle=esp_timer_get_time()+30000000;
+    while (received<8192 && (n=read_chunk(client,(uint8_t*)json+received,(int)(8192-received),&idle))>0) received+=n;
+    bool complete=esp_http_client_is_complete_data_received(client);
+    esp_http_client_cleanup(client);json[received]=0;
+    if (n<0 || !complete || pico_release_parse(json,received,release)!=ESP_OK ||
+        !pico_ota_same_channel(release->version,running->version) ||
+        pico_version_compare(running->version,release->minimum_base_version)<0) return false;
+    *need_update=pico_version_compare(release->version,running->version)>0;
+    return true;
+}
+
+// 续传换源只允许逐字节相同的镜像；不得把另一版本写到已开始的槽中。
+// Resume across providers only for the identical image; never mix versions in an in-progress slot.
+static bool download_use_github(pico_release_t *release) {
+    if (!pico_mindreset_url_valid(release->url) || atomic_load(&s_cancel)) return false;
+    char *json=heap_caps_malloc(8193,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    pico_release_t *other=heap_caps_calloc(1,sizeof(*other),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    bool update=false;
+    bool ok=json && other && github_query(esp_app_get_description(),json,other,&update) && update &&
+        !strcmp(other->version,release->version) && other->size==release->size &&
+        !strcasecmp(other->sha256,release->sha256) && !strcmp(other->project,release->project) &&
+        !strcmp(other->board,release->board) && !strcmp(other->layout,release->layout);
+    if (ok) snprintf(release->url,sizeof(release->url),"%s",other->url);
+    heap_caps_free(json);heap_caps_free(other);return ok;
+}
+
 static bool check_feed(void) {
     char *json = heap_caps_malloc(8193, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     pico_release_t *release = heap_caps_calloc(1, sizeof(*release), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!json || !release) { state(PICO_UPDATE_FAILED, "内存不足，请退出传书后重试"); goto failed; }
-    // GitHub Pages清单优先，官网清单备用；同一缓冲区顺序请求，无并发TLS连接。
-    // Prefer GitHub Pages metadata, falling back to the website with one shared buffer and no concurrent TLS clients.
-    static const char *const feeds[] = {PICO_OTA_FEED_URL, PICO_OTA_FEED_FALLBACK_URL};
-    bool valid = false;
-    for (size_t source = 0; source < sizeof(feeds) / sizeof(feeds[0]) && !atomic_load(&s_cancel); ++source) {
-        char url[192]; snprintf(url, sizeof(url), "%s?t=%lld", feeds[source], (long long)time(NULL));
+    const esp_app_desc_t *running = esp_app_get_description();
+    char body[384];
+    if (strcmp(running->project_name, PICO_OTA_PROJECT) || !layout_valid() ||
+        pico_mindreset_query_body(running->version, body, sizeof(body)) != ESP_OK) {
+        state(PICO_UPDATE_FAILED, "基础包不兼容，请先通过官网完整刷机"); goto failed;
+    }
+    bool valid = false, need_update = false;
+    for (unsigned attempt = 0; attempt < 2 && !atomic_load(&s_cancel); ++attempt) {
         int code = -1; int64_t length = -1;
         esp_http_client_handle_t client = NULL;
-        for (int i = 0; i < 2 && !atomic_load(&s_cancel); ++i) {
-            if (wait_network()) client = open_http(url, &code, &length);
-            if (client) break;
-            vTaskDelay(pdMS_TO_TICKS(250));
+        if (wait_network()) client = open_request(PICO_MINDRESET_QUERY_URL, body, 0, NULL, NULL, &code, &length);
+        if (!client) { vTaskDelay(pdMS_TO_TICKS(250)); continue; }
+        if (code == 404) {
+            esp_http_client_cleanup(client);
+            break;
         }
-        if (!client) continue;
-        if (code != 200 || length > 8192) { esp_http_client_cleanup(client); continue; }
+        if (code != 200 || length > 8192) {
+            esp_http_client_cleanup(client);
+            if (code == 429 || code >= 500) vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
         size_t received = 0;
         int64_t idle = esp_timer_get_time() + 30000000;
         int n = -1;
@@ -235,19 +319,21 @@ static bool check_feed(void) {
         bool complete = esp_http_client_is_complete_data_received(client);
         esp_http_client_cleanup(client);
         json[received] = 0;
-        if (n >= 0 && complete && pico_release_parse(json, received, release) == ESP_OK) { valid = true; break; }
+        if (n >= 0 && complete && pico_mindreset_parse(json, received, running->version, release, &need_update) == ESP_OK) {
+            valid = true; break;
+        }
     }
-    if (!valid) { state(PICO_UPDATE_FAILED, "更新服务器连接失败或清单无效，请稍后重试"); goto failed; }
-    const esp_app_desc_t *running = esp_app_get_description();
-    if (strcmp(release->project, running->project_name) || !layout_valid() ||
-        pico_version_compare(running->version, release->minimum_base_version) < 0) {
-        state(PICO_UPDATE_FAILED, "基础包不兼容，请先通过官网完整刷机"); goto failed;
+    if ((!valid || (need_update && !release->url[0])) && !atomic_load(&s_cancel))
+        valid=github_query(running,json,release,&need_update);
+    if (!valid) { state(PICO_UPDATE_FAILED, "更新源连接失败或信息无效，请稍后重试"); goto failed; }
+    if (need_update && !release->size) {
+        state(PICO_UPDATE_FAILED, "此内测版本未提供 OTA 升级包"); goto failed;
     }
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     memcpy(&s_status->release, release, sizeof(*release));
     xSemaphoreGive(s_mutex);
-    state(pico_version_compare(release->version, running->version) > 0 ? PICO_UPDATE_AVAILABLE : PICO_UPDATE_LATEST,
-          pico_version_compare(release->version, running->version) > 0 ? "发现新版本，可下载安装" : "当前已是最新版本");
+    state(need_update ? PICO_UPDATE_AVAILABLE : PICO_UPDATE_LATEST,
+          need_update ? "发现新版本，可下载安装" : "当前已是最新版本");
     heap_caps_free(json); heap_caps_free(release);
     return true;
 failed:
@@ -285,12 +371,17 @@ static bool download(void) {
     int64_t idle = esp_timer_get_time() + 30000000;
     int n = -1;
     unsigned retries = 0;
+    bool mirror_tried = false;
     bool complete = false;
     while (error == ESP_OK && !atomic_load(&s_cancel)) {
         if (!client) {
             if (wait_network()) client = open_http_range(release->url, total, &range, &code, &length);
             if (!client) {
-                if (atomic_load(&s_cancel) || retries++ >= 3) { error = ESP_FAIL; break; }
+                if (atomic_load(&s_cancel)) { error=ESP_FAIL;break; }
+                if (retries++ >= 3) {
+                    if (!mirror_tried) {mirror_tried=true;if(download_use_github(release)){retries=0;continue;}}
+                    error=ESP_FAIL;break;
+                }
                 vTaskDelay(pdMS_TO_TICKS(250 * retries)); continue;
             }
             // 续传必须严格匹配起点与全文件长度；最终仍验证整本镜像的 SHA256。
@@ -308,7 +399,11 @@ static bool download(void) {
             esp_http_client_cleanup(client); client = NULL;
             if (n == 0 && complete && total == release->size) break;
             complete = false;
-            if (total >= release->size || atomic_load(&s_cancel) || retries++ >= 3) { error = ESP_FAIL; break; }
+            if (total >= release->size || atomic_load(&s_cancel)) {error=ESP_FAIL;break;}
+            if (retries++ >= 3) {
+                if (!mirror_tried) {mirror_tried=true;if(download_use_github(release)){retries=0;continue;}}
+                error=ESP_FAIL;break;
+            }
             vTaskDelay(pdMS_TO_TICKS(250 * retries));
             continue;
         }
@@ -396,7 +491,7 @@ static esp_err_t start(bool downloading) {
     s_status->busy = true; s_status->received = 0;
     xSemaphoreGive(s_mutex);
     state(downloading ? PICO_UPDATE_DOWNLOADING : PICO_UPDATE_CHECKING,
-          downloading ? "正在下载，短暂断网会自动重连" : "正在连接并检查更新");
+          downloading ? "正在下载，短暂断网会自动重连" : "正在连接 MindReset 检查更新");
     if (xTaskCreate(worker, "kiikoread_ota", 12288, NULL, 4, NULL) != pdPASS) {
         xSemaphoreTake(s_mutex, portMAX_DELAY); s_status->busy = false; xSemaphoreGive(s_mutex);
         state(PICO_UPDATE_FAILED, "内存不足，无法开始升级"); return ESP_ERR_NO_MEM;

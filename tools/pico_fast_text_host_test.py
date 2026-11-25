@@ -96,7 +96,6 @@ static enum EpdDrawError main_recover(EpdiyHighlevelState*h,enum EpdDrawError e)
 }
 '''
 unit+=function('display_reader_fast_text_prepare',ROOT/'main/display_reader_waveform.c')+'\n'
-unit+='static void pclk_retry_default(void){}\n'
 unit+=function('use_scan_for',ROOT/'main/display.c')+'\n'
 unit+=function('update_display_text_turn',ROOT/'main/display.c')+'\n'
 unit+=r'''

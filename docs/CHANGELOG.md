@@ -1,3 +1,23 @@
+## 1.0.0（准备中 / Unreleased）
+
+- PICO设置将屏幕修复、DC恢复和存储检查与修复收拢为“系统修复”；返回按菜单层级，进入菜单不执行修复。
+- Pico groups display, DC and storage recovery under System repair, with hierarchical Back navigation and no repair triggered by entering the menu.
+- 书架准备期间点击重新扫描显示等待提示，准备完成后提示再次点击；未就绪时不清空书架名单。
+- Rescan acknowledges taps while the shelf is preparing and reports readiness for a fresh tap; waiting preserves library enrollment.
+
+- PICO新增存储检查与修复：默认保留数据，提供原始机内分区备份到TF、源/备份SHA256核验及二次确认重建；设置和TF保留，原始备份不会自动恢复旧文件。
+- Pico storage maintenance checks media without clearing data; an isolated rebuild requires a durable raw backup, source/readback SHA256 verification and second confirmation, preserving settings and TF. Raw backups do not automatically restore old files.
+
+- 区分TF目录与内置存储故障；内置不可用时保留可用TF书架缓存，不再反复误报重新扫描，不用部分结果覆盖原书架名册或完整索引。
+- Distinguish TF directory errors from unavailable internal storage; retain usable TF shelf caching and preserve enrollment/full indexes after partial scans.
+
+- 双板统一1.0.0；低残影默认关闭，保留已保存选择。
+- 机内进度存储故障时继续校验旧NVS记录并支持TF双副本；配置恢复有逐键回退和中断恢复，不清原数据。
+- PICO统一MindReset主OTA源、GitHub备用，按正式/内测渠道分开。
+- 书架先显示可操作书目，封面后台加载，输入可中断扫描；封面迁移失败保留原件。
+- 阅读相邻页缓存、反向预绘、图页后文字预绘及空闲保存；增加上下独立页边距。
+- 修复USB主机复位的误恢复判断及网页刷机读取回调；计时仅显式测试构建启用。
+
 ## 本地测试 · Pico RC110 / S31 RC118 · 2026-11-24
 
 - 阅读排版新增独立的左右与上下页边距，两项均支持 0～48 px，每档 6 px。横竖排切换保留两个方向的设置，旧版单边距按原排版方向迁移；页首插图随上下留白一起下移，竖排用户升级后插图位置会与正文对齐。

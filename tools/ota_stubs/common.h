@@ -38,6 +38,7 @@ typedef struct {uint8_t magic;uint8_t unused[11];uint16_t chip_id;uint8_t tail[1
 typedef struct {uint32_t address,length;} esp_image_segment_header_t;
 typedef struct {uint32_t address,size;} esp_partition_t;
 typedef struct FakeHttp *esp_http_client_handle_t;
+typedef enum {HTTP_METHOD_GET, HTTP_METHOD_POST} esp_http_client_method_t;
 #define HTTP_EVENT_ON_HEADER 1
 typedef struct {int event_id; void *user_data; char *header_key, *header_value;} esp_http_client_event_t;
 typedef struct {const char *url;int timeout_ms,buffer_size,buffer_size_tx;int (*crt_bundle_attach)(void*);bool disable_auto_redirect,keep_alive_enable; int (*event_handler)(esp_http_client_event_t*);void *user_data;} esp_http_client_config_t;
@@ -82,8 +83,10 @@ void read_pico_transfer_service_poll(void);
 esp_err_t read_pico_transfer_sync_time_online(uint32_t*);
 int esp_crt_bundle_attach(void*);
 esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t*);
+esp_err_t esp_http_client_set_method(esp_http_client_handle_t,esp_http_client_method_t);
 esp_err_t esp_http_client_set_header(esp_http_client_handle_t,const char*,const char*);
 esp_err_t esp_http_client_open(esp_http_client_handle_t,int);
+int esp_http_client_write(esp_http_client_handle_t,const char*,int);
 int64_t esp_http_client_fetch_headers(esp_http_client_handle_t);
 int esp_http_client_get_status_code(esp_http_client_handle_t);
 esp_err_t esp_http_client_set_timeout_ms(esp_http_client_handle_t,int);

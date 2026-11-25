@@ -318,3 +318,6 @@ esp_err_t app_settings_sync_import(const uint8_t *data, size_t length);
 /// 校验备份后恢复 NVS；缺失的外部字体或壁纸回退到内建资源。
 /// Validate before restoring NVS; missing external assets fall back safely.
 esp_err_t app_settings_backup_restore(void);
+// 未提交恢复日志保留到回退成功；无日志返回ESP_ERR_NOT_FOUND。
+// Keep unfinished restore journals until rollback succeeds.
+esp_err_t app_settings_restore_recover(void);

@@ -10,7 +10,7 @@ import struct
 MAX_BYTES = 4 * 1024 * 1024
 BASE_SIZE = 829  # Frozen byte-only v1: magic,17 flags,160+160+288+96+96 paths,seal.
 SIZES = {'extension':7,'profile':453,'keys':7,'hold':5,'adjust':5,'weight':5,
-         'wifi':103,'background':292,'home':6,'bookmark':292,'controls':17,'shelf':6,'guide':5,'covers':5}
+         'wifi':103,'background':292,'home':6,'bookmark':292,'controls':17,'shelf':6,'guide':5}
 FNV = 2166136261
 
 def fingerprint(data, value=FNV):
@@ -51,13 +51,13 @@ def write_history(records):
 
 def parse(data):
     if not BASE_SIZE<=len(data)<=MAX_BYTES or data[:7]!=b'PICOSET':raise ValueError('配置格式或大小无效')
-    code=data[7];version=code-48 if 49<=code<=57 else code-65+10 if 65<=code<=83 else 0
-    if not 20<=version<=28:raise ValueError('此工具仅转换第20至28版；更早备份由新版固件直接恢复')
+    code=data[7];version=code-48 if 49<=code<=57 else code-65+10 if 65<=code<=84 else 0
+    if not 20<=version<=29:raise ValueError('此工具仅转换第20至29版；更早备份由新版固件直接恢复')
     base=data[:BASE_SIZE]
     if fingerprint(base[:-4])!=int.from_bytes(base[-4:],'little'):raise ValueError('配置主体校验失败')
     fields={};offset=BASE_SIZE
     for name,size in SIZES.items():
-        if (name=='controls' and version<24) or (name=='shelf' and version<25) or (name=='guide' and version<26) or (name=='covers' and version<28):continue
+        if (name=='controls' and version<24) or (name=='shelf' and version<25) or (name=='guide' and version<26) or (name=='lowghost' and version<28):continue
         field=data[offset:offset+size];offset+=size
         if len(field)!=size:raise ValueError('配置字段缺失: '+name)
         if name=='extension': initial=fingerprint(base)
@@ -66,6 +66,23 @@ def parse(data):
         if fingerprint(field[:-4],initial)!=int.from_bytes(field[-4:],'little'):
             raise ValueError('配置字段校验失败: '+name)
         fields[name]=field
+    if version == 29:
+        block=data[offset:offset+12]; offset+=12
+        if len(block)!=12 or block[:4]!=b'KRE\x01' or block[4]>1 or block[5]>1 or block[6]>48 or block[7] or fingerprint(block[:8])!=int.from_bytes(block[8:],'little'):
+            raise ValueError('完整扩展格式或校验无效')
+        fields['extra']=block
+    elif version == 28:
+        block=data[offset:offset+2]
+        if len(block)==2 and block[0]<=48 and block[0]^block[1]==255:
+            offset+=2; fields['margin_y']=block
+        else:
+            block=data[offset:offset+5]; offset+=5
+            if len(block)!=5 or block[0]>1 or fingerprint(block[:1])!=int.from_bytes(block[1:],'little'):
+                raise ValueError('旧完整扩展校验无效')
+            margin=data[offset:offset+2]
+            if len(margin)==2 and margin[0]<=48 and margin[0]^margin[1]==255:
+                fields['covers']=block;fields['margin_y']=margin;offset+=2
+            else:fields['lowghost']=block
     return version,base,fields,history_records(data[offset:])
 
 def convert(data,target=25):

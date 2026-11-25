@@ -279,6 +279,7 @@ kiiko_board_sources(kiiko_selected_sources "${CMAKE_CURRENT_LIST_DIR}" "app_main
         "apps/app_onboarding.c"
         "factory_reset.c"
         "app/app_loop.c"
+        "app/storage_repair.c"
         "app/crash_note.c"
         "app/app_registry.c"
         "ui/ui_kit.c"

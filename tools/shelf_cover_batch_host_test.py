@@ -19,7 +19,7 @@ unit=r'''
 typedef struct{int x,y,width,height;}EpdRect;
 enum{SHELF,MANAGE,BULK};
 typedef struct{bool touched;}touch_t;
-typedef struct{int leaf;bool request_app,request_return,request_menu;int64_t now_ms;touch_t *touch;uint8_t *fb;}app_ctx_t;
+typedef struct{int leaf;bool consumed,request_app,request_return,request_menu;int64_t now_ms;touch_t *touch;uint8_t *fb;}app_ctx_t;
 #define BOOK_ROWS 9
 #define UI_LOCK_WIDTH 684
 #define SHELF_FAST_COVER_STRIDE 21

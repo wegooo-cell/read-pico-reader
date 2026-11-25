@@ -32,6 +32,12 @@ esp_err_t book_store_roots(book_store_root_t out[BOOK_STORE_ROOT_MAX], int* n);
 /// 最近一次 roots 扫描有来源失败；未插 SD 不算失败，成功返回也可能为 true。
 /// Whether the last roots scan lost a source; absent SD is not failure, and a successful call may still be degraded.
 bool book_store_roots_degraded(void);
+enum {
+    BOOK_STORE_ROOT_ERROR_CARD = 1u << 0,
+    BOOK_STORE_ROOT_ERROR_FLASH = 1u << 1,
+};
+/// 最近一次根扫描失败的来源；可用来源仍可正常读取。/ Failed sources from the last roots scan; usable roots remain readable.
+unsigned book_store_root_errors(void);
 /// 选择上传目录；SD 已挂载时不回退掩盖其目录错误。/ Select upload root; do not hide a mounted SD directory error.
 esp_err_t book_store_upload_root(book_store_root_t* out);
 /// 单文件限制；SD 为 SIZE_MAX。/ File limit; SIZE_MAX for SD.
@@ -40,6 +46,8 @@ size_t book_store_file_limit(const book_store_root_t* root);
 uint64_t book_store_free_bytes(const book_store_root_t* root);
 /// 仅查询内置分区是否已挂载，不触发挂载。/ Inspect flash mount state without mounting.
 bool book_store_flash_ready(void);
+/// TF卡已挂载；不探测、不重挂、不格式化。/ Inspect the mounted TF snapshot without probing,remounting or formatting.
+bool book_store_card_ready(void);
 /// 挂载用于书籍和阅读历史的内置文件系统。/ Mount internal storage for books and reading history.
 esp_err_t book_store_prepare_flash(void);
 /// 删除已挂载根（书目录、TF 卡或内置 storage）内的普通 TXT/EPUB 书籍，然后清对应进度及 last。

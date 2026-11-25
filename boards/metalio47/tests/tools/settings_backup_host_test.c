@@ -59,10 +59,31 @@ static bool copy_backup_file(const char *from, const char *to) {
 
 /* Keep the historical byte-splicing cases on the native v26 stream. The paired
  * card interchange is exercised separately by settings_backup_pair_host_test.py. */
+/* Legacy byte-splicing tests use the frozen v26/v27 prefix. Full v28 is tested separately. */
+static size_t fixture_project_v27(uint8_t *data,size_t len){
+ if(data[7]!='S')return len;
+ assert(len>sizeof(settings_backup_v1_t)+7+sizeof(settings_backup_profile_t)+13);
+ memmove(data+len-13,data+len-8,8);len-=5;
+ settings_backup_v1_t *head=(void*)data;memcpy(head->magic,"PICOSETR",8);backup_seal(head);
+ uint8_t *ext=data+sizeof(*head);settings_backup_profile_t *profile=(void*)(ext+7);
+ uint32_t hash=backup_shutdown_checksum(head,ext[0],ext[1],ext[2]);for(unsigned i=0;i<4;++i)ext[3+i]=hash>>(8*i);
+ hash=backup_profile_checksum(head,ext[0],ext[1],ext[2],profile);for(unsigned i=0;i<4;++i)profile->checksum[i]=hash>>(8*i);
+ return len;
+}
+static esp_err_t fixture_sync_export(uint8_t **data,size_t *len){
+ esp_err_t err=app_settings_sync_export(data,len);if(err==ESP_OK)*len=fixture_project_v27(*data,*len);return err;
+}
+#define app_settings_sync_export fixture_sync_export
+
 static bool fixture_native_new_format;
 static esp_err_t native_fixture_save(void) {
     esp_err_t error=app_settings_backup_save();
     if(error==ESP_OK && !copy_backup_file(BACKUP_FULL,BACKUP_FILE))error=ESP_FAIL;
+    if(error==ESP_OK){
+        FILE *file=fopen(BACKUP_FILE,"r+b");assert(file&&!fseek(file,0,SEEK_END));long n=ftell(file);assert(n>0&&!fseek(file,0,SEEK_SET));
+        uint8_t *data=malloc((size_t)n);assert(data&&fread(data,1,(size_t)n,file)==(size_t)n);
+        size_t len=fixture_project_v27(data,(size_t)n);assert(!fseek(file,0,SEEK_SET)&&fwrite(data,1,len,file)==len&&!fflush(file)&&!ftruncate(fileno(file),(off_t)len)&&!fclose(file));free(data);
+    }
     if(error==ESP_OK && !fixture_native_new_format) {
         FILE *file=fopen(BACKUP_FILE,"r+b");assert(file);
         settings_backup_v1_t header;uint8_t ext[7];settings_backup_profile_t profile;
@@ -82,10 +103,10 @@ static esp_err_t native_fixture_save(void) {
         assert(fwrite(&header,1,sizeof(header),file)==sizeof(header));
         assert(fwrite(ext,1,sizeof(ext),file)==sizeof(ext));
         assert(fwrite(&profile,1,sizeof(profile),file)==sizeof(profile));
-        // v26原生流没有v28封面开关块与上下边距块：删去它们并保留阅读资料尾。/ The v26 native stream lacks the v28 cover and vertical-inset blocks: drop them and keep the history tail.
+        // v26原生流没有v28封面开关块：删去它并保留阅读资料尾。/ The v26 native stream lacks the v28 cover block: drop it and keep the history tail.
         char history[8];assert(!fseek(file,0,SEEK_END));long size=ftell(file);
-        assert(size>15&&!fseek(file,size-8,SEEK_SET)&&fread(history,1,8,file)==8);
-        assert(!fseek(file,size-15,SEEK_SET)&&fwrite(history,1,8,file)==8&&!fflush(file)&&!ftruncate(fileno(file),size-7));
+        assert(size>20&&!fseek(file,size-8,SEEK_SET)&&fread(history,1,8,file)==8);
+        assert(!fseek(file,size-20,SEEK_SET)&&fwrite(history,1,8,file)==8&&!fflush(file)&&!ftruncate(fileno(file),size-12));
         assert(!fclose(file));
     }
     (void)remove(BACKUP_PREVIOUS); // Isolate legacy single-file corruption tests from recovery copies.
@@ -168,6 +189,21 @@ static bool has_tracking,has_para;static uint8_t loaded_tracking,loaded_para;
 static int loaded_shelf_order=-1;
 static int loaded_rule_saved=-1;
 static int loaded_line_full=-1,loaded_para_full=-1,loaded_line=-1,loaded_book_px=-1;
+/* Persist fields not covered by the explicit legacy-migration stand-ins above.
+   Configuration is published by reloading NVS after the complete restore commits. */
+typedef struct {char key[16];uint8_t u8;bool has_u8;char text[288];bool has_text;} test_setting_t;
+static test_setting_t test_settings[96];
+static test_setting_t *test_setting(const char *key,bool create){
+ for(unsigned i=0;i<96;++i)if(!strcmp(test_settings[i].key,key))return test_settings+i;
+ if(create)for(unsigned i=0;i<96;++i)if(!test_settings[i].key[0]){strlcpy(test_settings[i].key,key,16);return test_settings+i;}
+ return NULL;
+}
+static bool explicit_u8(const char *key){
+ static const char *keys[]={"lock_lp","shelf_badges","ui_fast",NVS_KEY_BOOK_AA,NVS_KEY_BOOK_INDENT_ADJUST,NVS_KEY_BOOK_LINE,NVS_KEY_BOOK_LINE_FULL,NVS_KEY_BOOK_PARA,NVS_KEY_BOOK_PARA_FULL,NVS_KEY_BOOK_PX,NVS_KEY_BOOK_RULE_FULL,NVS_KEY_BOOK_RULE_SAVED,NVS_KEY_BOOK_TRACK,NVS_KEY_BOOK_WEIGHT,NVS_KEY_BOOK_WEIGHT_FINE,NVS_KEY_DEFAULT_FULLSCREEN,NVS_KEY_EQUAL_MARGINS,NVS_KEY_HOLD_ACTION,NVS_KEY_HOME_COMPONENT,NVS_KEY_HOME_FULL,NVS_KEY_LOCK_STYLE,NVS_KEY_MAIN_REFRESH,NVS_KEY_READER_KEYS_V2,NVS_KEY_SHELF_RECENT,NVS_KEY_SHELF_STYLE,NVS_KEY_SHELF_V22,NVS_KEY_SHUTDOWN_MODE,NVS_KEY_SYS_SIZE};
+ for(unsigned i=0;i<sizeof(keys)/sizeof(keys[0]);++i)if(!strcmp(key,keys[i]))return true;
+ for(unsigned i=0;i<3;++i)if(!strcmp(key,s_reader_key_names[i]))return true;
+ return false;
+}
 static int loaded_margin=-1,loaded_margin_y=-1,loaded_vertical=-1;
 esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
     if(!strcmp(key,NVS_KEY_BOOK_MARGIN)&&loaded_margin>=0){*value=loaded_margin;return ESP_OK;}
@@ -183,8 +219,13 @@ esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
     if(!strcmp(key,NVS_KEY_DEFAULT_FULLSCREEN)&&loaded_default_full>=0){*value=(uint8_t)loaded_default_full;return ESP_OK;}
     if(!strcmp(key,NVS_KEY_BOOK_RULE_FULL)&&loaded_rule_full>=0){*value=(uint8_t)loaded_rule_full;return ESP_OK;}
     if(!strcmp(key,NVS_KEY_SHELF_RECENT)&&loaded_shelf_order>=0){*value=(uint8_t)loaded_shelf_order;return ESP_OK;}
-    if(!strcmp(key,NVS_KEY_HOME_FULL)&&loaded_home_full>=0){*value=(uint8_t)loaded_home_full;return ESP_OK;} (void)h; if(!strcmp(key,NVS_KEY_SHUTDOWN_MODE)&&loaded_shutdown>=0){*value=(uint8_t)loaded_shutdown;return ESP_OK;} if(!strcmp(key,"lock_lp")&&loaded_lock_lp>=0){*value=(uint8_t)loaded_lock_lp;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_PARA)&&has_para){*value=loaded_para;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)&&has_tracking){*value=loaded_tracking;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)&&has_fine){*value=loaded_fine;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOME_COMPONENT)&&loaded_home>=0){*value=(uint8_t)loaded_home;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_AA)&&has_aa){*value=loaded_aa;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2)&&keys_v2){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)&&has_weight){*value=loaded_weight;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)&&has_adjust){*value=loaded_adjust;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_STYLE)&&loaded_shelf>=0){*value=(uint8_t)loaded_shelf;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_V22)&&loaded_shelf_v22){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_LOCK_STYLE)&&loaded_lock>=0){*value=(uint8_t)loaded_lock;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOLD_ACTION)&&has_hold){*value=loaded_hold;return ESP_OK;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])&&has_keys[i]){*value=loaded_keys[i];return ESP_OK;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH) && has_main_mode) { *value=loaded_main_mode;return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } return ESP_FAIL; }
+    if(!strcmp(key,NVS_KEY_HOME_FULL)&&loaded_home_full>=0){*value=(uint8_t)loaded_home_full;return ESP_OK;} (void)h; if(!strcmp(key,NVS_KEY_SHUTDOWN_MODE)&&loaded_shutdown>=0){*value=(uint8_t)loaded_shutdown;return ESP_OK;} if(!strcmp(key,"lock_lp")&&loaded_lock_lp>=0){*value=(uint8_t)loaded_lock_lp;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_PARA)&&has_para){*value=loaded_para;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)&&has_tracking){*value=loaded_tracking;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)&&has_fine){*value=loaded_fine;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOME_COMPONENT)&&loaded_home>=0){*value=(uint8_t)loaded_home;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_AA)&&has_aa){*value=loaded_aa;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2)&&keys_v2){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)&&has_weight){*value=loaded_weight;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)&&has_adjust){*value=loaded_adjust;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_STYLE)&&loaded_shelf>=0){*value=(uint8_t)loaded_shelf;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_V22)&&loaded_shelf_v22){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_LOCK_STYLE)&&loaded_lock>=0){*value=(uint8_t)loaded_lock;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOLD_ACTION)&&has_hold){*value=loaded_hold;return ESP_OK;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])&&has_keys[i]){*value=loaded_keys[i];return ESP_OK;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH) && has_main_mode) { *value=loaded_main_mode;return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } if(!explicit_u8(key)){test_setting_t *r=test_setting(key,false);if(r&&r->has_u8){*value=r->u8;return ESP_OK;}}return ESP_FAIL; }
 esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) {
+    if(!commit_fails){
+        if(!strcmp(key,NVS_KEY_SYS_SIZE))test_loaded_system_size=value;
+        if(!strcmp(key,NVS_KEY_HOME_COMPONENT))loaded_home=value;
+        if(!explicit_u8(key)){test_setting_t *r=test_setting(key,true);assert(r);r->u8=value;r->has_u8=true;}
+    }
     if(!strcmp(key,NVS_KEY_BOOK_MARGIN)&&!commit_fails)loaded_margin=value;
     if(!strcmp(key,NVS_KEY_BOOK_MARGIN_Y)&&!commit_fails)loaded_margin_y=value;
     if(!strcmp(key,NVS_KEY_BOOK_VERTICAL)&&!commit_fails)loaded_vertical=value;
@@ -208,9 +249,10 @@ esp_err_t nvs_get_str(nvs_handle_t h, const char *key, char *value, size_t *size
   if(*size<bytes)return ESP_FAIL;
   memcpy(value,legacy,bytes);*size=bytes;return ESP_OK;
  }
- return ESP_FAIL;
+ test_setting_t *r=test_setting(key,false);if(r&&r->has_text){size_t n=strlen(r->text)+1;if(value&&*size<n)return ESP_FAIL;if(value)memcpy(value,r->text,n);*size=n;return ESP_OK;}return ESP_FAIL;
 }
 esp_err_t nvs_set_str(nvs_handle_t h, const char *key, const char *value) { (void)h;
+ if(!commit_fails){test_setting_t *r=test_setting(key,true);assert(r);strlcpy(r->text,value,sizeof(r->text));r->has_text=true;}
  if((!strcmp(key,NVS_KEY_BOOKS_DIR)||!strcmp(key,NVS_KEY_FONTS_DIR))&&!commit_fails)
   strlcpy(loaded_dirs[!strcmp(key,NVS_KEY_FONTS_DIR)],value,sizeof(loaded_dirs[0]));
  return ESP_OK; }
@@ -1060,8 +1102,8 @@ int main(void) {
     uint8_t *guide_sync=NULL;size_t guide_bytes=0;
     assert(app_settings_sync_export(&guide_sync,&guide_bytes)==ESP_OK&&guide_bytes>8);
     s_book_rule_saved=1;assert(app_settings_sync_import(guide_sync,guide_bytes)==ESP_OK&&s_book_rule_saved==guide_preset);
-    // v28在引导块后追加独立校验的封面开关块与上下边距块。/ V28 appends an independently sealed cover block and the vertical inset after the guide.
-    const size_t covers_at=guide_bytes-8-2-sizeof(settings_backup_hold_t),guide_at=covers_at-sizeof(settings_backup_hold_t);
+    // v28在引导块后追加独立校验的封面开关块。/ V28 appends an independently sealed cover block after the guide.
+    const size_t covers_at=guide_bytes-8-12,guide_at=covers_at-sizeof(settings_backup_hold_t);
     int guide_commits=commit_count;const uint8_t covers_value=guide_sync[covers_at];guide_sync[covers_at]=2;
     assert(app_settings_sync_import(guide_sync,guide_bytes)==ESP_ERR_INVALID_RESPONSE&&commit_count==guide_commits);
     guide_sync[covers_at]=covers_value;guide_sync[guide_at+1]^=1;
@@ -1079,7 +1121,7 @@ int main(void) {
     v25_hash=backup_profile_checksum(v25,v25_ext[0],v25_ext[1],v25_ext[2],v25_profile);
     for(unsigned i=0;i<4;++i)v25_profile->checksum[i]=(uint8_t)(v25_hash>>(8*i));
     memmove(guide_sync+guide_at,guide_sync+guide_bytes-8,8);
-    assert(app_settings_sync_import(guide_sync,guide_bytes-2*sizeof(settings_backup_hold_t)-2)==ESP_OK&&s_book_rule_saved==0);
+    assert(app_settings_sync_import(guide_sync,guide_bytes-12-sizeof(settings_backup_hold_t))==ESP_OK&&s_book_rule_saved==0);
     assert(app_settings_toggle_book_reading_line()&&!s_book_reading_line&&s_book_rule_saved==guide_preset);
     assert(app_settings_toggle_book_reading_line()&&s_book_reading_line==2&&s_book_rule_full&&s_book_rule_offset==7);
     free(guide_sync);
