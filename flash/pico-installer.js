@@ -25,7 +25,7 @@ async function open(snapshot){
   async function read(address,size,label){
     const started=performance.now();let last=0;
     say(`${label}（0/${size} 字节）…`);append(`${label}: 0x${address.toString(16)}, ${size} 字节`);
-    const bytes=await loader.readFlash(address,size,(done,total)=>{
+    const bytes=await loader.readFlash(address,size,(_chunk,done,total)=>{
       const now=performance.now();if(now-last<200&&done!==total)return;last=now;
       say(`${label}：${Math.floor(done/total*100)}%（${done}/${total} 字节）`);
       if(checking)progress.value=done/total*100;

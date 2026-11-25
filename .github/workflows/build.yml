@@ -82,6 +82,8 @@ jobs:
         shell: bash
         run: |
           python3 tools/progress_boot_storage_host_test.py
+          python3 tools/progress_failover_restore_host_test.py
+          python3 tools/settings_restore_integration_host_test.py
           python3 tools/reader_resume_durability_host_test.py
           python3 tools/book_library_host_test.py
           python3 tools/book_library_ui_host_test.py
@@ -99,6 +101,9 @@ jobs:
         shell: bash
         working-directory: build/host/pico
         run: |
+          python3 tools/pico_reader_cache_save_host_test.py
+          python3 tools/cover_legacy_sweep_host_test.py
+          bash tools/run_reader_waveform_dc_host_test.sh
           bash tools/run_water_turn_host_test.sh
           bash tools/run_display_host_test.sh
           bash tools/run_display_navigation_tests.sh
@@ -159,6 +164,10 @@ jobs:
           if [ "${{ matrix.board }}" = pico ]; then
             python tools/lowzag_host_test.py --component build/boards/pico/source/managed_components/defensiblelogic__lowzag
           fi
+      - name: Verify OTA protocols and provider fallback
+        shell: bash
+        run: |
+          python3 tools/run_mindreset_ota_host_tests.py --cjson "build/boards/${{ matrix.board }}/source/managed_components/espressif__cjson/cJSON" --output "build/ota-host/${{ matrix.board }}"
       - name: Verify transparent-cover pixels and cache reads
         if: matrix.board == 'pico'
         shell: bash

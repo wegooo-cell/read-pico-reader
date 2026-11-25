@@ -11,6 +11,7 @@
 #include "book_epub.h"
 #include "book_title.h"
 #include "book_weread_cover.h"
+#include <dirent.h>
 #include <errno.h>
 #include <setjmp.h>
 #include <stdio.h>
@@ -18,6 +19,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include "esp_heap_caps.h"
 #ifdef ESP_PLATFORM
 #include "esp_log.h"
@@ -958,41 +960,136 @@ static void cover_cache_identity(const char *source, const char *title, const ch
         .path_hash = path_hash, .text_hash = text_hash,
     };
 }
+/* ---- 封面缓存分组目录 / Grouped cover cache folders ---- */
+// 用户2026-11-24：200本书的封面缓存都放在同一个 covers 文件夹里有上千个文件，FAT 查不到一个文件要把整个目录
+// 扫一遍（约0.1秒），新写一个文件要扫好几遍（0.4秒以上）。按书路径哈希的高6位分进64个子文件夹，每次只扫
+// 几十个文件。旧 covers 与更早的板级目录只回退读取灰度封面和完整列表封面（解码代价高），其余缓存从灰度重建。
+// User2026-11-24: with 200 books the flat covers folder holds over a thousand files; FAT scans the whole
+// folder for every missing name (~0.1 s) and several times per new file (0.4 s or more). Covers now go into
+// 64 subfolders chosen by the top six bits of the book path hash, so each lookup scans a few dozen files.
+// The old covers folder and the older board roots are only read back for gray and full list covers, which
+// are costly to decode; every other cache is rebuilt from the gray cover.
+#define COVER_DIR "/sdcard/.kiikoread/coverdb"
+static bool cover_file_path(char *path, size_t cap, uint64_t hash, const char *suffix) {
+    const int n = snprintf(path, cap, COVER_DIR "/%02x/%016llx-%s", (unsigned)(hash >> 58),
+                           (unsigned long long)hash, suffix);
+    return n > 0 && (size_t)n < cap;
+}
+// 写入前建好根目录与分组目录。/ Create the root and group folders before a write.
+static bool cover_dir_ready(const char *path) {
+    char dir[160];
+    const char *slash = strrchr(path, '/');
+    const size_t n = slash ? (size_t)(slash - path) : 0;
+    if (!n || n >= sizeof(dir)) return false;
+    memcpy(dir, path, n); dir[n] = 0;
+    return (!mkdir("/sdcard/.kiikoread", 0777) || errno == EEXIST) &&
+           (!mkdir(COVER_DIR, 0777) || errno == EEXIST) && (!mkdir(dir, 0777) || errno == EEXIST);
+}
+// 分组目录未命中时按文件名查旧的平铺目录，再查更早的板级目录。/ On a group miss, try the flat folder, then the older board root.
+static FILE *cover_legacy_open(const char *path) {
+    const char *name = strrchr(path, '/');
+    char legacy[160];
+    if (!name) return NULL;
+    FILE *file = NULL;
+    if (snprintf(legacy, sizeof(legacy), "/sdcard/.kiikoread/covers/%s", name + 1) < (int)sizeof(legacy))
+        file = fopen(legacy, "rb");
+    if (!file &&
+#if KIIKO_BOARD_METALIO47
+        snprintf(legacy, sizeof(legacy), "/sdcard/.metalio_s31/covers/%s", name + 1) < (int)sizeof(legacy)
+#else
+        snprintf(legacy, sizeof(legacy), "/sdcard/.readpico/covers/%s", name + 1) < (int)sizeof(legacy)
+#endif
+    ) file = fopen(legacy, "rb");
+    return file;
+}
+/* ---- 旧平铺目录迁移 / Flat folder migration ---- */
+// 封面后台空闲时每次处理旧平铺目录里的一个文件：灰度封面和完整列表封面改名进分组目录（分组已有则删旧件），
+// 其他缓存可由灰度封面很快重建，直接删除。TXT在线封面记录留给旧固件，读到时另存一份进分组目录。
+// 目录只剩这些记录或已清空时返回0，本次开机不再处理。
+// When the cover worker is idle, handle one file of the old flat folder per step: gray and full list
+// covers are renamed into their group folder (or deleted when the group already has them), and every
+// other cache, quickly rebuilt from the gray cover, is deleted. TXT online cover records stay for older
+// firmware and are copied into the group folders when read. Returns 0 once only those records remain.
+#define COVER_LEGACY_DIR "/sdcard/.kiikoread/covers"
+static bool cover_legacy_kept(const char *name) {
+    const size_t n = strlen(name);
+    return !strncmp(name, "wr-", 3) && n > 7 && !strcmp(name + n - 4, ".bin");
+}
+static bool cover_legacy_movable(const char *name, uint64_t *hash) {
+    if (strlen(name) < 17 || name[16] != '-') return false;
+    uint64_t value = 0;
+    for (int i = 0; i < 16; ++i) {
+        const char c = name[i];
+        const int digit = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+        if (digit < 0) return false;
+        value = value << 4 | (uint64_t)digit;
+    }
+    *hash = value;
+    return !strcmp(name + 17, "176x240.bin") || !strcmp(name + 17, "176x240-list.bin");
+}
+int book_cover_legacy_sweep_step(void) {
+    DIR *dir = opendir(COVER_LEGACY_DIR);
+    if (!dir) return 0;
+    char name[96] = "";
+    bool kept = false;
+    for (struct dirent *entry; (entry = readdir(dir));) {
+        if (entry->d_name[0] == '.') continue; // 只处理自己写的文件。/ Only files this firmware wrote.
+        if (cover_legacy_kept(entry->d_name) || strlen(entry->d_name) >= sizeof(name)) { kept = true; continue; }
+        // 分组已有文件时保留旧件供损坏回退，不让一件旧缓存阻塞其他迁移。
+        // Retain the legacy copy when a target exists, for corruption fallback; keep scanning other entries.
+        uint64_t existing_hash; char existing_path[160]; struct stat existing;
+        if (cover_legacy_movable(entry->d_name, &existing_hash) &&
+            cover_file_path(existing_path, sizeof(existing_path), existing_hash, entry->d_name + 17) &&
+            !stat(existing_path, &existing)) { kept = true; continue; }
+        strcpy(name, entry->d_name);
+        break;
+    }
+    closedir(dir);
+    if (!name[0]) {
+        if (!kept) (void)rmdir(COVER_LEGACY_DIR);
+        return 0;
+    }
+    char from[160], to[160];
+    uint64_t hash;
+    snprintf(from, sizeof(from), COVER_LEGACY_DIR "/%s", name);
+    struct stat st;
+    if (cover_legacy_movable(name, &hash)) {
+        // 迁移失败时保留唯一原件；读卡/建目录/改名错误不能当作可删除缓存。
+        // Preserve the sole source on I/O, mkdir or rename failure.
+        if (!cover_file_path(to, sizeof(to), hash, name + 17)) return 0;
+        if (!stat(to, &st) || errno != ENOENT || !cover_dir_ready(to)) return 0;
+        return rename(from, to) == 0;
+    }
+    const bool moved = false;
+    // 删不掉（只读卡等）就停下，免得反复处理同一个文件。/ Stop if a file cannot be removed (read-only card) instead of looping on it.
+    if (!moved && unlink(from)) return 0;
+    return 1;
+}
+
 static bool cover_cache_key(const char *source, const char *title, const char *author,
                             char *path, size_t cap, cover_cache_header_t *header) {
     struct stat st;
     if (stat(source, &st) || !S_ISREG(st.st_mode) || st.st_size < 0) return false;
     cover_cache_identity(source, title, author, st.st_size, st.st_mtime, book_auto_cover_font_key(), header);
-    // 用户2026-11-05：两板封面缓存统一放 TF:/kiikoread/covers，成品点阵直接读取。
-    // User2026-11-05: both boards keep finished cover rasters under TF:/kiikoread/covers.
-    return snprintf(path, cap, "/sdcard/.kiikoread/covers/%016llx-%ux%u.bin",
-                    (unsigned long long)header->path_hash, BOOK_COVER_W, BOOK_COVER_H) < (int)cap;
+    char suffix[16];
+    snprintf(suffix, sizeof(suffix), "%ux%u.bin", BOOK_COVER_W, BOOK_COVER_H);
+    return cover_file_path(path, cap, header->path_hash, suffix);
 }
 
 static metalio_cover_key_t ram_key(const cover_cache_header_t *key,uint64_t variant) {
     return (metalio_cover_key_t){.field={key->path_hash,key->text_hash,key->file_size,
         (uint64_t)key->modified,variant,key->template_version,key->schema,0}};
 }
-// 用户2026-11-05：封面缓存迁到 TF:/kiikoread/covers；新路径未生成时回退读旧根，
-// 升级后第一次开机就能复用旧成品点阵，不必逐本重新解码。回退逻辑内联在读取点，
-// 宿主测试单独抽取这些函数时也能自洽编译。
-// User2026-11-05: cover caches moved to TF:/kiikoread/covers. Fall back to the legacy root so
-// the first boot after upgrading can reuse finished rasters instead of decoding every book. The
-// fallback stays inline so host tests that extract individual functions still compile.
+// 分组目录未生成时回退读旧目录，升级后第一次开机就能复用旧成品灰度图，不必逐本重新解码。
+// Fall back to the old folders until the group copy exists, so the first boot after upgrading reuses
+// finished gray covers instead of decoding every book.
+static void cover_cache_write(const char *path, const cover_cache_header_t *header,
+                              const uint8_t out[BOOK_COVER_W * BOOK_COVER_H]);
 static bool cover_cache_read(const char *path, const cover_cache_header_t *expected,
                              uint8_t out[BOOK_COVER_W * BOOK_COVER_H]) {
     FILE *file = fopen(path, "rb");
-    if (!file) {
-        const char *name = strrchr(path, '/');
-        char legacy[160];
-        if (name &&
-#if KIIKO_BOARD_METALIO47
-            snprintf(legacy, sizeof(legacy), "/sdcard/.metalio_s31/covers/%s", name + 1) < (int)sizeof(legacy)
-#else
-            snprintf(legacy, sizeof(legacy), "/sdcard/.readpico/covers/%s", name + 1) < (int)sizeof(legacy)
-#endif
-        ) file = fopen(legacy, "rb");
-    }
+    const bool moved = !file;
+    if (!file) file = cover_legacy_open(path);
     if (!file) return false;
     cover_cache_header_t found;
     bool ok = fread(&found, 1, sizeof(found), file) == sizeof(found) &&
@@ -1004,13 +1101,14 @@ static bool cover_cache_read(const char *path, const cover_cache_header_t *expec
               fread(out, 1, BOOK_COVER_W * BOOK_COVER_H, file) == BOOK_COVER_W * BOOK_COVER_H &&
               fgetc(file) == EOF;
     fclose(file);
+    // 旧目录命中后写进分组目录，下次不再查旧目录。/ A legacy hit is copied into its group folder so later reads skip the old folders.
+    if (ok && moved) cover_cache_write(path, expected, out);
     return ok;
 }
 
 static void cover_cache_write(const char *path, const cover_cache_header_t *header,
                               const uint8_t out[BOOK_COVER_W * BOOK_COVER_H]) {
-    if (mkdir("/sdcard/.kiikoread", 0777) && errno != EEXIST) return;
-    if (mkdir("/sdcard/.kiikoread/covers", 0777) && errno != EEXIST) return;
+    if (!cover_dir_ready(path)) return;
     char temp[128];
     if (snprintf(temp, sizeof(temp), "%s.tmp", path) >= (int)sizeof(temp)) return;
     FILE *file = fopen(temp, "wb");
@@ -1023,6 +1121,67 @@ static void cover_cache_write(const char *path, const cover_cache_header_t *head
         if (!rename(temp, path)) return;
     }
     remove(temp);
+}
+
+/* ---- 无封面标记 / No-artwork marker ---- */
+// 书内确认没有封面图时落盘一个小标记，按原书路径、大小与修改时间失效；
+// 之后开机或翻回该页不再打开压缩包解析目录。改进封面查找规则时递增版本以重新探测。
+// Persist a small marker once a book is confirmed to carry no cover image, invalidated by the
+// source path, size and mtime, so later boots and page visits skip reopening the archive.
+// Bump the revision when cover discovery improves so every book is probed again.
+#define NO_ART_MAGIC UINT32_C(0x5241414E)
+#define NO_ART_REVISION 1u
+typedef struct {
+    uint32_t magic, revision;
+    uint64_t path_hash, file_size;
+    int64_t modified;
+} no_art_marker_t;
+static bool no_art_path(const cover_cache_header_t *key, char path[120]) {
+    return cover_file_path(path, 120, key->path_hash, "noart.bin");
+}
+static bool no_art_known(const cover_cache_header_t *key) {
+    char path[120];
+    if (!no_art_path(key, path)) return false;
+    FILE *file = fopen(path, "rb");
+    if (!file) return false;
+    no_art_marker_t found;
+    bool ok = fread(&found, 1, sizeof(found), file) == sizeof(found) && fgetc(file) == EOF &&
+              found.magic == NO_ART_MAGIC && found.revision == NO_ART_REVISION &&
+              found.path_hash == key->path_hash && found.file_size == key->file_size &&
+              found.modified == key->modified;
+    fclose(file);
+    return ok;
+}
+static void no_art_remember(const cover_cache_header_t *key) {
+    char path[120], temp[128];
+    if (!no_art_path(key, path) || snprintf(temp, sizeof(temp), "%s.tmp", path) >= (int)sizeof(temp)) return;
+    if (!cover_dir_ready(path)) return;
+    const no_art_marker_t marker = {NO_ART_MAGIC, NO_ART_REVISION, key->path_hash, key->file_size, key->modified};
+    FILE *file = fopen(temp, "wb");
+    if (!file) return;
+    bool ok = fwrite(&marker, 1, sizeof(marker), file) == sizeof(marker);
+    if (fclose(file)) ok = false;
+    // FAT 的 rename 不覆盖已有文件，先删除旧标记。/ FAT rename never replaces a file, so drop the old marker first.
+    if (ok) {
+        remove(path);
+        if (!rename(temp, path)) return;
+    }
+    remove(temp);
+}
+
+/* ---- 解码内存 / Decode headroom ---- */
+// 用户2026-11-23：200本书库实测，翻几页后内存封面缓存把空闲PSRAM压到解码保留线，之后每本封面预算都不足而失败。
+// 可用预算不到1 MiB时，先按缺口让出最久未用的内存封面（可重建，TF缓存仍在）再计算。
+// User 2026-11-23: on a 200-book shelf the RAM cover cache pressed free PSRAM down to the decode reserve
+// after a few pages, so every later cover failed for lack of budget. Below 1 MiB, yield least-recently-used
+// RAM covers (rebuildable; the TF cache remains) for the shortfall before computing the budget.
+#define COVER_DECODE_ROOM (1024u * 1024u)
+static size_t cover_decode_budget(size_t reserve) {
+    size_t free_bytes = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    size_t budget = free_bytes > reserve ? free_bytes - reserve : 0;
+    if (budget >= COVER_DECODE_ROOM || !metalio_cover_cache_yield(COVER_DECODE_ROOM - budget)) return budget;
+    free_bytes = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return free_bytes > reserve ? free_bytes - reserve : 0;
 }
 
 static bool book_cover_load_gray_impl(const char *path, const char *title, const char *author,
@@ -1054,9 +1213,12 @@ static bool book_cover_load_gray_impl(const char *path, const char *title, const
         uint8_t *data = NULL;
         size_t size = 0;
         bool png = false;
-        size_t free_bytes=heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-        size_t budget=free_bytes>2u*1024u*1024u?free_bytes-2u*1024u*1024u:0;
-        esp_err_t err = budget ? book_epub_cover_bounded(path,&data,&size,&png,budget) : ESP_ERR_NO_MEM;
+        size_t budget=cover_decode_budget(2u*1024u*1024u);
+        esp_err_t err = ESP_ERR_NOT_FOUND;
+        if (!no_art_known(&key)) {
+            err = budget ? book_epub_cover_bounded(path,&data,&size,&png,budget) : ESP_ERR_NO_MEM;
+            if (err == ESP_ERR_NOT_FOUND) no_art_remember(&key);
+        }
         if (err == ESP_OK) good = book_cover_thumbnail(data, size, png, out);
 #ifdef ESP_PLATFORM
         else ESP_LOGW("cover", "epub cover fail %s err=%d", path, (int)err);
@@ -1131,19 +1293,8 @@ static bool book_cover_load_list_gray_sized_impl(const char *path, const char *t
     }
     if(!list_cache_path(cache_path,sizeof(cache_path),limit_w,limit_h))return false;
     FILE *file = fopen(cache_path, "rb");
-    if (!file) {
-        // 旧目录回退：升级后仍能读上次生成的列表封面。
-        // Legacy-root fallback keeps list covers readable after the cache migration.
-        const char *name = strrchr(cache_path, '/');
-        char legacy[160];
-        if (name &&
-#if KIIKO_BOARD_METALIO47
-            snprintf(legacy, sizeof(legacy), "/sdcard/.metalio_s31/covers/%s", name + 1) < (int)sizeof(legacy)
-#else
-            snprintf(legacy, sizeof(legacy), "/sdcard/.readpico/covers/%s", name + 1) < (int)sizeof(legacy)
-#endif
-        ) file = fopen(legacy, "rb");
-    }
+    // 旧目录只回退完整列表封面；小图可从灰度封面快速重建。/ Only full list covers fall back to old folders; thumbnails rebuild quickly.
+    if (!file && !compact) file = cover_legacy_open(cache_path);
     if (file) {
         cover_cache_header_t found;
         bool good = fread(&found, 1, sizeof(found), file) == sizeof(found) &&
@@ -1168,10 +1319,36 @@ static bool book_cover_load_list_gray_sized_impl(const char *path, const char *t
     if(compact&&heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)>=BOOK_COVER_W*BOOK_COVER_H+1536u*1024u){
         uint8_t *legacy=heap_caps_malloc(BOOK_COVER_W*BOOK_COVER_H,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
         unsigned lw=0,lh=0;bool pending=false;
-        if(legacy&&book_cover_load_list_gray_sized_impl(path,title,author,legacy,false,&pending,&lw,&lh,false,NULL,BOOK_COVER_W,BOOK_COVER_H)){
+        bool have=legacy&&book_cover_load_list_gray_sized_impl(path,title,author,legacy,false,&pending,&lw,&lh,false,NULL,BOOK_COVER_W,BOOK_COVER_H);
+        // 用户2026-11-24：200本书实测，列表小图缺缓存时每本从EPUB重解约0.7秒。网格灰阶缓存同为居中铺满裁剪，
+        // 宽高比（0.733）与列表格（0.729）几乎相同，直接缩出小图；只读不收录，不让42KB网格图挤掉列表小图。
+        // User 2026-11-24: on a 200-book shelf each missing list thumbnail re-decoded its EPUB in about 0.7 s.
+        // The grid gray cache is also a centred aspect fill with nearly the same ratio (0.733 vs 0.729), so
+        // scale the thumbnail from it; read without admission so a 42 KB grid raster never evicts list thumbnails.
+        if(legacy&&!have){
+            char grid_path[120];cover_cache_header_t grid_key;metalio_cover_key_t grid_ram;
+            if(cover_cache_key(path,title,author,grid_path,sizeof(grid_path),&grid_key)){
+                grid_ram=ram_key(&grid_key,0);
+                have=metalio_cover_cache_get(&grid_ram,legacy,BOOK_COVER_W*BOOK_COVER_H,NULL)||
+                     cover_cache_read(grid_path,&grid_key,legacy);
+                if(have){lw=BOOK_COVER_W;lh=BOOK_COVER_H;}
+            }
+        }
+        if(have){
+            // 按源像素窗口取平均缩小，避免约3.4倍最近邻缩小带来的锯齿和细线丢失。
+            // Box-average each source window so the ~3.4x reduction does not alias or drop thin lines.
             book_crop_t crop=book_cover_crop(lw,lh,limit_w,limit_h);
-            for(unsigned y=0;y<limit_h;++y)for(unsigned x=0;x<limit_w;++x)
-                out[(size_t)y*limit_w+x]=legacy[(crop.y+(uint64_t)y*crop.height/limit_h)*lw+crop.x+(uint64_t)x*crop.width/limit_w];
+            for(unsigned y=0;y<limit_h;++y){
+                unsigned y0=crop.y+(uint64_t)y*crop.height/limit_h,y1=crop.y+(uint64_t)(y+1)*crop.height/limit_h;
+                if(y1<=y0)y1=y0+1;
+                for(unsigned x=0;x<limit_w;++x){
+                    unsigned x0=crop.x+(uint64_t)x*crop.width/limit_w,x1=crop.x+(uint64_t)(x+1)*crop.width/limit_w;
+                    if(x1<=x0)x1=x0+1;
+                    unsigned sum=0;
+                    for(unsigned sy=y0;sy<y1;++sy)for(unsigned sx=x0;sx<x1;++sx)sum+=legacy[(size_t)sy*lw+sx];
+                    out[(size_t)y*limit_w+x]=(uint8_t)((sum+(y1-y0)*(x1-x0)/2)/((y1-y0)*(x1-x0)));
+                }
+            }
             good=true;
         }
         free(legacy);
@@ -1179,10 +1356,13 @@ static bool book_cover_load_list_gray_sized_impl(const char *path, const char *t
     const char *ext = strrchr(path, '.');
     if (!good && ext && !strcasecmp(ext, ".epub")) {
         uint8_t *data = NULL; size_t size = 0; bool png = false;
-        size_t available = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        size_t budget = available > 1536u*1024u ? available - 1536u*1024u : 0;
+        size_t budget = cover_decode_budget(1536u*1024u);
         if (budget > 4u*1024u*1024u) budget = 4u*1024u*1024u;
-        esp_err_t error = budget ? book_epub_cover_bounded(path, &data, &size, &png, budget) : ESP_ERR_NO_MEM;
+        esp_err_t error = ESP_ERR_NOT_FOUND;
+        if (!no_art_known(&key)) {
+            error = budget ? book_epub_cover_bounded(path, &data, &size, &png, budget) : ESP_ERR_NO_MEM;
+            if (error == ESP_ERR_NOT_FOUND) no_art_remember(&key);
+        }
 #ifdef ESP_PLATFORM
         if (error != ESP_OK) ESP_LOGW("cover", "epub cover fail(list) %s err=%d", path, (int)error);
 #endif
@@ -1216,8 +1396,7 @@ static bool book_cover_load_list_gray_sized_impl(const char *path, const char *t
         // Persist dimensions and pixels atomically; one small image, never a whole-page decode workspace.
         key.width = *width; key.height = *height;
         char temp[128];
-        if ((!mkdir("/sdcard/.kiikoread",0777) || errno==EEXIST) &&
-            (!mkdir("/sdcard/.kiikoread/covers",0777) || errno==EEXIST) &&
+        if (cover_dir_ready(cache_path) &&
             snprintf(temp,sizeof(temp),"%s.tmp",cache_path)<(int)sizeof(temp)) {
             file = fopen(temp,"wb");
             if (file) {
@@ -1304,8 +1483,7 @@ static bool fast_cover_key(const char *source, const char *title, const char *au
     if (!title || !*title) return false;
     memset(header, 0, sizeof(*header));
     if (!cover_cache_key(source, title, author, path, 120, &header->source)) return false;
-    snprintf(path, 120, "/sdcard/.kiikoread/covers/%016llx-%sfast.bin",
-             (unsigned long long)header->source.path_hash, home ? "home-" : "");
+    if (!cover_file_path(path, 120, header->source.path_hash, home ? "home-fast.bin" : "fast.bin")) return false;
     header->revision = FAST_COVER_REVISION; header->width = key.width; header->height = key.height;
     header->stride = key.stride; header->contrast = key.contrast; header->phase = key.phase;
     return true;
@@ -1405,18 +1583,9 @@ bool book_cover_fast_cache_read(const char *source, const char *title, const cha
     metalio_cover_key_t ram = finished_fast_ram_key(&expected);
     metalio_cover_meta_t meta;
     if (metalio_cover_cache_get(&ram, out, bytes, &meta)) { *white_edge = meta.white_edge; return true; }
+    // 快刷点阵不回退旧目录：从灰度封面重建只要几十毫秒，比在旧目录里查不到便宜。
+    // Fast rasters skip old folders: rebuilding from the gray cover costs tens of ms, less than a miss there.
     FILE *file = fopen(path, "rb");
-    if (!file) {
-        const char *name = strrchr(path, '/');
-        char legacy[160];
-        if (name &&
-#if KIIKO_BOARD_METALIO47
-            snprintf(legacy, sizeof(legacy), "/sdcard/.metalio_s31/covers/%s", name + 1) < (int)sizeof(legacy)
-#else
-            snprintf(legacy, sizeof(legacy), "/sdcard/.readpico/covers/%s", name + 1) < (int)sizeof(legacy)
-#endif
-        ) file = fopen(legacy, "rb");
-    }
     if (!file) return false;
     bool ok = fread(&found, 1, sizeof(found), file) == sizeof(found) &&
         found.source.magic == expected.source.magic && found.source.schema == expected.source.schema &&
@@ -1443,8 +1612,7 @@ static void fast_cache_write(const char *source,const char *title,const char *au
     metalio_cover_key_t ram = finished_fast_ram_key(&header);
     (void)metalio_cover_cache_put(&ram, out, (size_t)key.stride * key.height,
         (metalio_cover_meta_t){key.width, key.height, white_edge});
-    if ((mkdir("/sdcard/.kiikoread", 0777) && errno != EEXIST) ||
-        (mkdir("/sdcard/.kiikoread/covers", 0777) && errno != EEXIST)) return;
+    if (!cover_dir_ready(path)) return;
     if (snprintf(temp, sizeof(temp), "%s.tmp", path) >= (int)sizeof(temp)) return;
     header.white_edge = white_edge;
     const size_t bytes = (size_t)key.stride * key.height;
@@ -1452,7 +1620,13 @@ static void fast_cache_write(const char *source,const char *title,const char *au
     FILE *file = fopen(temp, "wb"); if (!file) return;
     bool ok = fwrite(&header, 1, sizeof(header), file) == sizeof(header) && fwrite(out, 1, bytes, file) == bytes;
     if (fclose(file)) ok = false;
-    if (ok && !rename(temp, path)) return;
+    // FAT 的 rename 遇到已有文件直接失败；格子换了抖动相位后旧点阵必须能被替换。
+    // FAT rename fails on an existing name; a cell with a new dither phase must replace the old raster.
+    if (ok) {
+        int result = rename(temp, path);
+        if (result && errno == EEXIST && !remove(path)) result = rename(temp, path);
+        if (!result) return;
+    }
     (void)remove(temp);
 }
 
@@ -1818,8 +1992,7 @@ void book_cover_store_sized(const char *path,const char *title,const char *autho
     metalio_cover_key_t ram=ram_key(&key,1);ram.field[7]=((uint64_t)width<<32)|height;
     metalio_cover_cache_put(&ram,pixels,bytes,(metalio_cover_meta_t){width,height,false});
 #endif
-    if ((mkdir("/sdcard/.kiikoread", 0777) && errno != EEXIST) ||
-        (mkdir("/sdcard/.kiikoread/covers", 0777) && errno != EEXIST)) return;
+    if (!cover_dir_ready(cache)) return;
     if(snprintf(temp,sizeof(temp),"%s.tmp",cache)>=(int)sizeof(temp))return;
     FILE *f=fopen(temp,"wb");if(!f)return;uint64_t checksum=fast_cover_checksum(pixels,bytes);
     bool ok=fwrite(&key,1,sizeof(key),f)==sizeof(key)&&fwrite(pixels,1,bytes,f)==bytes&&fwrite(&checksum,sizeof(checksum),1,f)==1;

@@ -1,5 +1,12 @@
 # AGENTS.md
 
+## 下一版 1.0.0 / Next 1.0.0
+
+用户要求PICO和S31下一版统一使用1.0.0；低残影默认关闭，保留已保存的明确选择，不再强制开启。PICO无论安装入口，OTA均采用MindReset主源、GitHub备用，正式/alpha/beta渠道隔离；S31保留原来源。用户接受PR整合与CI基线修复，硬件原始表、VCOM、分区和数据保护保持；封面缓存优化与PCLK自动重试独立验收，本轮暂不启用后者。测试包不等于正式发布或设备验收。
+
+The next Pico and S31 versions are1.0.0. Low-ghost defaults off while preserving explicit saved preferences. Every Pico installation uses MindReset first and GitHub fallback with isolated release/alpha/beta channels; S31 sources stay unchanged. Integrate reviewed PRs and repair stale host baselines without changing raw waveforms,VCOM,partitions or data protection. Defer PCLK automatic retry independently of cover caching. Local packages are not publication or physical acceptance.
+
+
 面向 AI agent 的仓库入口。人类也可读。产品概述、硬件表、引脚、编译命令见 [README.md](README.md)。
 
 Agent entry for this tree. Humans can read it too. Product overview, hardware, pinout and flash commands live in [README.md](README.md).

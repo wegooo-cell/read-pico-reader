@@ -220,18 +220,24 @@
   },
   "approved_overrides": {
     "boards/pico/src/main/sleep.c": {
-      "sha256": "7c6b16ce79b251024c4170f690e52fba23ff96b0b67a9710fc83b1bfe3c1a411",
-      "user_decision": "用户2026-11-04要求Pico四种锁屏样式一起优化且保留保护：正常锁屏/浅睡解锁单次GC16、页面恢复后重启网络，拼贴提示只局部GC16；反馈/绘图/输出失败保留原清屏，缓存/PIN/深睡策略及波形不变。 / User2026-11-04 extends the Pico optimization to all four lock styles: one GC16 lock/light-wake restore, deferred network restart and local GC16 collage feedback; retain clearing on feedback/art/output failure and preserve cache/PIN/deep-sleep/waveform behavior. 用户2026-11-04报告透明书封透字并要求修复：仅透明书封入锁增加一次原GC16白目标后输出最终图，不改原表、供电与解锁逻辑，分配/显示失败沿用清屏兜底。 / User2026-11-04 authorizes one calibrated white GC16 target before transparent-cover art to address ghosting, retaining raw tables, power, unlock logic and allocation/display-failure recovery. 用户确认透明书封不再透字后要求其他类型一并修复：将一次GC16白目标+最终图扩展到Pico四种锁屏，异常清屏与解锁保护保持。 / After device confirmation, the user requests the same white-target plus final-image sequence for all four Pico lock styles, retaining failure recovery and unlock protection."
+      "sha256": "b33f03575db2f5581a635a18bee6df009f96f6959bfc7c93168404cf46fa5a1a",
+      "user_decision": "用户2026-11-04要求Pico四种锁屏样式一起优化且保留保护：正常锁屏/浅睡解锁单次GC16、页面恢复后重启网络，拼贴提示只局部GC16；反馈/绘图/输出失败保留原清屏，缓存/PIN/深睡策略及波形不变。 / User2026-11-04 extends the Pico optimization to all four lock styles: one GC16 lock/light-wake restore, deferred network restart and local GC16 collage feedback; retain clearing on feedback/art/output failure and preserve cache/PIN/deep-sleep/waveform behavior. 用户2026-11-04报告透明书封透字并要求修复：仅透明书封入锁增加一次原GC16白目标后输出最终图，不改原表、供电与解锁逻辑，分配/显示失败沿用清屏兜底。 / User2026-11-04 authorizes one calibrated white GC16 target before transparent-cover art to address ghosting, retaining raw tables, power, unlock logic and allocation/display-failure recovery. 用户确认透明书封不再透字后要求其他类型一并修复：将一次GC16白目标+最终图扩展到Pico四种锁屏，异常清屏与解锁保护保持。 / After device confirmation, the user requests the same white-target plus final-image sequence for all four Pico lock styles, retaining failure recovery and unlock protection.",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
     },
     "main/sleep.h": {
-      "sha256": "0c067e19583e5ee75fd726f0bf773482b280346b795f88fd80ec2f175b99f4c5",
+      "sha256": "f4323a7252a88981820d5887618aa1fb2f4eb459528a0edf4045c3c35e4b98df",
       "pull_request": 71,
       "source_commit": "24e70e0057c44da826270822f4c831f5911de0e5",
-      "reason": "Retain the merged PR71 API; User2026-11-04 all-style Pico lock optimization updates only the local-GC16 collage-feedback contract comment. No declarations or S31 behavior changed."
+      "reason": "Retain the merged PR71 API; User2026-11-04 all-style Pico lock optimization updates only the local-GC16 collage-feedback contract comment. No declarations or S31 behavior changed.",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
     },
     "boards/metalio47/src/main/sleep.c": {
-      "sha256": "348ee84c094c76d5d2f67d5fb5f51d9d37f1376d5ba059765d7dd721e28dae2c",
-      "reason": "User2026-11-04 explicitly verifies full physical wake-target clearing without changing back history or refreshing; retain PR73 charger, keep-light, native power sequence and wake/PIN gates."
+      "sha256": "3b1d2df308a6331e3118e40be8b865cafba2cd3349776e05764a30fe4ce17e85",
+      "reason": "User2026-11-04 explicitly verifies full physical wake-target clearing without changing back history or refreshing; retain PR73 charger, keep-light, native power sequence and wake/PIN gates.",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
     },
     "components/metalio_hw/CMakeLists.txt": {
       "sha256": "75f3504a8850c7275cbdd986d08947fe182661b1f308b3cf6480afb4f86ff36f",
@@ -243,15 +249,19 @@
       "reason": "User2026-11-09: align S31 displayed battery estimation/filter/wake reset to official v2.0.77; preserve charger control and Pico."
     },
     "boards/pico/src/main/display_reader_waveform.c": {
-      "sha256": "231de8d85f6b6d9d7575ec37f18021c1b9d058ecd584ddbb18cdbf5fb2f10d19",
+      "sha256": "0ed0e5251dfa596a9bf1f03cdc1a9e4546557cfa6f64700797276b98432e5fd4",
       "pull_request": 68,
       "source_commit": "cd9f1a598a97a985bcda57dc47d49e118c4b1083",
-      "reason": "User2026-11-02 explicitly approved merging PR68 as authored; retain its Pico ripple erase/redrive phases and64-phase engine capacity."
+      "reason": "User2026-11-02 explicitly approved merging PR68 as authored; retain its Pico ripple erase/redrive phases and64-phase engine capacity.",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
     },
     "boards/metalio47/src/main/display_reader_waveform.c": {
-      "sha256": "e256413af08373f8cd394fd09ef352880dc60966b658d3ba05201cefbe6b08cf",
+      "sha256": "907fcc07c8e93dc5c03f1ca647b34adc618ad4f883885da232fd66c40dadbd1e",
       "reason": "User2026-11-01 explicitly approved PR62 as authored, superseding the previous derived-waveform pin for this file.",
-      "user_decision": "用户2026-11-03：S31残影/翻页优化定稿并直接提交合并（整页刷新恢复厂家完整48相，普通翻页对齐Pico的十二相擦白+四相重推黑）。/ User2026-11-03 finalizes the S31 ghosting/turn work and merges it directly (page refreshes use vendor full 48 phases; ordinary turns match Pico's twelve erase plus four black re-drive phases)."
+      "user_decision": "用户2026-11-03：S31残影/翻页优化定稿并直接提交合并（整页刷新恢复厂家完整48相，普通翻页对齐Pico的十二相擦白+四相重推黑）。/ User2026-11-03 finalizes the S31 ghosting/turn work and merges it directly (page refreshes use vendor full 48 phases; ordinary turns match Pico's twelve erase plus four black re-drive phases).",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
     },
     "boards/metalio47/src/components/e0470_epaper_waveform/e0470_epaper_waveform.c": {
       "sha256": "c7dbea4dc78ce57d9b87e5406caff4b6126da25386bc3279892afa3f3a321e76",
@@ -260,36 +270,46 @@
       "settings_short_motion_authorization": "User2026-11-07 requests an opt-in S31 settings-only14-phase motion accessor, keeping global DU14 off and existing reader/idle/raw profiles unchanged; local delivery only."
     },
     "components/e0470_epaper_waveform/include/e0470_epaper_waveform.h": {
-      "sha256": "748f1506470a50792bb9229eb4d7f67464e429c6bfaa9934504e832c781592ac",
+      "sha256": "2d9ff9aca72a9bece1d0a44d20de488c6a32851ce0afab62532911f32db4e461",
       "reason": "User2026-11-01 explicitly approved PR64 as authored, superseding the previous derived-waveform pin for this file.",
       "user_decision": "用户2026-11-03：S31残影/翻页优化定稿并直接提交合并（整页刷新恢复厂家完整48相，普通翻页对齐Pico的十二相擦白+四相重推黑）。/ User2026-11-03 finalizes the S31 ghosting/turn work and merges it directly (page refreshes use vendor full 48 phases; ordinary turns match Pico's twelve erase plus four black re-drive phases).",
-      "settings_short_motion_authorization": "User2026-11-07 requests an opt-in S31 settings-only14-phase motion accessor, keeping global DU14 off and existing reader/idle/raw profiles unchanged; local delivery only."
+      "settings_short_motion_authorization": "User2026-11-07 requests an opt-in S31 settings-only14-phase motion accessor, keeping global DU14 off and existing reader/idle/raw profiles unchanged; local delivery only.",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
     },
     "boards/metalio47/src/components/read_pico/read_pico_sd.c": {
-      "sha256": "6447cc070ff5cceefc7f4e8fb1ccaa006c2be5d019aadc5babf8b59ef3ecc7fd",
-      "reason": "User2026-11-02: S31 wake/font and keep-light policy, bounded Wi-Fi reception and read-only SD profile diagnostics; preserve native pins, power sequence, waveforms and SD fallback."
+      "sha256": "10db62cc18ac3195b46bce6ec25f872bac53fd8381e4b97692071c0849409046",
+      "reason": "User2026-11-02: S31 wake/font and keep-light policy, bounded Wi-Fi reception and read-only SD profile diagnostics; preserve native pins, power sequence, waveforms and SD fallback.",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
     },
     "components/read_pico/CMakeLists.txt": {
       "sha256": "8aecef52d3c4b20cce992ba2672744d8c996b5f8699bf195b96b45a9437d6721",
       "reason": "User2026-11-02: S31 SD admission and shared VFS/USB initialization; retain native fallback, recovery and board isolation."
     },
     "components/read_pico/include/read_pico_sd.h": {
-      "sha256": "08233e4107469c665c5f2feec22ce78c3fdb6f51bc33b62c56caed977d95dccb",
-      "reason": "User2026-11-02: S31 wake/font and keep-light policy, bounded Wi-Fi reception and read-only SD profile diagnostics; preserve native pins, power sequence, waveforms and SD fallback."
+      "sha256": "68a1a34db255b0585d3226f79ea4e70128843808f7466bbd9d8e16be92d37df8",
+      "reason": "User2026-11-02: S31 wake/font and keep-light policy, bounded Wi-Fi reception and read-only SD profile diagnostics; preserve native pins, power sequence, waveforms and SD fallback.",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
     },
     "boards/pico/src/components/e0470_page_turn/e0470_page_turn.c": {
-      "sha256": "fcc91f574f59abcceab2f879f3d8992eb306c251a0933a974438e579ba39c114",
+      "sha256": "7356201297331d0c7c50c9c93248bc09e75128b3d80c972686aab21522dba805",
       "pull_request": 68,
       "source_commit": "cd9f1a598a97a985bcda57dc47d49e118c4b1083",
-      "reason": "User2026-11-02 explicitly approved merging PR68 as authored; retain its Pico ripple erase/redrive phases and64-phase engine capacity."
+      "reason": "User2026-11-02 explicitly approved merging PR68 as authored; retain its Pico ripple erase/redrive phases and64-phase engine capacity.",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
     },
     "CMakeLists.txt": {
       "sha256": "a9b7d22f5ab7bc3117f86b54335bd8b7559a1370517691c2c3a66b8762ea0b08",
       "user_decision": "用户2026-11-03：S31残影/翻页优化定稿并直接提交合并（整页刷新恢复厂家完整48相，普通翻页对齐Pico的十二相擦白+四相重推黑）。/ User2026-11-03 finalizes the S31 ghosting/turn work and merges it directly (page refreshes use vendor full 48 phases; ordinary turns match Pico's twelve erase plus four black re-drive phases)."
     },
     "boards/metalio47/src/main/display.c": {
-      "sha256": "f27d4f559cb3ede0115dfa84f11c8a907b64ca68831dbe740b781ebba637f050",
-      "user_decision": "用户2026-11-03：S31残影/翻页优化定稿并直接提交合并（整页刷新恢复厂家完整48相，普通翻页对齐Pico的十二相擦白+四相重推黑）。/ User2026-11-03 finalizes the S31 ghosting/turn work and merges it directly (page refreshes use vendor full 48 phases; ordinary turns match Pico's twelve erase plus four black re-drive phases)."
+      "sha256": "339ae7c94f98abe4e947e991947e32895b9b19e7edbf80557f92ca91121dc098",
+      "user_decision": "用户2026-11-03：S31残影/翻页优化定稿并直接提交合并（整页刷新恢复厂家完整48相，普通翻页对齐Pico的十二相擦白+四相重推黑）。/ User2026-11-03 finalizes the S31 ghosting/turn work and merges it directly (page refreshes use vendor full 48 phases; ordinary turns match Pico's twelve erase plus four black re-drive phases).",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
     },
     "components/read_pico_pmu/README.md": {
       "sha256": "17e5f056acaf1d4102fef058c367afe7d4c1b159ee39aba779be0e86af03116d",
@@ -310,12 +330,16 @@
       "source_commit": "ba3d09e0ba95d06d04149465964428be3c81e998"
     },
     "main/display_reader_waveform.h": {
-      "sha256": "5d11da8c89d685551d9b93043af3be307c2a538228aa1b1f6c7b213a196b6f84",
-      "user_decision": "用户2026-11-03：S31残影/翻页优化定稿并直接提交合并（整页刷新恢复厂家完整48相，普通翻页对齐Pico的十二相擦白+四相重推黑）。/ User2026-11-03 finalizes the S31 ghosting/turn work and merges it directly (page refreshes use vendor full 48 phases; ordinary turns match Pico's twelve erase plus four black re-drive phases)."
+      "sha256": "b96e4f934aefd6e202257a674da53b494e679e54dd00017b1e05b2f4f0e0c0ba",
+      "user_decision": "用户2026-11-03：S31残影/翻页优化定稿并直接提交合并（整页刷新恢复厂家完整48相，普通翻页对齐Pico的十二相擦白+四相重推黑）。/ User2026-11-03 finalizes the S31 ghosting/turn work and merges it directly (page refreshes use vendor full 48 phases; ordinary turns match Pico's twelve erase plus four black re-drive phases).",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
     },
     "components/epdiy/src/highlevel.c": {
-      "sha256": "92c50435e721b7fb1cefb4566ac193409babe21f7a7542283fb1596e84ae42a1",
-      "user_decision": "用户2026-11-04要求从最新main创建feature分支修复Pico进度线闪黑，版本不变。仅Pico精确屏蔽局刷裁剪外像素并同步后缓冲范围，S31执行代码与原波形保持。 / User2026-11-04 requests the Pico progress-track fix on a feature branch from latest main without version changes. Exact Pico scan masks and back-buffer bounds only; S31 executable code and waveforms remain unchanged."
+      "sha256": "399f528f19175429b29a6566e6b3a990abea8a51db1859818a12a251f4de9880",
+      "user_decision": "用户2026-11-04要求从最新main创建feature分支修复Pico进度线闪黑，版本不变。仅Pico精确屏蔽局刷裁剪外像素并同步后缓冲范围，S31执行代码与原波形保持。 / User2026-11-04 requests the Pico progress-track fix on a feature branch from latest main without version changes. Exact Pico scan masks and back-buffer bounds only; S31 executable code and waveforms remain unchanged.",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
     },
     "components/epdiy/LICENSE": {
       "sha256": "9d0c6c1bf7bf8f9587b6959c3bc7f9271f2abb9bf48be8e4e782baa06bb22648",
@@ -326,31 +350,164 @@
       "reason": "User2026-11-04 adopts S31 data-only zero-prefix DMA and CKV-high frame start from vendor2.0.74; retain clocks, pipeline, interrupts, power and Moku waveforms."
     },
     "main/display.h": {
-      "sha256": "d752e1db7932db3bab8abb08c7e2753efe7d8f2f189919a5a5925f9e3412279c",
-      "reason": "User2026-11-05 explicitly requests Pico reader idle rail retention; expose only the Pico lifecycle setter, preserving S31, waveform bytes, voltages and existing power-off sequencing."
+      "sha256": "e691ef92709880c1ff754495dd82ca8d2444c35e94c30c03995f32d665e90249",
+      "reason": "User2026-11-05 explicitly requests Pico reader idle rail retention; expose only the Pico lifecycle setter, preserving S31, waveform bytes, voltages and existing power-off sequencing.",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
     },
     "boards/pico/src/main/display.c": {
-      "sha256": "0432fb775f549c1091da119bfc07941fc409c46612516fa5d5dcc36fd7c3ab39",
+      "sha256": "dd750d2b45c569d6d54b024f07a7dd4f9c9ba6ef896a917a329c8116048a4ff8",
       "reason": "User2026-11-05 enables Pico reader idle HV retention with neutral pixel/VCOM release, exit/lock revocation and retained fault timeout; preserve original waveforms, voltages, timing and S31.",
-      "pico_settings_motion_authorization": "User2026-11-07 reports excessive dark ghosts during Pico settings motion; add only a scoped12-phase FOLLOW-derived profile (retain black7,white12/equal-white2) and recognize its FAST identity. Full-pixel list motion only; preserve existing Moku profiles, scan timing, reader/idle, power and S31. Local-only delivery."
+      "pico_settings_motion_authorization": "User2026-11-07 reports excessive dark ghosts during Pico settings motion; add only a scoped12-phase FOLLOW-derived profile (retain black7,white12/equal-white2) and recognize its FAST identity. Full-pixel list motion only; preserve existing Moku profiles, scan timing, reader/idle, power and S31. Local-only delivery.",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
     },
     "components/e0470_epaper_waveform/CMakeLists.txt": {
       "sha256": "595e9561dd93e7be298d3cd8372ae0e08024512bafd636513cc842fb105e5d1a",
       "settings_short_motion_authorization": "User2026-11-07 requests an opt-in S31 settings-only14-phase motion accessor, keeping global DU14 off and existing reader/idle/raw profiles unchanged; local delivery only."
     },
     "boards/pico/src/main/display_main_waveform.c": {
-      "sha256": "9556d91253fbbd3254eaf51c8669f4c25ea9e08069c101fc6985daa65536a458",
+      "sha256": "56b119c03ecef23dcdfabe36e9fe6e67e08ad53ce383123fd1e240aea0ec261f",
       "pico_settings_motion_authorization": "User2026-11-07 reports excessive dark ghosts during Pico settings motion; add only a scoped12-phase FOLLOW-derived profile (retain black7,white12/equal-white2) and recognize its FAST identity. Full-pixel list motion only; preserve existing Moku profiles, scan timing, reader/idle, power and S31. Local-only delivery.",
-      "pico_settings_steady_motion_authorization": "User2026-11-07 reports white flashing during held Pico settings drags in8853. Remove only scoped equal-white maintenance and use changed-only DU12; retain changed-white12/black7, existing FAST timing and800ms idle53 recovery. Existing Moku tables,reader,power and S31 unchanged; local delivery only."
+      "pico_settings_steady_motion_authorization": "User2026-11-07 reports white flashing during held Pico settings drags in8853. Remove only scoped equal-white maintenance and use changed-only DU12; retain changed-white12/black7, existing FAST timing and800ms idle53 recovery. Existing Moku tables,reader,power and S31 unchanged; local delivery only.",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
     },
     "main/display_main_waveform.h": {
-      "sha256": "559702bbde33d5e93734c0e01a7cb5f5c4d6822dd4872c2017aa0da0a2afa197",
+      "sha256": "2fb4c4f65e373be49cd5915d37f916b2f31b658ed12f10dab488767601cf44b3",
       "pico_settings_motion_authorization": "User2026-11-07 reports excessive dark ghosts during Pico settings motion; add only a scoped12-phase FOLLOW-derived profile (retain black7,white12/equal-white2) and recognize its FAST identity. Full-pixel list motion only; preserve existing Moku profiles, scan timing, reader/idle, power and S31. Local-only delivery.",
-      "pico_settings_steady_motion_authorization": "User2026-11-07 reports white flashing during held Pico settings drags in8853. Remove only scoped equal-white maintenance and use changed-only DU12; retain changed-white12/black7, existing FAST timing and800ms idle53 recovery. Existing Moku tables,reader,power and S31 unchanged; local delivery only."
+      "pico_settings_steady_motion_authorization": "User2026-11-07 reports white flashing during held Pico settings drags in8853. Remove only scoped equal-white maintenance and use changed-only DU12; retain changed-white12/black7, existing FAST timing and800ms idle53 recovery. Existing Moku tables,reader,power and S31 unchanged; local delivery only.",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
     },
     "components/read_pico_pmu/CMakeLists.txt": {
       "sha256": "3e5542a8d6408cce9dfe6d268ad5f038c190b69a8b9e2147152c3f6bcb4aa937",
       "reason": "User2026-11-09: align S31 displayed battery estimation/filter/wake reset to official v2.0.77; preserve charger control and Pico."
+    },
+    "boards/metalio47/src/components/e0470_page_turn/e0470_page_turn.c": {
+      "sha256": "ffb24a7b5db9630be512bd96546220bd62da4a5faed5f387d9281f85b7f8336f",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
+    },
+    "boards/metalio47/src/components/epdiy/src/output_common/render_context.c": {
+      "sha256": "2aa97959c73300b7066c14cf3e1c82b7ff614fb0a89da2b2c912b98e938e062b",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
+    },
+    "boards/metalio47/src/components/epdiy/src/output_lcd/render_lcd.c": {
+      "sha256": "18027e735c7d80068bb6346c00eea1158f7c7b3101fecdaf1279973b2181b545",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
+    },
+    "boards/metalio47/src/components/epdiy/src/render.c": {
+      "sha256": "ef4e85b372a78601cd6a8700e1742af39ea7481438b9953a51836ad31b40e150",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
+    },
+    "boards/metalio47/src/components/read_pico/read_pico_board.c": {
+      "sha256": "9af36cb842d9307ac6642353fd43c43c06943bcb9916df6c2c9f3170d9957cda",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
+    },
+    "boards/metalio47/src/main/display_main_waveform.c": {
+      "sha256": "67456ddb9a7d896ed19befc4ff6a953f6e34546e0b1ff5e7694567c131c10589",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
+    },
+    "boards/pico/src/components/e0470_epaper_waveform/e0470_epaper_waveform.c": {
+      "sha256": "36f4379ea7ea25f49454cd7c3b26b62ecb4cb17bb9ec61147724f79d65e99a47",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
+    },
+    "boards/pico/src/components/epdiy/src/render.c": {
+      "sha256": "77624b2fd4a87a181322a820ad4511ed3b6564aec64b2192f36c03c71a49289d",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history. User-approved PR113 adds compile-time-disabled timing declarations only."
+    },
+    "boards/pico/src/components/read_pico/read_pico_board.c": {
+      "sha256": "79f262c6a1b6f07c30ca37cc5b063830636fc492cfd328972a98a18da239f5cf",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
+    },
+    "components/ble_page_turner/include/ble_page_turner.h": {
+      "sha256": "6dcc750f25294063c37ecf0f425981c2b2d623509ac8d209c121d09a1b101e19",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
+    },
+    "components/ble_page_turner/src/ble_page_turner.c": {
+      "sha256": "1040c5d68a74ce100f85f803849dfccea41a7a9c7875de429ce8440f11311cb8",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
+    },
+    "components/cst836u/include/cst836u.h": {
+      "sha256": "9f87fbc9f4fc4dab3f42e5dbbfa8a49f2d58264a8cdde6790707093de552f016",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
+    },
+    "components/cst836u/metalio_ft6336.c": {
+      "sha256": "09ee771520a70c31c76457c77b74cdcfd82900366c7be4e82160ee6970aa9748",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
+    },
+    "components/e0470_page_turn/include/e0470_page_turn.h": {
+      "sha256": "3d25b347564860afbe1fee000ce1c54daf96817d535377c220ba2eac93935a0a",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
+    },
+    "components/epdiy/src/epd_highlevel.h": {
+      "sha256": "6c571737f42c71494f735eb819f258c0320c2eac76f40406bee88eaa7774ab5d",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
+    },
+    "components/epdiy/src/epdiy.h": {
+      "sha256": "2fd33eb673d231e07d1fe58c50b75d5e11303f618efc291ec98ec6d998c2bb3c",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history. User-approved PR113 adds compile-time-disabled timing declarations only."
+    },
+    "components/epdiy/src/output_common/render_context.h": {
+      "sha256": "aeaeab5c291dfdbd124c89a21ac9b1a7b8f3b07ac9d5f3d83d711d15bafc0ecb",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
+    },
+    "components/metalio_hw/include/metalio_hw.h": {
+      "sha256": "e679b3e94521f8697c63792d18af748ff47e01c5f262551352216d527d2fbb42",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
+    },
+    "components/metalio_hw/include/metalio_sleep.h": {
+      "sha256": "20c87189bf938d6ba447fdb7433d8dde6d79e9f4c31677c397930d934b4556c0",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
+    },
+    "components/metalio_hw/metalio_hw.c": {
+      "sha256": "dc0797aa09d4f7983a0e43c08e76691faa19049da218ca7e57673b8410ac825c",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
+    },
+    "components/metalio_hw/s31_sleep/s31_sleep.cc": {
+      "sha256": "a72eacb4a59362157e9286599bd60a185e47103d5f1c4b9d7c12085675c90c79",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
+    },
+    "components/metalio_hw/s31_sleep/s31_sleep.h": {
+      "sha256": "28bc278029258ff1ac1684201c7cd01267d1ba74c128405de8f981da4ef02108",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
+    },
+    "components/read_pico/include/read_pico_board.h": {
+      "sha256": "5c99caf9935eac1c05ab88dfdc2ef090277ce63bbaa6826f44d39e5f7f19ac40",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
+    },
+    "components/read_pico_pmu/include/pico_soc_filter.h": {
+      "sha256": "0e017506eddc83425fa054cceef0c48bd50ba966a7dff823c500f98323437f40",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
+    },
+    "components/read_pico_pmu/pico_soc_filter.c": {
+      "sha256": "8f16af7ec1a451b6973f385b53a55a49ff9f2e4b9c625c91592ec6454cf5f93e",
+      "baseline_revision": "f46c1b5786087cb013a162ac3c62ee5e9d119a4b",
+      "baseline_reason": "Pin the current merged driver baseline; retain original PR59 digests and explicit override history."
     }
   }
 }

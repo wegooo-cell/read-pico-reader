@@ -26,8 +26,13 @@
 #define PICO_OTA_LAYOUT "pico-dual-4m-v1"
 #define PICO_OTA_BOARD "RDP-G01-W"
 #define PICO_OTA_CAPABILITY "PICO_HTTPS_OTA_V1"
+#define PICO_MINDRESET_QUERY_URL "https://dot.mindreset.tech/api/authV2/device/firmware/query"
+#define PICO_MINDRESET_FIRMWARE_ID "6b05776be73f24cc56953283"
 #define PICO_OTA_FEED_URL "https://wegooo-cell.github.io/read-pico-reader/update.json"
-#define PICO_OTA_FEED_FALLBACK_URL "https://kiikoread.com/update.json"
+#define PICO_OTA_FEED_FALLBACK_URL PICO_OTA_FEED_URL
+#define PICO_MINDRESET_DOWNLOAD_PREFIX "https://dot.mindreset.tech/download/"
+#define PICO_MINDRESET_CDN_PREFIX "https://cdn.mindreset.tech/"
+#define PICO_MINDRESET_CDN_URL_MAX 2048
 #endif
 
 typedef enum { PICO_UPDATE_IDLE, PICO_UPDATE_CHECKING, PICO_UPDATE_AVAILABLE,
@@ -48,6 +53,20 @@ typedef struct {
 
 /// 有界解析、型号与版本验证；不接触网络。/ Bounded parsing, board and version validation without networking.
 esp_err_t pico_release_parse(const char *json, size_t length, pico_release_t *release);
+#if !KIIKO_BOARD_METALIO47
+/// 构造匿名型号查询；不发送组织密钥或设备身份。/ Build an anonymous model query without organization secrets or device identity.
+esp_err_t pico_mindreset_query_body(const char *current, char *out, size_t capacity);
+/// 校验软件、设备、渠道、版本与OTA元数据。/ Validate software, device, channel, versions and OTA metadata.
+esp_err_t pico_mindreset_parse(const char *json, size_t length, const char *current,
+                             pico_release_t *release, bool *need_update);
+/// 仅允许官方CDN的有界HTTPS签名链接。/ Accept only bounded HTTPS signed links on the official CDN.
+const char *pico_mindreset_channel(const char *version);
+bool pico_ota_same_channel(const char *candidate, const char *current);
+const char *pico_github_feed_url(const char *current);
+bool pico_github_url_valid(const char *url);
+bool pico_mindreset_url_valid(const char *url);
+bool pico_mindreset_cdn_url_valid(const char *url);
+#endif
 int pico_version_compare(const char *a, const char *b);
 bool pico_release_url_valid(const char *url);
 /// 检查或下载唯一后台任务；离页、锁屏先取消并等待。/ Start one worker; cancel and join on exit or lock.

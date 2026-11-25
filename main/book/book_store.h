@@ -40,6 +40,8 @@ size_t book_store_file_limit(const book_store_root_t* root);
 uint64_t book_store_free_bytes(const book_store_root_t* root);
 /// 仅查询内置分区是否已挂载，不触发挂载。/ Inspect flash mount state without mounting.
 bool book_store_flash_ready(void);
+/// TF卡已挂载；不探测、不重挂、不格式化。/ Inspect the mounted TF snapshot without probing,remounting or formatting.
+bool book_store_card_ready(void);
 /// 挂载用于书籍和阅读历史的内置文件系统。/ Mount internal storage for books and reading history.
 esp_err_t book_store_prepare_flash(void);
 /// 删除已挂载根（书目录、TF 卡或内置 storage）内的普通 TXT/EPUB 书籍，然后清对应进度及 last。

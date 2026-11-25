@@ -60,7 +60,7 @@ static esp_err_t ensure_dir(const char* path) {
     return ESP_FAIL;
 }
 
-static bool sd_ready(void) {
+bool book_store_card_ready(void) {
     read_pico_sd_info_t info = {0};
     read_pico_sd_get_info(&info);
     return info.present && info.mounted;
@@ -132,7 +132,7 @@ esp_err_t book_store_roots(book_store_root_t out[BOOK_STORE_ROOT_MAX], int* n) {
     *n = 0;
     s_roots_degraded = false;
     memset(out, 0, sizeof(*out) * BOOK_STORE_ROOT_MAX);
-    if (sd_ready()) {
+    if (book_store_card_ready()) {
         // Also show books already copied to a singular `book` directory.
         struct stat legacy;
         if (!strcmp(app_settings_books_dir(), "/sdcard/books") && stat("/sdcard/book", &legacy) == 0 && S_ISDIR(legacy.st_mode))
@@ -154,7 +154,7 @@ esp_err_t book_store_roots(book_store_root_t out[BOOK_STORE_ROOT_MAX], int* n) {
 esp_err_t book_store_upload_root(book_store_root_t* out) {
     if (out == NULL) return ESP_ERR_INVALID_ARG;
     memset(out, 0, sizeof(*out));
-    if (!sd_ready()) {
+    if (!book_store_card_ready()) {
         read_pico_sd_info_t info = {0};
         read_pico_sd_get_info(&info);
         // 有卡但挂载失效时让用户显式重挂，不能悄悄改写内置目录。
@@ -174,7 +174,7 @@ size_t book_store_file_limit(const book_store_root_t* root) {
 
 uint64_t book_store_free_bytes(const book_store_root_t* root) {
     if (root == NULL) return 0;
-    if (!root->is_flash && !sd_ready()) return 0;
+    if (!root->is_flash && !book_store_card_ready()) return 0;
     uint64_t total = 0, free_bytes = 0;
     esp_err_t err = esp_vfs_fat_info(root->is_flash ? "/flash" : "/sdcard", &total, &free_bytes);
     if (err != ESP_OK) {
@@ -207,7 +207,7 @@ esp_err_t book_store_delete(const char* path, bool* removed) {
             // so deletion accepts any book file under the mounted SD root (including legacy book/).
             root = "/sdcard"; name = path + 8;
         } else return ESP_ERR_INVALID_ARG;
-        if (!sd_ready()) return ESP_ERR_INVALID_STATE;
+        if (!book_store_card_ready()) return ESP_ERR_INVALID_STATE;
     }
     size_t len = strlen(name);
     if (!len || name[0] == '/' || name[len - 1] == '/' || strstr(name, "//")) return ESP_ERR_INVALID_ARG;

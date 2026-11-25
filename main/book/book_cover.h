@@ -91,6 +91,9 @@ void book_cover_store_generated(const char *path,const char *title,const char *a
 
 /// 异步结果仅在来源尺寸/修改时间仍匹配时持久化，防止换书后固化旧像素。
 /// Persist asynchronous pixels only under their original source identity, never a replaced book's key.
+/// 迁移旧平铺封面目录中的一个文件；返回1表示还有，0表示已处理完。只在封面后台线程调用。
+/// Migrate one file of the old flat cover folder; 1 means more remain, 0 means done. Cover worker only.
+int book_cover_legacy_sweep_step(void);
 void book_cover_fast_cache_write_checked(const char *path,const char *title,const char *author,book_fast_cover_key_t key,const uint8_t *pixels,bool edge,int64_t size,int64_t modified);
 
 #include "metalio_cover_cache.h"

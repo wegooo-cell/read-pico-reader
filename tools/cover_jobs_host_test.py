@@ -58,6 +58,7 @@ static int64_t esp_timer_get_time(void){return mono;}
 static int mock_stat(const char *p,struct stat *st){assert(worker_context);++reads;if(*p=='X')return -1;memset(st,0,sizeof(*st));st->st_mode=S_IFREG;st->st_size=100;st->st_mtime=200;return 0;}
 #define stat(p,s) mock_stat(p,s)
 static book_cover_job_t request(const char *p){book_cover_job_t q={.width=164,.height=214,.stride=21,.contrast=100};strcpy(q.path,p);strcpy(q.title,"title");return q;}
+static int holds,held_decodes;static bool held;
 static int chapter_reads;static uint16_t book_cached_chapter_count(const char*p,uint32_t n,int64_t m){assert(worker_context&&p&&n==100&&m==200);++chapter_reads;return 37;}
 static bool book_auto_cover_render(const char*,const char*,unsigned,unsigned,uint8_t*);
 static uint64_t cover_font;
@@ -67,9 +68,14 @@ static bool book_title_from_path(const char *p,char *out,size_t cap){(void)p;(vo
 unit+='\n'.join(x for x in (root/'main/book/book_cover_jobs.c').read_text().splitlines() if not x.startswith('#include'))
 unit+=r'''
 book_crop_t book_cover_crop(unsigned sw,unsigned sh,unsigned w,unsigned h){(void)w;(void)h;return(book_crop_t){0,0,sw,sh};}
+static int sweep_steps;int book_cover_legacy_sweep_step(void){assert(worker_context);return sweep_steps?sweep_steps--:0;}
 bool book_cover_list_cache_dimensions(const char *p,const char*t,const char*a,unsigned*w,unsigned*h){(void)t;(void)a;assert(worker_context);++reads;*w=80;*h=120;return *p=='P';}
 bool book_cover_fast_cache_read(const char*p,const char*t,const char*a,book_fast_cover_key_t k,uint8_t*out,bool*edge){(void)t;(void)a;assert(worker_context);++reads;if(*p!='P')return false;assert(k.width==80&&k.height==120);memset(out,255,(size_t)k.stride*k.height);*edge=false;return true;}
-void book_cover_fast_cache_write_checked(const char*p,const char*t,const char*a,book_fast_cover_key_t k,const uint8_t*out,bool edge,int64_t size,int64_t modified){(void)p;(void)t;(void)a;(void)k;(void)out;(void)edge;assert(size==100&&modified==200&&worker_context);++writes;}
+static int fast_writes_after_ready;
+// 快刷点阵写卡之前，结果已交到槽位（READY），显示不等写卡。/ The raster is already published (READY) before the card write.
+void book_cover_fast_cache_write_checked(const char*p,const char*t,const char*a,book_fast_cover_key_t k,const uint8_t*out,bool edge,int64_t size,int64_t modified){(void)t;(void)a;(void)k;(void)out;(void)edge;assert(size==100&&modified==200&&worker_context);
+ for(unsigned i=0;i<BOOK_COVER_JOB_SLOTS;++i)if(s_jobs&&!strcmp(s_jobs[i].request.path,p)&&s_jobs[i].state==READY&&s_jobs[i].result.fast){++fast_writes_after_ready;break;}
+ unsigned queued=0;for(unsigned i=0;s_jobs&&i<BOOK_COVER_JOB_SLOTS;++i)queued+=s_jobs[i].state==QUEUED;assert(!queued);++writes;}
 void book_cover_shelf_ram_store(const char*p,const char*t,const char*a,uint64_t n,int64_t m,uint64_t font_key,bool list,bool fast,book_fast_cover_key_t k,const uint8_t*out,bool edge){
  (void)t;(void)a;(void)edge;
  assert(worker_context&&font_key==cover_font&&!strcmp(p,"N.TXT")&&n==100&&m==200&&out);
@@ -78,7 +84,7 @@ void book_cover_shelf_ram_store(const char*p,const char*t,const char*a,uint64_t 
  ++ram_stores;
 }
 void book_cover_store_generated(const char*p,const char*t,const char*a,const uint8_t*out,bool list,int64_t size,int64_t modified){(void)p;(void)t;(void)a;(void)out;(void)list;assert(size==100&&modified==200&&worker_context);++writes;}
-int book_cover_load_io(const char*p,const char*t,const char*a,uint8_t*out,bool list,unsigned*w,unsigned*h,bool*cache){(void)t;(void)a;(void)list;assert(worker_context);++decodes;*w=176;*h=240;memset(out,*p,176*240);*cache=false;
+int book_cover_load_io(const char*p,const char*t,const char*a,uint8_t*out,bool list,unsigned*w,unsigned*h,bool*cache){(void)t;(void)a;(void)list;assert(worker_context);++decodes;if(held)++held_decodes;*w=176;*h=240;memset(out,*p,176*240);*cache=false;
  if(mode==1){mode=0;replaced=book_cover_jobs_begin();book_cover_job_t q=request("B");assert(book_cover_jobs_submit(replaced,0,&q));}
  if(mode==2){mode=0;assert(!book_cover_jobs_quiesce(0));}
  if (*p=='H') {*cache=true;return 0;}
@@ -87,6 +93,7 @@ int book_cover_load_io(const char*p,const char*t,const char*a,uint8_t*out,bool l
 int book_cover_load_sized_io(const char*p,const char*t,const char*a,uint8_t*out,unsigned w,unsigned h,bool*cache){(void)t;(void)a;assert(worker_context&&w==51&&h==70);++decodes;memset(out,*p,w*h);*cache=true;return (*p=='N'||*p=='H')?0:1;}
 void book_cover_store_sized(const char*p,const char*t,const char*a,const uint8_t*out,unsigned w,unsigned h,int64_t n,int64_t m){(void)p;(void)t;(void)a;assert(worker_context&&w==51&&h==70&&n==100&&m==200&&out[0]==33);++writes;}
 static bool book_auto_cover_render(const char*t,const char*a,unsigned w,unsigned h,uint8_t*out){(void)t;(void)a;assert(!worker_context&&w==176&&h==240);++fonts;memset(out,33,w*h);return true;}
+void metalio_cover_cache_hold_admission(bool hold){assert(worker_context&&held!=hold);held=hold;if(hold)++holds;}
 static void run(void){worker_pending=false;worker_context=1;if(!setjmp(done))task_fn(NULL);worker_context=0;}
 '''
 if has_cover_warm:
@@ -136,6 +143,12 @@ int main(void){
     assert(!!(result.pixels[y*stride+x/8]&(1u<<(x&7)))==expected);
   }free(result.pixels);
  }
+ assert(fast_writes_after_ready==2);
+ // 同页三本快刷封面：三本都交付后才开始写卡，写入按完成顺序。/ Three fast covers on one page: all are published before any card write.
+ generation=book_cover_jobs_begin();int before_writes=writes;
+ for(unsigned slot=0;slot<3;++slot){q=request("A");q.fast=true;assert(book_cover_jobs_submit(generation,slot,&q));}
+ run();assert(writes==before_writes+3&&fast_writes_after_ready==5);
+ for(unsigned slot=0;slot<3;++slot){assert(book_cover_jobs_take(generation,slot,&result)==1&&result.fast);free(result.pixels);}
  generation=book_cover_jobs_begin();q=request("A");assert(book_cover_jobs_submit(generation,0,&q));mode=1;run();
  assert(book_cover_jobs_take(generation,0,&result)==-1);assert(book_cover_jobs_take(replaced,0,&result)==1&&result.pixels[0]=='B');free(result.pixels);
  generation=book_cover_jobs_begin();q=request("N");assert(book_cover_jobs_submit(generation,0,&q));run();assert(!fonts);
@@ -186,8 +199,27 @@ int main(void){
  assert(book_cover_jobs_take(generation,0,&result)==1);free(result.pixels);
  puts("PASS: absent grid/list artwork completes without glyph work, and transient failures can retry");
 #endif
+ // 全书库预热只写卡：仅该作业期间暂停内存收录，普通作业从不暂停。
+ // Library warming writes the card only: RAM admission is held for that job alone, never for ordinary jobs.
+ assert(!holds&&!held_decodes);
+ generation=book_cover_jobs_begin();q=request("A");q.disk_only=q.artwork_only=true;
+ assert(book_cover_jobs_submit(generation,0,&q));run();
+ assert(holds==1&&!held&&held_decodes==1);
+ assert(book_cover_jobs_take_ready(generation,0,&result)==1);free(result.pixels);
+ generation=book_cover_jobs_begin();q=request("A");assert(book_cover_jobs_submit(generation,0,&q));run();
+ assert(holds==1&&held_decodes==1&&book_cover_jobs_take(generation,0,&result)==1);free(result.pixels);
+ // 旧封面目录迁移：排队的封面先做，之后逐步迁移，迁移中仍算空闲；做完后不再请求；暂停时不迁移。
+ // Old cover folder migration: queued covers first, then step by step while still counting as idle;
+ // a finished migration is never requested again, and a pause stops it.
+ generation=book_cover_jobs_begin();book_cover_jobs_cancel(generation);sweep_steps=2;
+ book_cover_jobs_sweep_legacy();assert(!worker_pending&&sweep_steps==2);
+ generation=book_cover_jobs_begin();q=request("A");assert(book_cover_jobs_submit(generation,0,&q));
+ book_cover_jobs_sweep_legacy();int decoded=decodes;run();
+ assert(decodes==decoded+1&&!sweep_steps&&book_cover_jobs_take(generation,0,&result)==1);free(result.pixels);
+ assert(s_sweep_done&&!s_sweep_requested&&book_cover_jobs_idle());
+ sweep_steps=5;book_cover_jobs_sweep_legacy();assert(!worker_pending&&sweep_steps==5);sweep_steps=0;
  assert(book_cover_jobs_quiesce(0));free(s_jobs);s_jobs=NULL;assert(!live);
- puts("PASS: real bounded cover worker has no UI IO on queue/poll, packed hits skip gray/decode, stale generations and media cancellation discard results, UI-only auto glyphs, transient fallback not cached, all9 slots and OOM/task failures release resources");
+ puts("PASS: disk-only warming holds RAM admission for its own job only; real bounded cover worker has no UI IO on queue/poll, packed hits skip gray/decode, stale generations and media cancellation discard results, UI-only auto glyphs, transient fallback not cached, all9 slots and OOM/task failures release resources");
 }
 '''
 if has_cover_warm:

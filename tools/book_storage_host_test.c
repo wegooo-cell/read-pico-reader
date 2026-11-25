@@ -70,6 +70,8 @@ esp_err_t nvs_entry_info(nvs_iterator_t it,nvs_entry_info_t* out){
     strcpy(out->key,((record_t*)it)->key);out->type=NVS_TYPE_BLOB;return ESP_OK;
 }
 void nvs_release_iterator(nvs_iterator_t it){(void)it;}
+static bool test_sd_mounted;
+__attribute__((weak)) bool book_store_card_ready(void){return test_sd_mounted;}
 static int listed;
 static uint8_t listed_px;
 static char listed_paths[8][BOOK_STORE_PATH_MAX];

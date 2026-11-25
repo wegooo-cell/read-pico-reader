@@ -61,6 +61,7 @@ static void epd_fill_circle(int x,int y,int radius,int color,uint8_t*fb){(void)x
 '''
 if 'static bool shelf_waiting_for_index(' in book.read_text():
  u+=function('shelf_waiting_for_index',book)+'\n'
+u+='static void shelf_join_quick_covers(app_ctx_t*c){(void)c;}\n'
 for name in ['leaves','draw_shelf_pager','shelf_key_paint','shelf_turn_page','shelf_pager_release_hit','shelf_pager_event']:
  u+=function(name,book)+'\n'
 for name in ['ui_gesture_reset','emit','ui_gesture_feed']:

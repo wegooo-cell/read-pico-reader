@@ -30,7 +30,11 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#define COVER_DIRECTORY "/sdcard/.kiikoread/covers"
+// 记录按书路径哈希高6位分进64个子目录，与书架封面缓存同一套目录；旧平铺目录只读回并另存一份。
+// Records go into 64 subfolders by the top six bits of the book path hash, shared with the shelf cover
+// cache; the old flat folder is only read back and copied forward.
+#define COVER_DIRECTORY "/sdcard/.kiikoread/coverdb"
+#define COVER_LEGACY_DIRECTORY "/sdcard/.kiikoread/covers"
 #define COVER_MAGIC UINT32_C(0x57435231)
 #define COVER_BYTES (BOOK_COVER_W * BOOK_COVER_H)
 #define HTTP_LIMIT (256u * 1024u)
@@ -67,21 +71,32 @@ static bool identity(const char *path, struct stat *st) {
         !stat(path, st) && S_ISREG(st->st_mode) && st->st_size >= 0;
 }
 
-static void record_path(const char *path, const struct stat *st, char name[128]) {
+static void record_path(const char *path, const struct stat *st, char name[128], bool legacy) {
     uint64_t hash = UINT64_C(14695981039346656037);
     for (const unsigned char *p = (const unsigned char *)path; *p; ++p)
         hash = (hash ^ *p) * UINT64_C(1099511628211);
-    snprintf(name, 128, COVER_DIRECTORY "/wr-%016" PRIx64 "-%" PRIx64 "-%" PRIx64 ".bin",
-             hash, (uint64_t)st->st_size, (uint64_t)st->st_mtime);
+    if (legacy)
+        snprintf(name, 128, COVER_LEGACY_DIRECTORY "/wr-%016" PRIx64 "-%" PRIx64 "-%" PRIx64 ".bin",
+                 hash, (uint64_t)st->st_size, (uint64_t)st->st_mtime);
+    else
+        snprintf(name, 128, COVER_DIRECTORY "/%02x/wr-%016" PRIx64 "-%" PRIx64 "-%" PRIx64 ".bin",
+                 (unsigned)(hash >> 58), hash, (uint64_t)st->st_size, (uint64_t)st->st_mtime);
 }
 
+static bool save_record(const char *path, const struct stat *expected, const book_name_t *name,
+                        const uint8_t *pixels);
 static FILE *open_record(const char *path, cover_record_t *record) {
     if (!book_weread_cover_is_txt(path) || !read_pico_sd_io_ready()) return NULL;
     struct stat st;
     if (!identity(path, &st)) return NULL;
     char name[128];
-    record_path(path, &st, name);
+    record_path(path, &st, name, false);
     FILE *file = fopen(name, "rb");
+    const bool legacy = !file;
+    if (legacy) {
+        record_path(path, &st, name, true);
+        file = fopen(name, "rb");
+    }
     if (!file) return NULL;
     if (fread(record, sizeof(*record), 1, file) != 1 || record->magic != COVER_MAGIC ||
         record->size != (uint64_t)st.st_size || record->modified != st.st_mtime ||
@@ -92,6 +107,16 @@ static FILE *open_record(const char *path, cover_record_t *record) {
         fseek(file, sizeof(*record), SEEK_SET)) {
         fclose(file);
         return NULL;
+    }
+    // 旧目录命中：另存一份进分组目录，旧文件留给旧固件。/ Legacy hit: copy into the group folder and keep the old file for older firmware.
+    uint8_t *pixels = legacy ? heap_caps_malloc(COVER_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;
+    if (pixels) {
+        if (fread(pixels, COVER_BYTES, 1, file) == 1) (void)save_record(path, &st, &record->name, pixels);
+        free(pixels);
+        if (fseek(file, sizeof(*record), SEEK_SET)) {
+            fclose(file);
+            return NULL;
+        }
     }
     return file;
 }
@@ -163,10 +188,12 @@ static bool save_record(const char *path, const struct stat *expected, const boo
     struct stat st;
     if (!identity(path, &st) || st.st_size != expected->st_size || st.st_mtime != expected->st_mtime)
         return false;
+    char target[128], part[136], group[128];
+    record_path(path, &st, target, false);
+    snprintf(group, sizeof(group), "%.*s", (int)(strrchr(target, '/') - target), target);
     if (mkdir("/sdcard/.kiikoread", 0777) && errno != EEXIST) return false;
     if (mkdir(COVER_DIRECTORY, 0777) && errno != EEXIST) return false;
-    char target[128], part[136];
-    record_path(path, &st, target);
+    if (mkdir(group, 0777) && errno != EEXIST) return false;
     snprintf(part, sizeof(part), "%s.part", target);
     cover_record_t record = {.size = st.st_size, .modified = st.st_mtime, .magic = COVER_MAGIC, .name = *name};
     strcpy(record.source, path);

@@ -381,7 +381,7 @@ static int settings_main_row_height(void) {
 
 #define SETTINGS_WIRELESS_ROWS 4
 #define SETTINGS_DISPLAY_ROWS 9
-#define SETTINGS_PERSONAL_ROWS 5
+#define SETTINGS_PERSONAL_ROWS 6
 #define SETTINGS_MAINTENANCE_ROWS 6
 #define SETTINGS_WIRELESS_Y (180 + settings_profile_height() + 77)
 #define SETTINGS_DISPLAY_Y (SETTINGS_WIRELESS_Y + SETTINGS_WIRELESS_ROWS * SETTINGS_ROW_H + 78)
@@ -1000,6 +1000,7 @@ static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
         UI_ICON_LOCK,              // 18 双击解锁 / double-press unlock
         [20] = UI_ICON_CHART_COLUMN, // 20 书籍百分比 / cover progress
         [21] = UI_ICON_REFRESH_CW,  // 21 设备同步 / device sync
+        [22] = UI_ICON_FILE_IMAGE,  // 22 书架封面显示 / shelf covers
     };
     if (index < 0 || index >= (int)(sizeof(icons) / sizeof(icons[0]))) return;
     ui_draw_icon(fb, cx, cy, SETTINGS_ICON_PX, icons[index], SETTINGS_ICON_INK);
@@ -1053,9 +1054,9 @@ static void setting_group(uint8_t *fb, int title_y, const char *title,
             settings_switch(fb, y + row_height / 2, app_settings_low_ghost());
             continue;
         }
-        if(icons[i]==20){
+        if(icons[i]==20||icons[i]==22){
             ui_text_vc(fb,100,y+row_height/2,25,labels[i],EPD_DRAW_ALIGN_LEFT,false);
-            settings_switch(fb,y+row_height/2,app_settings_shelf_progress_badges());continue;
+            settings_switch(fb,y+row_height/2,icons[i]==20?app_settings_shelf_progress_badges():app_settings_shelf_covers());continue;
         }
         if (icons[i] == SETTINGS_UNLOCK_ICON) {
             ui_text_vc(fb, 100, y + row_height / 2, 25, labels[i], EPD_DRAW_ALIGN_LEFT, false);
@@ -1738,11 +1739,11 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         ui_text_vc(fb, 474, 677, 24, "开启", EPD_DRAW_ALIGN_CENTER, true);
     }
     snprintf(signature,sizeof(signature),"%s",app_settings_status_signature()[0]?app_settings_status_signature():"未设置");
-    const char *personal_labels[]={"书架样式","书籍百分比显示","锁屏样式","锁屏密码","状态栏签名"};
-    const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==6?"液态玻璃书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架","",
+    const char *personal_labels[]={"书架样式","书籍百分比显示","书架封面显示","锁屏样式","锁屏密码","状态栏签名"};
+    const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==6?"液态玻璃书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架","","",
         app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
         lock_pin_enabled()?"已开启":"已关闭",signature};
-    const int personal_icons[]={4,20,5,16,10};
+    const int personal_icons[]={4,20,22,5,16,10};
     setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
                   personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
     const char *maintenance_labels[]={"系统升级","保存与恢复","屏幕修复","DC 恢复","BOOT 刷机","恢复出厂设置"};
@@ -3054,8 +3055,10 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         row=(y-SETTINGS_PERSONAL_Y)/SETTINGS_ROW_H;
         if(row==0) {s_page=SETTINGS_SHELF_STYLE;s_style_scroll=0;}
         else if(row==1){if(!app_settings_set_shelf_progress_badges(!app_settings_shelf_progress_badges()))snprintf(s_notice,sizeof(s_notice),"保存失败，请重试");}
-        else if(row==2)s_page=SETTINGS_LOCK_STYLE;
-        else if(row==3){s_page=SETTINGS_LOCK_PIN;s_notice[0]=0;}
+        // 关闭封面后书架只画书名卡，不读取或生成封面。/ With covers off the shelf draws title cards without reading or generating covers.
+        else if(row==2){if(!app_settings_set_shelf_covers(!app_settings_shelf_covers()))snprintf(s_notice,sizeof(s_notice),"保存失败，请重试");}
+        else if(row==3)s_page=SETTINGS_LOCK_STYLE;
+        else if(row==4){s_page=SETTINGS_LOCK_PIN;s_notice[0]=0;}
         else profile_editor_open(true);
         return APP_REDRAW_PAGE;
     }

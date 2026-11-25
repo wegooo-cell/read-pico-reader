@@ -620,6 +620,16 @@ static bool poll_media(app_ctx_t* ctx, const app_desc_t* current,
     if (err == ESP_ERR_NOT_FINISHED) return false;
     if ((err != ESP_OK || !info.mounted) && app_sleep_media_settling()) return false;
     bool ready = err == ESP_OK && info.mounted;
+#ifdef ESP_PLATFORM
+    static bool restore_checked;static int64_t restore_retry_at;
+    if(!ready){restore_checked=false;restore_retry_at=0;}
+    if(ready&&!restore_checked&&ctx->now_ms>=restore_retry_at){
+        restore_retry_at=ctx->now_ms+10000;
+        esp_err_t recovery=app_settings_restore_recover();
+        restore_checked=recovery==ESP_OK||recovery==ESP_ERR_NOT_FOUND;
+        if(recovery==ESP_OK){app_settings_init();book_store_notify_changed();}
+    }
+#endif
     bool lost = *mounted && !ready;
     bool gained = !*mounted && ready;
     *mounted = ready;

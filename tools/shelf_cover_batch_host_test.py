@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""中文：真实书架整页合并异步封面结果、失败退避重试，触摸和切页优先。/ English: Actual shelf batches cover reveals, retries transient failures, and prioritizes navigation.
+"""中文：真实书架逐本显示异步封面结果、失败退避重试，触摸和切页优先。/ English: Actual shelf reveals each async cover as it finishes, retries transient failures, and prioritizes navigation.
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
-import subprocess,tempfile
+import re,subprocess,tempfile
 from home_cover_cache_host_test import function
 ROOT=Path(__file__).resolve().parents[1];book=ROOT/'main/apps/app_book.c'
 source = book.read_text()
@@ -19,7 +19,7 @@ unit=r'''
 typedef struct{int x,y,width,height;}EpdRect;
 enum{SHELF,MANAGE,BULK};
 typedef struct{bool touched;}touch_t;
-typedef struct{int leaf;bool request_app,request_return,request_menu;int64_t now_ms;touch_t *touch;uint8_t *fb;}app_ctx_t;
+typedef struct{int leaf;bool consumed,request_app,request_return,request_menu;int64_t now_ms;touch_t *touch;uint8_t *fb;}app_ctx_t;
 #define BOOK_ROWS 9
 #define UI_LOCK_WIDTH 684
 #define SHELF_FAST_COVER_STRIDE 21
@@ -60,6 +60,8 @@ static int shelf_rows(void){return rows;}
 static int app_settings_shelf_style(void){return 2;}
 static bool app_settings_main_fast_refresh(void){return fast;}
 static unsigned app_settings_system_contrast(void){return 100;}
+static bool covers_off;
+static bool app_settings_shelf_covers(void){return !covers_off;}
 static EpdRect shelf_cover_image(int row){return(EpdRect){20,192+row*282,164,214};}
 static void copy_text(char *to,size_t cap,const char *from){snprintf(to,cap,"%s",from);}
 static __attribute__((unused)) bool app_touch_input_pending(app_ctx_t *ctx){return ctx->request_app||queued_touch;}
@@ -87,7 +89,7 @@ static book_shelf_page_state_t book_shelf_page_poll(void){return BOOK_SHELF_PAGE
 static void prepare_covers(app_ctx_t *ctx){(void)ctx;assert(false);}
 '''
 unit += function('shelf_page_mask', book) + '\n'
-functions=['shelf_is_txt','prepare_cover_batch','shelf_cover_frame_ready','shelf_cover_reveal_mask']
+functions=['shelf_covers_hidden','shelf_is_txt','prepare_cover_batch','shelf_cover_frame_ready','shelf_cover_reveal_mask']
 for name in functions:
  unit+=function(name,book)+'\n'
 present=function('present',book)
@@ -113,7 +115,7 @@ static bool book_shelf_page_capture(uint8_t *fb,unsigned edges,int64_t now){(voi
 static bool shelf_cover_white_edge(int row,EpdRect rect){(void)row;(void)rect;return false;}
 static void draw_shelf_cover(uint8_t *fb,EpdRect rect,int row,const char *name,bool favorite){
  (void)fb;(void)rect;(void)name;(void)favorite;slots_drawn|=1u<<row;
- if(shelf_cover_frame_ready()&&(s_covers[row].gray||s_covers[row].fast_bits))art_drawn|=1u<<row;
+ if(!shelf_covers_hidden()&&shelf_cover_frame_ready()&&(s_covers[row].gray||s_covers[row].fast_bits))art_drawn|=1u<<row;
 }
 static void draw_shelf_furniture(uint8_t *fb){(void)fb;}
 static void draw_shelf_cover_favorite(uint8_t *fb,int row,EpdRect rect,bool favorite){
@@ -134,6 +136,8 @@ static void render(app_ctx_t *ctx,uint8_t *fb){
  draw_shelf_page_artwork(ctx,fb);
 }
 '''
+unit += ''.join(re.findall(r'#define SHELF_COVER_GATHER_(?:SLOW_)?MS[^\n]*\n', book.read_text()))
+unit += 'static int64_t s_cover_ready_since_ms;static bool s_cover_gathering;\n' + function('shelf_cover_gather_ms', book) + '\n' + function('shelf_cover_gather_wait', book) + '\n'
 unit += function('shelf_cover_tick', book) + '\n'
 unit += 'static void ack_present(int redraw,int err){'+ack+'}\n'
 unit+=r'''
@@ -146,11 +150,12 @@ static void reset(app_ctx_t *ctx){for(unsigned i=0;i<9;++i){free(s_covers[i].gra
 }
 int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
  for(int mode=0;mode<3;++mode){fast=mode==1;reset(&ctx);
-  assert(!prepare_cover_batch(&ctx,true)&&queued==511&&!shelf_cover_frame_ready());
+  assert(!prepare_cover_batch(&ctx,true)&&queued==511&&s_cover_pending_mask==511&&shelf_cover_frame_ready());
   ready_mask=7;assert(prepare_cover_batch(&ctx,false)==7&&s_cover_dirty_mask==7);
-  assert(shelf_cover_reveal_mask()==0);
+  // 逐本显示：已完成的三本立即可推，不等同页其余封面。/ One by one: finished covers reveal without waiting for the page.
+  assert(shelf_cover_reveal_mask()==7);
   s_cover_batch_present_pending=false;ack_present(APP_REDRAW_PAGE,EPD_DRAW_SUCCESS);
-  assert(s_cover_dirty_mask==7);
+  assert(!s_cover_dirty_mask);
   s_cover_dirty_mask=7; // Reproduce a failed partial submission carrying all three groups.
   ready_mask=511;assert(prepare_cover_batch(&ctx,false)==504&&shelf_cover_reveal_mask()==511);
   s_cover_batch_present_pending=true;s_cover_present_mask=511;ack_present(APP_REDRAW_AREA,EPD_DRAW_FAULT);assert(s_cover_dirty_mask==511);
@@ -161,13 +166,13 @@ int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
  // A failure is not dropped forever: retry twice with backoff, then leave a placeholder.
  reset(&ctx);ready_mask=511;failed_mask=4;
  assert(prepare_cover_batch(&ctx,true)==507);
- assert(!shelf_cover_frame_ready());
+ assert(s_cover_pending_mask==4);
  assert(!s_covers[2].gray&&!s_covers[2].fast_bits);
  assert(s_cover_retry_count[2]==1&&s_cover_retry_ms[2]>ctx.now_ms);
- assert(s_cover_retry_ms[2]==60&&!shelf_cover_reveal_mask());
+ assert(s_cover_retry_ms[2]==60&&shelf_cover_reveal_mask()==507);
  assert(prepare_cover_batch(&ctx,true)==0);assert(s_cover_retry_count[2]==1);
  ctx.now_ms=s_cover_retry_ms[2];assert(prepare_cover_batch(&ctx,true)==0&&s_cover_retry_count[2]==2);
- assert(shelf_cover_frame_ready());
+ assert(!s_cover_pending_mask);
  assert(!s_covers[2].gray&&!s_covers[2].fast_bits);
  reset(&ctx);s_scan_pending=true;s_visible_count=0;
  render(&ctx,ctx.fb);assert(center_hint&&!slots_drawn);
@@ -184,29 +189,41 @@ int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
  queued_touch=true;
  assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&queued==0);
  queued_touch=false;
- assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&queued==15&&s_cover_dirty_mask==6);
- render(&ctx,ctx.fb);assert(!art_drawn);
- ack_present(APP_REDRAW_PAGE,EPD_DRAW_SUCCESS);assert(s_cover_dirty_mask==6);
+ // 第0、3格仍在做：先到的两张最多等一个合并窗口再一起补画。/ Cells 0 and 3 are still in flight: the first two wait one gather window.
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&!s_cover_present_mask&&!art_drawn);
+ ctx.now_ms+=shelf_cover_gather_ms();
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&queued==15&&s_cover_present_mask==6&&art_drawn==6);
+ assert(s_area.x==244&&s_area.y==192&&s_area.y+s_area.height==452&&!s_message[0]);
+ ack_present(APP_REDRAW_AREA,EPD_DRAW_SUCCESS);assert(!s_cover_dirty_mask);
  no_artwork_mask=8;
  assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&s_shelf_no_artwork_mask==8);
  assert(s_cover_retry_count[3]==0);
  ready_mask=7;
  queued_touch=true;
- assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&s_cover_dirty_mask==6);
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&!s_cover_dirty_mask);
  queued_touch=false;
- assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==7&&art_drawn==7);
- assert(s_area.y==192&&s_area.y+s_area.height==452&&!s_message[0]);
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==1&&art_drawn==7);
+ assert(s_area.x==36&&s_area.width==196&&s_area.y==192&&s_area.y+s_area.height==452&&!s_message[0]);
  ack_present(APP_REDRAW_AREA,EPD_DRAW_FAULT);
- assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==7);
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==1);
  ack_present(APP_REDRAW_AREA,EPD_DRAW_SUCCESS);
  assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE);
 
+ // 其他格仍在做时每批先等一个合并窗口；最后一批不再等待。/ Batches wait one gather window while others are in flight; the last batch never waits.
+ // 快速模式局刷便宜，窗口短；普通/水波纹局刷贵，窗口长。/ Cheap fast reveals use the short window; costly normal/ripple reveals use the long one.
+ fast=true;assert(shelf_cover_gather_ms()==SHELF_COVER_GATHER_MS);fast=false;assert(shelf_cover_gather_ms()==SHELF_COVER_GATHER_SLOW_MS&&SHELF_COVER_GATHER_SLOW_MS>SHELF_COVER_GATHER_MS);
  reset(&ctx);s_visible_count=9;ready_mask=7;
- assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&s_cover_dirty_mask==7);
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&s_cover_gathering);
+ ctx.now_ms+=shelf_cover_gather_ms()-1;assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE);
+ ctx.now_ms+=1;assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==7&&!s_cover_gathering);
+ ack_present(APP_REDRAW_AREA,EPD_DRAW_SUCCESS);
  ready_mask=63;
- assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&s_cover_dirty_mask==63);
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE);
+ ctx.now_ms+=shelf_cover_gather_ms();
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==56);
+ ack_present(APP_REDRAW_AREA,EPD_DRAW_SUCCESS);
  ready_mask=511;
- assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==511&&!s_message[0]);
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_AREA&&s_cover_present_mask==448&&!s_message[0]);
  ack_present(APP_REDRAW_AREA,EPD_DRAW_SUCCESS);
  assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE);
  reset(&ctx);s_visible_count=9;
@@ -217,13 +234,24 @@ int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
  ack_present(APP_REDRAW_AREA,EPD_DRAW_SUCCESS);
  assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&queued==0);
  shelf_page_turn=false;
- puts("PASS: shelf holds partial results, includes TXT covers and skips known missing artwork, and reveals a completed page in one retry-safe update");
+ // 关闭封面：整页只画书名卡，不入队、不读内存封面，也没有可推的封面格。
+ // Covers off: the page draws title cards only, with no queueing, RAM cover reads or cells to present.
+ reset(&ctx);covers_off=true;s_visible_count=9;
+ s_covers[0].index=-1;s_cover_pending_mask=0;ram_mask=511;
+ prepare_shelf_cover_slots(&ctx);
+ assert(!s_cover_pending_mask&&!s_cover_dirty_mask&&s_covers[8].index==8&&!s_covers[0].gray);
+ assert(prepare_cover_batch(&ctx,false)==0&&queued==0);
+ render(&ctx,ctx.fb);assert(slots_drawn==511&&!art_drawn);
+ assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&queued==0);
+ covers_off=false;
+ puts("PASS: shelf covers can be switched off: title cards only, no cover jobs or RAM reads");
+ puts("PASS: shelf gathers finished covers for at most one window while others are in flight, reveals them in retry-safe cell updates, includes TXT covers and skips known missing artwork");
  (void)warm_calls;(void)s_cover_warm_mask;(void)s_cover_warm_after_ms;
  for(unsigned i=0;i<9;++i){free(s_covers[i].gray);free(s_covers[i].fast_bits);}
  puts("PASS: queue without IO, reveal ready cells, retain dirty covers through failed displays, retry with backoff and prioritize touch");
 }
 '''
-assert 'const bool artwork = shelf_cover_frame_ready();' in function('draw_shelf_cover', book)
+assert 'const bool artwork = !shelf_covers_hidden() && shelf_cover_frame_ready();' in function('draw_shelf_cover', book)
 assert 'shelf_cover_tick(ctx)' in function('on_tick', book)
 assert 's_cover_batch_present_pending = true;' in function('shelf_cover_tick', book)
 with tempfile.TemporaryDirectory() as d:

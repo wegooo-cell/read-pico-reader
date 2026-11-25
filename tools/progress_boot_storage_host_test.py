@@ -57,7 +57,28 @@ int main(int argc,char **argv){
  unsigned expected_mounts=mounts;
  scarce=true; // Model the EPD/DMA/font allocations observed before the failing late mount.
  esp_err_t err=book_progress_save(path,&value);
- if(!early){assert(err!=ESP_OK&&!book_store_flash_ready());puts("PASS: reproduce late mount allocation failure with plenty of free NVS entries");return 0;}
+ if(!early){
+  assert(err!=ESP_OK&&!book_store_flash_ready());
+  actual.byte_off=123;
+  assert(book_progress_load_checked(path,value.file_size,&actual)==ESP_ERR_NO_MEM&&actual.byte_off==123);
+  uint8_t legacy[512]={'R','P','B',2};
+  legacy[4]=0x10;legacy[5]=0x27;legacy[8]=2;legacy[10]=0x08;legacy[11]=0x20;
+  legacy[14]=40;legacy[15]=82;legacy[16]=20;legacy[22]=(uint8_t)(strlen(path)+1);
+  strcpy((char*)legacy+24,path);char key[11];uint32_t hash=2166136261u;
+  for(const unsigned char *p=(const unsigned char*)path;*p;++p)hash=(hash^*p)*16777619u;
+  snprintf(key,sizeof(key),"b_%08x",hash);size_t len=24+legacy[22];
+  assert(nvs_set_blob(1,key,legacy,len)==ESP_OK);
+  assert(book_progress_load_checked(path,value.file_size,&actual)==ESP_OK&&actual.pct==82&&actual.byte_off==8200);
+  assert(book_progress_load_checked(path,value.file_size+1,&actual)==ESP_ERR_NO_MEM);
+  book_progress_t zero=value;zero.byte_off=0;zero.pct=0;
+  assert(book_progress_save(path,&zero)!=ESP_OK);
+  uint8_t saved[512];size_t saved_len=sizeof(saved);
+  assert(nvs_get_blob(1,key,saved,&saved_len)==ESP_OK&&saved_len==len&&!memcmp(saved,legacy,len));
+  legacy[0]=0;assert(nvs_set_blob(1,key,legacy,len)==ESP_OK);actual.byte_off=123;
+  assert(book_progress_load_checked(path,value.file_size,&actual)==ESP_ERR_NO_MEM&&actual.byte_off==123);
+  puts("PASS: mount failure retains readable legacy82% progress; absent/corrupt/changed-source copies remain errors, failed writes never replace old progress");
+  return 0;
+ }
  assert(err==ESP_OK&&mounts==expected_mounts);
  assert(book_progress_load(path,value.file_size,&actual)&&actual.byte_off==value.byte_off);
  assert(book_progress_records(copy_record,NULL)==ESP_OK&&saved_len);
