@@ -420,6 +420,6 @@ with tempfile.TemporaryDirectory(prefix='reader-overlay-') as temporary:
     (p / 'epdiy.h').write_text('#pragma once\ntypedef struct{int x,y,width,height;}EpdRect;\n')
     (p / 'esp_err.h').write_text('#pragma once\ntypedef int esp_err_t;\n')
     (p / 'test.c').write_text(unit)
-    subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',
+    subprocess.run(['cc','-std=c11','-D_DEFAULT_SOURCE','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',
                     '-I'+str(p),'-I'+str(root/'main/ui'),'-I'+str(root/'main/book'),str(p/'test.c'),'-o',str(p/'test')],check=True)
     subprocess.run([str(p/'test')],check=True)

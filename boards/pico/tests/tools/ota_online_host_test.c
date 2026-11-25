@@ -136,7 +136,10 @@ esp_err_t esp_http_client_open(esp_http_client_handle_t h,int n){
 int esp_http_client_write(esp_http_client_handle_t h,const char *p,int n){
  assert(h->kind==QUERY&&h->post_at+(size_t)n<=h->post_size);
  if(fail_post)return -1;
- if(n>31)n=31;memcpy(h->post+h->post_at,p,n);h->post_at+=n;return n;
+ if(n>31) n=31;
+ memcpy(h->post+h->post_at,p,n);
+ h->post_at+=n;
+ return n;
 }
 int64_t esp_http_client_fetch_headers(esp_http_client_handle_t h){
  if(h->kind==QUERY){
