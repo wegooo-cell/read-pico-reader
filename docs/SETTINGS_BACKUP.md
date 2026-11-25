@@ -7,3 +7,6 @@ Interchange stays v25. Full paired backups use v29(PICOSETT): before history, a1
 读取v1..27及已交付本地v28低残影备份。两字节v28边距草案可识别；未发布的封面草案与低残影草案都用了完全相同的五字节v28布局，无法由字节推断来源。五字节v28沿用已交付低残影语义，不据此改变封面开关；这类封面草案须先由原作者版本恢复并导出明确格式。缺少新字段的旧备份保留当前低残影和封面选择。
 
 Read v1..27 and delivered local v28 low-ghost backups. The two-byte v28 margin draft is distinguishable,while the unpublished cover draft reused identical five-byte bytes with different semantics. Interpret that layout as delivered low-ghost data without inferring a cover choice; restore an ambiguous cover draft using its original writer before exporting a tagged version. Legacy streams lacking new fields retain current low-ghost and cover preferences.
+
+上游合并版v28的七字节“封面块＋上下边距”扩展也可独立识别：恢复这两个字段，保留当前低残影选择。
+The combined upstream v28 seven-byte cover-plus-margin extension is also recognized, restoring those fields while retaining the current low-ghost choice.

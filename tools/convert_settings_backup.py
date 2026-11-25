@@ -79,7 +79,10 @@ def parse(data):
             block=data[offset:offset+5]; offset+=5
             if len(block)!=5 or block[0]>1 or fingerprint(block[:1])!=int.from_bytes(block[1:],'little'):
                 raise ValueError('旧完整扩展校验无效')
-            fields['lowghost']=block
+            margin=data[offset:offset+2]
+            if len(margin)==2 and margin[0]<=48 and margin[0]^margin[1]==255:
+                fields['covers']=block;fields['margin_y']=margin;offset+=2
+            else:fields['lowghost']=block
     return version,base,fields,history_records(data[offset:])
 
 def convert(data,target=25):

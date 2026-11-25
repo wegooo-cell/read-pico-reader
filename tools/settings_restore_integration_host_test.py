@@ -29,6 +29,8 @@ with tempfile.TemporaryDirectory(prefix='restore-integration-') as folder:
   old=bytearray((p/'v28.backup').read_bytes())
   margin=bytes([data[ghost_at+6],data[ghost_at+6]^255])
   margin_file=p/'v28-margin.backup';margin_file.write_bytes(old[:ghost_at]+margin+old[ghost_at+5:]);files.append(margin_file)
+  combined=p/'v28-combined.backup';combined.write_bytes(old[:ghost_at]+codec.seal(bytes([data[ghost_at+5]]))+margin+old[ghost_at+5:]);files.append(combined)
+  assert codec.parse(combined.read_bytes())[2]['margin_y']==margin
   if len(sys.argv)>2:files.extend(sorted(Path(sys.argv[2]).glob('*.backup')))
   # Keep generated test inputs separate from card data; create a fresh card for the check process.
   import shutil

@@ -91,7 +91,8 @@ int main(int argc,char **argv){
     assert(argc>=3);app_settings_init();assert(!app_settings_low_ghost());
     app_settings_set_low_ghost(true);app_settings_init();assert(app_settings_low_ghost());
     app_settings_set_low_ghost(false);app_settings_init();assert(!app_settings_low_ghost());app_settings_set_book_px(120);app_settings_set_book_line_spacing(300);app_settings_set_book_paragraph_spacing(-100);
-    app_settings_set_clock_12h(true);app_settings_set_low_ghost(false);save_progress_at(a,82);
+    app_settings_set_clock_12h(true);app_settings_set_low_ghost(false);assert(app_settings_set_shelf_covers(false));
+    assert(app_settings_try_book_layout(120,24,300,-100,18));save_progress_at(a,82);
     nvs_handle_t favorite_handle,stats_handle;
     assert(nvs_open(KIIKO_BOARD_METALIO47?"mt_favs":"rp_favs",NVS_READWRITE,&favorite_handle)==ESP_OK);
     assert(nvs_set_u8(favorite_handle,"f_deadbeef",1)==ESP_OK);
@@ -140,7 +141,17 @@ int main(int argc,char **argv){
     assert(app_settings_restore_recover()==ESP_ERR_INVALID_RESPONSE);assert_database_saved();assert(!remove(RESTORE_PENDING));
     mounted=false;assert(app_settings_sync_import(wire,bytes)==ESP_ERR_INVALID_STATE);assert_database_saved();mounted=true;
     // Native v28 plus all historical streams are applied by actual ESP restore code.
-    for(int i=2;i<argc;++i){size_t n=0;uint8_t *data=load_bytes(argv[i],&n);esp_err_t err=app_settings_sync_import(data,n);if(err!=ESP_OK)fprintf(stderr,"failed %s err=%d\n",argv[i],err);assert(err==ESP_OK);assert_progress(b,64);free(data);}
+    for(int i=2;i<argc;++i){
+        size_t n=0;uint8_t *data=load_bytes(argv[i],&n);
+        bool combined=strstr(argv[i],"v28-combined")!=NULL;
+        if(combined){app_settings_set_low_ghost(true);assert(app_settings_set_shelf_covers(true));}
+        esp_err_t err=app_settings_sync_import(data,n);
+        if(err!=ESP_OK)fprintf(stderr,"failed %s err=%d\n",argv[i],err);
+        assert(err==ESP_OK);assert_progress(b,64);
+        if(combined)assert(app_settings_low_ghost()&&!app_settings_shelf_covers()&&app_settings_book_margin_y()==18);
+        free(data);
+    }
+
     // Public card path and a damaged paired companion must still accept a valid older interchange.
     assert(app_settings_backup_save()==ESP_OK&&app_settings_backup_save()==ESP_OK);FILE *bad_full=fopen(BACKUP_FULL,"r+b");assert(bad_full&&fputc(0,bad_full)!=EOF&&!fclose(bad_full));
     assert(app_settings_backup_restore()==ESP_OK);assert_progress(b,64);

@@ -33,6 +33,17 @@ static bool backup_extra_read(FILE *file, unsigned version, settings_backup_extr
         }
         settings_backup_hold_t legacy = {.action=first[0], .checksum={first[1]}};
         if (fread(legacy.checksum+1, 1, 3, file) != 3 || legacy.action > 1 || !backup_hold_valid(&legacy)) return false;
+        // 上游合并版v28在封面块后连写两字节边距；历史流的RP前缀不会与其混淆。
+        // The combined upstream v28 appends two margin bytes after covers; history's RP prefix is distinct.
+        long history = ftell(file);
+        uint8_t margin[2];
+        if (history < 0 || fread(margin, 1, 2, file) != 2) return false;
+        if (margin[0] <= 48 && (margin[0] ^ margin[1]) == 255) {
+            extra->covers = legacy.action; extra->has_covers = true;
+            extra->margin_y = margin[0]; extra->has_margin_y = true;
+            return true;
+        }
+        if (fseek(file, history, SEEK_SET)) return false;
         // 未发布的封面草案也用了同一布局，不能由这些字节推断封面开关。
         // The unpublished cover draft used identical bytes: never infer its cover switch here.
         extra->lowghost = legacy.action; extra->has_lowghost = true;
