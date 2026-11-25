@@ -81,11 +81,6 @@ static void IRAM_ATTR handle_lcd_frame_done(void* payload) {
 // during scans to avoid line-queue underruns.
 __attribute__((weak)) void epd_scan_hook(bool active) { (void)active; }
 
-// 无欠载完成的扫屏次数；应用据此判断降频后能否再试回默认像素时钟。
-// Count of scans finished without underrun; the app uses it to decide when to retry the default clock.
-static volatile uint32_t s_clean_scans;
-uint32_t epd_lcd_clean_scans(void) { return s_clean_scans; }
-
 void lcd_do_update(RenderContext_t* ctx) {
     epd_scan_hook(true);
     epd_set_mode(1);
@@ -124,7 +119,6 @@ void lcd_do_update(RenderContext_t* ctx) {
     epd_lcd_frame_done_cb(NULL, NULL);
 
     epd_set_mode(0);
-    if (!ctx->error) s_clean_scans++;
     epd_scan_hook(false);
 }
 

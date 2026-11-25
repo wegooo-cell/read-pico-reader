@@ -1035,6 +1035,12 @@ int book_cover_legacy_sweep_step(void) {
     for (struct dirent *entry; (entry = readdir(dir));) {
         if (entry->d_name[0] == '.') continue; // 只处理自己写的文件。/ Only files this firmware wrote.
         if (cover_legacy_kept(entry->d_name) || strlen(entry->d_name) >= sizeof(name)) { kept = true; continue; }
+        // 分组已有文件时保留旧件供损坏回退，不让一件旧缓存阻塞其他迁移。
+        // Retain the legacy copy when a target exists, for corruption fallback; keep scanning other entries.
+        uint64_t existing_hash; char existing_path[160]; struct stat existing;
+        if (cover_legacy_movable(entry->d_name, &existing_hash) &&
+            cover_file_path(existing_path, sizeof(existing_path), existing_hash, entry->d_name + 17) &&
+            !stat(existing_path, &existing)) { kept = true; continue; }
         strcpy(name, entry->d_name);
         break;
     }
@@ -1047,8 +1053,14 @@ int book_cover_legacy_sweep_step(void) {
     uint64_t hash;
     snprintf(from, sizeof(from), COVER_LEGACY_DIR "/%s", name);
     struct stat st;
-    const bool moved = cover_legacy_movable(name, &hash) && cover_file_path(to, sizeof(to), hash, name + 17) &&
-        stat(to, &st) && cover_dir_ready(to) && !rename(from, to);
+    if (cover_legacy_movable(name, &hash)) {
+        // 迁移失败时保留唯一原件；读卡/建目录/改名错误不能当作可删除缓存。
+        // Preserve the sole source on I/O, mkdir or rename failure.
+        if (!cover_file_path(to, sizeof(to), hash, name + 17)) return 0;
+        if (!stat(to, &st) || errno != ENOENT || !cover_dir_ready(to)) return 0;
+        return rename(from, to) == 0;
+    }
+    const bool moved = false;
     // 删不掉（只读卡等）就停下，免得反复处理同一个文件。/ Stop if a file cannot be removed (read-only card) instead of looping on it.
     if (!moved && unlink(from)) return 0;
     return 1;

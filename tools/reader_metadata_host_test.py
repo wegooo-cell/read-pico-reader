@@ -179,7 +179,7 @@ with tempfile.TemporaryDirectory(prefix='reader-metadata-') as temporary:
     work=Path(temporary)
     (work/'epdiy.h').write_text('#pragma once\ntypedef struct{int x,y,width,height;}EpdRect;\n')
     (work/'test.c').write_text(unit)
-    subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',
+    subprocess.run(['cc','-std=c11','-D_DEFAULT_SOURCE','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',
                     *(['-DTEST_SEPARATE_FOOTER'] if separate_footer else []),
                     '-DTEST_RETRY_DUE='+str(1050 if separate_footer else 1700),
                     '-DKIIKO_BOARD_METALIO47='+str(int('metalio47' in str(ROOT))),'-I'+str(work),'-I'+str(ROOT/'main/ui'),str(work/'test.c'),'-o',str(work/'test')],check=True)
