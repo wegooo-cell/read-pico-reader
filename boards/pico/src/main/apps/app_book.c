@@ -4567,13 +4567,15 @@ static void prep_task(void *arg) {
         xSemaphoreGive(s_prep_done);
     }
 }
-// 预绘目标：往回翻时取上一页，否则取下一页；越界或任一页带图、设了阅读背景时不预绘。
+// 预绘目标：往回翻时取上一页，否则取下一页；越界、目标页带图或设了阅读背景时不预绘。
+// 当前是插图页时照样预绘相邻的文字页，插图页推屏期间不取显示锁，不会和预绘争用。
 // Prefetch target: the previous page while paging backward, otherwise the next; none when out of
-// range, when either page carries an image or when a reading background is set.
+// range, when the target carries an image or when a reading background is set. An image page still
+// prefetches its neighbouring text page: its panel push takes no draw lock, so the two do not contend.
 static int reader_prefetch_target(void) {
     const bool back=s_page>0&&s_back_turns>=(s_keep_cur.fb?1:2);
     int target=back?(int)s_page-1:(int)s_page+1;
-    if(target>=(int)book_layout_page_count()||book_layout_page_image_count(s_page)||
+    if(target>=(int)book_layout_page_count()||
        book_layout_page_image_count((size_t)target)||app_settings_book_background_path()[0])return -1;
     return target;
 }
@@ -5349,9 +5351,12 @@ static void prepare_inline_image(void) {
     if (app_settings_reader_hide_images()) { release_page_images(); return; }
     uint32_t generation = book_layout_generation();
     if (s_page_images_for == s_page && s_page_images_generation == generation) return;
-    // 纯文字跨页不应作废已排好的下一页；布局代次改变或任一侧有插图时才失效。
-    // Preserve the prefetched next text page; invalidate only across layout generations or image-bearing pages.
-    const bool changed_layout_or_image = s_page_images_generation != generation || s_page_image_count > 0;
+    // 预绘的是纯文字页的正文，与上一页有没有插图无关：从插图页翻到预绘好的文字页时照样命中。
+    // 只在布局代次改变或本页带插图时作废。
+    // The prefetch holds a text page's body, independent of the previous page's images, so turning
+    // from an image page onto a prefetched text page still hits. Invalidate only across layout
+    // generations or onto an image-bearing page.
+    const bool changed_layout = s_page_images_generation != generation;
     release_page_images();
     s_page_images_for = s_page; s_page_images_generation = generation;
     // 插图不显示没有别的症状，每条失败路径以前都是静默 continue；这里把结局记下来，
@@ -5359,7 +5364,7 @@ static void prepare_inline_image(void) {
     // A missing illustration has no other symptom and every failure path used to be a silent
     // continue; record the outcome instead of guessing.
     int count = reader_image_slots(s_page);
-    if (changed_layout_or_image || count > 0) reset_prefetch();
+    if (changed_layout || count > 0) reset_prefetch();
     if (count > 0) release_image_headroom();
     if (!count || count > (int)HTML_TEXT_MAX_BLOCKS) {
         ESP_LOGI(TAG, "inline page %u: %d image slots", (unsigned)s_page, count);
