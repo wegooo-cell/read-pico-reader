@@ -58,7 +58,7 @@ typedef int esp_err_t;
 typedef struct {void *hl;uint8_t *fb;} app_ctx_t;
 typedef struct {void (*on_before_lock)(app_ctx_t*);} app_desc_t;
 typedef struct {uint8_t tab,reader,fullscreen;char path[288];} pico_resume_t;
-static bool position_ok,checkpoint_ok,checkpoint_live,deep_ready,reading=true;
+static bool position_ok,checkpoint_ok,checkpoint_live,checkpoint_saved,deep_ready,reading=true;
 static unsigned before_calls,power_calls,present_calls;
 static void before(app_ctx_t *ctx){(void)ctx;++before_calls;}
 static const app_desc_t app_book={before},other={before};
@@ -67,7 +67,7 @@ static void app_lock_feedback(void *hl){(void)hl;}
 static int app_index_of(const app_desc_t *page){return page==&app_book?1:5;}
 static bool app_book_resume_context(char *path,size_t cap,bool *fullscreen){snprintf(path,cap,"/sdcard/books/test.txt");*fullscreen=true;return reading;}
 static bool app_book_checkpoint_ready(void){return position_ok;}
-static esp_err_t pico_boot_save_resume(const pico_resume_t *resume){assert(resume->tab<6);checkpoint_live=checkpoint_ok;return checkpoint_ok?ESP_OK:ESP_FAIL;}
+static esp_err_t pico_boot_save_resume(const pico_resume_t *resume){assert(resume->tab<6);checkpoint_live=checkpoint_ok;checkpoint_saved|=checkpoint_ok;return checkpoint_ok?ESP_OK:ESP_FAIL;}
 static void app_lock_set_resume_ready(bool ready){deep_ready=ready;}
 static void app_present(app_ctx_t *ctx,const app_desc_t *page,int mode){(void)ctx;(void)page;(void)mode;++present_calls;}
 static void ui_power_final_draw(uint8_t *fb,bool restart){(void)fb;(void)restart;}
@@ -75,8 +75,9 @@ static void guard_draw_result(void *hl,int result){(void)hl;(void)result;}
 static int update_display_full(void *hl){(void)hl;return 0;}
 static void app_lock_wait_key_idle(unsigned ms){assert(ms==800);}
 static void epd_poweroff(void){}
-static void app_restart_host(void){assert(checkpoint_live&&deep_ready);}
-static esp_err_t app_enter_host_sleep(int mode){assert(mode==APP_SLEEP_OFF&&checkpoint_live&&deep_ready);++power_calls;return ESP_FAIL;}
+// 电源交接前已保存过检查点、再按PR112清掉恢复记录，冷启动回主页。/ The checkpoint was saved, then cleared before the handoff (PR112) so the next boot is cold.
+static void app_restart_host(void){assert(checkpoint_saved&&!checkpoint_live&&deep_ready);}
+static esp_err_t app_enter_host_sleep(int mode){assert(mode==APP_SLEEP_OFF&&checkpoint_saved&&!checkpoint_live&&deep_ready);checkpoint_saved=false;++power_calls;return ESP_FAIL;}
 static void pico_boot_clear_resume(void){checkpoint_live=false;}
 """
  unit+=function('prepare_lock',source)+'\n'+function('run_power_action',source)
@@ -86,7 +87,7 @@ int main(void){app_ctx_t ctx={0};
  position_ok=false;run_power_action(&ctx,&app_book,false);assert(power_calls==1&&!deep_ready&&before_calls==2);
  position_ok=true;checkpoint_ok=false;run_power_action(&ctx,&app_book,false);assert(power_calls==1&&!deep_ready&&before_calls==3);
  checkpoint_ok=true;position_ok=false;run_power_action(&ctx,&other,false);assert(power_calls==2&&deep_ready&&before_calls==4);
- puts("PASS: both-board power actions flush first, refuse failed current-position/checkpoint writes and retain resume through hardware handoff");
+ puts("PASS: both-board power actions flush first, refuse failed current-position/checkpoint writes and clear the resume record before the hardware handoff");
 }
 """
  with tempfile.TemporaryDirectory(prefix='reader-power-') as d:

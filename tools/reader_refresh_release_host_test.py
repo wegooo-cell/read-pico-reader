@@ -105,9 +105,6 @@ static enum EpdDrawError update_display_water_turn(void *hl,EpdRect area,int dir
  (void)hl;(void)dir;return push_area(18,&soft_turn_waveform,MODE_GL16,area);
 }
 #define E0470_TURN_RTL 0
-static enum EpdDrawError update_display_text_turn(void *hl,EpdRect area,int dir) {
- (void)hl;(void)dir;assert(tick==2);return push_area(20,&E0470_FULL_WAVEFORM,MODE_DU,area);
-}
 #define update_display_fast_page(...) push(19)
 static enum EpdDrawError update_display_reader_area(void *hl,const EpdWaveform *wave,int mode,EpdRect area,bool full){
  (void)hl;return push_area(full?14:13,wave,mode,area);
@@ -115,6 +112,19 @@ static enum EpdDrawError update_display_reader_area(void *hl,const EpdWaveform *
 static bool present_reader_footer(app_ctx_t *ctx){
  (void)ctx;assert(calls==1);++footer_commits;s_reader_footer_pending=false;return true;
 }
+// 顶栏的DU局刷由pico_reader_metadata_present覆盖，这里只记页脚提交。/ The header DU push is covered by pico_reader_metadata_present; count the footer commit here.
+static bool present_reader_metadata(app_ctx_t *ctx){return present_reader_footer(ctx);}
+// 快速灰阶翻页表与低残影（fe154b3，默认按关闭测）。/ Fast-gray turn table and low-ghost (fe154b3), tested off.
+static int gray8_turn_waveform,white_push_waveform;
+static const int *display_reader_gray8_turn_waveform(void){return &gray8_turn_waveform;}
+static const int *display_reader_white_push_waveform(void){return &white_push_waveform;}
+static bool app_settings_low_ghost(void){return false;}
+// 锁屏前取消导入、记下恢复上下文。/ Before lock: cancel a running import and record the resume context.
+static bool s_import_candidates,s_lock_reader_reopen,s_lock_reader_fullscreen;static char s_batch_message[64],s_lock_reader_path[256];
+static bool book_import_running(void){return false;}
+static void book_import_cancel(void){assert(false);}
+static void copy_text(char *d,size_t n,const char *t){snprintf(d,n,"%s",t);}
+static bool app_book_resume_context(char *p,size_t n,bool *full){(void)p;(void)n;(void)full;return false;}
 '''
 unit+='enum {READER_PANEL_TOUCH_SETTINGS=90,READER_PANEL_TOUCH_MORE=91};\nstatic bool s_rc_full_was_visible,s_rc_double_pending;\nstatic bool rc_custom_modal(void){return false;}\nstatic void rc_pause_auto(void){}\nstatic void rc_stop_auto(void){}\nstatic void rc_cancel_side(void){}\n'
 unit+='static bool s_shelf_key_paint_pending;\n'
@@ -184,14 +194,15 @@ int main(void){
  present(&ctx,APP_REDRAW_DONE);assert(!calls&&s_turns==7&&s_presented_view==SHELF);
  ctx.request_app=true;present(&ctx,APP_REDRAW_PAGE);
  assert(!calls&&s_turns==7&&s_presented_view==SHELF);ctx.request_app=false;
- // Pico普通翻页保留正文全像素GL16，信息栏在停下后独立局刷。
- // Pico ordinary turns use body-only full-pixel GL16 with independently deferred metadata.
+ // Pico普通翻页按fe154b3整屏全像素GL16（信息栏白底同扫），图文页仍只擦正文；页脚随后独立提交。
+ // Pico ordinary turns run whole-panel full-pixel GL16 (fe154b3, metadata whites sweep too); image turns
+ // keep the body; the footer still commits separately afterwards.
  for(int full=0;full<2;++full)for(int hide_status=0;hide_status<2;++hide_status)for(int content=0;content<3;++content){
   reset();s_reader_fullscreen=full;immersive=hide_status;s_reader_footer_pending=false;s_area=reader_area();
   images=content==1;s_reader_image_refresh_pending=images!=0;background=content==2;
   assert(present(&ctx,APP_REDRAW_AREA));
   assert(calls==1&&selected==14&&modes[0]==MODE_GL16&&waves[0]==&soft_turn_waveform&&s_reader_text_frame==(content==0));
-  same_area(areas[0],reader_area());
+  same_area(areas[0],content==1?reader_area():(EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT});
   assert(footer_commits==1&&!s_reader_footer_pending&&!s_reader_cleanup);
  }
  for(int full=0;full<2;++full)for(int image=0;image<2;++image){
@@ -238,28 +249,24 @@ int main(void){
  reset();s_view=s_presented_view=SHELF;s_shelf_key_paint_pending=true;
  present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==13&&!s_shelf_key_paint_pending&&!prepares);
  reset();ctx.request_app=true;present(&ctx,APP_REDRAW_AREA);assert(calls==0);ctx.request_app=false;
- // 新速读与普通共用连续文字资格，全文/页脚一次；清理和图像不被短路。
- // Fast BW shares consecutive-text eligibility, fusing the footer; cleanup and images take priority.
+ // 55b9d26起Pico不再有快速黑白（旧ID2迁移为3）；快速灰阶与普通同样整屏一次，页脚随后提交；清理、图像和整页重绘优先。
+ // Since 55b9d26 Pico has no fast BW (old ID2 migrates to 3); fast gray sweeps the whole panel once like
+ // ordinary turns, then commits the footer; cleanup, images and full redraws take priority.
  for(int full=0;full<2;++full)for(int hide_status=0;hide_status<2;++hide_status) {
-  reset();tick=2;s_reader_fullscreen=full;immersive=hide_status;s_reader_footer_pending=false;s_area=reader_area();
-  assert(present(&ctx,APP_REDRAW_AREA)&&calls==1&&selected==20&&s_reader_text_frame);
-  same_area(areas[0],reader_area());assert(footer_commits==1);
+  reset();tick=3;s_reader_fullscreen=full;immersive=hide_status;s_reader_footer_pending=false;s_area=reader_area();
+  assert(present(&ctx,APP_REDRAW_AREA)&&calls==1&&selected==14&&waves[0]==&gray8_turn_waveform&&s_reader_text_frame);
+  same_area(areas[0],(EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT});assert(footer_commits==1);
  }
- for(int kind=0;kind<9;++kind) {
-  reset();tick=2;
+ for(int kind=0;kind<4;++kind) {
+  reset();tick=3;
   if(kind==0)s_reader_cleanup=true;
   if(kind==1){images=1;s_reader_image_refresh_pending=true;}
-  if(kind==2)background=true;
-  if(kind==3)s_reader_turn_pending=false;
-  if(kind==4)s_reader_panel=99;
-  if(kind==5)s_toolbar=true;
-  if(kind==6)s_clear_confirm=true;
-  if(kind==7)s_presented_view=SHELF;
-  present(&ctx,kind==8?APP_REDRAW_FULL:APP_REDRAW_AREA);assert(selected!=20);
+  if(kind==2)s_reader_turn_pending=false;
+  present(&ctx,kind==3?APP_REDRAW_FULL:APP_REDRAW_AREA);assert(calls==1&&waves[0]!=&gray8_turn_waveform);
  }
- reset();tick=2;fail=1;present(&ctx,APP_REDRAW_AREA);assert(selected==20&&!s_reader_text_frame);
- puts("PASS: FastBW crops to body and defers metadata, preserves full/periodic/entry/image/background/panel routes and rejects failed history");
- puts("PASS: reader entry cleans once with complete GC16 including images/backgrounds, retaining failure retry; ordinary Pico turns use body GL16 with deferred metadata; periodic GC16, ripple, local controls, clock and cancellation retain their paths");
+ reset();tick=3;fail=1;present(&ctx,APP_REDRAW_AREA);assert(selected==14&&!s_reader_text_frame);
+ puts("PASS: fast gray sweeps the whole panel with its own table and commits the footer, preserving full/periodic/image routes and rejecting failed history");
+ puts("PASS: reader entry cleans once with complete GC16 including images/backgrounds, retaining failure retry; ordinary Pico turns use whole-panel GL16 then commit metadata; periodic GC16, ripple, local controls, clock and cancellation retain their paths");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='kiikoread-reader-release-') as folder:

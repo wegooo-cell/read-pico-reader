@@ -61,6 +61,8 @@ static unsigned draws[4],fallback,presents,auths,font_begin,font_end,pause,resum
 static bool pin,draw_ok=true,transfer_ok=true,timeout,reader,boot_cache,cache_ok;
 static unsigned cached_style;
 static jmp_buf deep;
+// 锁屏前已保存当前位置与恢复检查点（app_lock_set_resume_ready），超时可进深睡。/ Position and resume checkpoint were saved before locking, so a timeout may deep-sleep.
+static bool s_lock_deep_ready;
 static const char *app_settings_wallpaper_path(void){return "/sdcard/wallpaper.jpg";}
 static uint8_t app_settings_lock_style(void){return style;}
 static bool lock_pin_enabled(void){return pin;}
@@ -120,7 +122,7 @@ static int epd_height(void){return 1216;}
 for name in ('draw_wallpaper', 'present_clean_lock', 'enter_lock_and_sleep', 'app_lock_boot_gate'):
     unit += function(name, ROOT/'main/sleep.c') + '\n'
 unit += r'''
-static void reset(void){assert(!white_allocations);white_scans=0;white_ok=true;white_alloc_fail=false;current_background=0x32;memset(draws,0,sizeof(draws));fallback=presents=auths=font_begin=font_end=pause=resume=clear_resume=0;memset(pixels,0x32,FRAME_BYTES);memset(panel,0x32,FRAME_BYTES);memset(history,0x32,FRAME_BYTES);frame_ready=s_lock_feedback_failed=s_lock_feedback_visible=feedback_seen=false;full_presents=entry_clears=exit_clears=exit_white=0;unlocking=hint_visible=false;recovery_ok=true;final_ok=true;draw_ok=transfer_ok=true;timeout=reader=boot_cache=cache_ok=false;}
+static void reset(void){s_lock_deep_ready=true;assert(!white_allocations);white_scans=0;white_ok=true;white_alloc_fail=false;current_background=0x32;memset(draws,0,sizeof(draws));fallback=presents=auths=font_begin=font_end=pause=resume=clear_resume=0;memset(pixels,0x32,FRAME_BYTES);memset(panel,0x32,FRAME_BYTES);memset(history,0x32,FRAME_BYTES);frame_ready=s_lock_feedback_failed=s_lock_feedback_visible=feedback_seen=false;full_presents=entry_clears=exit_clears=exit_white=0;unlocking=hint_visible=false;recovery_ok=true;final_ok=true;draw_ok=transfer_ok=true;timeout=reader=boot_cache=cache_ok=false;}
 int main(void){
  EpdiyHighlevelState hl={.back_fb=history,.front_fb=pixels};int64_t ignore=0;
  // 两种来源的阅读背景只影响票根内容，不决定样式。/ Reader provenance affects ticket content, never the style.

@@ -91,7 +91,7 @@ static EpdRect ui_bar_rect(int i,int count){int width=(508-(count-1)*12)/count;r
 enum {UI_PAGER_NONE=-1,UI_PAGER_FIRST,UI_PAGER_PREVIOUS,UI_PAGER_NEXT,UI_PAGER_LAST};
 static EpdRect ui_pager_rect(int i){return (EpdRect){40+i*140,1004,100,70};}
 static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}
-typedef struct {char name[256],author[128],path[288];uint32_t size;uint16_t chapter,chapters;bool chapters_checked, is_flash,has_progress;uint8_t pct;uint32_t recent;uint64_t added;bool selected,removed,search_match,favorite;} shelf_entry_t;
+typedef struct {char name[256],author[128],path[288];uint32_t size;int64_t modified;bool cover_identity_known;uint16_t chapter;bool chapters_checked;uint16_t chapters;bool is_flash,has_progress;uint8_t pct;uint32_t recent;uint64_t added;bool selected,removed,search_match,favorite,shelved,is_dir;} shelf_entry_t;
 #define BOOK_ROWS 13
 #define BOOK_GRID_ROWS 9
 #define BOOK_BULK_ROWS 5
@@ -139,6 +139,7 @@ static bool book_toc_picker_close(int *leaf){(void)leaf;return false;}
 static uint8_t s_shelf_order;
 static uint8_t app_settings_shelf_order(void){return s_shelf_order;}
 static void app_settings_set_shelf_order(uint8_t value){s_shelf_order=value;}
+static bool app_settings_try_shelf_order(uint8_t value){s_shelf_order=value;return true;}
 static void shelf_added_load(void){}
 static int test_shelf_style;
 static int app_settings_shelf_style(void){return test_shelf_style;}
@@ -271,7 +272,7 @@ static void invalidate_covers(void){}
 static shelf_entry_t s_managed;
 static bool s_delete_confirm,s_file_removed,s_clear_confirm;
 static char s_manage_message[128];
-typedef enum {SHELF,SETTINGS,READING,TOC,MANAGE,BULK,IMPORT,SEARCH,EDIT} book_view_t;
+typedef enum {SHELF,SETTINGS,READING,TOC,MANAGE,BULK,IMPORT,SEARCH,EDIT,COVER_LOOKUP} book_view_t;
 static book_view_t s_view,s_search_parent;
 static bool test_draw_locked,test_system_face=true;
 static void lock_draw(void){assert(!test_draw_locked);test_draw_locked=true;}
@@ -464,6 +465,111 @@ unit += re.search(r'^#define APP_BOOK_PARAGRAPH_COUNT \d+', settings_header.read
 unit+=r'''
 static int ui_nav_hit(int x,int y){return x>=0&&x<684&&y>=1096&&y<1216?x*4/684:-1;}
 '''
+unit+=''.join(line+'\n' for line in (source.parents[1]/'book/book_font_size.h').read_text().splitlines() if line.startswith(('#define BOOK_READER_LINE_','#define BOOK_READER_PARAGRAPH_')))
+unit+=r'''
+// ---- 书库、导入与 Books 目录（55b9d26 起）/ Library, import and Books directory (since 55b9d26) ----
+// 按“全部收录”建模：没有导入候选、不在 Books 目录视图，旧书架的扫描/排序/管理行为不变；
+// 书库与导入本身由 book_library_host_test / book_library_ui_host_test 覆盖。
+// Model the library as "all books": no import candidates and no Books-directory view, so the
+// existing shelf scan/sort/manage expectations hold; the library and import paths have their own
+// book_library_host_test / book_library_ui_host_test.
+#define TAG "book"
+#define ESP_LOGW(...) ((void)0)
+typedef enum {BOOK_LIBRARY_UNSET,BOOK_LIBRARY_SELECTED,BOOK_LIBRARY_ALL} book_library_mode_t;
+// 小型内存书库，语义同 book_library.c：快照从“全部”转为逐本名单，提交失败不改已存名单。
+// A small in-memory library with book_library.c's semantics: a snapshot turns "all" into an explicit
+// list, and a failed commit leaves the stored list unchanged.
+#define TEST_LIBRARY_MAX 96
+static book_library_mode_t test_library_mode=BOOK_LIBRARY_ALL,test_library_stage_mode;
+static char test_library[TEST_LIBRARY_MAX][BOOK_STORE_PATH_MAX],test_library_stage[TEST_LIBRARY_MAX][BOOK_STORE_PATH_MAX];
+static int test_library_count,test_library_stage_count,test_library_commits;
+// 真实扫描在“全部”模式下会把当前书冻结为名单，之后新放入的书要走导入。旧的目录发现用例默认保持“全部”
+// 以继续覆盖目录遍历；移出书架用例打开 test_library_freeze 按真实语义执行。
+// A real complete scan in "all" mode freezes the current books into a list, so later files need an import.
+// The legacy discovery cases keep "all" by default to keep exercising the directory walk; the removal
+// case sets test_library_freeze for the real semantics.
+static bool test_library_transaction,test_library_freeze;static esp_err_t test_library_error;
+static book_library_mode_t book_library_mode(void){return test_library_mode;}
+static esp_err_t book_library_error(void){return ESP_OK;}
+static bool test_library_find(char (*list)[BOOK_STORE_PATH_MAX],int count,const char *path){for(int i=0;i<count;++i)if(!strcmp(list[i],path))return true;return false;}
+static bool book_library_contains(const char *path){return test_library_mode==BOOK_LIBRARY_ALL||test_library_find(test_library,test_library_count,path);}
+static esp_err_t book_library_begin_snapshot(void){
+ assert(!test_library_transaction);test_library_transaction=true;test_library_stage_mode=BOOK_LIBRARY_SELECTED;
+ test_library_stage_count=test_library_mode==BOOK_LIBRARY_ALL?0:test_library_count;
+ memcpy(test_library_stage,test_library,sizeof(test_library));return ESP_OK;}
+static esp_err_t book_library_add(const char *path){
+ assert(test_library_transaction&&test_library_stage_count<TEST_LIBRARY_MAX);
+ if(!test_library_find(test_library_stage,test_library_stage_count,path))snprintf(test_library_stage[test_library_stage_count++],BOOK_STORE_PATH_MAX,"%s",path);return ESP_OK;}
+static esp_err_t book_library_commit(void){
+ assert(test_library_transaction);if(test_library_error)return test_library_error;
+ if(test_library_freeze){test_library_mode=test_library_stage_mode;test_library_count=test_library_stage_count;
+  memcpy(test_library,test_library_stage,sizeof(test_library));}
+ test_library_transaction=false;++test_library_commits;return ESP_OK;}
+static void book_library_abort(void){test_library_transaction=false;}
+static esp_err_t book_library_remove(const char *path){
+ assert(test_library_transaction&&test_library_stage_mode==BOOK_LIBRARY_SELECTED);
+ for(int i=0;i<test_library_stage_count;++i)if(!strcmp(test_library_stage[i],path)){memmove(test_library_stage[i],test_library_stage[i+1],(size_t)(--test_library_stage_count-i)*BOOK_STORE_PATH_MAX);break;}
+ return ESP_OK;}
+typedef bool (*book_library_visit_fn)(const char *path,void *context);
+static esp_err_t book_library_list(book_library_visit_fn visit,void *context){
+ if(test_library_mode!=BOOK_LIBRARY_ALL)for(int i=0;i<test_library_count;++i)if(!visit(test_library[i],context))break;return ESP_OK;}
+typedef enum {BOOK_IMPORT_NONE,BOOK_IMPORT_EXPLICIT,BOOK_IMPORT_COVERED} book_import_selection_t;
+static book_import_selection_t book_import_selection(const char *path){(void)path;return BOOK_IMPORT_NONE;}
+static esp_err_t book_import_select(const char *path,bool directory,bool selected){(void)path;(void)directory;(void)selected;return ESP_OK;}
+static unsigned book_import_choice_count(void){return 0;}
+static void book_import_reset(void){}
+static bool book_import_running(void){return false;}
+static bool s_import_candidates,s_library_setup_pending,s_manage_books,s_rescan_prompt,s_import_all_pending,s_manage_files_return;
+static bool s_editor_from_bulk,s_shelf_recheck_on_return,s_shelf_index_preloaded,s_shelf_open_queued,s_manage_style_restore;
+static bool s_shelf_scan_yield_to_touch,s_shelf_scan_cancelled,s_background_index_scan,s_rc_double_pending;
+static bool s_lock_reader_fullscreen,s_lock_reader_reopen;
+static char s_manage_dir[BOOK_STORE_PATH_MAX],s_lock_reader_path[BOOK_STORE_PATH_MAX];
+static int64_t s_shelf_input_ms,s_resume_media_deadline_ms;
+static bool books_directory_is_root(void){return true;}
+static const char *books_directory_current(void){return app_settings_books_dir();}
+static app_redraw_t books_directory_open(app_ctx_t *ctx,const char *path){(void)ctx;(void)path;assert(false);return APP_REDRAW_NONE;}
+static app_redraw_t books_directory_up(app_ctx_t *ctx){(void)ctx;assert(false);return APP_REDRAW_NONE;}
+static app_redraw_t library_cancel_candidates(app_ctx_t *ctx){(void)ctx;assert(false);return APP_REDRAW_NONE;}
+static app_redraw_t library_import_selected(app_ctx_t *ctx){(void)ctx;assert(false);return APP_REDRAW_NONE;}
+static app_redraw_t library_restart_import(app_ctx_t *ctx){(void)ctx;assert(false);return APP_REDRAW_NONE;}
+static app_redraw_t library_setup_action(app_ctx_t *ctx,int x,int y){(void)ctx;(void)x;(void)y;assert(false);return APP_REDRAW_NONE;}
+static void library_page_selection(app_ctx_t *ctx,bool selected){(void)ctx;(void)selected;assert(false);}
+static void library_scan_again(app_ctx_t *ctx){(void)ctx;assert(false);}
+static void library_filter_loaded(app_ctx_t *ctx){(void)ctx;}
+static void library_restore_import_selection(void){}
+static bool library_remove_selected(void);
+static app_redraw_t bulk_cover_start(app_ctx_t *ctx){(void)ctx;return APP_REDRAW_PAGE;}
+static app_redraw_t cover_lookup_back(void){return APP_REDRAW_PAGE;}
+static app_redraw_t cover_lookup_page(int direction){(void)direction;return APP_REDRAW_PAGE;}
+static bool cover_lookup_resume(void){return false;}
+static void cover_lookup_cleanup(void){}
+static void rc_cancel_side(void){}
+static void rc_pause_auto(void){}
+static void rc_stop_auto(void){}
+static void reader_current_chapter(char *dst,size_t cap){if(cap)dst[0]=0;}
+static void book_ticket_note_position(const char *path,const book_progress_t *progress,const char *chapter,bool saved){(void)path;(void)progress;(void)chapter;(void)saved;}
+static void app_book_ticket_sample(int64_t now_ms,bool exposed){(void)now_ms;(void)exposed;}
+static bool app_files_request_book_action(const char *path,bool move){(void)path;(void)move;return false;}
+const app_desc_t app_files;
+static bool app_settings_try_book_layout(uint8_t px,uint8_t margin,int line,int paragraph){(void)px;app_settings_set_book_margin(margin);(void)line;(void)paragraph;return true;}
+static int read_pico_name_compare(const char *left,const char *right){return strcmp(left,right);}
+static bool book_display_name_from_path(const char *path,char *title,size_t title_cap,char *author,size_t author_cap){return book_name_from_path(path,title,title_cap,author,author_cap);}
+static bool shelf_cache_load(app_ctx_t *ctx,bool quiet){(void)ctx;(void)quiet;return false;}
+static bool app_touch_input_pending(app_ctx_t *ctx){(void)ctx;return false;}
+static bool shelf_cache_save(void){return true;}
+static int shelf_order_mode(void);
+static bool shelf_order_desc(void);
+static bool shelf_order_apply(app_ctx_t *ctx,int mode,bool desc);
+static bool shelf_scan_interrupted(app_ctx_t *ctx);
+static bool shelf_waiting_for_index(void);
+static bool shelf_library_visit(const char *path,void *context);
+static bool resume_media_wait(app_ctx_t *ctx);
+static void cancel_shelf_open(void);
+static app_redraw_t bulk_return_shelf(app_ctx_t *ctx);
+'''
+for name in ("shelf_waiting_for_index","shelf_scan_interrupted","resume_media_wait","cancel_shelf_open"):
+    unit+=function(name)+"\n"
+
 for name in ("ui_pager_rect_at","ui_pager_hit_at","ui_pager_target"):unit+=function(name,source.parents[2]/"main/ui/ui_kit.c")+"\n"
 unit+='\n'.join(line for line in (source.parents[2]/'main/ui/ui_book_manage_layout.h').read_text().splitlines() if not line.startswith(('#include','#pragma'))) + '\n'
 unit+='\n'.join(line for line in (source.parents[2]/'main/ui/ui_reader_layout.h').read_text().splitlines() if not line.startswith(('#include','#pragma'))) + '\n'
@@ -530,9 +636,13 @@ int main(void) {
     remote_ctx.leaf=2;
     assert(shelf_turn_page(&remote_ctx,1)==APP_REDRAW_NONE&&remote_ctx.leaf==2);
     assert(shelf_turn_page(&remote_ctx,-1)==APP_REDRAW_AREA&&remote_ctx.leaf==1);
+    // d7b45d1起书架已有书时后台核对不挡翻页，只有空书架才等索引。
+    // Since d7b45d1 a background check no longer blocks paging once books are shown; only an empty shelf waits.
     s_scan_pending=true;
+    assert(shelf_turn_page(&remote_ctx,1)==APP_REDRAW_AREA&&remote_ctx.leaf==2);
+    remote_ctx.leaf=1;s_visible_count=0;assert(shelf_waiting_for_index());
     assert(shelf_turn_page(&remote_ctx,1)==APP_REDRAW_NONE&&remote_ctx.leaf==1);
-    s_scan_pending=false;s_view=MANAGE;
+    s_visible_count=27;s_scan_pending=false;s_view=MANAGE;
     assert(shelf_turn_page(&remote_ctx,1)==APP_REDRAW_NONE);
     EpdRect left=shelf_page_arrow_rect(-1),right=shelf_page_arrow_rect(1);
     assert(left.y==right.y&&left.y+left.height<=UI_BAR_TOP);
@@ -626,10 +736,12 @@ int main(void) {
     shelf_entry_t a={.search_match=true,.name="Same.txt",.path="/sdcard/books/A/Same.txt"};
     shelf_entry_t b={.search_match=true,.name="Same.txt",.path="/sdcard/books/B/Same.txt"};
     assert(compare_books(&a,&b)<0);
-    b.recent=10;s_recent_sort=true;assert(compare_books(&a,&b)>0);
-    s_recent_sort=false;a.favorite=true;
+    // 排序按书架排序设置（55b9d26起由s_shelf_order决定），收藏不再置顶。
+    // Sorting follows the shelf order setting (s_shelf_order since 55b9d26); favorites are no longer pinned.
+    b.recent=10;s_shelf_order=1;assert(compare_books(&a,&b)>0);
+    s_shelf_order=0;a.favorite=true;
     for(int style=1;style<=4;style++){test_shelf_style=style;assert(compare_books(&a,&b)<0);}
-    s_recent_sort=true;assert(compare_books(&a,&b)<0);s_recent_sort=false;test_shelf_style=0;
+    s_shelf_order=1;assert(compare_books(&a,&b)>0);s_shelf_order=0;test_shelf_style=0;
     a.favorite=false;a.recent=10;b.recent=20;a.added=100;b.added=200;
     strcpy(a.name,"Zulu");strcpy(b.name,"Alpha");
     int expected[]={1,1,-1,-1,-1,1};
@@ -686,6 +798,8 @@ int main(void) {
     for(int i=1;i<4;i++)test_progress[i].value=(book_progress_t){.file_size=1,.px=48,.pct=7};
     favorite_key(outside,test_favorite_key);
     strcpy(test_recent_path,outside);++test_progress_revision;
+    // 收藏不再置顶（55b9d26），按最近阅读排序让刚读的书排第一。/ Favorites are no longer pinned (55b9d26); sort by recent reading so the read book leads.
+    s_shelf_order=1;
     refresh_cached_progress(&ctx);assert(s_count==66&&s_visible_count==66);
     assert(!strcmp(s_shelf[0].path,outside)&&!strcmp(s_shelf[0].name,"读过")&&
            !strcmp(s_shelf[0].author,"作者")&&s_shelf[0].favorite&&s_shelf[0].has_progress&&
@@ -693,23 +807,29 @@ int main(void) {
     refresh_cached_progress(&ctx);assert(s_count==66);
     // 六个按钮可命中；取消不写入，失败可重试，移出不删除文件或修改进度。
     // All six buttons respond; cancellation is safe and failed removal retries without data loss.
+    // 55b9d26起移出书架是一次书库事务（不再逐本写隐藏表）：取消不写入，提交失败保留选择，文件与进度保留。
+    // Since 55b9d26 removal is one library transaction (no per-book hidden records): cancellation writes
+    // nothing, a failed commit keeps the selection, and files and progress stay.
+    test_library_freeze=true;test_library_commits=0;
     s_view=BULK;s_bulk_selecting=true;clear_selection();toggle_selection(0);
     EpdRect unshelf= batch_rect(5);int removal_delete_calls=test_delete_calls;
     batch_action(&ctx,unshelf.x+1,unshelf.y+1);
-    assert(s_batch_confirm&&s_batch_kind==BATCH_UNSHELF&&!shelf_hidden_load(outside));
+    assert(s_batch_confirm&&s_batch_kind==BATCH_UNSHELF&&!test_library_commits);
     EpdRect dismiss=ui_row_rect(0,2,620,UI_BTN_H);
     batch_action(&ctx,dismiss.x+1,dismiss.y+1);
-    assert(!s_batch_confirm&&!shelf_hidden_load(outside)&&selected_count()==1);
-    test_hidden_error=ESP_FAIL;batch_apply(&ctx);
-    assert(s_count==66&&selected_count()==1&&!shelf_hidden_load(outside));
-    test_hidden_error=ESP_OK;batch_apply(&ctx);
-    assert(s_count==65&&!selected_count()&&shelf_hidden_load(outside)&&test_delete_calls==removal_delete_calls);
+    assert(!s_batch_confirm&&!test_library_commits&&selected_count()==1);
+    test_library_error=ESP_FAIL;batch_apply(&ctx);
+    assert(s_count==66&&selected_count()==1&&!test_library_commits&&book_library_contains(outside)&&s_batch_message[0]);
+    test_library_error=ESP_OK;s_batch_message[0]=0;batch_apply(&ctx);
+    assert(s_count==65&&!selected_count()&&test_library_commits==1&&test_library_count==65);
+    assert(!book_library_contains(outside)&&test_delete_calls==removal_delete_calls&&!shelf_hidden_load(outside));
     struct stat outside_stat;assert(stat(outside,&outside_stat)==0&&outside_stat.st_size==1);
     book_progress_t retained;
     assert(book_progress_load(outside,1,&retained)&&retained.pct==42&&retained.byte_off==17);
-    scan_shelf(&ctx);refresh_cached_progress(&ctx);assert(s_count==65&&shelf_hidden_load(outside));
-    assert(shelf_hidden_save(outside,false));scan_shelf(&ctx);refresh_cached_progress(&ctx);
-    assert(s_count==66&&!shelf_hidden_load(outside));
+    scan_shelf(&ctx);refresh_cached_progress(&ctx);assert(s_count==65&&!book_library_contains(outside));
+    // 回到“全部收录”，后续用例照旧。/ Return to "all books" for the remaining cases.
+    test_library_freeze=false;test_library_mode=BOOK_LIBRARY_ALL;test_library_count=test_library_commits=0;
+    scan_shelf(&ctx);refresh_cached_progress(&ctx);assert(s_count==66);
     assert(shelf_hidden_save(test_progress[3].path,true));scan_shelf(&ctx);assert(s_count==65&&!chapter_reads);
     assert(shelf_hidden_save(test_progress[3].path,false));
     char hidden_key[11];shelf_hidden_key(outside,hidden_key);
@@ -997,6 +1117,11 @@ int main(void) {
     puts("book_ui_host_test: PASS");
 }
 '''
+for name in ("shelf_order_apply","shelf_library_visit","bulk_return_shelf"):
+    unit+=function(name)+"\n"
+unit+=function("library_remove_selected",source.parent/"book_library_ui.inc")+"\n"
+# clang不认GCC的optimize属性。/ clang rejects GCC's optimize attribute.
+unit=unit.replace('__attribute__((optimize("Os"))) ','')
 with tempfile.TemporaryDirectory() as tmp:
     c = Path(tmp) / "test.c"
     exe = Path(tmp) / "test"

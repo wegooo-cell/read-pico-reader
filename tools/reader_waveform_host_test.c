@@ -8,7 +8,12 @@
 #include <string.h>
 #include "display_reader_waveform.h"
 #include "e0470_epaper_waveform.h"
+#include "settings.h"
 
+// 低残影（fe154b3）默认开启，下面的额外擦白/重推黑断言按开启校验，末尾再查关闭。
+// Low-ghost (fe154b3) defaults on; the extra white/black checks below run with it on, then off at the end.
+static bool test_low_ghost = true;
+bool app_settings_low_ghost(void) { return test_low_ghost; }
 static enum EpdRotation test_rotation;
 int epd_width(void) { return 1216; }
 int epd_height(void) { return 684; }
@@ -151,24 +156,27 @@ int main(void) {
                 if (to == from && a != 0) ++equal_gray_refreshes;
             }
     assert(equal_gray_refreshes > 0);
-    for (int f = drive; f < drive + 12; ++f)
+    // 74ca1f4起厂商三相定稿保持在前，十二相整屏擦白其后，重推黑在最后。
+    // Since 74ca1f4 the vendor's three settle holds come first, then twelve white phases, with the black re-drive last.
+    for (int i = 0; i < 3; ++i)
+        for (int from = 0; from < 16; ++from)
+            for (int to = 0; to < 16; ++to) {
+                assert(e0470_phase_action(st, drive + i, to, from) ==
+                       e0470_phase_action(vendor, drive + i, to, from));
+                assert(e0470_phase_action(st, drive + i, to, from) == 0);
+            }
+    for (int f = drive + 3; f < drive + 15; ++f)
         for (int from = 0; from < 16; ++from)
             for (int to = 0; to < 16; ++to)
                 assert(e0470_phase_action(st, f, to, from) ==
                        (to == 15 ? 2 : 0));
-    for (int f = drive + 12; f < drive + 16; ++f)
+    for (int f = drive + 15; f < drive + 19; ++f)
         for (int from = 0; from < 16; ++from)
             for (int to = 0; to < 16; ++to)
                 assert(e0470_phase_action(st, f, to, from) ==
                        (to == 0 ? 1 : 0));
-    for (int i = 0; i < 3; ++i)
-        for (int from = 0; from < 16; ++from)
-            for (int to = 0; to < 16; ++to) {
-                assert(e0470_phase_action(st, drive + 16 + i, to, from) ==
-                       e0470_phase_action(vendor, drive + i, to, from));
-                assert(e0470_phase_action(st, drive + 16 + i, to, from) == 0);
-            }
-    puts("PASS: soft ordinary turn keeps vendor sequences and equal-gray refresh, drops only black-on-black erase phases, inserts twelve whole-white phases and four black re-drive phases before the vendor settle holds");
+    assert(st->phases == drive + 19);
+    puts("PASS: soft ordinary turn keeps vendor sequences and equal-gray refresh, drops only black-on-black erase phases, then the vendor settle holds, twelve whole-white phases and four final black re-drive phases");
     const EpdWaveform* water_wave=display_reader_water_waveform();
     const EpdWaveformPhases* water=e0470_waveform_phases(water_wave,MODE_GL16);
     assert(water_wave==display_reader_water_waveform() && water && water->phases==E0470_GL16_FRAMES+4);
@@ -191,6 +199,16 @@ int main(void) {
         if(from==to)for(int f=0;f<water->phases;++f)assert(e0470_phase_action(water,f,to,from)==0);
     }
     puts("PASS: Pico reader ripple retains every original gray transition/three settle holds, four changed-white-only drives, all equal pairs held,41 phases and cached identity");
+    // 关闭低残影：普通翻页去掉十六相额外擦白/重推黑，水波纹直接用原文字表。
+    // Low-ghost off: the soft turn drops its sixteen extra phases and ripple uses the plain text table.
+    test_low_ghost = false;
+    const EpdWaveformPhases* balanced = e0470_waveform_phases(display_reader_soft_turn_waveform(), MODE_GL16);
+    assert(balanced && balanced->phases == vendor->phases);
+    assert(display_reader_water_waveform() == display_reader_text_waveform());
+    test_low_ghost = true;
+    assert(e0470_waveform_phases(display_reader_soft_turn_waveform(), MODE_GL16)->phases == vendor->phases + 16);
+    assert(display_reader_water_waveform() == water_wave);
+    puts("PASS: low-ghost off drops the extra soft-turn phases and ripple white drives; switching back restores them");
     puts("PASS: all 256 pairs, endpoints, holds, first/final actions, pulse counts, 37-frame timing and original LUT retained; optical validation pending");
     return 0;
 }

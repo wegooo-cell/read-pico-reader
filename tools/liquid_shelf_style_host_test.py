@@ -48,8 +48,7 @@ typedef struct {int type,x0,y0,x,y;} ui_gesture_event_t;
 #define EPD_DRAW_ALIGN_CENTER 1
 #define SETTINGS_SCROLL_MAX 1000
 static int s_page=SETTINGS_SHELF_STYLE,s_style_scroll,s_main_scroll,s_ble_scroll,viewport=1088,style=2;
-static bool s_scroll_drag_consumed,s_scroll_present_pending,s_main_wifi_saved;
-static char s_main_wifi[33];
+static bool s_scroll_drag_consumed,s_scroll_present_pending;
 static unsigned glass,acrylic,headers,footers,cards,titles;
 static int settings_viewport_end(void){return viewport;}
 static int settings_content_end(void){return viewport;}
@@ -91,6 +90,23 @@ static int ui_content_width(void){return 612;}
 '''
 unit+='\n'.join(line for line in (root/'main/ui/ui_book_manage_layout.h').read_text().splitlines() if not line.startswith(('#include','#pragma')))+'\n'
 unit+='static bool s_bulk_grid;\n'
+# 书架行布局引用导入候选；设置手势经拖动跟手与完成回调返回。拖动跟手另有测试，这里让它不接管。
+# Shelf rows consult import candidates; settings gestures go through drag tracking and the finish callback.
+# Drag tracking has its own tests, so it declines here.
+unit += r'''
+static bool s_import_candidates;
+typedef struct {bool request_return;} app_ctx_t;
+static app_ctx_t s_ctx_storage;
+static app_ctx_t *const ctx=&s_ctx_storage;
+static bool s_shelf_style_from_manage;
+static char s_notice[64];
+static void app_book_return_from_shelf_style(void){}
+typedef struct {bool tracking;int origin_offset,origin_y;} settings_drag_t;
+static settings_drag_t s_list_drag;
+static bool settings_drag_gesture(app_ctx_t *c,const ui_gesture_event_t *ev,int *offset,int limit,app_redraw_t *motion){
+ (void)c;(void)ev;(void)offset;(void)limit;(void)motion;return false;}
+'''
+unit += function('shelf_style_finish', source) + '\n'
 for name in ('shelf_rows','row_rect','shelf_cover_image'):
     unit += function(name,root/'main/apps/app_book.c')+'\n'
 unit += catalog + '\n' + count + '\n' + function('draw_style_thumbnail', source) + '\n'
@@ -102,7 +118,7 @@ unit += r'''
 int main(void){
  const int expected[]={1,2,6,5};uint8_t fb=0;
  for(unsigned choice=0;choice<4;++choice){
-  style=expected[choice];int rows=style==5?4:9;assert(shelf_rows()==rows);
+  style=expected[choice];int rows=style==5?8:9;assert(shelf_rows()==rows);
   for(int i=0;i<rows;++i){EpdRect hit=row_rect(i),cover=shelf_cover_image(i);
    assert(cover.x>=36&&cover.x+cover.width<=648&&cover.y>=184&&cover.y+cover.height<=972);
    assert(cover.x>=hit.x&&cover.x+cover.width<=hit.x+hit.width&&cover.y>=hit.y&&cover.y+cover.height<=hit.y+hit.height);

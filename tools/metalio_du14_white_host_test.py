@@ -75,7 +75,7 @@ extern const EpdWaveform* display_reader_fast_text_waveform(void);
 '''
 unit+=function('text_leading_holds',ROOT/'boards/metalio47/src/components/e0470_page_turn/e0470_page_turn.c')+'\n'
 unit+=function('main_fast_white_waveform',ROOT/'boards/metalio47/src/main/display.c')+'\n'
-for name in ['_inverse_rotated_area','hl_update_area']:
+for name in ['_inverse_rotated_area','reader_dilate_masks','hl_update_area']:
     unit+=function(name,ROOT/'components/epdiy/src/highlevel.c')+'\n'
 unit+=r'''
 int main(void){
@@ -114,7 +114,7 @@ int main(void){
   set(front,40,2,0);set(front,1150,500,0);memcpy(old,back,B);
   scans=frames=0;fail_phase=fail;
   EpdiyHighlevelState h={front,back,difference,lines,columns,white};
-  assert(hl_update_area(&h,MODE_DU,25,(EpdRect){0,0,H,extent},true,false)==(fail?EPD_DRAW_EMPTY_LINE_QUEUE:EPD_DRAW_SUCCESS));
+  assert(hl_update_area(&h,MODE_DU,25,(EpdRect){0,0,H,extent},true,false,0,0)==(fail?EPD_DRAW_EMPTY_LINE_QUEUE:EPD_DRAW_SUCCESS));
   assert(scans==1&&frames==(fail?fail:14));
   for(int y=0;y<H;++y)for(int x=0;x<W;++x)assert(pixel(back,x,y)==pixel(!fail&&x<extent?front:old,x,y));
  }
