@@ -127,6 +127,9 @@ enum{UI_GESTURE_TAP,UI_GESTURE_MOVE,APP_REDRAW_NONE,APP_REDRAW_PAGE,EPD_DRAW_ALI
 static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&y>=r.y&&x<r.x+r.width&&y<r.y+r.height;}
 static void back_header(uint8_t*f,const char*t){(void)f;(void)t;}
 static void settings_navigation(uint8_t*f){(void)f;}
+static void ui_clear_page(uint8_t*f){*f=0;}
+static bool test_english;
+static bool ui_locale_english(void){return test_english;}
 static void ui_text_fixed(uint8_t*f,int x,int y,int px,const char*t,int a,bool inv){(void)f;(void)x;(void)px;(void)t;(void)a;(void)inv;assert(y<1096);}
 static void ui_text_box(uint8_t*f,EpdRect r,int px,const char*t,int a,bool inv){(void)f;(void)px;(void)t;(void)a;(void)inv;assert(r.x>=0&&r.y>=0&&r.x+r.width<=684&&r.y+r.height<=1096);}
 static void ui_draw_button(uint8_t*f,EpdRect r,const char*t,bool inv){(void)f;(void)t;(void)inv;assert(r.x>=0&&r.y>=0&&r.x+r.width<=684&&r.y+r.height<=1096);}
@@ -191,13 +194,13 @@ int main(void){
  reset();s_storage_rebuild_question=s_storage_wait_release=false;test_touch_t held={true};app_ctx_t ctx={.touch=&held};uint8_t fb=0;
  ui_gesture_event_t e={UI_GESTURE_MOVE,60,950};assert(storage_repair_gesture(&ctx,&e)==APP_REDRAW_NONE);source_retained();
  e.type=UI_GESTURE_TAP;assert(storage_repair_gesture(&ctx,&e)==APP_REDRAW_PAGE&&s_storage_rebuild_question&&!app_storage_repair_busy());
- unsigned before=reads;storage_repair_draw(&fb);assert(reads==before&&!erases);
+ unsigned before=reads;fb=255;storage_repair_draw(&fb);assert(reads==before&&!erases&&fb==0);
  assert(storage_repair_gesture(&ctx,&e)==APP_REDRAW_PAGE&&app_storage_repair_busy());
  for(int i=0;i<5000&&app_storage_repair_busy();++i)(void)storage_repair_tick(&ctx);
  assert(s_status.phase==STORAGE_REPAIR_BACKUP_READY&&!erases&&s_storage_wait_release);
  assert(storage_repair_gesture(&ctx,&e)==APP_REDRAW_NONE&&!erases);
  held.touched=false;(void)storage_repair_tick(&ctx);assert(!s_storage_wait_release);
- storage_repair_draw(&fb);ctx.now_ms=10000;assert(storage_repair_gesture(&ctx,&e)==APP_REDRAW_PAGE);run();assert(erases==1);
+ test_english=true;storage_repair_draw(&fb);test_english=false;ctx.now_ms=10000;assert(storage_repair_gesture(&ctx,&e)==APP_REDRAW_PAGE);run();assert(erases==1);
  reset();s_storage_rebuild_question=true;e.y0=851;assert(storage_repair_gesture(&ctx,&e)==APP_REDRAW_PAGE&&!s_storage_rebuild_question);source_retained();
  reset();s_page=SETTINGS_MAIN;s_storage_rebuild_question=true;
  assert(actual_maintenance(&ctx,2000+6*82)==APP_REDRAW_PAGE&&s_page==SETTINGS_STORAGE_REPAIR&&!s_storage_rebuild_question&&!erases);

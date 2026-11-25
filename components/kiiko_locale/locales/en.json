@@ -1214,5 +1214,11 @@
   "整行": "Full line",
   "保存阅读线格式": "Save reading guide format",
   "阅读线格式已保存": "Reading guide format saved",
-  "请先选择虚线或点线": "Select dashed or dotted first"
+  "请先选择虚线或点线": "Select dashed or dotted first",
+  "TF 书目录暂不可用，请检查存储卡": "TF book directory unavailable; check the card",
+  "内置存储暂不可用，TF 书籍仍可使用": "Internal storage unavailable; TF books remain usable",
+  "内置存储暂不可用，原数据已保留": "Internal storage unavailable; original data retained",
+  "存储检查与修复": "Storage checks and repair",
+  "检查 / 备份后重建": "Check / back up and rebuild",
+  "部分图书目录读取失败，请检查存储后重试": "Some book directories could not be read; check storage and retry"
 }
