@@ -181,7 +181,9 @@ static shelf_entry_t* s_shelf;
 static size_t s_shelf_capacity;
 static int s_count,s_visible_count;
 static char s_message[128],s_shelf_warning[128],s_storage[128];
-static bool s_pending_invalidated,test_oom,test_degraded;
+static bool s_pending_invalidated,test_oom;
+static unsigned test_source_errors;
+enum{BOOK_STORE_ROOT_ERROR_CARD=1u,BOOK_STORE_ROOT_ERROR_FLASH=2u};
 static bool pico_boot_asset_allowed(const char *path){(void)path;return true;}
 static unsigned s_store_revision;
 typedef struct {char path[288];bool is_flash;} book_store_root_t;
@@ -213,9 +215,10 @@ static int test_root_count=1;
 static void* heap_caps_realloc(void* p,size_t n,int caps){(void)caps;return test_oom?NULL:realloc(p,n);}
 static void* heap_caps_malloc(size_t n,int caps){(void)caps;return malloc(n);}
 static void* heap_caps_calloc(size_t count,size_t n,int caps){(void)caps;return test_oom?NULL:calloc(count,n);}
-static bool book_store_roots_degraded(void){return test_degraded;}
+static unsigned book_store_root_errors(void){return test_source_errors;}
 static uint64_t book_store_free_bytes(const book_store_root_t* root){(void)root;return 1000000;}
-static int book_store_roots(book_store_root_t out[BOOK_STORE_ROOT_MAX],int* n){*n=test_root_count;memcpy(out,test_roots,sizeof(test_roots));return 0;}
+static int test_root_calls;
+static int book_store_roots(book_store_root_t out[BOOK_STORE_ROOT_MAX],int* n){++test_root_calls;*n=test_root_count;memcpy(out,test_roots,sizeof(test_roots));return 0;}
 static bool book_progress_load(const char* p,uint32_t n,book_progress_t* out){
     if(!test_batch_active)++test_single_calls;
     for(int i=0;i<test_progress_count;i++)if(!strcmp(p,test_progress[i].path)&&n==test_progress[i].value.file_size){*out=test_progress[i].value;return true;}
@@ -421,7 +424,7 @@ static void book_store_notify_changed(void){test_notify_count++;}
 static unsigned book_store_revision(void){return (unsigned)test_notify_count;}
 static void free_book(void){s_text=NULL;s_path[0]=0;}
 static void refresh_cached_progress(app_ctx_t* ctx);
-static void return_to_cached_shelf(app_ctx_t* ctx){(void)ctx;}
+static void return_to_cached_shelf(app_ctx_t* ctx);
 static bool open_book(app_ctx_t* ctx,const char* path){(void)ctx;assert(path[0]);test_open_calls++;s_view=READING;return true;}
 static char test_wrapped[512];
 #define UI_PX_CAPTION 28
@@ -563,7 +566,8 @@ static int read_pico_name_compare(const char *left,const char *right){return str
 static bool book_display_name_from_path(const char *path,char *title,size_t title_cap,char *author,size_t author_cap){return book_name_from_path(path,title,title_cap,author,author_cap);}
 static bool shelf_cache_load(app_ctx_t *ctx,bool quiet){(void)ctx;(void)quiet;return false;}
 static bool app_touch_input_pending(app_ctx_t *ctx){(void)ctx;return false;}
-static bool shelf_cache_save(void){return true;}
+static int test_cache_writes;
+static bool shelf_cache_save(void){++test_cache_writes;return true;}
 static int shelf_order_mode(void);
 static bool shelf_order_desc(void);
 static bool shelf_order_apply(app_ctx_t *ctx,int mode,bool desc);
@@ -586,7 +590,7 @@ unit += function("book_layout_balanced_rect", layout_source) + "\n"
 unit += function("set_reader_view") + "\n"
 unit += function("ble_pt_action_for_usage", source.parents[2] / "components/ble_page_turner/src/ble_page_turner.c") + "\n"
 
-for name in ("inline_ink_gray", "reader_margin_width", "reader_margin_levels", "reader_margin_level_for", "reader_margin_for_level", "slider_index", "reader_margin_input", "reader_area", "reader_fullscreen_progress_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_display_style", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_category_matches", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "shelf_matches", "compare_books", "sort_shelf", "shelf_reserve", "delete_retry_find", "delete_retry_reserve", "delete_retry_discard", "scan_shelf_dir", "shelf_backfill_visit", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress",
+for name in ("inline_ink_gray", "reader_margin_width", "reader_margin_levels", "reader_margin_level_for", "reader_margin_for_level", "slider_index", "reader_margin_input", "reader_area", "reader_fullscreen_progress_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_display_style", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_category_matches", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "shelf_matches", "compare_books", "sort_shelf", "shelf_reserve", "delete_retry_find", "delete_retry_reserve", "delete_retry_discard", "scan_shelf_dir", "shelf_backfill_visit", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress", "return_to_cached_shelf",
              "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "reader_saved_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "shelf_manage_rect", "shelf_sort_rect", "shelf_pager_group_rect", "shelf_search_rect", "shelf_search_clear_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "bulk_sort_rect", "shelf_sort_menu_rect", "shelf_order_mode", "shelf_order_desc", "leaves", "selected_count", "clear_selection", "toggle_selection", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "shelf_search_clear", "refresh_capacity", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_select_row", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "reader_key_action", "import_finish", "shelf_sort_gesture", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
     unit += function(name) + "\n"
 unit += "static void shelf_join_quick_covers(app_ctx_t *ctx){(void)ctx;}\n"
@@ -915,7 +919,38 @@ int main(void) {
     EpdRect filter=bulk_filter_rect(1);assert(filter.y==246&&filter.height==48);
     s_view=MANAGE;manage_action(&ctx,circle.x+20,circle.y+20);assert(s_view==SHELF);
     assert(!strcmp(s_shelf[0].name,"book000")&&!strcmp(s_shelf[64].name,"book064"));
-    test_degraded=true;scan_shelf(&ctx);assert(s_count==65&&s_shelf_warning[0]);test_degraded=false;
+    // 内置故障不反复扫描可读TF，也不能把部分目录提交为完整名册/持久索引。
+    // Failed internal storage must not rescan usable TF or overwrite complete enrollment/indexes.
+    test_source_errors=BOOK_STORE_ROOT_ERROR_FLASH;
+    int prior_commits=test_library_commits,prior_cache_writes=test_cache_writes;
+    book_view_t prior_view=s_view;s_view=SHELF;
+    for(int repeat=0;repeat<3;++repeat){
+        scan_shelf(&ctx);assert(s_count==65&&s_shelf_cache_valid);
+        assert(strstr(s_shelf_warning,"内置存储")&&!strstr(s_shelf_warning,"重新扫描"));
+        assert(test_library_commits==prior_commits&&test_cache_writes==prior_cache_writes);
+        int calls=test_root_calls;s_scan_pending=false;s_shelf_recheck_on_return=false;
+        return_to_cached_shelf(&ctx);
+        assert(test_root_calls==calls&&!s_scan_pending&&s_count==65);
+    }
+    // 管理/导入仅扫描TF，不能携带未扫描的内置来源故障。
+    // TF-only management/import must not inherit an unrelated flash failure.
+    for(int candidate=0;candidate<2;++candidate){
+        s_manage_books=!candidate;s_import_candidates=candidate;scan_shelf(&ctx);
+        assert(s_count==65&&s_shelf_cache_valid&&!s_shelf_warning[0]);
+        assert(test_library_commits==prior_commits&&test_cache_writes==prior_cache_writes);
+    }
+    s_manage_books=s_import_candidates=false;
+    test_source_errors=BOOK_STORE_ROOT_ERROR_CARD;
+    scan_shelf(&ctx);assert(!s_shelf_cache_valid&&strstr(s_shelf_warning,"TF"));
+    assert(test_library_commits==prior_commits&&test_cache_writes==prior_cache_writes);
+    test_source_errors=BOOK_STORE_ROOT_ERROR_CARD|BOOK_STORE_ROOT_ERROR_FLASH;
+    scan_shelf(&ctx);assert(!s_shelf_cache_valid&&strstr(s_shelf_warning,"TF"));
+    assert(test_library_commits==prior_commits&&test_cache_writes==prior_cache_writes);
+    test_source_errors=0;scan_shelf(&ctx);
+    assert(s_count==65&&s_shelf_cache_valid&&!s_shelf_warning[0]);
+    assert(test_library_commits==prior_commits+1&&test_cache_writes==prior_cache_writes+1);
+    s_view=prior_view;
+    puts("PASS: failed flash retains usable TF RAM catalog without rescan loops or enrollment/index overwrite; TF-only scope, real card errors and recovery remain distinct");
     test_root_count=2;strcpy(test_roots[1].path,"/nonexistent-book-root");scan_shelf(&ctx);assert(s_count==65&&s_shelf_warning[0]);test_root_count=1;
     free(s_shelf);s_shelf=NULL;s_shelf_capacity=0;s_count=0;test_oom=true;scan_shelf(&ctx);assert(s_count==0&&s_shelf_warning[0]);test_oom=false;
     strcpy(s_path,"/sdcard/books/a.txt");s_text="text";s_page=1;s_unsaved=8;

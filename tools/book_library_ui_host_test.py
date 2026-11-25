@@ -142,6 +142,6 @@ with tempfile.TemporaryDirectory(prefix='library-ui-') as d:
  subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-variable','-fsanitize=address,undefined','-I'+str(p),'-I'+str(R/'main/book'),str(p/'test.c'),'-o',str(p/'test')],check=True);subprocess.run([str(p/'test')],check=True)
 for source in [R/'main/apps/app_book.c',R/'boards/pico/src/main/apps/app_book.c']:
  text=source.read_text();assert '#include "apps/book_library_ui.inc"' in text
- assert 'if (s_shelf_cache_valid && !s_import_candidates&&!s_manage_books) shelf_cache_save();' in text
+ assert 'if (complete && !s_import_candidates&&!s_manage_books) shelf_cache_save();' in text
  assert 'if(!s_import_candidates&&!s_manage_books)shelf_added_load();' in text
  assert 's_import_candidates&&book_import_running()' in text

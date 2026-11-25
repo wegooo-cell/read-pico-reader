@@ -111,14 +111,18 @@ int main(void) {
     mount_error = ESP_FAIL;
     assert(book_store_roots(roots, &n) == ESP_FAIL && n == 0);
     assert(book_store_roots_degraded());
+    assert(book_store_root_errors()==BOOK_STORE_ROOT_ERROR_FLASH);
     sd_mounted = true;
     assert(book_store_roots(roots, &n) == ESP_OK && n == 1 && !roots[0].is_flash);
     assert(book_store_roots_degraded());
+    assert(book_store_root_errors()==BOOK_STORE_ROOT_ERROR_FLASH);
     assert(book_store_upload_root(&upload) == ESP_OK && !upload.is_flash);
+    unsigned before_recovery=book_store_revision();
     mount_error = 0;
     assert(book_store_roots(roots, &n) == ESP_OK && n == 2);
     assert(!book_store_roots_degraded());
     assert(!roots[0].is_flash && roots[1].is_flash && book_store_flash_ready());
+    assert(book_store_root_errors()==0&&book_store_revision()==before_recovery+1);
     legacy_dir = true;
     assert(book_store_roots(roots, &n) == ESP_OK && n == 3);
     assert(!strcmp(roots[0].path, "/sdcard/book") && !strcmp(roots[1].path, "/sdcard/books") && roots[2].is_flash);
@@ -127,6 +131,7 @@ int main(void) {
     assert(book_store_roots(roots, &n) == ESP_OK && mount_calls == calls);
     sd_mkdir_error = EACCES;
     assert(book_store_roots(roots, &n) == ESP_OK && n == 1 && roots[0].is_flash && book_store_roots_degraded());
+    assert(book_store_root_errors()==BOOK_STORE_ROOT_ERROR_CARD);
     sd_mkdir_error = 0;
     assert(book_store_roots(roots, &n) == ESP_OK && n == 2 && !book_store_roots_degraded());
     assert(book_store_file_limit(&roots[0]) == SIZE_MAX);
@@ -137,6 +142,7 @@ int main(void) {
     assert(book_store_roots(roots, &n) == ESP_OK && n == 2);
     is_directory = 0;
     assert(book_store_roots(roots, &n) == ESP_FAIL && n == 0);
+    assert(book_store_root_errors()==(BOOK_STORE_ROOT_ERROR_CARD|BOOK_STORE_ROOT_ERROR_FLASH));
     assert(book_store_upload_root(&upload) == ESP_FAIL);
     mkdir_error = EACCES;
     assert(book_store_upload_root(&upload) == ESP_FAIL);
@@ -147,6 +153,7 @@ int main(void) {
     sd_invalid_present = true;
     assert(book_store_upload_root(&upload) == ESP_ERR_INVALID_STATE && !upload.path[0]);
     assert(book_store_roots(roots, &n) == ESP_OK && n == 1 && book_store_roots_degraded());
+    assert(book_store_root_errors()==BOOK_STORE_ROOT_ERROR_CARD);
     book_store_root_t removed_root = {.path = "/sdcard/books", .is_flash = false};
     assert(book_store_free_bytes(&removed_root) == 0);
     sd_invalid_present = false;

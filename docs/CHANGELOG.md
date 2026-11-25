@@ -1,5 +1,8 @@
 ## 1.0.0（准备中 / Unreleased）
 
+- 区分TF目录与内置存储故障；内置不可用时保留可用TF书架缓存，不再反复误报重新扫描，不用部分结果覆盖原书架名册或完整索引。
+- Distinguish TF directory errors from unavailable internal storage; retain usable TF shelf caching and preserve enrollment/full indexes after partial scans.
+
 - 双板统一1.0.0；低残影默认关闭，保留已保存选择。
 - 机内进度存储故障时继续校验旧NVS记录并支持TF双副本；配置恢复有逐键回退和中断恢复，不清原数据。
 - PICO统一MindReset主OTA源、GitHub备用，按正式/内测渠道分开。
