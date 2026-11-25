@@ -46,6 +46,7 @@
 #include "ui_locale_format.h"
 #endif
 #include "app_loop.h"
+#include "storage_repair.h"
 #include "auto_lock.h"
 #include "crash_note.h"
 
@@ -847,6 +848,19 @@ void app_loop_run(const app_loop_config_t* config) {
         const bool power_input_owned = power_dialog_open;
         bool quick_lock_requested = false;
         bool quick_input_owned = false;
+
+        // 存储维护独占文件与闪存；暂停重挂、字体重试、导航和休眠，保留本页进度显示。
+        // Maintenance owns file/flash lifecycle: pause remounts, font retry, navigation and sleep, retaining its progress page.
+        if (app_storage_repair_busy()) {
+            held_key = -1; held_main_key = false;
+            ui_click_feedback_reset(); cancel_gesture(&ctx, current, &gesture);
+            read_pico_pmu_drain_events();
+            last_input_ms = last_font_retry_ms = last_media_poll_ms = ctx.now_ms;
+            if (current->on_tick) app_present(&ctx, current, current->on_tick(&ctx));
+            was_touched = touch.touched;
+            vTaskDelay(pdMS_TO_TICKS(LOOP_TICK_MS));
+            continue;
+        }
 
         if (ctx.now_ms - last_media_poll_ms >= MEDIA_POLL_INTERVAL_MS) {
             last_media_poll_ms = ctx.now_ms;

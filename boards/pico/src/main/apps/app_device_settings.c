@@ -79,6 +79,7 @@
 #include "ui_avatar.h"
 #include "read_pico_search.h"
 #include "book_store.h"
+#include "storage_repair.h"
 #include "book_cover.h"
 #include "ota_update.h"
 #include "ota_online.h"
@@ -103,7 +104,7 @@ typedef enum { SETTINGS_MAIN, SETTINGS_WIFI, SETTINGS_TIME,
                SETTINGS_CONFIG, SETTINGS_UPGRADE, SETTINGS_BOOT, SETTINGS_FACTORY_RESET,
                SETTINGS_POWER_SLEEP, SETTINGS_AUTO_LOCK, SETTINGS_PROFILE, SETTINGS_AVATAR,
                SETTINGS_BLUETOOTH, SETTINGS_BLE_SCAN, SETTINGS_DEVICE_SYNC,
-               SETTINGS_LOCK_PIN, SETTINGS_PIN_ENTRY, SETTINGS_TEXT_EDIT, SETTINGS_LANGUAGE } settings_page_t;
+               SETTINGS_LOCK_PIN, SETTINGS_PIN_ENTRY, SETTINGS_TEXT_EDIT, SETTINGS_LANGUAGE, SETTINGS_STORAGE_REPAIR } settings_page_t;
 static settings_page_t s_page;
 static bool s_shelf_style_requested,s_shelf_style_from_manage;
 void app_device_settings_request_shelf_style(void){s_shelf_style_requested=true;}
@@ -382,7 +383,7 @@ static int settings_main_row_height(void) {
 #define SETTINGS_WIRELESS_ROWS 4
 #define SETTINGS_DISPLAY_ROWS 9
 #define SETTINGS_PERSONAL_ROWS 6
-#define SETTINGS_MAINTENANCE_ROWS 6
+#define SETTINGS_MAINTENANCE_ROWS 7
 #define SETTINGS_WIRELESS_Y (180 + settings_profile_height() + 77)
 #define SETTINGS_DISPLAY_Y (SETTINGS_WIRELESS_Y + SETTINGS_WIRELESS_ROWS * SETTINGS_ROW_H + 78)
 #define SETTINGS_PERSONAL_Y (SETTINGS_DISPLAY_Y + SETTINGS_DISPLAY_ROWS * SETTINGS_ROW_H + 78)
@@ -1130,7 +1131,10 @@ static char s_avatar_path[288];
 static bool s_avatar_ready, s_avatar_pending;
 static char s_main_wifi[33];
 static bool s_main_wifi_saved;
+#include "apps/storage_repair_ui.inc"
+
 static void render_content(app_ctx_t *ctx, uint8_t *fb) {
+    if (s_page == SETTINGS_STORAGE_REPAIR) { storage_repair_draw(fb); return; }
     (void)ctx;
     if (s_page == SETTINGS_PIN_ENTRY) { ui_pinpad_paint(fb, &s_pinpad, ui_pinpad_full()); return; }
     ui_clear_page(fb);
@@ -1746,9 +1750,9 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
     const int personal_icons[]={4,20,22,5,16,10};
     setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
                   personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
-    const char *maintenance_labels[]={"系统升级","保存与恢复","屏幕修复","DC 恢复","BOOT 刷机","恢复出厂设置"};
-    const char *maintenance_values[]={"OTA / TF 卡","配置","清除条纹","平衡电荷","电脑刷机","重置系统"};
-    const int maintenance_icons[]={12,8,17,11,13,11};
+    const char *maintenance_labels[]={"系统升级","保存与恢复","屏幕修复","DC 恢复","BOOT 刷机","恢复出厂设置","存储检查与修复"};
+    const char *maintenance_values[]={"OTA / TF 卡","配置","清除条纹","平衡电荷","电脑刷机","重置系统","检查 / 备份后重建"};
+    const int maintenance_icons[]={12,8,17,11,13,11,11};
     setting_group(fb,SETTINGS_MAINTENANCE_Y-49,"升级和恢复",SETTINGS_MAINTENANCE_Y,
                   maintenance_icons,maintenance_labels,maintenance_values,SETTINGS_MAINTENANCE_ROWS);
     // 主列表也要有一行提示位：确认、修复结果都写在这里，不然点了没有任何回音。
@@ -2196,6 +2200,8 @@ static app_redraw_t reset_tick(void) {
 }
 
 static app_redraw_t on_tick(app_ctx_t *ctx) {
+    if (s_page == SETTINGS_STORAGE_REPAIR)
+        return storage_repair_tick(ctx);
     if(s_list_drag.tracking||s_list_drag.settle_pending) {
         app_redraw_t redraw=settings_drag_tick(ctx);
         if(redraw!=APP_REDRAW_NONE||s_list_drag.settle_pending)return redraw;
@@ -2472,6 +2478,9 @@ static app_redraw_t reset_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev) {
 }
 
 static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
+    if (app_storage_repair_busy()) return APP_REDRAW_NONE;
+    if (s_page == SETTINGS_STORAGE_REPAIR && ev->type == UI_GESTURE_TAP && ev->y0 < UI_NAV_REFRESH_END)
+        return storage_repair_gesture(ctx, ev);
     if (s_lowghost_dialog) {
         const EpdRect cancel = {94, 643, 232, 68}, confirm = {358, 643, 232, 68};
         if (ui_rect_hit(cancel, ev->x0, ev->y0) && ui_rect_hit(cancel, ev->x, ev->y)) {
@@ -3064,7 +3073,8 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     }
     if(y>=SETTINGS_MAINTENANCE_Y && y<SETTINGS_MAINTENANCE_Y+SETTINGS_MAINTENANCE_ROWS*SETTINGS_ROW_H) {
         row=(y-SETTINGS_MAINTENANCE_Y)/SETTINGS_ROW_H;
-        if(row==5) {s_page=SETTINGS_FACTORY_RESET;s_reset_confirm=s_reset_pending=false;s_reset_notice[0]=0;}
+        if(row==6) {app_storage_repair_cancel();s_storage_rebuild_question=false;s_page=SETTINGS_STORAGE_REPAIR;}
+        else if(row==5) {s_page=SETTINGS_FACTORY_RESET;s_reset_confirm=s_reset_pending=false;s_reset_notice[0]=0;}
         else if(row==0)upgrade_open();
         else if(row==1){s_page=SETTINGS_CONFIG;s_config_confirm=false;s_notice[0]=0;}
         else if(row==2){
@@ -3089,6 +3099,8 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
 }
 
 static app_redraw_t on_key(app_ctx_t *ctx, int key) {
+    if (app_storage_repair_busy()) return APP_REDRAW_NONE;
+    if (s_page == SETTINGS_STORAGE_REPAIR) { app_storage_repair_cancel(); s_storage_rebuild_question=false; }
     settings_drag_reset();
     s_reset_confirm=s_reset_pending=false;
     if(s_font_sync_confirm) {
@@ -3122,6 +3134,7 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
     return APP_REDRAW_NONE;
 }
 static void settings_exit(app_ctx_t *ctx) {
+    app_storage_repair_cancel(); s_storage_rebuild_question=false;
     s_shelf_style_from_manage=false;s_shelf_style_requested=false;
     settings_drag_reset();
     s_reset_confirm=s_reset_pending=false;
@@ -3134,6 +3147,7 @@ static void settings_exit(app_ctx_t *ctx) {
     (void)ctx; ui_keyboard_end(); pico_online_cancel_join(); ble_pt_scan_stop(); s_ble_learning = 0;
 }
 static void on_before_lock(app_ctx_t *ctx) {
+    app_storage_repair_cancel(); s_storage_rebuild_question=false;
     settings_drag_reset();
     s_reset_confirm=s_reset_pending=false;
     s_font_sync_confirm=false;s_font_sync_path[0]=0;
@@ -3162,7 +3176,7 @@ static bool settings_back_swipe_area(app_ctx_t *ctx,const ui_gesture_event_t *ev
 static bool main_page_visible(app_ctx_t *ctx) { (void)ctx; return s_page == SETTINGS_MAIN; }
 static bool settings_navigation_enabled(app_ctx_t *ctx) {
     (void)ctx;
-    return !s_reset_pending && !s_local_pending && !s_upgrade_restart && !s_pin_pending && !s_boot_pending;
+    return !app_storage_repair_busy() && !s_reset_pending && !s_local_pending && !s_upgrade_restart && !s_pin_pending && !s_boot_pending;
 }
 static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
     if(redraw==APP_REDRAW_FULL||redraw==APP_REDRAW_PAGE)settings_drag_reset();

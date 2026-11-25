@@ -81,6 +81,7 @@ jobs:
       - name: Progress filesystem initialization and restore preflight
         shell: bash
         run: |
+          python3 tools/pico_storage_repair_host_test.py
           python3 tools/progress_boot_storage_host_test.py
           python3 tools/progress_failover_restore_host_test.py
           python3 tools/settings_restore_integration_host_test.py

@@ -1,5 +1,8 @@
 ## 1.0.0（准备中 / Unreleased）
 
+- PICO新增存储检查与修复：默认保留数据，提供原始机内分区备份到TF、源/备份SHA256核验及二次确认重建；设置和TF保留，原始备份不会自动恢复旧文件。
+- Pico storage maintenance checks media without clearing data; an isolated rebuild requires a durable raw backup, source/readback SHA256 verification and second confirmation, preserving settings and TF. Raw backups do not automatically restore old files.
+
 - 区分TF目录与内置存储故障；内置不可用时保留可用TF书架缓存，不再反复误报重新扫描，不用部分结果覆盖原书架名册或完整索引。
 - Distinguish TF directory errors from unavailable internal storage; retain usable TF shelf caching and preserve enrollment/full indexes after partial scans.
 

@@ -69,10 +69,14 @@ ACTIONS = r'''
 #include <string.h>
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE,APP_REDRAW_FULL,APP_REDRAW_DONE} app_redraw_t;
 typedef struct { void *hl; uint8_t *fb; } app_ctx_t;
-enum { SETTINGS_MAIN, SETTINGS_CONFIG, SETTINGS_BOOT, SETTINGS_FACTORY_RESET };
+enum { SETTINGS_MAIN, SETTINGS_CONFIG, SETTINGS_BOOT, SETTINGS_FACTORY_RESET, SETTINGS_STORAGE_REPAIR };
 enum EpdDrawError { EPD_DRAW_SUCCESS, EPD_DRAW_ERROR };
 #define SETTINGS_MAINTENANCE_Y 500
+#ifdef TEST_STORAGE_REPAIR_MENU
+#define SETTINGS_MAINTENANCE_ROWS 7
+#else
 #define SETTINGS_MAINTENANCE_ROWS 6
+#endif
 #define SETTINGS_ROW_H 68
 static int s_page, repairs, paints, upgrades;
 static bool s_dc_recover_pending;
@@ -80,6 +84,8 @@ static enum EpdDrawError display_dc_recover(void *hl){assert(hl);return EPD_DRAW
 static bool s_panel_repair_pending, s_scroll_present_pending, s_boot_pending, s_config_confirm;
 static char s_notice[96],s_reset_notice[96];
 static bool s_reset_confirm,s_reset_pending;
+bool s_storage_rebuild_question;
+void app_storage_repair_cancel(void){s_storage_rebuild_question=false;}
 static enum EpdDrawError result;
 static void upgrade_open(void) { ++upgrades; }
 static void render(app_ctx_t *ctx, uint8_t *fb) {
@@ -118,10 +124,19 @@ int main(void) {
     assert(tick(&ctx)==APP_REDRAW_NONE && repairs==2 && !s_panel_repair_pending);
     assert(tap(SETTINGS_MAINTENANCE_Y+4*SETTINGS_ROW_H)==APP_REDRAW_PAGE && s_page==SETTINGS_BOOT);
     assert(tap(SETTINGS_MAINTENANCE_Y+5*SETTINGS_ROW_H)==APP_REDRAW_PAGE && s_page==SETTINGS_FACTORY_RESET);
+#ifdef TEST_STORAGE_REPAIR_MENU
+    s_storage_rebuild_question=true;
+    assert(tap(SETTINGS_MAINTENANCE_Y+6*SETTINGS_ROW_H)==APP_REDRAW_PAGE&&s_page==SETTINGS_STORAGE_REPAIR&&!s_storage_rebuild_question);
+    assert(tap(SETTINGS_MAINTENANCE_Y+7*SETTINGS_ROW_H)==APP_REDRAW_NONE);
+#else
     assert(tap(SETTINGS_MAINTENANCE_Y+6*SETTINGS_ROW_H)==APP_REDRAW_NONE);
+#endif
     puts("PASS: actual Settings repair row defers work, cancels after leaving, paints final notice once and reports output failure");
 }
 '''
+
+if 'SETTINGS_STORAGE_REPAIR' in gesture:
+    ACTIONS = '#define TEST_STORAGE_REPAIR_MENU 1\n' + ACTIONS
 
 with tempfile.TemporaryDirectory(prefix='kiikoread-boot-panel-') as directory:
     work = Path(directory)
