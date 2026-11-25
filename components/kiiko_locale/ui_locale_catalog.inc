@@ -143,7 +143,7 @@ static const ui_locale_pair_t s_pairs[] = {
     {"上一页 Prev","Previous"},
     {"上下、左右及 PageUp / PageDown 均可翻页","Arrow keys and PageUp / PageDown turn pages"},
     {"上下位置  %+d","Vertical offset  %+d"},
-    {"上下增加留白 · px","Extra top/bottom · px"},
+    {"上下页边距 · px","Top/bottom margins · px"},
     {"上下翻页","Up / down"},
     {"上传失败，请重试","Upload failed. Retry"},
     {"上次打开此书时中断","Opening this book was interrupted"},
