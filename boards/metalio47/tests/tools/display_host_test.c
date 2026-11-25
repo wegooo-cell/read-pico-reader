@@ -199,6 +199,9 @@ enum EpdDrawError epd_hl_update_area(EpdiyHighlevelState* hl, enum EpdDrawMode m
     (void)area;
     return draw(hl, mode, temperature, false);
 }
+enum EpdDrawError epd_hl_update_area_padded(EpdiyHighlevelState *hl,enum EpdDrawMode mode,int temp,EpdRect area,int x,int y){
+    assert(x==1&&y==1);return epd_hl_update_area(hl,mode,temp,area);
+}
 enum EpdDrawError epd_hl_update_area_diff_exact(EpdiyHighlevelState* hl, enum EpdDrawMode mode, int temperature, EpdRect area) {
     last_area = area;
     return draw(hl, mode, temperature, false);

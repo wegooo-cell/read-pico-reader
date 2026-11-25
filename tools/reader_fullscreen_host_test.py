@@ -8,7 +8,7 @@ from home_cover_cache_host_test import function
 
 ROOT = Path(__file__).resolve().parents[1]
 BOOK = ROOT / 'main/apps/app_book.c'
-unit = '#define TEST_IMAGE_RIPPLE '+str(int('from_image_frame' in function('turn_page',BOOK)))+'\n'+r'''
+unit = '#define TEST_PICO_TURN '+str(int('TT_SPAN' in function('turn_page',BOOK)))+'\n'+'#define TEST_IMAGE_RIPPLE '+str(int('from_image_frame' in function('turn_page',BOOK)))+'\n'+r'''
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -27,6 +27,14 @@ enum {READING,TOC,SHELF,READER_PANEL_NONE,READER_PANEL_TOOLS};
 #define E0470_TURN_RTL 1
 #define E0470_TURN_LTR -1
 #define ESP_LOGI(...) ((void)0)
+#define TT_SPAN(name,expr) do{expr;}while(0)
+#define TT_STAMP(name) ((void)0)
+#if TEST_PICO_TURN
+static unsigned s_back_turns,s_dc_recover_pages;
+static bool s_reader_dc_recover,s_save_due;
+static uint8_t s_save_due_turns;
+static bool app_settings_low_ghost(void){return false;}
+#endif
 static char s_requested_open[288];
 static int64_t s_resume_media_deadline_ms;
 static bool s_requested_fullscreen=true,s_requested_open_home,s_requested_resume_mode,s_shelf_open_queued;
@@ -101,7 +109,11 @@ static bool book_layout_build_blocks(const char *text,size_t len,const void *blo
 }
 static void release_page_images(void){}
 static void prepare_inline_image(void){}
-static void save_progress(void){++saves;}
+static void save_progress(void){++saves;
+#if TEST_PICO_TURN
+ s_unsaved=0;s_save_due=false;s_save_due_turns=0;
+#endif
+}
 // Chapter geometry is verified with the real paginator in reader_chapter_viewport_host_test.
 static void reader_heading_viewport(void){}
 #define READER_TICKET_DAY_MS UINT64_C(86400000)
@@ -263,9 +275,16 @@ int main(void){
    assert(s_reader_cleanup==(full_pages&&n%full_pages==0));
   }
  }
+#if TEST_PICO_TURN
+ reset(false,false,0,0);s_text_len=4000;s_save_due=false;s_save_due_turns=0;s_save_failed=false;
+ for(int turn=0;turn<16;++turn){(void)turn_page(&ctx,1);if(turn<15)assert(!saves);}
+ assert(saves==1&&!s_save_due&&!s_unsaved);
+ puts("PASS: actual turns defer the eighth-page save and force it after eight further continuous turns");
+#endif
  puts("PASS: standard entry and explicit sleep overrides; mode-preserving destination anchors; toolbar dismissal; chapter/boundary turns; failed reflow restores safely or returns to the shelf");
 }
 '''
+(ROOT/'build').mkdir(exist_ok=True)
 with tempfile.TemporaryDirectory(dir=ROOT / 'build') as folder:
     c, exe = Path(folder) / 'test.c', Path(folder) / 'test'
     c.write_text(unit)

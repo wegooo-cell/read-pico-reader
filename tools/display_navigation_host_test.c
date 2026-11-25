@@ -205,6 +205,11 @@ enum EpdDrawError epd_hl_update_area(EpdiyHighlevelState* state, enum EpdDrawMod
 enum EpdDrawError epd_hl_update_area_full(EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area) {
     assert(temperature == 25); return draw(state, mode, true, &area);
 }
+// 补边像素由reader_dirty_padding回归验证；此测试仅检查调度路由。
+// Pixel padding is tested by reader_dirty_padding; this harness checks routing only.
+enum EpdDrawError epd_hl_update_area_padded(EpdiyHighlevelState *hl,enum EpdDrawMode mode,int temp,EpdRect area,int x,int y){
+    assert(x==1&&y==1);return epd_hl_update_area(hl,mode,temp,area);
+}
 enum EpdDrawError epd_hl_update_area_diff_exact(EpdiyHighlevelState *hl, enum EpdDrawMode mode, int temp, EpdRect area) {
     return epd_hl_update_area(hl, mode, temp, area);
 }

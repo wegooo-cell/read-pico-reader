@@ -40,9 +40,13 @@ static int E0470_WAVEFORM,E0470_FULL_WAVEFORM,E0470_FOLLOW_WAVEFORM;
 #define display_main_normal_waveform() (&E0470_WAVEFORM)
 #endif
 typedef int EpdWaveform;
+#define TT_STAMP(x) ((void)0)
+static bool s_reader_dc_recover;
+static enum EpdDrawError display_dc_recover_light(void *hl){(void)hl;return 0;}
 static int reader_waveform,soft_turn_waveform;
 static const int *display_main_gray_waveform(void){return &reader_waveform;}
 static const int *display_reader_soft_turn_waveform(void){return &soft_turn_waveform;}
+static const int *display_reader_image_turn_waveform(void){return &soft_turn_waveform;}
 static bool s_reader_clock_pending,s_input_settle,s_shelf_feedback_pending,s_cover_batch_present_pending,s_shelf_page_pending;
 static bool s_reader_image_refresh_pending,s_reader_cleanup,s_reader_turn_pending,s_water_turn_pending,s_clear_confirm,s_reader_fullscreen,s_reader_footer_pending,s_reader_text_frame;
 static bool s_toolbar;

@@ -25,6 +25,9 @@ unit = '#include <stdbool.h>\ntypedef struct {int x,y,width,height;} ModelRect;\
 base = base.replace('drive(area,true);', 'model_drive(area.x,area.y,area.width,area.height,true);')
 unit += base
 unit += r'''
+#define TT_STAMP(x) ((void)0)
+static bool s_reader_dc_recover;
+static enum EpdDrawError display_dc_recover_light(void *hl){(void)hl;return 0;}
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
 typedef int EpdWaveform;
@@ -41,6 +44,7 @@ static void display_main_transition_cancel(void){}
 static const EpdWaveform *display_main_gray_waveform(void){return &E0470_WAVEFORM;}
 static const EpdWaveform *display_main_normal_waveform(void){return &E0470_WAVEFORM;}
 static const EpdWaveform *display_reader_soft_turn_waveform(void){return &E0470_SOFT_TEXTTURN_WAVEFORM;}
+static const EpdWaveform *display_reader_image_turn_waveform(void){return display_reader_soft_turn_waveform();}
 static const EpdWaveform *display_reader_gray8_turn_waveform(void){static const int wave=8;return &wave;}
 static void reader_prefetch_end(bool prep){(void)prep;}
 // 低残影（fe154b3）默认关闭，本测试覆盖默认推屏路由。/ Low-ghost (fe154b3) defaults off; this test covers the default route.

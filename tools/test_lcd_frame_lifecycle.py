@@ -9,7 +9,8 @@ root = Path(__file__).resolve().parents[1]
 source_path = Path(sys.argv[1]) if len(sys.argv) > 1 else root / 'components/epdiy/src/output_lcd/render_lcd.c'
 source = source_path.read_text()
 start = source.index('static void IRAM_ATTR handle_lcd_frame_done(')
-end = source.index('__attribute__', start)
+# A weak scan hook may precede the scheduler; search for its trailing helper after the scheduler starts.
+end = source.index('__attribute__', source.index('void lcd_do_update(', start))
 production = source[start:end]
 harness = r'''
 #include <assert.h>
