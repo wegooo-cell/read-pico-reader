@@ -12,6 +12,7 @@ typedef struct {
     // Reader idle preparation must never render placeholder glyphs with the reading face.
     bool artwork_only;
     bool metadata_only,with_chapters; ///< 当前页元数据/相邻页预热 / Visible metadata or neighbor warming
+    bool disk_only; ///< 全书库预热：只写TF成品缓存，不进内存缓存 / Library warming: card cache only, never the RAM cache
     unsigned width,height,stride,contrast,phase;
     int x,y;
 } book_cover_job_t;
@@ -40,4 +41,7 @@ void book_cover_jobs_cancel(unsigned generation);
 bool book_cover_jobs_quiesce(unsigned timeout_ms);
 
 /// 仅在没有待接收/运行作业时让后台预热借用队列。/ Background warming may borrow only an empty/quiescent queue.
+/// 请求在空闲时迁移旧平铺封面目录；本次开机完成后再调用无效果。
+/// Request migration of the old flat cover folder while idle; a no-op once done this boot.
+void book_cover_jobs_sweep_legacy(void);
 bool book_cover_jobs_idle(void);

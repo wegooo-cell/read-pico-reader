@@ -11,6 +11,15 @@ bool app_settings_set_shelf_progress_badges(bool on){
     if(!shelf_preference_put("shelf_badges",on))return false;
     s_shelf_badges=on;return true;
 }
+// 中文：书架封面默认显示；关闭后书架只画书名卡、不读取或生成封面，提交成功才更新内存。
+// English: Shelf covers default on; when off the shelf draws title cards without reading or generating covers, updating live state only after a commit.
+static bool s_shelf_covers=true;
+bool app_settings_shelf_covers(void){return s_shelf_covers;}
+bool app_settings_set_shelf_covers(bool on){
+    if(on==s_shelf_covers)return true;
+    if(!shelf_preference_put("shelf_covers",on))return false;
+    s_shelf_covers=on;return true;
+}
 // 中文：备份v25的小型校验块保留完整八种排序和角标开关，旧版本采用原排序及开启角标。
 // English: A checked v25 block preserves all eight sort orders and badges; legacy files retain their old order and enable badges.
 typedef struct{uint8_t order,badges,checksum[4];}settings_backup_shelf_t;

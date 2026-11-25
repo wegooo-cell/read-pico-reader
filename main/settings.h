@@ -293,6 +293,9 @@ uint8_t app_settings_shelf_style(void);
 /// 三种封面书架的进度角标，不影响列表进度。/ Progress badges on cover shelves, independent of list metadata.
 bool app_settings_shelf_progress_badges(void);
 bool app_settings_set_shelf_progress_badges(bool on);
+/// 书架封面开关：关闭时书架只显示书名卡，不读取、解码或预热封面；管理页与主页不受影响。/ Shelf-cover switch: when off the shelf shows title cards only and never reads, decodes or warms covers; management and Home are unaffected.
+bool app_settings_shelf_covers(void);
+bool app_settings_set_shelf_covers(bool on);
 void app_settings_set_shelf_style(uint8_t style);
 /// 固定 TF 根目录：/sdcard/books 与 /sdcard/fonts；旧配置/备份不能修改。/ Fixed TF roots, unaffected by legacy settings/backups.
 const char* app_settings_books_dir(void);

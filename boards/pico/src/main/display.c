@@ -63,7 +63,6 @@ unsigned display_main_quality_set(unsigned white_phases){
 
 static bool s_full_refresh_requested;
 void display_request_full_refresh(void) { s_full_refresh_requested = true; }
-static int s_pclk_mhz = DISPLAY_PCLK_DEFAULT_MHZ;
 
 void display_set_bulk_io(bool active) {
     s_bulk_io = active;
@@ -115,7 +114,35 @@ void rails_idle_check(int64_t now_ms) {
 
 // 完整原厂DU仍走FULL；FOLLOW8及独立的列表DU12使用既有FAST，不改扫描参数。
 // Native DU retains FULL; FOLLOW8 and scoped list DU12 use existing FAST without changing scan parameters.
+// 欠载后降到安全频率；连续若干次干净扫屏后再试回默认频率。再次欠载则所需次数翻倍，
+// 避免后台解码持续时反复整屏恢复。重启前最多等1024次。
+// After an underrun drop to the safe clock, retry the default clock once enough scans finish cleanly.
+// Each further underrun doubles the requirement (capped at 1024) so sustained decoding cannot keep
+// forcing full-panel recoveries.
+#define PCLK_RETRY_FIRST_SCANS 32u
+#define PCLK_RETRY_MAX_SCANS 1024u
+uint32_t epd_lcd_clean_scans(void);
+static int s_pclk_mhz = DISPLAY_PCLK_DEFAULT_MHZ;
+static uint32_t s_pclk_safe_mark;
+static uint32_t s_pclk_retry_scans;
+static void pclk_drop_to_safe(void) {
+    s_pclk_mhz = DISPLAY_PCLK_SAFE_MHZ;
+    read_pico_epd_set_pclk(DISPLAY_PCLK_SAFE_MHZ);
+    s_pclk_safe_mark = epd_lcd_clean_scans();
+    s_pclk_retry_scans = !s_pclk_retry_scans ? PCLK_RETRY_FIRST_SCANS
+        : s_pclk_retry_scans < PCLK_RETRY_MAX_SCANS ? s_pclk_retry_scans * 2 : PCLK_RETRY_MAX_SCANS;
+}
+static void pclk_retry_default(void) {
+    if (s_pclk_mhz == DISPLAY_PCLK_DEFAULT_MHZ ||
+        epd_lcd_clean_scans() - s_pclk_safe_mark < s_pclk_retry_scans) return;
+    s_pclk_mhz = DISPLAY_PCLK_DEFAULT_MHZ;
+    read_pico_epd_set_pclk(DISPLAY_PCLK_DEFAULT_MHZ);
+    ESP_LOGI(TAG, "pclk back to %d MHz after %u clean scans", DISPLAY_PCLK_DEFAULT_MHZ,
+             (unsigned)s_pclk_retry_scans);
+}
+
 static void use_scan_for(const EpdWaveform* waveform, enum EpdDrawMode mode) {
+    pclk_retry_default();
     const bool fast = (mode & 0xF) == MODE_DU &&
         (waveform == &E0470_FOLLOW_WAVEFORM || waveform == &PICO_SETTINGS_MOTION_WAVEFORM);
     read_pico_epd_use_scan(fast ? READ_PICO_EPD_SCAN_FAST : READ_PICO_EPD_SCAN_FULL);
@@ -273,8 +300,7 @@ static enum EpdDrawError main_recover(EpdiyHighlevelState* hl, enum EpdDrawError
     // A failed scan leaves unknown optical state; rebuild from white instead of reusing an intermediate back.
     display_main_transition_cancel();
     if (error & EPD_DRAW_EMPTY_LINE_QUEUE) {
-        s_pclk_mhz = DISPLAY_PCLK_SAFE_MHZ;
-        read_pico_epd_set_pclk(DISPLAY_PCLK_SAFE_MHZ);
+        pclk_drop_to_safe();
     }
     use_scan_for(&E0470_WAVEFORM, MODE_GC16);
     epd_poweron();
@@ -701,8 +727,7 @@ static enum EpdDrawError update_display_reader_turn_unlocked(EpdiyHighlevelState
     // 中断可能把物理屏留在半途。清屏后按目标 front 重建整屏基准。
     // An interrupted scan may leave intermediate pixels. Rebuild the whole baseline from white.
     if (result & EPD_DRAW_EMPTY_LINE_QUEUE) {
-        s_pclk_mhz = DISPLAY_PCLK_SAFE_MHZ;
-        read_pico_epd_set_pclk(DISPLAY_PCLK_SAFE_MHZ);
+        pclk_drop_to_safe();
     }
     use_scan_for(&E0470_WAVEFORM, MODE_GC16);
     epd_clear();
@@ -726,8 +751,7 @@ int display_pclk_mhz(void) { return s_pclk_mhz; }
 static void guard_draw_result_unlocked(EpdiyHighlevelState* hl, enum EpdDrawError result) {
     if (!(result & EPD_DRAW_EMPTY_LINE_QUEUE)) return;
     display_main_transition_cancel();
-    s_pclk_mhz = DISPLAY_PCLK_SAFE_MHZ;
-    read_pico_epd_set_pclk(DISPLAY_PCLK_SAFE_MHZ);
+    pclk_drop_to_safe();
     use_scan_for(&E0470_WAVEFORM, MODE_GC16);
     epd_poweron();
     epd_clear();

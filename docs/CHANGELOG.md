@@ -51,6 +51,37 @@ S31 RC117已按用户要求撤回；官网、TF与OTA恢复原正式RC116。以�
 - 修复重启或关机后恢复记录未清除、下次开机被当成「从睡眠恢复」而停在锁屏浅睡的问题；现在重启与关机都从主页冷启动。
 - Fix restart and power-off leaving the resume record behind, which made the next boot treat it as a sleep resume and wait in light sleep on the lock screen; both actions now cold-boot to Home.
 
+## 本地测试 / Local test — 2026-11-23（书架封面加载）
+
+- 大书库书架提速：没有封面的EPUB记一次标记，之后开机不再反复解析；快速模式封面缓存可正常覆盖；附近页预热完后，空闲时后台把其余书的封面写入TF缓存，触屏即让路并可续做，不挤占当前页内存缓存。
+- Faster large libraries: EPUBs without artwork are marked once instead of re-parsed every boot; Fast-mode cover rasters overwrite correctly; after nearby pages warm, idle time writes the rest of the library's covers to TF, yielding to input, resuming later and leaving the current page's RAM cache intact.
+- 书架封面逐本显示：每本封面准备好即局刷所在格，未完成的格先保留书名卡，不再等同页全部封面；整页齐备后才写成品页缓存。
+- Shelf covers appear one by one: each finished cover refreshes its own cell while pending cells keep their title cards, instead of waiting for the whole page; the composed page cache is still written only once complete.
+- 设置 › 个性化功能新增「书架封面显示」开关（默认开启）：关闭后书架只显示书名卡，不读取、解码或预热封面，翻页更快；书架管理与主页封面不受影响。开关随完整配置备份（v28）保存，旧版本恢复标准备份时封面保持显示。
+- Settings › Personalisation adds a "Shelf covers" switch (on by default): when off the shelf shows title cards only and never reads, decodes or warms covers, so pages turn faster; management and Home covers are unchanged. The switch is kept in the full settings backup (v28); older firmware restoring the standard backup keeps covers on.
+- 大书库封面不再中途失效：翻过几页后内存封面缓存会把空闲内存压到解码保留线，之后每本封面都解码失败；现在解码前预算不足 1 MiB 时先让出最久未用的内存封面（TF 缓存仍在），只写卡的后台预热不让出。
+- Large libraries keep loading covers: after a few pages the RAM cover cache used to press free memory down to the decode reserve so every later cover failed; decoding now yields least-recently-used RAM covers (the TF cache remains) when its budget falls below 1 MiB, while card-only warming never does.
+- 书架翻页带出已缓存封面：翻页前最多等 0.4 秒收取 TF 卡上已有缓存的封面，与新页同一次刷新，不再先刷空页再补画；没有新结果 0.08 秒即停，其余封面照旧逐本显示。还在做的封面同时完成时，先到的封面等一会儿与后到的合成一次局刷：快速模式最多 0.15 秒，普通与水波纹模式局刷较慢，最多 0.45 秒。
+- Shelf turns bring cached covers along: before a turn the shelf waits up to 0.4 s for covers already cached on the TF card so they share the page's refresh instead of being painted in afterwards; it stops after 0.08 s without results and the rest still appear one by one. While other covers are in flight, a finished cover waits to share one area refresh with later ones: at most 0.15 s in Fast mode and 0.45 s in Normal and Ripple modes, whose refreshes are slower.
+- 书架索引写入保留上一代 `shelf.idx.previous`：新索引改名失败时放回原索引；当前索引缺失或损坏时开机读上一代，后台目录核对再补正增删，不必整库重扫。
+- The shelf index keeps its previous generation as `shelf.idx.previous`: a failed rename of the new index restores the old one, and a missing or corrupt index boots from the previous generation while the background reconcile corrects additions and removals, avoiding a full rescan.
+- 书架搜索同时匹配作者：已上架书籍按书名或作者（含拼音与首字母）搜索；目录与导入视图仍只按文件名。
+- Shelf search also matches authors: enrolled books match by title or author (including pinyin and initials); directory and import views still match filenames only.
+- 列表样式小封面首次显示更快：卡上没有列表缩略图时，直接从已缓存的网格封面按窗口平均缩出，不再重新打开 EPUB 解码。
+- List-style thumbnails appear sooner: when the card has no list thumbnail yet, it is box-averaged from the cached grid cover instead of decoding the EPUB again.
+- 封面缓存改放 `.kiikoread/coverdb/` 下按书分组的 64 个子文件夹：书多时 TF 卡查找和写入不再每次扫遍上千个文件。旧 `covers/` 里的灰度封面和完整列表封面仍能读回，读到后复制进新位置；其余缓存从灰度封面快速重建。
+- Cover caches move into 64 per-book group folders under `.kiikoread/coverdb/`, so large libraries no longer scan over a thousand files on every TF lookup or write. Gray and full list covers in the old `covers/` folder are still read back and copied forward; the other caches rebuild quickly from the gray cover.
+- 快速模式封面转好就显示，写卡留到当前页封面都显示完再进行。
+- Fast-mode covers appear as soon as they are converted; their card writes wait until the page's covers are all shown.
+- Pico 扫屏期间暂停封面后台，避免后台解码与扫屏争抢内存带宽导致整屏清白重刷和像素时钟降档。
+- On Pico the cover worker pauses during panel scans, so background decoding no longer starves a scan into a full white rebuild and a lower pixel clock.
+- 全书库预热从当前附近页之后接着往后做，到末尾再绕回开头，先覆盖接下来最可能翻到的页。
+- Whole-library warming continues past the nearby pages and wraps to the start, covering the pages you are most likely to reach next first.
+- 旧 `.kiikoread/covers/` 平铺目录在书库预热完成后于后台空闲时逐个迁移：灰度与完整列表封面移入分组目录，其余可重建的缓存删除。TXT 在线封面记录改存分组目录，旧记录读到时另存一份，原文件保留给旧版固件。
+- The old flat `.kiikoread/covers/` folder is migrated one file at a time while idle after library warming completes: gray and full list covers move into the group folders and rebuildable caches are deleted. TXT online cover records now live in the group folders; an old record is copied forward when read and the original stays for older firmware.
+- Pico 扫屏欠载降到安全像素时钟后，连续 32 次干净扫屏即试回默认时钟；再次欠载则所需次数翻倍（最多 1024 次），不再一直慢到重启。
+- After a scan underrun drops the Pico to the safe pixel clock, it retries the default clock after 32 clean scans; each further underrun doubles that count (up to 1024) instead of staying slow until reboot.
+
 ## 本地测试 / Local test — 2026-11-21（JPEGDEC 基线解码）
 
 - 封面与插图解码：基线 JPEG 先走 JPEGDEC 的全平面 8 位灰度（按目标尺寸选 1/1~1/8，清晰度与 TJpgDec 同级），渐进式继续用 1/8 平面，失败回落 TJpgDec。
