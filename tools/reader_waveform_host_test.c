@@ -131,7 +131,7 @@ int main(void) {
     }
     assert(held==16&&edge_runs>=10);
     puts("PASS: reader ripple holds all 16 unchanged grays and reduces at least ten gray-edge dark runs; existing text profile, targets and 37 phases unchanged");
-    // 普通翻页柔和档：厂商 GL16 原序，等灰全保持；末尾定稿保持之前补十二相整屏擦白，
+    // 普通翻页柔和档：厂商 GL16 原序，等灰全保持；末尾定稿保持之前补两相整屏擦白，
     // 再补四相重推黑，抵消整屏白推对黑字的冲淡。
     // Soft ordinary turn: vendor GL16 phases, every equal pair held, two whole-panel white
     // phases plus four black re-drive phases inserted before the vendor's trailing settle holds.
