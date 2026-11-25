@@ -3385,7 +3385,7 @@ static void draw_layout_settings(uint8_t* fb) {
                      reader_margin_level_for(shown_margin, s_px, shown_tracking + APP_BOOK_TRACK_MIN),
                      margin_count, 21, 21);
     // 上下值叠加在固定留白之上，标题直接写明“增加”。/ The vertical value adds to the fixed insets, so its label says so.
-    ui_text_box(fb, (EpdRect){360,472,282,38}, 21, "上下增加留白 · px", EPD_DRAW_ALIGN_LEFT, false);
+    ui_text_box(fb, (EpdRect){360,472,282,38}, 21, "上下页边距 · px", EPD_DRAW_ALIGN_LEFT, false);
     snprintf(value, sizeof(value), "%d", shown_margin_y);
     draw_pill_slider(fb, reader_slider_rect(5), "窄", "宽", value,
                      reader_margin_level_for(shown_margin_y, s_px, shown_tracking + APP_BOOK_TRACK_MIN),

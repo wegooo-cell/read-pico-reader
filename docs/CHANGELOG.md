@@ -15,9 +15,9 @@
 
 ## 本地测试 · Pico RC110 / S31 RC118 · 2026-11-24
 
-- 阅读排版新增独立的左右页边距和上下增加留白，两项均支持 0～48 px，每档 6 px。横竖排切换保留两个方向的设置，旧版单边距按原排版方向迁移；页首插图随上下留白一起下移，竖排用户升级后插图位置会与正文对齐。
+- 阅读排版新增独立的左右与上下页边距，两项均支持 0～48 px，每档 6 px。横竖排切换保留两个方向的设置，旧版单边距按原排版方向迁移；页首插图随上下留白一起下移，竖排用户升级后插图位置会与正文对齐。
 - 排版面板上移一行，行距和段距滑杆改为整行宽度，更容易拖到想要的档位；滑杆圆钮只显示数字，单位写在标题里。
-- Reading layout now has separate side margins and extra top/bottom space. Both use 6 px steps up to 48 px. Changing writing direction preserves both values, full settings backups restore them together, and page-start illustrations follow the top space, so they now align with vertical text after upgrading.
+- Reading layout now has separate side and top/bottom margins. Both use 6 px steps up to 48 px. Changing writing direction preserves both values, full settings backups restore them together, and page-start illustrations follow the top space, so they now align with vertical text after upgrading.
 - The layout panel rises one row so the line and paragraph spacing sliders span the full width; slider knobs show bare numbers with units in their labels.
 
 ## S31 0.3.3-rc118 — 2026-11-21
