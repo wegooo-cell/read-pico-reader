@@ -634,6 +634,18 @@ static book_layout_draw_cursor_t s_prep_cursor;
 static uint32_t s_next_generation;
 static uint8_t* s_next_fb;
 static int s_next_page = -1, s_prep_page = -1;
+// 纯文字页的正文层（不含题头、信息栏等覆盖层）多留两份：当前页与刚离开的那页。
+// 往回翻或两页来回翻时直接拷贝；三块缓冲与 s_next_fb 轮换，不额外拷贝。
+// Keep two more body-only layers of text pages (no chrome): the current page and the page just
+// left. Backward and alternating turns copy them directly; the three buffers rotate with s_next_fb.
+typedef struct { uint8_t *fb; int page; uint32_t generation; } reader_keep_t;
+static reader_keep_t s_keep_cur = {NULL, -1, 0}, s_keep_prev = {NULL, -1, 0};
+// 连续往回翻的次数，决定预绘上一页还是下一页。有保留页时回翻一次即预绘上一页，
+// 因为再往后翻会命中刚离开的页；没有保留页时从第二次起，免得回看一页再往后翻落空。
+// Consecutive backward turns pick the prefetch direction. With kept pages one backward turn
+// suffices, as a forward turn then hits the page just left; without them wait for the second,
+// so a single look back followed by a forward turn still hits the prefetched next page.
+static uint8_t s_back_turns;
 
 /* ---- 翻页分段计时 / Per-turn stage timing ---- */
 // 本地测时构建（--pico-turn-timing）每次翻页打一行 TURN 汇总：准备拆成载章、存进度、
@@ -645,7 +657,7 @@ static int s_next_page = -1, s_prep_page = -1;
 typedef struct {
     bool active;
     int dir;
-    int hit;                    ///< 0 现画 / 1 预绘命中 / 2 接着画完预绘 / drawn, prefetched, resumed
+    int hit;                    ///< 0 现画 / 1 预绘命中 / 2 接着画完预绘 / 3 保留页 / drawn, prefetched, resumed, kept
     int64_t t0, load, save, prep, draw, turn_end, present_in, present_start, push_main;
     ttf_bench_stats_t glyph;
 } turn_timing_t;
@@ -2376,7 +2388,16 @@ static void save_progress(void) {
     else { if (!s_unsaved) s_unsaved = 1; s_save_failed = true; }
     if (was_failed != s_save_failed) invalidate_prep();
 }
-static void invalidate_prep(void) { s_next_page = s_prep_page = -1; s_next_generation=0; memset(&s_prep_cursor,0,sizeof(s_prep_cursor)); }
+static void reset_prefetch(void) { s_next_page = s_prep_page = -1; s_next_generation=0; memset(&s_prep_cursor,0,sizeof(s_prep_cursor)); }
+// 字体、排版或显示设置可能改了正文像素，保留的页一并作废。
+// Font, layout or display changes may alter body pixels, so kept pages are dropped too.
+static void invalidate_prep(void) { reset_prefetch(); s_keep_cur.page = s_keep_prev.page = -1; }
+// 与 s_next_fb 同时释放；调用方持有显示锁或预绘任务已停。
+// Freed together with s_next_fb; callers hold the draw lock or the prefetch task is stopped.
+static void reader_keep_free(void) {
+    free(s_keep_cur.fb); free(s_keep_prev.fb);
+    s_keep_cur = s_keep_prev = (reader_keep_t){NULL, -1, 0};
+}
 
 // 页面恢复与其他书的保存状态无关；仅当前书的实际位置决定能否安全断电。
 // Restore context independently of unrelated saves; only this book's persisted position gates power-off.
@@ -4516,6 +4537,24 @@ static bool reader_prefetch_buffer(void) {
         s_next_fb=heap_caps_aligned_alloc(16,need,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     return s_next_fb!=NULL;
 }
+// 保留页沿用预绘的 1 MB 余量规则；两块都拿到才启用，否则退回原来只预绘下一页。
+// Kept pages follow the prefetch 1 MB headroom rule; both must be allocated, else fall back to next-page prefetch only.
+static bool reader_keep_buffers(void) {
+    if(s_keep_cur.fb&&s_keep_prev.fb)return s_next_fb!=NULL;
+    if(!reader_prefetch_buffer())return false;
+    size_t need=fb_bytes();
+    for(reader_keep_t *k=&s_keep_cur;k;k=k==&s_keep_cur?&s_keep_prev:NULL){
+        if(!k->fb&&heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)>need+BOOK_PREP_RESERVE)
+            k->fb=heap_caps_aligned_alloc(16,need,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+        k->page=-1;
+    }
+    if(s_keep_cur.fb&&s_keep_prev.fb)return true;
+    reader_keep_free();
+    return false;
+}
+static bool reader_keep_holds(const reader_keep_t *k, int page) {
+    return k->fb&&k->page==page&&k->generation==book_layout_generation();
+}
 static void prep_task(void *arg) {
     (void)arg;
     for(;;){
@@ -4528,12 +4567,22 @@ static void prep_task(void *arg) {
         xSemaphoreGive(s_prep_done);
     }
 }
+// 预绘目标：往回翻时取上一页，否则取下一页；越界或任一页带图、设了阅读背景时不预绘。
+// Prefetch target: the previous page while paging backward, otherwise the next; none when out of
+// range, when either page carries an image or when a reading background is set.
+static int reader_prefetch_target(void) {
+    const bool back=s_page>0&&s_back_turns>=(s_keep_cur.fb?1:2);
+    int target=back?(int)s_page-1:(int)s_page+1;
+    if(target>=(int)book_layout_page_count()||book_layout_page_image_count(s_page)||
+       book_layout_page_image_count((size_t)target)||app_settings_book_background_path()[0])return -1;
+    return target;
+}
 static bool kick_prep(void) {
-    if(s_view!=READING||!s_text||s_toolbar||s_clear_confirm||s_reader_panel!=READER_PANEL_NONE||
-       s_page+1>=book_layout_page_count()||book_layout_page_image_count(s_page)||
-       book_layout_page_image_count(s_page+1)||app_settings_book_background_path()[0])return false;
-    int target=(int)s_page+1;
+    if(s_view!=READING||!s_text||s_toolbar||s_clear_confirm||s_reader_panel!=READER_PANEL_NONE)return false;
+    int target=reader_prefetch_target();
+    if(target<0)return false;
     if(s_next_page==target&&s_next_generation==book_layout_generation())return false;
+    if(reader_keep_holds(&s_keep_prev,target)||reader_keep_holds(&s_keep_cur,target))return false;
     if(s_prep_page!=target||s_prep_cursor.generation!=book_layout_generation()){
         s_next_page=-1;s_next_generation=0;s_prep_page=target;memset(&s_prep_cursor,0,sizeof(s_prep_cursor));
     }
@@ -4585,10 +4634,9 @@ static void reader_save_idle(app_ctx_t *ctx) {
 static void reader_prefetch_idle(app_ctx_t *ctx) {
     if(s_view!=READING||!s_text||s_toolbar||s_clear_confirm||s_reader_panel!=READER_PANEL_NONE||
        ctx->consumed||ctx->request_app||ctx->request_menu||ctx->request_return||
-       (ctx->touch&&ctx->touch->touched)||s_prep_page!=(int)s_page+1)return;
-    if(app_settings_book_background_path()[0]||book_layout_page_image_count(s_page)||
-       book_layout_page_image_count(s_page+1)||s_page+1>=book_layout_page_count())return;
+       (ctx->touch&&ctx->touch->touched)||s_prep_page<0||s_prep_page!=reader_prefetch_target())return;
     if(s_next_page==s_prep_page&&s_next_generation==book_layout_generation())return;
+    if(reader_keep_holds(&s_keep_prev,s_prep_page)||reader_keep_holds(&s_keep_cur,s_prep_page))return;
     if(!reader_prefetch_buffer())return;
     const int64_t deadline=esp_timer_get_time()+BOOK_PREP_IDLE_US;
     for(unsigned row=0;row<8;++row){
@@ -5088,22 +5136,74 @@ static app_redraw_t paint_reading(app_ctx_t* ctx, enum EpdDrawMode mode) {
     lock_draw();
 #ifdef KIIKO_TURN_TIMING
     const bool tt_ready = s_next_fb && s_next_page == (int)s_page && s_next_generation == book_layout_generation();
+    int tt_hit = 0;
 #endif
-    bool cached = !s_toolbar && !s_clear_confirm && s_next_fb &&
-                  ((s_next_page == (int)s_page && s_next_generation == book_layout_generation()) ||
-                   reader_prefetch_resume(s_page));
-    if (cached) {
-        memcpy(ctx->fb, s_next_fb, fb_bytes());
-        draw_reader_outer(ctx->fb,s_page);
+    const int page = (int)s_page;
+    const uint32_t generation = book_layout_generation();
+    const bool keep_page = !s_toolbar && !s_clear_confirm && !s_zoom_active &&
+        book_layout_page_image_count(s_page) == 0 && !app_settings_book_background_path()[0] &&
+        reader_keep_buffers();
+    bool cached;
+    if (keep_page) {
+        // 正文层来源依次为：已保留的当前页或刚离开的页、预绘好的下一页、现画进空闲缓冲。
+        // 原当前页随后成为“刚离开的页”，三块缓冲只换指针。
+        // Body source, in order: a kept current or just-left page, the prefetched next page, or a fresh
+        // draw into the spare buffer. The old current page then becomes the page just left; only pointers rotate.
+        if (!reader_keep_holds(&s_keep_cur, page)) {
+            const reader_keep_t left = s_keep_cur;
+            if (reader_keep_holds(&s_keep_prev, page)) {
+                s_keep_cur = s_keep_prev;
+#ifdef KIIKO_TURN_TIMING
+                tt_hit = 3;
+#endif
+            } else if ((s_next_page == page && s_next_generation == generation) || reader_prefetch_resume(s_page)) {
+                s_keep_cur = (reader_keep_t){s_next_fb, page, generation};
+                s_next_fb = s_keep_prev.fb;
+                reset_prefetch();
+#ifdef KIIKO_TURN_TIMING
+                tt_hit = tt_ready ? 1 : 2;
+#endif
+            } else {
+                uint8_t *body = s_keep_prev.fb;
+                ui_text_set_system_scale(false);
+                memset(body, 0xff, fb_bytes());
+                book_layout_draw_page(body, s_page, body_rect(), s_px);
+                s_keep_cur = (reader_keep_t){body, page, generation};
+            }
+            s_keep_prev = left;
+        }
+#ifdef KIIKO_TURN_TIMING
+        else tt_hit = 3;
+#endif
+        memcpy(ctx->fb, s_keep_cur.fb, fb_bytes());
+        draw_reader_outer(ctx->fb, s_page);
+        cached = true;
+    } else {
+        // 插图页等不保留正文层，但刚离开的文字页仍留作上一页。
+        // Image pages and the like keep no body layer, while the text page just left stays as the previous page.
+        if (s_keep_cur.fb && s_keep_cur.page != page) {
+            const reader_keep_t left = s_keep_cur;
+            s_keep_cur = (reader_keep_t){s_keep_prev.fb, -1, 0};
+            s_keep_prev = left;
+        }
+        cached = !s_toolbar && !s_clear_confirm && s_next_fb &&
+                 ((s_next_page == page && s_next_generation == generation) || reader_prefetch_resume(s_page));
+        if (cached) {
+            memcpy(ctx->fb, s_next_fb, fb_bytes());
+            draw_reader_outer(ctx->fb,s_page);
+        }
+        else draw_reader(ctx->fb, s_page);
+#ifdef KIIKO_TURN_TIMING
+        tt_hit = cached ? (tt_ready ? 1 : 2) : 0;
+#endif
     }
-    else draw_reader(ctx->fb, s_page);
     // 下一页可能预渲染于数分钟前，复制后以当前时间重绘状态栏。
     // A prefetched page can be minutes old; replace its status with the current time.
     if (cached && reader_status_visible()) reader_status_paint(ctx->fb);
     unlock_draw();
 #ifdef KIIKO_TURN_TIMING
     if (s_tt.active) {
-        s_tt.hit = cached ? (tt_ready ? 1 : 2) : 0;
+        s_tt.hit = tt_hit;
         s_tt.prep += tt_prepared - started;
         s_tt.draw += esp_timer_get_time() - tt_prepared;
     }
@@ -5234,6 +5334,10 @@ static void release_page_images(void) {
 static void release_image_headroom(void) {
     if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) >= 3u * 1024u * 1024u) return;
     lock_draw();
+    // 保留页最先让出；腾够了就不动预绘缓冲和字形缓存。
+    // Kept pages give way first; if that suffices, keep the prefetch buffer and glyph cache.
+    reader_keep_free();
+    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) >= 3u * 1024u * 1024u) { unlock_draw(); return; }
     invalidate_prep();
     free(s_next_fb);
     s_next_fb = NULL;
@@ -5255,7 +5359,7 @@ static void prepare_inline_image(void) {
     // A missing illustration has no other symptom and every failure path used to be a silent
     // continue; record the outcome instead of guessing.
     int count = reader_image_slots(s_page);
-    if (changed_layout_or_image || count > 0) invalidate_prep();
+    if (changed_layout_or_image || count > 0) reset_prefetch();
     if (count > 0) release_image_headroom();
     if (!count || count > (int)HTML_TEXT_MAX_BLOCKS) {
         ESP_LOGI(TAG, "inline page %u: %d image slots", (unsigned)s_page, count);
@@ -5516,6 +5620,7 @@ static bool open_book_impl(app_ctx_t* ctx, const char* path) {
     invalidate_prep();
     free(s_next_fb);
     s_next_fb = NULL;
+    reader_keep_free();
     unlock_draw();
     if (network.network_ready) ttf_font_cache_clear();
     // 开书前把字形缓存全还回去并量一下能腾多少：书内字体要的正是这块 PSRAM，而系统字体
@@ -6781,6 +6886,8 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
     // Chapter loads may replace the image table; the old-page eligibility comes from the displayed frame.
     bool from_text_frame = s_reader_text_frame;
     bool changed = true;
+    if (dir < 0) { if (s_back_turns < 2) ++s_back_turns; }
+    else s_back_turns = 0;
     if (dir > 0 && s_page + 1 < book_layout_page_count()) ++s_page;
     else if (dir < 0 && s_page) --s_page;
     else if ((dir > 0 && s_part_more) || (dir < 0 && s_part_base)) {
@@ -8536,6 +8643,7 @@ static void book_on_exit(app_ctx_t* ctx) {
     free_book();
     free(s_next_fb);
     s_next_fb = NULL;
+    reader_keep_free();
     if(s_prep_task){vTaskDelete(s_prep_task);s_prep_task=NULL;}
     if(s_prep_done){vSemaphoreDelete(s_prep_done);s_prep_done=NULL;}
     if (s_draw_lock) { vSemaphoreDelete(s_draw_lock); s_draw_lock = NULL; }
