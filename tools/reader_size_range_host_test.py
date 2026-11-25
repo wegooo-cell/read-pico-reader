@@ -24,8 +24,8 @@ unit=r'''
 #define APP_BOOK_TRACK_COUNT 31
 #define APP_BOOK_PARAGRAPH_COUNT 21
 typedef struct {int x,y,width,height;}EpdRect;
-static int s_px=48,s_margin=24,s_line_spacing=130;
-static int s_reader_slider,s_reader_preview_px,s_reader_preview_margin,s_reader_preview_line,s_reader_preview_para,s_reader_preview_tracking;
+static int s_px=48,s_margin=24,s_margin_y,s_line_spacing=130;
+static int s_reader_slider,s_reader_preview_px,s_reader_preview_margin,s_reader_preview_margin_y,s_reader_preview_line,s_reader_preview_para,s_reader_preview_tracking;
 static bool s_reader_slider_endpoint;
 static EpdRect reader_slider_rect(int slider){(void)slider;return (EpdRect){36,700,612,76};}
 static int app_settings_book_tracking(void){return 15;}

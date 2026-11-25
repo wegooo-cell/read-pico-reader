@@ -15,7 +15,7 @@ static inline EpdRect ui_reader_area(bool fullscreen,bool immersive) {
     int bottom=!fullscreen?UI_READER_STANDARD_BOTTOM:immersive?UI_READER_FULLSCREEN_BOTTOM:UI_READER_METADATA_BOTTOM;
     return (EpdRect){0,top,684,bottom-top};
 }
-static inline EpdRect ui_reader_body(bool fullscreen,bool immersive,int margin,bool vertical) {
+static inline EpdRect ui_reader_body(bool fullscreen,bool immersive,int margin,int margin_y) {
     // 工具栏及题头悬浮在正文上；显隐只改变可见/刷新范围，不改变排版。
     // Header/tools overlay the body; visibility changes the paint crop, never pagination.
     (void)fullscreen;
@@ -24,8 +24,7 @@ static inline EpdRect ui_reader_body(bool fullscreen,bool immersive,int margin,b
     // Keep4px below status chrome and16px above the footer; immersive insets stay16px with balanced continuation slack.
     const int top_inset=immersive?16:4;
     r.y+=top_inset;r.height-=top_inset+16;
-    if(vertical)return (EpdRect){24,r.y+margin,636,r.height-2*margin};
-    return (EpdRect){margin,r.y,684-2*margin,r.height};
+    return (EpdRect){margin, r.y + margin_y, 684 - 2 * margin, r.height - 2 * margin_y};
 }
 static inline EpdRect ui_reader_header(void){return (EpdRect){0,0,684,UI_READER_METADATA_TOP};}
 static inline EpdRect ui_reader_back_control(void){return (EpdRect){32,80,64,64};}

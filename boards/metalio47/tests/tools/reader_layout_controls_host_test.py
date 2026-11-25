@@ -21,7 +21,7 @@ u=r'''
 #define BOOK_MARGIN_CHOICES 9
 typedef struct {int x,y,width,height;} EpdRect;
 static bool s_reader_fullscreen,vertical,immersive;
-static int s_margin;
+static int s_margin,s_margin_y;
 static bool app_settings_reader_immersive(void){return immersive;}
 static bool app_settings_book_vertical(void){return vertical;}
 static int slider_index(EpdRect r,unsigned x,int n){int p=(int)x-r.x;if(p<0)p=0;if(p>=r.width)p=r.width-1;return(p*(n-1)+(r.width-1)/2)/(r.width-1);}
@@ -43,9 +43,10 @@ int main(void){
  }
  for(int full=0;full<2;++full)for(int im=0;im<2;++im)for(int v=0;v<2;++v){
   s_reader_fullscreen=full;immersive=im;vertical=v;
-  for(int i=0;i<9;++i){s_margin=i*6;EpdRect a=body_rect_for_tracking(2);
-   if(v){assert(a.y==(im?16:84)+s_margin);assert(a.height==(im?1188:1152)-(im?16:84)-2*s_margin);}
-   else assert(a.x==s_margin&&a.width==684-2*s_margin);
+  for(int x=0;x<=48;x+=6)for(int y=0;y<=48;y+=6){
+   s_margin=x;s_margin_y=y;EpdRect a=body_rect_for_tracking(2);
+   assert(a.x==x&&a.width==684-2*x);
+   assert(a.y==(im?16:84)+y&&a.height==(im?1188:1152)-(im?16:84)-2*y);
   }
  }
  for(int i=-100;i<=100;++i){app_settings_set_book_indent_adjust(i);assert(app_settings_book_indent_adjust()==i&&s_book_indent_adjust<=200);}

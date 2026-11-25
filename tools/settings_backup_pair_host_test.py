@@ -44,7 +44,7 @@ int main(int argc,char **argv){
  s_reader_turn_effect=0;assert(app_settings_sync_import(wire,bytes)==ESP_OK);
  assert(app_settings_reader_turn_effect()==(READER_TURN_EFFECT_MAX>=3?3:0));free(wire);
  remove_backup_files();
- puts("PASS: v25 interchange/v28 full pair, saved guide and shelf-cover switch, legacy-write invalidation, damaged companion/primary fallback, cross-board turn normalization");
+ puts("PASS: v25 interchange/v28 full pair, saved guide, shelf-cover switch and vertical inset, legacy-write invalidation, damaged companion/primary fallback, cross-board turn normalization");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='settings-pair-') as folder:

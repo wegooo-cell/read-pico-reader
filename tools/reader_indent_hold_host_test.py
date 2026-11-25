@@ -26,7 +26,7 @@ enum {EPD_DRAW_ALIGN_CENTER,MODE_DU};
 #define UI_TOUCH_SLOP_PX 24
 #define UI_SWIPE_MIN_PX 120
 #define UI_GRAY_BLACK 0
-static int s_view=READING,s_reader_panel=READER_PANEL_LAYOUT_SETTINGS,s_pressed_control=-1,s_reader_slider=-1,s_margin,s_px=48;
+static int s_view=READING,s_reader_panel=READER_PANEL_LAYOUT_SETTINGS,s_pressed_control=-1,s_reader_slider=-1;
 static bool s_clear_confirm,s_indent_feedback_pending;
 static EpdRect s_area;
 static int s_mode;
@@ -51,20 +51,17 @@ static const int E0470_FOLLOW_WAVEFORM=1;
 static int update_display_area_diff_with(void *hl,const int *wave,int mode,EpdRect r){(void)hl;assert(wave==&E0470_FOLLOW_WAVEFORM&&mode==MODE_DU&&r.y==1044&&r.height==72);++pushes;return 0;}
 static void guard_draw_result(void *hl,int result){(void)hl;assert(result==0);}
 static app_redraw_t apply_reader_indent(app_ctx_t *ctx,int em,int value){(void)ctx;assert(em>=0&&em<=3&&value>=-100&&value<=100);if(value==saved)return APP_REDRAW_NONE;saved=value;++reflows;return APP_REDRAW_PAGE;}
-static EpdRect reader_slider_rect(int n){(void)n;return(EpdRect){0};}
-static int reader_margin_input(EpdRect r,int x,int margin,int px,int tracking){(void)r;(void)x;(void)px;(void)tracking;return margin;}
-static int app_settings_book_tracking(void){return 4;}
-static int app_settings_book_line_spacing(void){return 120;}
-static int app_settings_book_paragraph_spacing(void){return 0;}
-static int slider_index(EpdRect r,int x,int n){(void)r;(void)x;(void)n;return 0;}
-static app_redraw_t apply_reader_layout(app_ctx_t *ctx,int px,int margin,int line,int para){(void)ctx;(void)px;(void)margin;(void)line;(void)para;assert(false);return APP_REDRAW_NONE;}
-static app_redraw_t apply_reader_typography(app_ctx_t *ctx,int value){(void)ctx;(void)value;assert(false);return APP_REDRAW_NONE;}
+static int reader_slider_at(int x,int y){(void)x;(void)y;return -1;}
+static void reader_slider_begin(int slider,int x){(void)slider;(void)x;assert(false);}
+static app_redraw_t reader_slider_commit(app_ctx_t *ctx){(void)ctx;assert(false);return APP_REDRAW_NONE;}
 static void invalidate_prep(void){++invalidated;}
 '''
 header=(root/'main/ui/ui_gesture.h').read_text()
 unit+=header[header.index('typedef enum {'):header.index('/// 清除状态')]
 for name in ('ui_gesture_reset','emit','ui_gesture_feed'):
     unit+=function(name,root/'main/ui/ui_gesture.c')+'\n'
+# 排版面板顶边与固件同源。/ Take the layout sheet top from the firmware source.
+unit+=re.search(r'^#define READER_LAYOUT_TOP .*$',text,re.M)[0]+'\n'
 for name in ('indent_adjust_rect','reader_layout_back_rect','indent_adjust_hit','reader_indent_hold_cancel','draw_indent_adjustments','reader_indent_feedback','reader_indent_present','reader_indent_finish','reader_indent_gesture','reader_indent_hold_tick'):
     unit+=function(name,book)+'\n'
 action=function('reader_panel_action',book)
