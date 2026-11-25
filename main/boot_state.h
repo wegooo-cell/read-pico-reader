@@ -18,6 +18,9 @@ typedef struct {
 
 /// 在 NVS 初始化后、硬件初始化前调用；异常或未完成启动采用本次启动保护。/ Call after NVS init and before hardware; abnormal or incomplete startup enables recovery for this boot.
 void pico_boot_init(bool abnormal_reset);
+/// host_reset：本次由主机经 USB 复位（ESP_RST_USB）。上次未完成启动不因此进入保护；崩溃、看门狗与中断开书照旧。
+/// host_reset: this boot follows a host USB reset (ESP_RST_USB). An unfinished previous startup then does not enable recovery; faults, watchdogs and interrupted opening still do.
+void pico_boot_init_reset(bool abnormal_reset, bool host_reset);
 /// 首个完整界面输出成功后标记启动完成。/ Mark startup complete after a successful first full presentation.
 void pico_boot_ready(void);
 bool pico_boot_recovery(void);

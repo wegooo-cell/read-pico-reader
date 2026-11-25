@@ -152,8 +152,8 @@ void app_main(void) {
     // 在大缓冲和字体之前读取小型锁屏设置；读取失败不阻塞，之后的检查仍可重试。
     // Read the tiny lock setting before large buffers/fonts; keep failures nonblocking and let subsequent checks retry.
     (void)lock_pin_enabled();
-    pico_boot_init(reset == ESP_RST_PANIC || reset == ESP_RST_INT_WDT ||
-                   reset == ESP_RST_TASK_WDT || reset == ESP_RST_WDT);
+    pico_boot_init_reset(reset == ESP_RST_PANIC || reset == ESP_RST_INT_WDT ||
+                         reset == ESP_RST_TASK_WDT || reset == ESP_RST_WDT, reset == ESP_RST_USB);
 
     read_pico_handle_t hw;
     if (read_pico_init(&hw) != ESP_OK) return;

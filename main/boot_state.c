@@ -137,7 +137,8 @@ static esp_err_t store(void) {
     if (err != ESP_OK) ESP_LOGW("boot_state", "checkpoint: %s", esp_err_to_name(err));
     return err;
 }
-void pico_boot_init(bool abnormal_reset) {
+void pico_boot_init(bool abnormal_reset) { pico_boot_init_reset(abnormal_reset, false); }
+void pico_boot_init_reset(bool abnormal_reset, bool host_reset) {
     memset(&s_record, 0, sizeof(s_record));
     s_resume_pending = false;
     s_resume_frame = false;
@@ -187,7 +188,9 @@ void pico_boot_init(bool abnormal_reset) {
     if(s_record.blocked[0]&&!book_file_path_supported(s_record.blocked))s_record.blocked[0]=0;
     if (s_record.starting) s_recovery_reasons |= BOOT_RECOVERY_STARTING;
     if (s_record.opening[0]) s_recovery_reasons |= BOOT_RECOVERY_OPENING;
-    if (s_record.starting || s_record.opening[0]) s_recovery = true;
+    // 主机USB复位（如开串口）打断的未完成启动不是启动故障；崩溃/看门狗/坏记录/中断开书仍进入保护。
+    // A host USB reset (e.g. opening the serial port) of an unfinished startup is not a startup fault; panics, watchdogs, bad records and interrupted opening still recover.
+    if ((s_record.starting && !host_reset) || s_record.opening[0]) s_recovery = true;
     if (s_record.opening[0]) {
         s_interrupted = true;
         memcpy(s_record.blocked, s_record.opening, sizeof(s_record.blocked));
@@ -218,6 +221,12 @@ void pico_boot_init(bool abnormal_reset) {
         s_recovery_reasons |= BOOT_RECOVERY_STORE;
     }
     ESP_LOGI("boot_state", "startup recovery=%d resume=%d reasons=0x%02x", s_recovery, s_resume_pending, s_recovery_reasons);
+    // 保护启动会静默改用内建字体并跳过TF资源，这里说明原因。/ Recovery silently uses the built-in face and skips TF assets; say why.
+    if (s_recovery)
+        ESP_LOGW("boot_state", "recovery boot: builtin font, TF fonts/shelf cache/covers skipped "
+            "(0x01 fault reset, 0x02 bad record, 0x04 unfinished startup, 0x08 interrupted book, 0x10 store failed)");
+    else if (host_reset && (s_recovery_reasons & BOOT_RECOVERY_STARTING))
+        ESP_LOGI("boot_state", "unfinished startup ended by host USB reset; not treated as a fault");
 }
 void pico_boot_ready(void) {
     s_record.starting = 0;
