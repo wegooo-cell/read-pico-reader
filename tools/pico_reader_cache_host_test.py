@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Execute the production PR115/116 cache helpers under memory pressure and layout changes."""
+"""中文：执行PR115/116真实缓存助手，覆盖内存压力及排版变化。
+English: Execute the production PR115/116 cache helpers under memory pressure and layout changes."""
 from pathlib import Path
 import subprocess,tempfile
 from home_cover_cache_host_test import function

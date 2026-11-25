@@ -765,6 +765,7 @@ int main(void) {
     assert(mkdir(test_roots[0].path,0700)==0);
     for(int i=0;i<65;i++){char path[340];snprintf(path,sizeof(path),"%s/book%03d.txt",test_roots[0].path,i);FILE* f=fopen(path,"w");assert(f);fputs("x",f);fclose(f);}
     app_ctx_t ctx={0};
+    // 空闲目录预热首项前也让出输入；前台复用遇到中断时保留旧列表。
     // Idle catalog warming yields even before the first entry; foreground reuse retains its old list.
     s_view=SHELF;s_background_index_scan=true;test_touch_pending=true;
     scan_shelf(&ctx);assert(!s_count&&!s_visible_count&&s_scan_pending);

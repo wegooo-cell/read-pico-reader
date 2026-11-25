@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Retain underrun recovery without promoting PCLK before separate acceptance."""
+"""中文：保留欠载恢复，像素时钟自动回升须另行验收。
+English: Retain underrun recovery without promoting PCLK before separate acceptance."""
 from pathlib import Path
 import subprocess,tempfile
 from home_cover_cache_host_test import function
