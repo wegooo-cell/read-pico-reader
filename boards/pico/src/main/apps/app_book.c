@@ -575,6 +575,16 @@ static size_t s_jump_offset = SIZE_MAX, s_jump_page;
 static uint32_t s_file_size;
 static int s_px, s_margin, s_line_spacing, s_turns, s_unsaved;
 static int64_t s_poll_ms, s_last_turn_ms;
+// 每 8 页的进度保存（约 160–250 ms）不再卡在翻页路径上：翻页只做标记，翻页后连续
+// BOOK_SAVE_IDLE_MS 无操作时再写。一直快翻时，标记后再翻 8 页仍没写成就回到翻页时同步写。
+// 锁屏、离开阅读和跨章仍按原样立即保存。
+// The every-eighth-turn progress save (about 160-250 ms) no longer blocks the turn: the turn
+// only marks it due, and it runs after BOOK_SAVE_IDLE_MS without input. During continuous fast
+// paging it falls back to a synchronous save once eight more turns pass. Lock, leaving the
+// reader and chapter changes still save immediately.
+#define BOOK_SAVE_IDLE_MS 1200
+static bool s_save_due;
+static uint8_t s_save_due_turns;
 static int64_t s_stats_activity_ms;
 static uint32_t s_session_read_ms, s_session_turns;
 static int s_font_page;
@@ -2358,6 +2368,8 @@ static void save_progress(void) {
     book_ticket_note_position(s_path, &p, chapter, saved || pending->progress_saved);
     if (saved) {
         s_unsaved = 0;
+        s_save_due = false;
+        s_save_due_turns = 0;
         s_save_failed = false;
         for (pending_progress_t* item = s_pending; item; item = item->next) if (item->dirty) s_save_failed = true;
     }
@@ -4551,6 +4563,25 @@ static bool reader_prefetch_resume(size_t page) {
     while(reader_prefetch_step()==0){}
     return s_next_page==(int)page&&s_next_generation==book_layout_generation();
 }
+// 翻页后空闲时写入到期的进度。持显示锁，与后台预绘互斥。
+// Write a due progress save once idle after a turn, under the draw lock so it excludes prefetch.
+static void reader_save_idle(app_ctx_t *ctx) {
+    if(!s_save_due||s_save_failed||s_view!=READING||!s_text||s_toolbar||s_clear_confirm||
+       ctx->consumed||ctx->request_app||ctx->request_menu||ctx->request_return||
+       (ctx->touch&&ctx->touch->touched)||ctx->now_ms-s_last_turn_ms<BOOK_SAVE_IDLE_MS)return;
+#ifdef KIIKO_TURN_TIMING
+    const int64_t start=esp_timer_get_time();
+#endif
+    lock_draw();
+    save_progress();
+    unlock_draw();
+    // 写失败时交给现有的 15 秒重试，不在空闲里反复写。/ On failure, leave retries to the existing 15 s loop.
+    s_save_due=false;
+#ifdef KIIKO_TURN_TIMING
+    const int64_t us=esp_timer_get_time()-start;
+    ESP_LOGI("turn","SAVE idle=%lld.%lld ok=%d",(long long)(us/1000),(long long)((us%1000)/100),!s_save_failed);
+#endif
+}
 static void reader_prefetch_idle(app_ctx_t *ctx) {
     if(s_view!=READING||!s_text||s_toolbar||s_clear_confirm||s_reader_panel!=READER_PANEL_NONE||
        ctx->consumed||ctx->request_app||ctx->request_menu||ctx->request_return||
@@ -5583,6 +5614,8 @@ static bool open_book_impl(app_ctx_t* ctx, const char* path) {
     s_session_read_ms = s_session_turns = 0;
     s_reader_notice[0] = 0;
     s_turns = s_unsaved = 0;
+    s_save_due = false;
+    s_save_due_turns = 0;
     pending_mark_latest(s_path);
     save_progress();
     if(!library_member&&book_library_include(s_path)!=ESP_OK){copy_text(s_reader_notice,sizeof(s_reader_notice),"加入书架失败，请检查存储后重试");s_reader_notice_until=ctx->now_ms+3000;}
@@ -6793,7 +6826,13 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
         s_dc_recover_pages = 0;
     }
     if (s_unsaved < 8) ++s_unsaved;
-    if (s_unsaved >= 8 && !s_save_failed) TT_SPAN(save, save_progress());
+    if (s_unsaved >= 8 && !s_save_failed) {
+        if (s_save_due && s_save_due_turns >= 8) TT_SPAN(save, save_progress());
+        else {
+            s_save_due = true;
+            if (s_save_due_turns < UINT8_MAX) ++s_save_due_turns;
+        }
+    }
     ESP_LOGI(TAG, "turn chapter=%u page=%u/%u pct=%u", (unsigned)s_chapter, (unsigned)s_page + 1, (unsigned)book_layout_page_count(), percent(s_page));
     // 预渲染未命中时也使用 GL16；到达设定页数后在本次翻页整屏全刷。
     // A cache miss still uses GL16; the selected turn count triggers a full-screen refresh on this turn.
@@ -9534,7 +9573,7 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
     app_redraw_t metadata=reader_metadata_tick(ctx);
     if(metadata!=APP_REDRAW_NONE)return metadata;
     app_redraw_t clock=reader_clock_tick(ctx);
-    if(clock==APP_REDRAW_NONE)reader_prefetch_idle(ctx);
+    if(clock==APP_REDRAW_NONE){reader_save_idle(ctx);reader_prefetch_idle(ctx);}
     return clock;
 }
 static void before_lock(app_ctx_t* ctx) {

@@ -31,6 +31,7 @@ static size_t s_jump_offset=SIZE_MAX,s_jump_page;
 static bool s_part_more,s_save_failed;
 static int s_px=48;
 static unsigned s_unsaved;
+static bool s_save_due;static uint8_t s_save_due_turns;
 static uint32_t s_file_size=1000;
 static book_progress_t stored;
 static int load_error,stat_error;
@@ -59,7 +60,9 @@ int main(void){
  snprintf(pending.path,sizeof(pending.path),"%s",s_path);snprintf(s_current.path,sizeof(s_current.path),"%s",s_path);
  const unsigned pages[]={42,82,17,99,0};
  for(unsigned i=0;i<sizeof(pages)/sizeof(pages[0]);++i){
+  s_save_due=true;s_save_due_turns=3;
   s_page=pages[i];save_progress();assert(!s_save_failed&&!pending.dirty&&stored.pct==percent(s_page));
+  assert(!s_save_due&&!s_save_due_turns);
   s_current.has_progress=true;s_current.progress.pct=91;assert(refresh_progress()&&s_current.has_progress);
   assert(s_current.progress.pct==percent(s_page));
   char footer[80],expected[80];reader_footer_progress(footer,sizeof(footer),s_page);
