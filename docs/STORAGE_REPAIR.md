@@ -1,8 +1,8 @@
 # PICO 存储检查与修复 / Storage checks and repair
 
-入口：设置 → 升级和恢复 → 存储检查与修复。
+入口：设置 → 升级和恢复 → 系统修复 → 存储检查与修复。
 
-Open Settings → Upgrade and recovery → Storage checks and repair.
+Open Settings → Upgrade and recovery → System repair → Storage checks and repair.
 
 “检查并尝试恢复”会释放阅读和字体使用的文件，重新尝试挂载不可用的 TF 卡，分别检查书目录、机内存储与进度备用存储，再通知书架重新核对。它保留设置、书籍、阅读记录和上架名单；不会把重新扫描当成清空书架，也不会格式化 TF。机内文件系统格式无法识别时，检查结果会保留该错误；可用的 TF 书籍和进度备用存储可继续使用。
 

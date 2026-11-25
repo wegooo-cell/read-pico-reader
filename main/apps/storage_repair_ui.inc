@@ -97,7 +97,7 @@ static app_redraw_t storage_repair_gesture(app_ctx_t *ctx, const ui_gesture_even
     if (app_storage_repair_busy() || s_storage_wait_release || event->type != UI_GESTURE_TAP) return APP_REDRAW_NONE;
     if (event->x0 < 170 && event->y0 < 190) {
         app_storage_repair_cancel(); s_storage_rebuild_question = false;
-        s_page = SETTINGS_MAIN; return APP_REDRAW_PAGE;
+        s_page = SETTINGS_SYSTEM_REPAIR; return APP_REDRAW_PAGE;
     }
     storage_repair_status_t status = app_storage_repair_status();
     if (ui_rect_hit(storage_check_button(), event->x0, event->y0)) {
@@ -112,6 +112,42 @@ static app_redraw_t storage_repair_gesture(app_ctx_t *ctx, const ui_gesture_even
     } else if (s_storage_rebuild_question) {
         (void)app_storage_repair_begin(true, ctx->now_ms); s_storage_rebuild_question = false;
     } else s_storage_rebuild_question = true;
+    return APP_REDRAW_PAGE;
+}
+
+// 只收拢入口，不在进入菜单或绘制时执行修复。/ Group entry points; entering or painting never runs a repair.
+static EpdRect system_repair_button(unsigned row) { return (EpdRect){54, 272 + (int)row * 112, 576, 84}; }
+static void system_repair_draw(uint8_t *fb) {
+    ui_clear_page(fb);
+    back_header(fb, STORAGE_TEXT("系统修复", "System repair"));
+    const char *labels[] = {
+        STORAGE_TEXT("屏幕修复", "Screen repair"), STORAGE_TEXT("DC 恢复", "DC recovery"),
+        STORAGE_TEXT("存储检查与修复", "Storage checks and repair")
+    };
+    for (unsigned i = 0; i < 3; ++i) ui_draw_button(fb, system_repair_button(i), labels[i], false);
+    ui_text_box(fb, (EpdRect){54, 646, 576, 90}, 23,
+                STORAGE_TEXT("按需要选择修复项目。存储检查默认保留数据。",
+                             "Choose a repair. Storage checks preserve data by default."), EPD_DRAW_ALIGN_LEFT, false);
+    if (s_notice[0]) ui_text_box(fb, (EpdRect){54, 780, 576, 160}, 23, s_notice, EPD_DRAW_ALIGN_LEFT, false);
+    settings_navigation(fb);
+}
+static app_redraw_t system_repair_gesture(app_ctx_t *ctx, const ui_gesture_event_t *event) {
+    if (event->type != UI_GESTURE_TAP) return APP_REDRAW_NONE;
+    if (event->x0 < 170 && event->y0 < 190) {
+        s_panel_repair_pending=s_dc_recover_pending=false; s_notice[0]=0;
+        s_page=SETTINGS_MAIN; return APP_REDRAW_PAGE;
+    }
+    int tab=settings_nav_hit(event->x0, event->y0);
+    if (tab >= 0) { s_panel_repair_pending=s_dc_recover_pending=false; ui_nav_request(ctx,tab); return APP_REDRAW_NONE; }
+    if (s_panel_repair_pending || s_dc_recover_pending) return APP_REDRAW_NONE;
+    if (ui_rect_hit(system_repair_button(0), event->x0, event->y0)) {
+        s_panel_repair_pending=true; snprintf(s_notice,sizeof(s_notice),"屏幕修复中…");
+    } else if (ui_rect_hit(system_repair_button(1), event->x0, event->y0)) {
+        s_dc_recover_pending=true; snprintf(s_notice,sizeof(s_notice),"DC 恢复中…");
+    } else if (ui_rect_hit(system_repair_button(2), event->x0, event->y0)) {
+        app_storage_repair_cancel(); s_storage_rebuild_question=s_storage_wait_release=false;
+        s_notice[0]=0; s_page=SETTINGS_STORAGE_REPAIR;
+    } else return APP_REDRAW_NONE;
     return APP_REDRAW_PAGE;
 }
 

@@ -130,12 +130,14 @@ static void settings_navigation(uint8_t*f){(void)f;}
 static void ui_clear_page(uint8_t*f){*f=0;}
 static bool test_english;
 static bool ui_locale_english(void){return test_english;}
+static int settings_nav_hit(int x,int y){(void)x;return y>=1096?0:-1;}
+static void ui_nav_request(app_ctx_t*ctx,int tab){(void)ctx;(void)tab;}
 static void ui_text_fixed(uint8_t*f,int x,int y,int px,const char*t,int a,bool inv){(void)f;(void)x;(void)px;(void)t;(void)a;(void)inv;assert(y<1096);}
 static void ui_text_box(uint8_t*f,EpdRect r,int px,const char*t,int a,bool inv){(void)f;(void)px;(void)t;(void)a;(void)inv;assert(r.x>=0&&r.y>=0&&r.x+r.width<=684&&r.y+r.height<=1096);}
 static void ui_draw_button(uint8_t*f,EpdRect r,const char*t,bool inv){(void)f;(void)t;(void)inv;assert(r.x>=0&&r.y>=0&&r.x+r.width<=684&&r.y+r.height<=1096);}
 '''
 unit += r'''
-enum{SETTINGS_MAIN,SETTINGS_STORAGE_REPAIR,SETTINGS_FACTORY_RESET,SETTINGS_CONFIG,SETTINGS_BOOT,SETTINGS_UPGRADE};
+enum{SETTINGS_MAIN,SETTINGS_STORAGE_REPAIR,SETTINGS_FACTORY_RESET,SETTINGS_CONFIG,SETTINGS_BOOT,SETTINGS_UPGRADE,SETTINGS_SYSTEM_REPAIR};
 static int s_page;static bool s_reset_confirm,s_reset_pending,s_config_confirm,s_panel_repair_pending,s_dc_recover_pending,s_boot_pending;
 static char s_reset_notice[96],s_notice[96];
 static void upgrade_open(void){s_page=SETTINGS_UPGRADE;}
@@ -147,7 +149,7 @@ main_gesture=function('on_gesture',settings_ui)
 maintenance=main_gesture[main_gesture.index('    if(y>=SETTINGS_MAINTENANCE_Y'):main_gesture.rindex('    return APP_REDRAW_NONE;')]
 unit += '''
 #define SETTINGS_MAINTENANCE_Y 2000
-#define SETTINGS_MAINTENANCE_ROWS 7
+#define SETTINGS_MAINTENANCE_ROWS 5
 #define SETTINGS_ROW_H 82
 static app_redraw_t actual_maintenance(app_ctx_t*ctx,int y){int row;(void)ctx;
 '''.replace('\n+','\n') + maintenance + 'return APP_REDRAW_NONE;}\n'
@@ -203,9 +205,12 @@ int main(void){
  test_english=true;storage_repair_draw(&fb);test_english=false;ctx.now_ms=10000;assert(storage_repair_gesture(&ctx,&e)==APP_REDRAW_PAGE);run();assert(erases==1);
  reset();s_storage_rebuild_question=true;e.y0=851;assert(storage_repair_gesture(&ctx,&e)==APP_REDRAW_PAGE&&!s_storage_rebuild_question);source_retained();
  reset();s_page=SETTINGS_MAIN;s_storage_rebuild_question=true;
- assert(actual_maintenance(&ctx,2000+6*82)==APP_REDRAW_PAGE&&s_page==SETTINGS_STORAGE_REPAIR&&!s_storage_rebuild_question&&!erases);
+ assert(actual_maintenance(&ctx,2000+2*82)==APP_REDRAW_PAGE&&s_page==SETTINGS_SYSTEM_REPAIR&&!erases);
+ fb=255;before=reads;system_repair_draw(&fb);assert(!fb&&reads==before&&!erases);
+ test_english=true;system_repair_draw(&fb);test_english=false;
+ e.x0=60;e.y0=272+2*112;assert(system_repair_gesture(&ctx,&e)==APP_REDRAW_PAGE&&s_page==SETTINGS_STORAGE_REPAIR&&!s_storage_rebuild_question&&!erases);
  backup();s_page=SETTINGS_STORAGE_REPAIR;e.x0=60;e.y0=100;
- assert(storage_repair_gesture(&ctx,&e)==APP_REDRAW_PAGE&&s_page==SETTINGS_MAIN&&app_storage_repair_confirm(10000)!=ESP_OK);source_retained();
+ assert(storage_repair_gesture(&ctx,&e)==APP_REDRAW_PAGE&&s_page==SETTINGS_SYSTEM_REPAIR&&app_storage_repair_confirm(10000)!=ESP_OK);source_retained();
  release_work();puts("PASS: actual settings entry/header-back, initial warning, verified backup and separate final confirmation; pure drawing and cancellation revoke authorization");
 }
 '''
@@ -229,7 +234,8 @@ assert loop.index('if (app_storage_repair_busy()) {')<loop.index('if (ctx.now_ms
 block=loop[loop.index('if (app_storage_repair_busy()) {'):loop.index('if (ctx.now_ms - last_media_poll_ms')]
 assert all(token in block for token in ('read_pico_pmu_drain_events','last_input_ms','last_font_retry_ms','last_media_poll_ms','continue;'))
 ui=(ROOT/'boards/pico/src/main/apps/app_device_settings.c').read_text()
-assert '"存储检查与修复"' in ui and '#define SETTINGS_MAINTENANCE_ROWS 7' in ui
+assert '"系统修复"' in ui and '#define SETTINGS_MAINTENANCE_ROWS 5' in ui
+assert '"存储检查与修复"' in (ROOT/'main/apps/storage_repair_ui.inc').read_text()
 assert ui.count('app_storage_repair_cancel(); s_storage_rebuild_question=false;')>=2
 assert 'return !app_storage_repair_busy() && !s_reset_pending' in ui
 print('PASS: Pico loop/exit/lock/navigation maintenance interlocks and settings entry are wired; S31 controller unchanged')

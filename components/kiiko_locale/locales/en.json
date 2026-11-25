@@ -1220,5 +1220,9 @@
   "内置存储暂不可用，原数据已保留": "Internal storage unavailable; original data retained",
   "存储检查与修复": "Storage checks and repair",
   "检查 / 备份后重建": "Check / back up and rebuild",
-  "部分图书目录读取失败，请检查存储后重试": "Some book directories could not be read; check storage and retry"
+  "部分图书目录读取失败，请检查存储后重试": "Some book directories could not be read; check storage and retry",
+  "系统修复": "System repair",
+  "书架正在准备，请稍候再点重新扫描": "The shelf is loading. Please wait, then tap Rescan again.",
+  "书架已就绪，请点击重新扫描": "The shelf is ready. Tap Rescan to continue.",
+  "书架准备失败，请检查存储后重试": "Shelf preparation failed. Check storage and retry."
 }

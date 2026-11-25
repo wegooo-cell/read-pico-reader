@@ -8351,13 +8351,13 @@ static app_redraw_t bulk_action(app_ctx_t* ctx,uint16_t x,uint16_t y) {
         search_begin();
         return APP_REDRAW_PAGE;
     }
+    if(!s_import_candidates&&!s_manage_books&&ui_rect_hit(batch_rect(6),x,y))return library_restart_import(ctx);
     if(s_scan_pending)return APP_REDRAW_NONE;
     EpdRect all=s_import_candidates?ui_book_import_select():ui_book_manage_select();
     EpdRect cancel=s_import_candidates?ui_book_import_cancel():ui_book_manage_cancel();
     if(ui_rect_hit(all,x,y)){s_batch_message[0]=0;library_page_selection(ctx,true);s_bulk_selecting=true;return APP_REDRAW_PAGE;}
     if(ui_rect_hit(cancel,x,y)){s_batch_message[0]=0;library_page_selection(ctx,false);return APP_REDRAW_PAGE;}
     if(!s_import_candidates)for(int i=0;i<4;++i)if(ui_rect_hit(batch_rect(i+3),x,y)){
-        if(!s_manage_books&&i==3)return library_restart_import(ctx);
         unsigned count=selected_count();if(!count){copy_text(s_batch_message,sizeof(s_batch_message),"请先选择书籍");return APP_REDRAW_PAGE;}
         if(i==0||(s_manage_books&&i==2)){
             if(count!=1){copy_text(s_batch_message,sizeof(s_batch_message),i==0?"重命名时请选择一本书":"移动时请选择一本书");return APP_REDRAW_PAGE;}
@@ -9797,6 +9797,8 @@ static app_redraw_t shelf_cover_tick(app_ctx_t *ctx) {
 }
 
 static app_redraw_t on_tick(app_ctx_t* ctx) {
+    app_redraw_t rescan_notice=library_rescan_notice_tick();
+    if(rescan_notice!=APP_REDRAW_NONE)return rescan_notice;
     // 低残影模式只在阅读正文期间保持高压轨；离开阅读立即恢复原来的空闲断电。
     // Low-ghost holds the rails only while the reader is visible; leaving restores idle power-off.
     display_set_rail_hold(s_view == READING && s_text && app_settings_low_ghost());

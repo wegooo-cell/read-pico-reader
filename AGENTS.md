@@ -1,5 +1,10 @@
 # AGENTS.md
 
+## PICO系统修复入口 / Pico system repair menu
+
+用户2026-11-25要求将“屏幕修复、DC恢复、存储检查与修复”收拢为“系统修复”子菜单；点击进入菜单不得执行修复，返回存储页的上一级为系统修复。书架尚未准备好时点击重新扫描须立即显示等待提示，未就绪时不得清空名册；准备好后提示再次点击。仅界面调整不授权执行机内存储重建，保留原双重确认和备份保护。
+Group screen repair, DC recovery and storage maintenance under Pico System repair. Opening the menu must not execute a repair; storage Back returns to System repair. Rescan taps during shelf preparation must visibly acknowledge waiting without resetting enrollment, then report readiness for a fresh tap. UI changes do not authorize a physical storage rebuild; retain backup and confirmation guards.
+
 ## PICO机内修复 / Pico storage maintenance
 
 用户2026-11-25明确要求机内可操作修复，并确认新增“原始机内分区备份到TF并校验后，经两次确认重建机内存储”入口；仅实现功能，本轮不在实机执行。默认检查保留数据；重建会清空机内storage，须明确提示不自动恢复旧文件，保留设置和TF且不改VCOM。原始备份唯一命名、完整SHA256读回并与源比较，再次确认后重新核验；取消/锁屏/离页/复位/任何错误不得自动重建，未知数据不能静默格式化。

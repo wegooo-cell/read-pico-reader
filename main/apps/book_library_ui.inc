@@ -3,6 +3,16 @@
  * 关闭首次提示只影响本次显示，返回书架仍由未导入状态重新提示。
  * Dismissing the initial prompt is temporary; unimported libraries prompt again on entry.
  */
+static bool s_rescan_wait_notice;
+static app_redraw_t library_rescan_notice_tick(void) {
+    if (!s_rescan_wait_notice) return APP_REDRAW_NONE;
+    if (s_view != BULK || s_manage_books || s_import_candidates) { s_rescan_wait_notice=false; return APP_REDRAW_NONE; }
+    if (s_scan_pending) return APP_REDRAW_NONE;
+    s_rescan_wait_notice=false;
+    copy_text(s_batch_message,sizeof(s_batch_message),book_library_error()==ESP_OK ?
+              "书架已就绪，请点击重新扫描" : "书架准备失败，请检查存储后重试");
+    return APP_REDRAW_PAGE;
+}
 static void library_filter_loaded(app_ctx_t *ctx) {
     if(s_import_candidates||s_manage_books)return;
     (void)book_library_mode();if(book_library_error()!=ESP_OK)return;
@@ -13,11 +23,19 @@ static void library_filter_loaded(app_ctx_t *ctx) {
     if(kept!=s_count){s_count=kept;sort_shelf(ctx);invalidate_covers();}
 }
 static void library_scan_again(app_ctx_t *ctx) {
+    s_rescan_wait_notice=false;
     book_library_invalidate();s_shelf_cache_valid=false;s_scan_pending=true;s_poll_ms=0;
     s_shelf_warning[0]=s_batch_message[0]=s_message[0]=0;
     ctx->leaf=0;invalidate_covers();
 }
 static app_redraw_t library_restart_import(app_ctx_t *ctx) {
+    // 等待只确认收到点按，不在未准备好的目录上清空名册。/ Acknowledge the tap without resetting an unready catalog.
+    if (s_scan_pending) {
+        s_rescan_wait_notice=true;
+        copy_text(s_batch_message,sizeof(s_batch_message),"书架正在准备，请稍候再点重新扫描");
+        return APP_REDRAW_PAGE;
+    }
+    s_rescan_wait_notice=false;
     // 先保存清空结果，再重置界面；失败时原列表仍可继续使用。
     // Persist the empty shelf before changing the UI; failures retain the current library.
     book_import_reset();

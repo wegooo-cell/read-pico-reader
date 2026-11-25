@@ -1,5 +1,10 @@
 ## 1.0.0（准备中 / Unreleased）
 
+- PICO设置将屏幕修复、DC恢复和存储检查与修复收拢为“系统修复”；返回按菜单层级，进入菜单不执行修复。
+- Pico groups display, DC and storage recovery under System repair, with hierarchical Back navigation and no repair triggered by entering the menu.
+- 书架准备期间点击重新扫描显示等待提示，准备完成后提示再次点击；未就绪时不清空书架名单。
+- Rescan acknowledges taps while the shelf is preparing and reports readiness for a fresh tap; waiting preserves library enrollment.
+
 - PICO新增存储检查与修复：默认保留数据，提供原始机内分区备份到TF、源/备份SHA256核验及二次确认重建；设置和TF保留，原始备份不会自动恢复旧文件。
 - Pico storage maintenance checks media without clearing data; an isolated rebuild requires a durable raw backup, source/readback SHA256 verification and second confirmation, preserving settings and TF. Raw backups do not automatically restore old files.
 

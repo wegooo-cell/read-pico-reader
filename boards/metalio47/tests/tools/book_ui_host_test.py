@@ -541,7 +541,8 @@ static app_redraw_t books_directory_open(app_ctx_t *ctx,const char *path){(void)
 static app_redraw_t books_directory_up(app_ctx_t *ctx){(void)ctx;assert(false);return APP_REDRAW_NONE;}
 static app_redraw_t library_cancel_candidates(app_ctx_t *ctx){(void)ctx;assert(false);return APP_REDRAW_NONE;}
 static app_redraw_t library_import_selected(app_ctx_t *ctx){(void)ctx;assert(false);return APP_REDRAW_NONE;}
-static app_redraw_t library_restart_import(app_ctx_t *ctx){(void)ctx;assert(false);return APP_REDRAW_NONE;}
+static unsigned test_rescan_calls;
+static app_redraw_t library_restart_import(app_ctx_t *ctx){(void)ctx;++test_rescan_calls;return APP_REDRAW_PAGE;}
 static app_redraw_t library_setup_action(app_ctx_t *ctx,int x,int y){(void)ctx;(void)x;(void)y;assert(false);return APP_REDRAW_NONE;}
 static void library_page_selection(app_ctx_t *ctx,bool selected);
 static void library_scan_again(app_ctx_t *ctx){(void)ctx;assert(false);}
@@ -920,6 +921,12 @@ int main(void) {
     s_view=MANAGE;manage_action(&ctx,circle.x+20,circle.y+20);assert(s_view==SHELF);
     assert(!strcmp(s_shelf[0].name,"book000")&&!strcmp(s_shelf[64].name,"book064"));
     // 内置故障不反复扫描可读TF，也不能把部分目录提交为完整名册/持久索引。
+    // Only the rescan button bypasses the loading guard to report waiting; other actions remain gated.
+    s_view=BULK;s_manage_books=s_import_candidates=false;s_scan_pending=true;
+    EpdRect rescan_wait= batch_rect(6);unsigned rescan_before=test_rescan_calls;
+    assert(bulk_action(&ctx,rescan_wait.x+2,rescan_wait.y+2)==APP_REDRAW_PAGE&&test_rescan_calls==rescan_before+1&&s_scan_pending);
+    assert(bulk_action(&ctx,rescan_wait.x+2,rescan_wait.y+2)==APP_REDRAW_PAGE&&test_rescan_calls==rescan_before+2&&s_scan_pending);
+    s_scan_pending=false;
     // Failed internal storage must not rescan usable TF or overwrite complete enrollment/indexes.
     test_source_errors=BOOK_STORE_ROOT_ERROR_FLASH;
     int prior_commits=test_library_commits,prior_cache_writes=test_cache_writes;
