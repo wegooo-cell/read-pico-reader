@@ -121,6 +121,9 @@ enum EpdDrawError update_display_full(EpdiyHighlevelState* hl);
 enum EpdDrawError display_dc_recover(EpdiyHighlevelState* hl);
 /// 低残影阅读的轻量恢复：净 −30 相，每 15 页一次。/ Light reader recovery: net -30 frames, every 15 turns.
 enum EpdDrawError display_dc_recover_light(EpdiyHighlevelState* hl);
+/// DC 平衡反向：净正偏置，抵消反向累积的电荷；一次反向为正向的 1/3。
+/// Reverse DC balance: a net positive bias to cancel charge accumulated the other way; one run is a third of a forward run.
+enum EpdDrawError display_dc_recover_reverse(EpdiyHighlevelState* hl);
 /// 面板修复：不看 framebuffer 的整屏盲刷，专治刷新中途断电留下的条纹。
 /// Panel repair: a blind full-screen drive that ignores the framebuffer, for the stripes a power
 /// cut in the middle of a refresh leaves behind.

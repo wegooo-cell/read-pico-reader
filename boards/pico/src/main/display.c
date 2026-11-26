@@ -892,14 +892,17 @@ enum EpdDrawError display_panel_repair(EpdiyHighlevelState* hl) {
     return result;
 }
 
-// DC 恢复：恢复一次推完，压黑 (net+13) 帧，再补 13 帧擦白把面板停回白场，净负偏置 = net；
+// DC 平衡：一次推完，先走完整的黑白循环把面板停回白场，净偏置 = net。
+// 正向压黑 (net+13) 相再擦白 13 相 → 净负；反向压黑 13 相再推白 (net+13) 相 → 净正。
 // 最后用完整 48 相 GC16 把当前页重新落屏。
-// One pass: (net+13) darken frames followed by 13 erase frames that leave the panel white, so the
-// net negative bias equals net.
+// One pass drives a complete dark/white cycle and leaves the panel white with a net bias of net:
+// forward darkens (net+13) then erases 13 (net negative); reverse darkens 13 then pushes white
+// (net+13) (net positive). A full 48-phase GC16 redraw then lands the current page.
 #define DISPLAY_DC_RECOVER_WHITE 13
-static enum EpdDrawError dc_recover_net(EpdiyHighlevelState* hl, int net_frames) {
+static enum EpdDrawError dc_balance_run(EpdiyHighlevelState* hl, int net_frames, bool reverse) {
     if (!hl || !hl->front_fb || !hl->back_fb || net_frames <= 0) return EPD_DRAW_INVALID_CROP;
-    const int black_frames = net_frames + DISPLAY_DC_RECOVER_WHITE;
+    const int dark_frames = reverse ? DISPLAY_DC_RECOVER_WHITE : net_frames + DISPLAY_DC_RECOVER_WHITE;
+    const int white_frames = reverse ? net_frames + DISPLAY_DC_RECOVER_WHITE : DISPLAY_DC_RECOVER_WHITE;
     LATENCY_DISPLAY_BEGIN();
     bool held = pico_online_display_begin();
     continuous_du_reset();
@@ -909,8 +912,8 @@ static enum EpdDrawError dc_recover_net(EpdiyHighlevelState* hl, int net_frames)
     vTaskDelay(pdMS_TO_TICKS(DISPLAY_REPAIR_OFF_MS));
     const EpdRect area = epd_full_screen();
     epd_poweron();
-    for (int i = 0; i < black_frames; ++i) epd_push_pixels(area, DISPLAY_REPAIR_TIME, 0);
-    for (int i = 0; i < DISPLAY_DC_RECOVER_WHITE; ++i) epd_push_pixels(area, DISPLAY_REPAIR_TIME, 1);
+    for (int i = 0; i < dark_frames; ++i) epd_push_pixels(area, DISPLAY_REPAIR_TIME, 0);
+    for (int i = 0; i < white_frames; ++i) epd_push_pixels(area, DISPLAY_REPAIR_TIME, 1);
     for (int i = 0; i < 3; ++i) epd_push_pixels(area, DISPLAY_REPAIR_TIME, 2);
     enum EpdDrawError result = update_display_from_white_with_unlocked(hl, &E0470_FULL_WAVEFORM, MODE_GC16);
     if (result != EPD_DRAW_SUCCESS) result = main_recover(hl, result);
@@ -922,13 +925,17 @@ static enum EpdDrawError dc_recover_net(EpdiyHighlevelState* hl, int net_frames)
     return result;
 }
 
-// 设置页手动恢复：点一下 360 相净负偏置（约 6 秒）。
-// Manual recovery from Settings: one tap drives a net -360 frames (about six seconds).
-enum EpdDrawError display_dc_recover(EpdiyHighlevelState* hl) { return dc_recover_net(hl, 360); }
+// 设置页手动恢复：正向 360 相净负偏置（约 6 秒）。
+// Manual forward balance from Settings: a net -360 frames (about six seconds).
+enum EpdDrawError display_dc_recover(EpdiyHighlevelState* hl) { return dc_balance_run(hl, 360, false); }
+
+// 反向：120 相净正偏置，为正向的 1/3（约 2 秒）。
+// Reverse: a net +120 frames, a third of forward (about two seconds).
+enum EpdDrawError display_dc_recover_reverse(EpdiyHighlevelState* hl) { return dc_balance_run(hl, 120, true); }
 
 // 低残影阅读每 15 页一次：净 −30 相，对应 15 页 × 2 相推白。
 // Low-ghost reading every fifteen turns: net -30 frames for fifteen turns of two white phases.
-enum EpdDrawError display_dc_recover_light(EpdiyHighlevelState* hl) { return dc_recover_net(hl, 30); }
+enum EpdDrawError display_dc_recover_light(EpdiyHighlevelState* hl) { return dc_balance_run(hl, 30, false); }
 
 enum EpdDrawError update_display_image_gray(EpdiyHighlevelState* hl) {
     LATENCY_DISPLAY_BEGIN();

@@ -69,15 +69,17 @@ ACTIONS = r'''
 #include <string.h>
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE,APP_REDRAW_FULL,APP_REDRAW_DONE} app_redraw_t;
 typedef struct { void *hl; uint8_t *fb; } app_ctx_t;
-enum { SETTINGS_MAIN, SETTINGS_CONFIG, SETTINGS_BOOT, SETTINGS_FACTORY_RESET };
+enum { SETTINGS_MAIN, SETTINGS_CONFIG, SETTINGS_BOOT, SETTINGS_FACTORY_RESET, SETTINGS_DC_BALANCE };
 enum EpdDrawError { EPD_DRAW_SUCCESS, EPD_DRAW_ERROR };
 #define SETTINGS_MAINTENANCE_Y 500
 #define SETTINGS_MAINTENANCE_ROWS 6
 #define SETTINGS_ROW_H 68
 static int s_page, repairs, paints, upgrades;
-static bool s_dc_recover_pending;
-static int dc_repairs;
+static bool s_dc_recover_pending, s_dc_balance_reverse;
+static int dc_repairs, dc_reverse_repairs, full_refreshes;
 static enum EpdDrawError display_dc_recover(void *hl){assert(hl);++dc_repairs;return EPD_DRAW_SUCCESS;}
+static enum EpdDrawError display_dc_recover_reverse(void *hl){assert(hl);++dc_reverse_repairs;return EPD_DRAW_SUCCESS;}
+static enum EpdDrawError update_display_full(void *hl){assert(hl);++full_refreshes;return EPD_DRAW_SUCCESS;}
 static bool s_panel_repair_pending, s_scroll_present_pending, s_boot_pending, s_config_confirm;
 static char s_notice[96],s_reset_notice[96];
 static bool s_reset_confirm,s_reset_pending;
@@ -118,9 +120,15 @@ int main(void) {
     s_page=SETTINGS_CONFIG;
     assert(tick(&ctx)==APP_REDRAW_NONE && repairs==2 && !s_panel_repair_pending);
     s_page=SETTINGS_MAIN;
-    assert(tap(SETTINGS_MAINTENANCE_Y+3*SETTINGS_ROW_H)==APP_REDRAW_PAGE&&s_dc_recover_pending);
-    assert(tick(&ctx)==APP_REDRAW_DONE&&dc_repairs==1&&!s_dc_recover_pending);
-    assert(tick(&ctx)==APP_REDRAW_NONE&&dc_repairs==1);
+    assert(tap(SETTINGS_MAINTENANCE_Y+3*SETTINGS_ROW_H)==APP_REDRAW_PAGE&&s_page==SETTINGS_DC_BALANCE&&!s_dc_recover_pending);
+    s_dc_recover_pending=true; s_dc_balance_reverse=false;
+    assert(tick(&ctx)==APP_REDRAW_DONE&&dc_repairs==1&&full_refreshes==1&&!s_dc_recover_pending);
+    assert(tick(&ctx)==APP_REDRAW_NONE&&dc_repairs==1&&full_refreshes==1);
+    s_page=SETTINGS_DC_BALANCE; s_dc_recover_pending=true; s_dc_balance_reverse=true;
+    assert(tick(&ctx)==APP_REDRAW_DONE&&dc_reverse_repairs==1&&full_refreshes==2&&!s_dc_recover_pending);
+    s_page=SETTINGS_CONFIG; s_dc_recover_pending=true;
+    assert(tick(&ctx)==APP_REDRAW_NONE&&dc_reverse_repairs==1&&full_refreshes==2&&!s_dc_recover_pending);
+    s_page=SETTINGS_MAIN;
     assert(tap(SETTINGS_MAINTENANCE_Y+4*SETTINGS_ROW_H)==APP_REDRAW_PAGE && s_page==SETTINGS_BOOT);
     assert(tap(SETTINGS_MAINTENANCE_Y+5*SETTINGS_ROW_H)==APP_REDRAW_PAGE && s_page==SETTINGS_FACTORY_RESET);
     assert(tap(SETTINGS_MAINTENANCE_Y+6*SETTINGS_ROW_H)==APP_REDRAW_NONE);

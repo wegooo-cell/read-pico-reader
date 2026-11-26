@@ -3,7 +3,9 @@
 - 封面迁移遇到建目录、读取目标状态或改名失败时保留唯一旧缓存；目标已存在时保留旧副本供损坏回退，不阻塞其他文件迁移。
 - 网页刷机按串口库的真实三参数读取回调计算进度，避免出现 NaN；对应测试使用真实回调形状并拒绝非有限进度。
 - 回翻缓存与图片页预绘补充低内存、解码余量、排版代际失效、方向及图文边界回归；保留封面扫屏暂停，欠载降频后不自动提高像素时钟，等待独立验收。
+- 设置里的 DC 恢复改为「DC 平衡」子页：正向净 −360 相（约 6 秒），反向净 +120 相（约 2 秒，为正向的 1/3），反向用于抵消反方向累积的电荷；子页带 16 级灰阶条，平衡结束再整屏全刷一次便于比对波形。
 - Preserve original cover caches on migration IO failures and existing-target alternates. Use the vendor's three-argument read callback in the web installer. Exercise retained-page/image-to-text cache boundaries while keeping cover-worker scan pause and deferring automatic PCLK promotion after underrun recovery.
+- Settings expose DC balance as a page: forward drives a net -360 frames (about 6 s) and reverse a net +120 frames (about 2 s, a third of forward) to cancel charge accumulated the other way.
 
 ## 本地测试 · Pico RC110 / S31 RC118 · 2026-11-24
 
