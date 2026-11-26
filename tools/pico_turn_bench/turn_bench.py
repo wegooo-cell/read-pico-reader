@@ -361,6 +361,9 @@ def print_summary(summary):
     if summary.get('_idle_save', {}).get('n'):
         s = summary['_idle_save']
         print(f'idle progress saves: {s["n"]} x median {s["median"]} ms (outside any turn)')
+    if summary.get('_preload', {}).get('n'):
+        p = summary['_preload']
+        print(f'chapter preloads: {p["n"]} (page0 drawn {p["drawn"]}) median parse={p["parse"]}ms layout={p["layout"]}ms draw={p["draw"]}ms')
 
 
 def cmd_run(args):
@@ -402,8 +405,22 @@ def cmd_run(args):
         dev.close()
     summary = summarize(bench.turns)
     # 空闲时写入的进度不在任何一次翻页里，单独从日志里统计。/ Idle saves happen outside turns; count them from the log.
-    idle = [float(m.group(1)) for m in re.finditer(r'turn: SAVE idle=([\d.]+)', open(log_path, errors='replace').read())]
+    log_text = open(log_path, errors='replace').read()
+    idle = [float(m.group(1)) for m in re.finditer(r'turn: SAVE idle=([\d.]+)', log_text)]
     summary['_idle_save'] = {'n': len(idle), 'median': round(statistics.median(idle), 1) if idle else 0}
+    preloads = [{
+        'ch': int(m.group(1)), 'pages': int(m.group(2)), 'img': int(m.group(3)), 'drawn': int(m.group(4)),
+        'parse': float(m.group(5)), 'layout': float(m.group(6)), 'draw': float(m.group(7)),
+    } for m in re.finditer(
+        r'turn: PRELOAD ch=(\d+) pages=(\d+) img=(\d+) drawn=(\d+) parse=([\d.]+) layout=([\d.]+) draw=([\d.]+)',
+        log_text)]
+    summary['_preload'] = {
+        'n': len(preloads),
+        'drawn': sum(p['drawn'] for p in preloads),
+        'parse': round(statistics.median(p['parse'] for p in preloads), 1) if preloads else 0,
+        'layout': round(statistics.median(p['layout'] for p in preloads), 1) if preloads else 0,
+        'draw': round(statistics.median(p['draw'] for p in preloads), 1) if preloads else 0,
+    }
     result = {'meta': meta, 'summary': summary, 'warnings': bench.warnings, 'turns': bench.turns}
     json_path = os.path.join(args.out, name + '.json')
     json.dump(result, open(json_path, 'w'), ensure_ascii=False, indent=1)

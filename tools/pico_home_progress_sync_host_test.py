@@ -28,7 +28,7 @@ static pending_progress_t pending,*s_pending=&pending;
 static const char *s_text="body",*s_path="/book.txt";
 static size_t s_page,s_chapter,s_text_len=1000,s_part_base,s_part_begin,s_part_end;
 static size_t s_jump_offset=SIZE_MAX,s_jump_page;
-static bool s_part_more,s_save_failed;
+static bool s_part_more,s_save_failed,s_chapter_display_pending;
 static int s_px=48;
 static unsigned s_unsaved;
 static bool s_save_due;static uint8_t s_save_due_turns;

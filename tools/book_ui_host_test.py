@@ -239,7 +239,7 @@ static pending_progress_t* s_pending;
 typedef struct delete_retry {shelf_entry_t entry;struct delete_retry* next;} delete_retry_t;
 static delete_retry_t* s_delete_retries;
 static char s_latest_path[288],test_last_path[288];
-static bool s_save_failed;
+static bool s_save_failed, s_chapter_display_pending;
 static char s_path[288],s_requested_open[288];
 static bool s_requested_open_home,s_reader_return_home,s_requested_fullscreen,s_requested_resume_mode;
 static bool app_settings_reader_default_fullscreen(void){return false;}

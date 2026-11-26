@@ -648,6 +648,9 @@ static reader_keep_t s_keep_cur = {NULL, -1, 0}, s_keep_prev = {NULL, -1, 0};
 // suffices, as a forward turn then hits the page just left; without them wait for the second,
 // so a single look back followed by a forward turn still hits the prefetched next page.
 static uint8_t s_back_turns;
+// 跨章预排切换到新章后，等真实推屏成功才允许写入新章进度。
+// After adopting a staged chapter, defer persisting its position until the panel push succeeds.
+static bool s_chapter_display_pending;
 
 /* ---- 翻页分段计时 / Per-turn stage timing ---- */
 // 本地测时构建（--pico-turn-timing）每次翻页打一行 TURN 汇总：准备拆成载章、存进度、
@@ -700,6 +703,7 @@ static app_redraw_t library_setup_action(app_ctx_t *ctx,int x,int y);
 static void save_progress(void);
 static void before_lock(app_ctx_t *ctx);
 static void invalidate_prep(void);
+static void next_chapter_clear(void);
 static void prepare_inline_image(void);
 static void release_page_images(void);
 static void sort_shelf(app_ctx_t* ctx);
@@ -2532,7 +2536,7 @@ static void library_scan_again(app_ctx_t *ctx);
 #pragma GCC pop_options
 #endif
 static void save_progress(void) {
-    if (!s_text || !s_path[0] || !book_layout_page_count()) return;
+    if (!s_text || !s_path[0] || !book_layout_page_count() || s_chapter_display_pending) return;
     bool was_failed = s_save_failed;
     book_progress_t p = {
         .file_size = s_file_size, .chapter = (uint16_t)s_chapter,
@@ -2569,7 +2573,7 @@ static void save_progress(void) {
 static void reset_prefetch(void) { s_next_page = s_prep_page = -1; s_next_generation=0; memset(&s_prep_cursor,0,sizeof(s_prep_cursor)); }
 // 字体、排版或显示设置可能改了正文像素，保留的页一并作废。
 // Font, layout or display changes may alter body pixels, so kept pages are dropped too.
-static void invalidate_prep(void) { reset_prefetch(); s_keep_cur.page = s_keep_prev.page = -1; }
+static void invalidate_prep(void) { reset_prefetch(); s_keep_cur.page = s_keep_prev.page = -1; next_chapter_clear(); }
 // 与 s_next_fb 同时释放；调用方持有显示锁或预绘任务已停。
 // Freed together with s_next_fb; callers hold the draw lock or the prefetch task is stopped.
 static void reader_keep_free(void) {
@@ -3997,8 +4001,10 @@ static void draw_vertical_heading(uint8_t *fb, EpdRect body) {
 // horizontally. `height` arrives already decided by the caller (zero when the first block is an
 // illustration or no title is usable); deriving it here unconditionally brought a heading onto
 // sheets that should have none, leaving it side by side with the body's own copy.
-static void apply_chapter_lead_at_size(const char *title, const char *label, size_t skip,
-                                       unsigned height, unsigned size) {
+static void compute_chapter_lead_metrics(const char *title, const char *label, unsigned height,
+                                         unsigned size, unsigned *out_height, unsigned *out_width) {
+    *out_height = 0;
+    *out_width = 0;
     reader_heading_viewport();
     s_heading_layout_size = size;
     const bool vertical = app_settings_book_vertical();
@@ -4006,23 +4012,34 @@ static void apply_chapter_lead_at_size(const char *title, const char *label, siz
     book_layout_set_heading_extent(vertical ? 2 * reader_heading_column_px(size) + 28 : band);
     book_layout_set_heading_measure(measure_reader_flow_heading);
     book_layout_set_reader_spacing(true);
-    s_chapter_lead_skip = skip;
-    if (book_kind() != BOOK_KIND_EPUB || title == NULL || title[0] == 0 || !height) {
+    if (book_kind() != BOOK_KIND_EPUB || title == NULL || title[0] == 0 || !height) return;
+    if (vertical) {
+        *out_width = (unsigned)reader_heading_metrics_at_size(title, label, body_rect(), size).width;
+    } else {
+        *out_height = (unsigned)horizontal_heading_at_size(NULL, body_rect(), title, label,
+            app_settings_book_heading_style(), app_settings_book_heading_align(), size);
+    }
+}
+
+static void apply_chapter_lead_at_size(const char *title, const char *label, size_t skip,
+                                       unsigned height, unsigned size) {
+    unsigned lead_height = 0, lead_width = 0;
+    compute_chapter_lead_metrics(title, label, height, size, &lead_height, &lead_width);
+    if (!lead_height && !lead_width) {
+        s_chapter_lead_skip = skip;
         s_chapter_lead_height = s_chapter_lead_width = 0;
         book_layout_set_chapter_lead(0, 0);
         book_layout_set_chapter_lead_width(0);
         return;
     }
-    if (vertical) {
-        s_chapter_lead_height = 0;
-        s_chapter_lead_width = (unsigned)reader_heading_metrics_at_size(title, label, body_rect(), size).width;
+    s_chapter_lead_skip = skip;
+    s_chapter_lead_height = lead_height;
+    s_chapter_lead_width = lead_width;
+    if (lead_width) {
         book_layout_set_chapter_lead(skip, 0);
-        book_layout_set_chapter_lead_width(s_chapter_lead_width);
+        book_layout_set_chapter_lead_width(lead_width);
     } else {
-        s_chapter_lead_width = 0;
-        s_chapter_lead_height = (unsigned)horizontal_heading_at_size(NULL, body_rect(), title, label,
-            app_settings_book_heading_style(), app_settings_book_heading_align(), size);
-        book_layout_set_chapter_lead(skip, s_chapter_lead_height);
+        book_layout_set_chapter_lead(skip, lead_height);
         book_layout_set_chapter_lead_width(0);
     }
 }
@@ -4779,6 +4796,7 @@ static bool kick_prep(void) {
     if(target<0)return false;
     if(s_next_page==target&&s_next_generation==book_layout_generation())return false;
     if(reader_keep_holds(&s_keep_prev,target)||reader_keep_holds(&s_keep_cur,target))return false;
+    next_chapter_clear();
     if(s_prep_page!=target||s_prep_cursor.generation!=book_layout_generation()){
         s_next_page=-1;s_next_generation=0;s_prep_page=target;memset(&s_prep_cursor,0,sizeof(s_prep_cursor));
     }
@@ -5301,6 +5319,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     s_reader_image_refresh_pending = false;
     if(err==EPD_DRAW_SUCCESS) {
         s_presented_view = (int)s_view;
+        if (s_view == READING) s_chapter_display_pending = false;
         if(reader_entry)s_turns=0;
     }
     if (err == EPD_DRAW_SUCCESS) {
@@ -5445,7 +5464,426 @@ static bool reader_image_dims(void* ctx, int image, int* width, int* height) {
     return true;
 }
 #include "book_ticket_reader.inc"
+
+/* ---- 章末预排下一章首页 / Cross-chapter next-page pre-layout ---- */
+#define BOOK_NEXT_CH_RESERVE (1536u * 1024u)
+#define BOOK_NEXT_CH_IDLE_US 12000
+
+typedef enum {
+    NEXT_CH_IDLE = 0,
+    NEXT_CH_PARSED,
+    NEXT_CH_LAYOUT,
+    NEXT_CH_DRAWING,
+    NEXT_CH_READY,
+    NEXT_CH_FAILED,
+} reader_next_ch_state_t;
+
+typedef struct {
+    reader_next_ch_state_t state;
+    size_t chapter;
+    uint32_t source_generation;
+    char path[BOOK_STORE_PATH_MAX];
+    html_text_t text;
+    book_chapter_map_t txt_map;
+    reader_dims_ctx_t dims_ctx;
+    char title[128], heading_title[128], heading_label[32];
+    size_t lead_skip;
+    unsigned lead_row_height, lead_height, lead_width;
+    book_layout_stage_t *layout;
+    book_layout_draw_cursor_t draw_cursor;
+    bool page0_drawn, page0_has_images, uses_next_fb;
+#ifdef KIIKO_TURN_TIMING
+    int64_t parse_us, layout_us, draw_us;
+    bool timing_logged;
+#endif
+} reader_next_chapter_t;
+
+static reader_next_chapter_t s_next_ch;
+
+static void next_chapter_free_resources(void) {
+    book_layout_stage_free(s_next_ch.layout);
+    s_next_ch.layout = NULL;
+    html_text_free(&s_next_ch.text);
+    s_next_ch.txt_map = (book_chapter_map_t){0};
+    s_next_ch.dims_ctx = (reader_dims_ctx_t){0};
+    s_next_ch.title[0] = s_next_ch.heading_title[0] = s_next_ch.heading_label[0] = 0;
+    s_next_ch.path[0] = 0;
+    s_next_ch.lead_skip = 0;
+    s_next_ch.lead_row_height = s_next_ch.lead_height = s_next_ch.lead_width = 0;
+    memset(&s_next_ch.draw_cursor, 0, sizeof(s_next_ch.draw_cursor));
+    s_next_ch.page0_drawn = s_next_ch.page0_has_images = s_next_ch.uses_next_fb = false;
+#ifdef KIIKO_TURN_TIMING
+    s_next_ch.parse_us = s_next_ch.layout_us = s_next_ch.draw_us = 0;
+    s_next_ch.timing_logged = false;
+#endif
+}
+
+static void next_chapter_clear(void) {
+    next_chapter_free_resources();
+    s_next_ch.state = NEXT_CH_IDLE;
+    s_next_ch.chapter = 0;
+    s_next_ch.source_generation = 0;
+}
+
+static void next_chapter_mark_failed(size_t target, uint32_t generation) {
+    next_chapter_free_resources();
+    s_next_ch.state = NEXT_CH_FAILED;
+    s_next_ch.chapter = target;
+    s_next_ch.source_generation = generation;
+}
+
+static bool next_chapter_has_headroom(void) {
+    return heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) >= BOOK_NEXT_CH_RESERVE;
+}
+
+// 仅在章末最后一页且无未完成工具栏、分段流或回翻趋势时预排下一章。
+// Pre-layout the next chapter only on the chapter's last page without modals, windows or backward turns.
+static int reader_next_chapter_target(void) {
+    if (s_view != READING || !s_text || !s_path[0] ||
+        s_toolbar || s_clear_confirm || s_reader_panel != READER_PANEL_NONE ||
+        s_fonts_reload_pending || s_reader_rule_pending ||
+        s_part_more || s_back_turns || reader_prefetch_target() >= 0) {
+        return -1;
+    }
+    size_t pages = book_layout_page_count();
+    if (!pages || s_page + 1 != pages) return -1;
+    if (s_chapter + 1 >= book_chapter_count()) return -1;
+    return (int)(s_chapter + 1);
+}
+
+static bool next_chapter_begin_layout_locked(void) {
+    if (!next_chapter_has_headroom()) return false;
+    s_next_ch.lead_skip = 0;
+    s_next_ch.lead_row_height = 0;
+    s_next_ch.heading_title[0] = s_next_ch.heading_label[0] = 0;
+    if (book_kind() == BOOK_KIND_EPUB && !s_next_ch.text.source_begin &&
+        s_next_ch.text.len && body_rect().height > 214) {
+        s_next_ch.lead_skip = epub_chapter_lead(&s_next_ch.text, s_next_ch.title,
+            s_next_ch.heading_title, sizeof(s_next_ch.heading_title),
+            s_next_ch.heading_label, sizeof(s_next_ch.heading_label));
+        if (s_next_ch.heading_title[0]) s_next_ch.lead_row_height = 214;
+    }
+    ui_text_set_system_scale(false);
+    compute_chapter_lead_metrics(s_next_ch.heading_title, s_next_ch.heading_label,
+                                 s_next_ch.lead_row_height, app_settings_book_heading_size(),
+                                 &s_next_ch.lead_height, &s_next_ch.lead_width);
+    s_next_ch.dims_ctx = (reader_dims_ctx_t){
+        s_next_ch.chapter, s_next_ch.text.images, s_next_ch.text.image_count,
+        s_next_ch.text.notes, s_next_ch.text.note_count
+    };
+    const book_layout_stage_params_t params = {
+        .utf8 = s_next_ch.text.utf8,
+        .len = s_next_ch.text.len,
+        .blocks = s_next_ch.text.blocks,
+        .block_count = s_next_ch.text.count,
+        .runs = s_next_ch.text.runs,
+        .run_count = s_next_ch.text.run_count,
+        .inline_notes = s_next_ch.text.notes,
+        .inline_note_count = s_next_ch.text.note_count,
+        .dims_fn = reader_image_dims,
+        .dims_ctx = &s_next_ch.dims_ctx,
+        .lead_skip = s_next_ch.lead_skip,
+        .lead_height = s_next_ch.lead_height,
+        .lead_width = s_next_ch.lead_width,
+        .rect = body_rect(),
+        .px = s_px,
+    };
+    s_next_ch.layout = book_layout_stage_begin(&params);
+    if (!s_next_ch.layout) return false;
+    s_next_ch.state = NEXT_CH_LAYOUT;
+    return true;
+}
+
+static void reader_next_chapter_idle(app_ctx_t *ctx) {
+    if (ctx->consumed || ctx->request_app || ctx->request_menu || ctx->request_return ||
+        (ctx->touch && ctx->touch->touched) || app_touch_input_pending(ctx)) {
+        return;
+    }
+    int target = reader_next_chapter_target();
+    uint32_t gen = book_layout_generation();
+    if (target < 0) {
+        if (s_next_ch.state != NEXT_CH_IDLE) {
+            lock_draw();
+            next_chapter_clear();
+            unlock_draw();
+        }
+        return;
+    }
+    if (s_next_ch.state != NEXT_CH_IDLE &&
+        (s_next_ch.chapter != (size_t)target || s_next_ch.source_generation != gen ||
+         strcmp(s_next_ch.path, s_path) != 0 || strcmp(s_font_path, ttf_font_path()) != 0 ||
+         s_book_fonts_applied != app_settings_book_fonts())) {
+        lock_draw();
+        next_chapter_clear();
+        unlock_draw();
+    }
+    if (s_next_ch.state == NEXT_CH_READY || s_next_ch.state == NEXT_CH_FAILED) return;
+
+    lock_draw();
+    if (s_next_ch.state == NEXT_CH_IDLE) {
+        if (!next_chapter_has_headroom()) {
+            next_chapter_mark_failed((size_t)target, gen);
+            unlock_draw();
+            return;
+        }
+#ifdef KIIKO_TURN_TIMING
+        const int64_t t0 = esp_timer_get_time();
+#endif
+        esp_err_t err = book_chapter_preload((size_t)target, &s_next_ch.text, &s_next_ch.txt_map);
+        if (err != ESP_OK) {
+            next_chapter_mark_failed((size_t)target, gen);
+            unlock_draw();
+            return;
+        }
+        s_next_ch.chapter = (size_t)target;
+        s_next_ch.source_generation = gen;
+        copy_text(s_next_ch.path, sizeof(s_next_ch.path), s_path);
+        if (book_chapter_title((size_t)target, s_next_ch.title, sizeof(s_next_ch.title)) != ESP_OK)
+            s_next_ch.title[0] = 0;
+        s_next_ch.state = NEXT_CH_PARSED;
+#ifdef KIIKO_TURN_TIMING
+        s_next_ch.parse_us += esp_timer_get_time() - t0;
+#endif
+        unlock_draw();
+        return;
+    }
+
+    const int64_t deadline = esp_timer_get_time() + BOOK_NEXT_CH_IDLE_US;
+    if (s_next_ch.state == NEXT_CH_PARSED) {
+#ifdef KIIKO_TURN_TIMING
+        const int64_t t0 = esp_timer_get_time();
+#endif
+        if (!next_chapter_begin_layout_locked()) {
+            next_chapter_mark_failed((size_t)target, gen);
+            unlock_draw();
+            return;
+        }
+#ifdef KIIKO_TURN_TIMING
+        s_next_ch.layout_us += esp_timer_get_time() - t0;
+#endif
+    }
+
+    if (s_next_ch.state == NEXT_CH_LAYOUT) {
+        if (!next_chapter_has_headroom()) {
+            next_chapter_mark_failed((size_t)target, gen);
+            unlock_draw();
+            return;
+        }
+#ifdef KIIKO_TURN_TIMING
+        const int64_t t0 = esp_timer_get_time();
+#endif
+        while (s_next_ch.state == NEXT_CH_LAYOUT &&
+               esp_timer_get_time() < deadline && !app_touch_input_pending(ctx)) {
+            int res = book_layout_stage_step(s_next_ch.layout, 4);
+            if (res < 0) {
+#ifdef KIIKO_TURN_TIMING
+                s_next_ch.layout_us += esp_timer_get_time() - t0;
+#endif
+                next_chapter_mark_failed((size_t)target, gen);
+                unlock_draw();
+                return;
+            }
+            if (res > 0) {
+                s_next_ch.page0_has_images =
+                    book_layout_stage_page_image_count(s_next_ch.layout, 0) > 0 ||
+                    book_layout_stage_page_image(s_next_ch.layout, 0) >= 0;
+                if (!s_next_ch.page0_has_images && !app_settings_book_background_path()[0] &&
+                    reader_prefetch_buffer()) {
+                    reset_prefetch();
+                    s_next_ch.uses_next_fb = true;
+                    s_next_ch.page0_drawn = false;
+                    memset(&s_next_ch.draw_cursor, 0, sizeof(s_next_ch.draw_cursor));
+                    s_next_ch.state = NEXT_CH_DRAWING;
+                } else {
+                    s_next_ch.state = NEXT_CH_READY;
+                }
+                break;
+            }
+        }
+#ifdef KIIKO_TURN_TIMING
+        s_next_ch.layout_us += esp_timer_get_time() - t0;
+#endif
+    }
+
+    if (s_next_ch.state == NEXT_CH_DRAWING) {
+        if (!s_next_ch.uses_next_fb || !s_next_fb || app_settings_book_background_path()[0]) {
+            s_next_ch.uses_next_fb = false;
+            s_next_ch.page0_drawn = false;
+            memset(&s_next_ch.draw_cursor, 0, sizeof(s_next_ch.draw_cursor));
+            s_next_ch.state = NEXT_CH_READY;
+        } else {
+#ifdef KIIKO_TURN_TIMING
+            const int64_t t0 = esp_timer_get_time();
+#endif
+            while (s_next_ch.state == NEXT_CH_DRAWING &&
+                   esp_timer_get_time() < deadline && !app_touch_input_pending(ctx)) {
+                if (!s_next_ch.draw_cursor.generation) memset(s_next_fb, 0xff, fb_bytes());
+                ui_text_set_system_scale(false);
+                int res = book_layout_stage_draw_slice(s_next_ch.layout, s_next_fb, 0,
+                                                       body_rect(), s_px, &s_next_ch.draw_cursor);
+                if (res < 0) {
+                    s_next_ch.uses_next_fb = false;
+                    s_next_ch.page0_drawn = false;
+                    memset(&s_next_ch.draw_cursor, 0, sizeof(s_next_ch.draw_cursor));
+                    s_next_ch.state = NEXT_CH_READY;
+                    break;
+                }
+                if (res > 0) {
+                    s_next_ch.page0_drawn = true;
+                    s_next_ch.state = NEXT_CH_READY;
+                    break;
+                }
+            }
+#ifdef KIIKO_TURN_TIMING
+            s_next_ch.draw_us += esp_timer_get_time() - t0;
+#endif
+        }
+    }
+
+#ifdef KIIKO_TURN_TIMING
+    if (s_next_ch.state == NEXT_CH_READY && !s_next_ch.timing_logged) {
+        s_next_ch.timing_logged = true;
+        ESP_LOGI("turn", "PRELOAD ch=%u pages=%u img=%d drawn=%d parse=%lld.%lld layout=%lld.%lld draw=%lld.%lld",
+                 (unsigned)s_next_ch.chapter,
+                 (unsigned)book_layout_stage_page_count(s_next_ch.layout),
+                 (int)s_next_ch.page0_has_images,
+                 (int)s_next_ch.page0_drawn,
+                 (long long)(s_next_ch.parse_us / 1000), (long long)((s_next_ch.parse_us % 1000) / 100),
+                 (long long)(s_next_ch.layout_us / 1000), (long long)((s_next_ch.layout_us % 1000) / 100),
+                 (long long)(s_next_ch.draw_us / 1000), (long long)((s_next_ch.draw_us % 1000) / 100));
+    }
+#endif
+    unlock_draw();
+}
+
+static bool next_chapter_can_adopt(size_t chapter) {
+    return s_next_ch.state != NEXT_CH_IDLE && s_next_ch.state != NEXT_CH_FAILED &&
+           s_next_ch.chapter == chapter &&
+           s_next_ch.source_generation == book_layout_generation() &&
+           strcmp(s_next_ch.path, s_path) == 0 &&
+           strcmp(s_font_path, ttf_font_path()) == 0 &&
+           s_book_fonts_applied == app_settings_book_fonts();
+}
+
+static bool commit_next_chapter(app_ctx_t *ctx, size_t chapter) {
+    (void)ctx;
+    lock_draw();
+    if (!next_chapter_can_adopt(chapter)) {
+        next_chapter_clear();
+        unlock_draw();
+        return false;
+    }
+    if (s_next_ch.state == NEXT_CH_PARSED) {
+        if (!next_chapter_begin_layout_locked()) {
+            next_chapter_clear();
+            unlock_draw();
+            return false;
+        }
+    }
+    while (s_next_ch.state == NEXT_CH_LAYOUT) {
+        int res = book_layout_stage_step(s_next_ch.layout, 64);
+        if (res < 0) {
+            next_chapter_clear();
+            unlock_draw();
+            return false;
+        }
+        if (res > 0) {
+            s_next_ch.page0_has_images =
+                book_layout_stage_page_image_count(s_next_ch.layout, 0) > 0 ||
+                book_layout_stage_page_image(s_next_ch.layout, 0) >= 0;
+            s_next_ch.state = NEXT_CH_READY;
+        }
+    }
+    const bool adopt_fb = s_next_ch.uses_next_fb && s_next_fb &&
+                          !s_next_ch.page0_has_images && !app_settings_book_background_path()[0];
+    const bool page0_done = adopt_fb && s_next_ch.page0_drawn;
+    const book_layout_draw_cursor_t saved_cursor = s_next_ch.draw_cursor;
+    if (!book_layout_stage_commit(s_next_ch.layout, &s_reader_dims_ctx)) {
+        next_chapter_clear();
+        unlock_draw();
+        return false;
+    }
+    s_next_ch.layout = NULL;
+    book_chapter_commit_map(&s_next_ch.txt_map);
+    if (!s_next_ch.text.source_begin) book_excerpt_offer(s_path, chapter, &s_next_ch.text);
+    free(s_text);
+    free(s_blocks);
+    free(s_runs);
+    html_notes_free(s_notes, s_note_count);
+    for (size_t i = 0; i < s_image_count; ++i) free(s_images[i]);
+    free(s_images);
+
+    s_notes = s_next_ch.text.notes;
+    s_note_count = s_next_ch.text.note_count;
+    s_footnote_note = -1;
+    s_text = s_next_ch.text.utf8;
+    s_text_len = s_next_ch.text.len;
+    s_part_base = s_next_ch.text.part_base;
+    s_part_begin = s_next_ch.text.source_begin;
+    s_part_end = s_next_ch.text.source_end;
+    s_part_more = s_next_ch.text.part_more;
+    s_blocks = s_next_ch.text.blocks;
+    s_block_count = s_next_ch.text.count;
+    s_runs = s_next_ch.text.runs;
+    s_run_count = s_next_ch.text.run_count;
+    s_images = s_next_ch.text.images;
+    s_image_count = s_next_ch.text.image_count;
+    s_reader_dims_ctx = (reader_dims_ctx_t){chapter, s_images, s_image_count, s_notes, s_note_count};
+    book_layout_set_image_dims(reader_image_dims, &s_reader_dims_ctx);
+    book_layout_set_heading_draw(draw_reader_flow_heading);
+
+    s_chapter = chapter;
+    s_page = 0;
+    s_chapter_jump_undo.valid = false;
+    s_selected_toc = SIZE_MAX;
+    s_jump_offset = SIZE_MAX;
+    s_jump_page = 0;
+    s_chapter_lead_skip = s_next_ch.lead_skip;
+    s_chapter_lead_row_height = s_next_ch.lead_row_height;
+    s_chapter_lead_height = s_next_ch.lead_height;
+    s_chapter_lead_width = s_next_ch.lead_width;
+    copy_text(s_chapter_heading_title, sizeof(s_chapter_heading_title), s_next_ch.heading_title);
+    copy_text(s_chapter_heading_label, sizeof(s_chapter_heading_label), s_next_ch.heading_label);
+    copy_text(s_title, sizeof(s_title), s_next_ch.title);
+    copy_text(s_font_path, sizeof(s_font_path), ttf_font_path());
+    s_message[0] = 0;
+
+    reset_prefetch();
+    s_keep_cur.page = s_keep_prev.page = -1;
+    const uint32_t new_gen = book_layout_generation();
+    if (page0_done) {
+        s_next_page = 0;
+        s_prep_page = 0;
+        s_next_generation = new_gen;
+    } else if (adopt_fb && saved_cursor.started && !saved_cursor.failed) {
+        s_prep_page = 0;
+        s_prep_cursor = saved_cursor;
+        s_prep_cursor.generation = new_gen;
+    }
+    memset(&s_next_ch, 0, sizeof(s_next_ch));
+    s_next_ch.state = NEXT_CH_IDLE;
+    // 等目标页真实推屏成功再确认新章阅读位置。
+    // Confirm the adopted chapter's saved position only after presentation succeeds.
+    s_chapter_display_pending = true;
+
+    release_page_images();
+    if (reader_image_slots(0) == 0) {
+        s_page_images_for = 0;
+        s_page_images_generation = new_gen;
+        unlock_draw();
+    } else {
+        unlock_draw();
+        prepare_inline_image();
+    }
+    ESP_LOGI(TAG, "chapter %u adopted stack free %u psram free %u largest %u", (unsigned)chapter,
+             (unsigned)uxTaskGetStackHighWaterMark(NULL),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    return true;
+}
+
 static void free_book(void) {
+    s_chapter_display_pending = false;
     s_reader_rule_pending = false;
     if (s_txt_opening) {
         s_txt_opening = false;
@@ -5530,8 +5968,12 @@ static void release_page_images(void) {
 static void release_image_headroom(void) {
     if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) >= 3u * 1024u * 1024u) return;
     lock_draw();
-    // 保留页最先让出；腾够了就不动预绘缓冲和字形缓存。
-    // Kept pages give way first; if that suffices, keep the prefetch buffer and glyph cache.
+    // 候选章最先让出；腾够了就不动保留页、预绘缓冲和字形缓存。
+    // Staged next-chapter buffers give way first; if that suffices, keep retained pages and caches.
+    next_chapter_clear();
+    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) >= 3u * 1024u * 1024u) { unlock_draw(); return; }
+    // 保留页接着让出；腾够了就不动预绘缓冲和字形缓存。
+    // Kept pages give way next; if that suffices, keep the prefetch buffer and glyph cache.
     reader_keep_free();
     if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) >= 3u * 1024u * 1024u) { unlock_draw(); return; }
     invalidate_prep();
@@ -5752,6 +6194,9 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     return true;
 }
 static bool load_chapter(app_ctx_t* ctx, size_t chapter, size_t offset, bool last_page) {
+    if (!offset && !last_page && next_chapter_can_adopt(chapter) && commit_next_chapter(ctx, chapter))
+        return true;
+    s_chapter_display_pending = false;
     return load_chapter_at(ctx, chapter, offset, last_page, NULL, SIZE_MAX);
 }
 // 关闭图片时跳过纯插图页，避免出现空白翻页。/ Skip illustration-only pages when images are disabled.
@@ -9926,7 +10371,7 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
     app_redraw_t metadata=reader_metadata_tick(ctx);
     if(metadata!=APP_REDRAW_NONE)return metadata;
     app_redraw_t clock=reader_clock_tick(ctx);
-    if(clock==APP_REDRAW_NONE){reader_save_idle(ctx);reader_prefetch_idle(ctx);}
+    if(clock==APP_REDRAW_NONE){reader_save_idle(ctx);reader_prefetch_idle(ctx);reader_next_chapter_idle(ctx);}
     return clock;
 }
 static void before_lock(app_ctx_t* ctx) {

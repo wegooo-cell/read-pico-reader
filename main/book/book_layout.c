@@ -21,52 +21,6 @@
 #define PAGE_MAX 4096u
 #define PSRAM_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 
-static const char* s_text;
-static size_t s_len;
-static size_t* s_pages;
-static size_t s_count;
-static size_t s_capacity;
-// 阅读器可选的竖直留白策略；默认关闭，保持其他调用方的原始分页。
-// Optional reader spacing policy, disabled by default to preserve other callers' pagination.
-static bool s_vertical_balance;
-static bool s_reader_spacing;
-static int *s_page_y;
-static int64_t s_page_text_bottom;
-static bool s_page_has_text;
-static book_layout_draw_cursor_t *s_idle_draw;
-static char* s_line;
-static size_t s_line_capacity;
-static EpdRect s_rect;
-static int s_px;
-static unsigned s_line_percent = 150;
-static int s_paragraph_percent = 50;
-static int s_tracking_px;
-static unsigned s_first_line_indent_em = 2;
-static int s_first_line_indent_adjust_px;
-static unsigned s_reading_line;
-static bool s_reading_line_full;
-static int s_reading_line_offset;
-static bool s_images_visible = true;
-// 竖排：同一套折行与禁则逻辑，只是推进方向朝下、堆叠方向朝左。
-// Vertical setting: the same wrapping and kinsoku logic, with the advance running down and the
-// stack running leftward.
-static bool s_vertical;
-// 竖排首页右起为竖排题头预留的列宽，调用方按同一宽度绘制题头。
-// Columns reserved from the right of the first vertical page for a vertical chapter heading; the
-// caller draws the heading into the same width.
-static unsigned s_chapter_lead_width;
-static size_t s_lead_skip;
-static unsigned s_lead_height;
-
-static const blk_t* s_blocks;
-static size_t s_block_count;
-static bool s_sparse_blocks;
-static book_heading_draw_fn s_heading_draw;
-static book_heading_measure_fn s_heading_measure;
-static int s_heading_extent;
-// 布局代次：重排或释放后自增，页内位图缓存靠它失效。/ Bumped on rebuild or free so page bitmap caches expire.
-static uint32_t s_generation;
-
 // 页内插图：图片序号、页内 y、显示宽高。平坦池按页顺序存放，每页用起点表切片，
 // 这样大多数没有插图的页只花两个下标。
 // Images placed on a page: index, y within the page, and display width/height. The pool is flat
@@ -80,31 +34,109 @@ typedef struct {
     int16_t x; ///< 行内图标为行末 x；-1 表示块级图居中 / Inline icon row-end x; -1 centres block images
 } layout_image_t;
 
-static layout_image_t* s_images;
-static size_t s_image_count;
-static size_t s_image_capacity;
-static uint32_t* s_page_img_start;
-// 上一行文字的结束 x 与该行顶部，用于把行内注号图标贴到字后。
-// End x and top of the previous text line, used to attach inline footnote icons to the text.
-static int s_last_line_x_end, s_last_line_used;
-
-// 行内注号图标：正文占位符 U+FFFC 对应的注表，排版把图标宽度算进行宽、记录精确 x。
-// Inline footnote icons: the note table behind U+FFFC placeholders, so layout can charge the
-// icon width to the line and record its exact x.
-static const html_note_t* s_inline_notes;
-static size_t s_inline_note_count;
 // 文字注号的版面矩形：文字注号没有图图标，命中区靠排版记下的行内位置。
 // On-page rects for text markers: they carry no icon, so their tap targets come from layout.
 typedef struct { size_t page, note; int x, y, w, h; } layout_note_marker_t;
-static layout_note_marker_t* s_note_markers;
-static size_t s_note_marker_count, s_note_marker_capacity;
-static book_layout_image_dims_fn s_dims_fn;
-static void* s_dims_ctx;
 
-// 插图可用区域。通栏开启时宽度换成整屏，竖直方向仍是正文那一条，分页数学不动。
-// Region illustrations may occupy. With full bleed on, its width becomes the panel's and its
-// vertical band stays the body's, leaving the pagination math alone.
-static EpdRect s_image_rect;
+// 单章排版文档状态：活动排版与后台候选排版各持一份，互不干扰。
+// Per-chapter layout document state: active and staged layouts each own an isolated instance.
+typedef struct {
+    const char *text;
+    size_t len;
+    size_t *pages;
+    size_t count;
+    size_t capacity;
+    int *page_y;
+    int64_t page_text_bottom;
+    bool page_has_text;
+    char *line;
+    size_t line_capacity;
+    EpdRect rect;
+    int px;
+    unsigned chapter_lead_width;
+    size_t lead_skip;
+    unsigned lead_height;
+    const blk_t *blocks;
+    size_t block_count;
+    bool sparse_blocks;
+    layout_image_t *images;
+    size_t image_count;
+    size_t image_capacity;
+    uint32_t *page_img_start;
+    int last_line_x_end, last_line_used;
+    const html_note_t *inline_notes;
+    size_t inline_note_count;
+    layout_note_marker_t *note_markers;
+    size_t note_marker_count, note_marker_capacity;
+    book_layout_image_dims_fn dims_fn;
+    void *dims_ctx;
+    EpdRect image_rect;
+    const html_run_t *runs;
+    size_t run_count;
+} book_layout_doc_t;
+
+static book_layout_doc_t s_active;
+static book_layout_doc_t *s_doc = &s_active;
+
+#define s_text (s_doc->text)
+#define s_len (s_doc->len)
+#define s_pages (s_doc->pages)
+#define s_count (s_doc->count)
+#define s_capacity (s_doc->capacity)
+#define s_page_y (s_doc->page_y)
+#define s_page_text_bottom (s_doc->page_text_bottom)
+#define s_page_has_text (s_doc->page_has_text)
+#define s_line (s_doc->line)
+#define s_line_capacity (s_doc->line_capacity)
+#define s_rect (s_doc->rect)
+#define s_px (s_doc->px)
+#define s_chapter_lead_width (s_doc->chapter_lead_width)
+#define s_lead_skip (s_doc->lead_skip)
+#define s_lead_height (s_doc->lead_height)
+#define s_blocks (s_doc->blocks)
+#define s_block_count (s_doc->block_count)
+#define s_sparse_blocks (s_doc->sparse_blocks)
+#define s_images (s_doc->images)
+#define s_image_count (s_doc->image_count)
+#define s_image_capacity (s_doc->image_capacity)
+#define s_page_img_start (s_doc->page_img_start)
+#define s_last_line_x_end (s_doc->last_line_x_end)
+#define s_last_line_used (s_doc->last_line_used)
+#define s_inline_notes (s_doc->inline_notes)
+#define s_inline_note_count (s_doc->inline_note_count)
+#define s_note_markers (s_doc->note_markers)
+#define s_note_marker_count (s_doc->note_marker_count)
+#define s_note_marker_capacity (s_doc->note_marker_capacity)
+#define s_dims_fn (s_doc->dims_fn)
+#define s_dims_ctx (s_doc->dims_ctx)
+#define s_image_rect (s_doc->image_rect)
+#define s_runs (s_doc->runs)
+#define s_run_count (s_doc->run_count)
+
+// 阅读器可选的竖直留白策略；默认关闭，保持其他调用方的原始分页。
+// Optional reader spacing policy, disabled by default to preserve other callers' pagination.
+static bool s_vertical_balance;
+static bool s_reader_spacing;
+static book_layout_draw_cursor_t *s_idle_draw;
+static unsigned s_line_percent = 150;
+static int s_paragraph_percent = 50;
+static int s_tracking_px;
+static unsigned s_first_line_indent_em = 2;
+static int s_first_line_indent_adjust_px;
+static unsigned s_reading_line;
+static bool s_reading_line_full;
+static int s_reading_line_offset;
+static bool s_images_visible = true;
+// 竖排：同一套折行与禁则逻辑，只是推进方向朝下、堆叠方向朝左。
+// Vertical setting: the same wrapping and kinsoku logic, with the advance running down and the
+// stack running leftward.
+static bool s_vertical;
+static book_heading_draw_fn s_heading_draw;
+static book_heading_measure_fn s_heading_measure;
+static int s_heading_extent;
+// 布局代次：重排或释放后自增，页内位图缓存靠它失效。/ Bumped on rebuild or free so page bitmap caches expire.
+static uint32_t s_generation;
+static uint32_t s_stage_generation;
 // 通栏宽度（整屏像素）。面板常量，重排不必跟着改；0 关闭。
 // Full-bleed width in panel pixels. A panel constant, so re-layouts need not update it; 0 disables.
 static int s_image_bleed_width;
@@ -122,12 +154,6 @@ static const blk_t* block_at(size_t off) {
     if (s_sparse_blocks && (off < block->offset || off - block->offset >= block->len)) return NULL;
     return block;
 }
-
-// 字体 run 表由调用方借用（和块表同一份 html_text），绘制时按段换字体。
-// The run table is borrowed from the caller's html_text, next to the block table, so drawing
-// can switch faces span by span.
-static const html_run_t* s_runs;
-static size_t s_run_count;
 
 // 一行最多切几段字体。屏上一行十几个字，段数只由内联标签决定。
 // How many face spans one line may carry: a line holds a dozen glyphs and spans only come
@@ -328,27 +354,36 @@ static bool prohibited_line_end(uint32_t cp) {
 
 uint32_t book_layout_generation(void) { return s_generation; }
 
+static void doc_release_buffers(book_layout_doc_t *doc) {
+    if (!doc) return;
+    free(doc->pages);
+    free(doc->page_y);
+    doc->page_y = NULL;
+    doc->page_text_bottom = 0;
+    doc->page_has_text = false;
+    free(doc->line);
+    free(doc->images);
+    free(doc->page_img_start);
+    free(doc->note_markers);
+    doc->pages = NULL;
+    doc->line = NULL;
+    doc->line_capacity = 0;
+    doc->images = NULL;
+    doc->page_img_start = NULL;
+    doc->image_count = doc->image_capacity = 0;
+    doc->note_markers = NULL;
+    doc->note_marker_count = doc->note_marker_capacity = 0;
+    doc->text = NULL;
+    doc->count = doc->capacity = doc->len = 0;
+    doc->px = 0;
+    doc->blocks = NULL;
+    doc->block_count = 0;
+    doc->image_rect = (EpdRect){0, 0, 0, 0};
+}
+
 void book_layout_free(void) {
     ++s_generation;
-    free(s_pages);
-    free(s_page_y);s_page_y=NULL;s_page_text_bottom=0;s_page_has_text=false;
-    free(s_line);
-    free(s_images);
-    free(s_page_img_start);
-    free(s_note_markers);
-    s_pages = NULL;
-    s_line = NULL; s_line_capacity = 0;
-    s_images = NULL;
-    s_page_img_start = NULL;
-    s_image_count = s_image_capacity = 0;
-    s_note_markers = NULL;
-    s_note_marker_count = s_note_marker_capacity = 0;
-    s_text = NULL;
-    s_count = s_capacity = s_len = 0;
-    s_px = 0;
-    s_blocks = NULL;
-    s_block_count = 0;
-    s_image_rect = (EpdRect){0, 0, 0, 0};
+    doc_release_buffers(&s_active);
 }
 
 static int s_chapter_height, s_chapter_top;
@@ -1153,85 +1188,82 @@ static size_t after_volume(size_t off) {
 // Vertical pagination: columns fill the page right to left and each column runs down; an
 // illustration takes a page of its own, breaking both before and after it. Whether a glyph stands
 // upright, lifts into the cell's corner or turns 90° is the font engine's vertical drawing rule.
-static bool build_vertical(size_t len) {
-    size_t off = skip_reader_spacing(s_lead_skip);
-    size_t visible = skip_reader_spacing(skip_image_spacing(off));
-    if (visible < len) off = visible;
-    else if (!s_images_visible) {
-        for (size_t i = 0; i < s_block_count; ++i)
-            if (s_blocks[i].image >= 0 && s_blocks[i].offset >= off) { off = s_blocks[i].offset; break; }
+static int layout_step_vertical(size_t *off_io, size_t *checked, int64_t *used_io) {
+    size_t off = *off_io;
+    const size_t len = s_len;
+    if (off >= len) return 1;
+    int64_t used = *used_io;
+    size_t visible_off = skip_reader_spacing(skip_image_spacing(off));
+    if (visible_off != off) {
+        *off_io = visible_off;
+        return visible_off >= len ? 1 : 0;
     }
-    size_t checked = 0;
-    off = skip_heading_spacing(off, &checked);
-    if (!append_page(off)) return false;
-    // 首页右起为竖排题头留出列宽；留太多时第一列正文会另起一页，不会卡住。
-    // The first page keeps room for a vertical chapter heading at its right; if that is too wide
-    // the first body column starts a new page instead of stalling.
-    int64_t used = s_count == 1 && s_chapter_lead_width < (unsigned)s_rect.width
-        ? (int64_t)s_chapter_lead_width : 0;
-    while (off < len) {
-        size_t visible_off = skip_reader_spacing(skip_image_spacing(off));
-        if (visible_off != off) { off = visible_off; continue; }
-        off = skip_heading_spacing(off, &checked);
-        if (off > s_pages[s_count - 1] && page_break_at(off)) {
-            if (!used) s_pages[s_count - 1] = off;
-            else if (!append_page(off)) return false;
+    off = skip_heading_spacing(off, checked);
+    if (off > s_pages[s_count - 1] && page_break_at(off)) {
+        if (!used) s_pages[s_count - 1] = off;
+        else if (!append_page(off)) return -1;
+        used = 0;
+    }
+    const blk_t *block = block_at(off);
+    int extent = heading_extent(block, off, s_rect);
+    if (extent) {
+        used += extent;
+        off = skip_reader_spacing(heading_end(block));
+        if (block->volume_start) {
+            off = after_volume(off);
+            if (off < len && !append_page(off)) return -1;
             used = 0;
         }
-        const blk_t* block = block_at(off);
-        int extent = heading_extent(block, off, s_rect);
-        if (extent) {
-            used += extent;
-            off = skip_reader_spacing(heading_end(block));
-            if (block->volume_start) {
-                off = after_volume(off);
-                if (off < len && !append_page(off)) return false;
-                used = 0;
-            }
-            continue;
-        }
-        if (block && block->image >= 0 && off == block->offset) {
-            int img_w = 0, img_h = 0;
-            // 首页题头占的就是顶部这一条，插图不能在题头上开画。
-            // The first page's heading owns the top band, so an illustration may not start there.
-            bool heading_band = s_count == 1 && s_lead_height > 0;
-            if (image_display_size(block->image, &img_w, &img_h)) {
-                if ((used || heading_band) && !append_page(off)) return false;
-                if (!record_page_image(block->image, -1, 0, img_w, img_h)) return false;
-                off = block->offset + block->len;
-                if (off < len && s_text[off] == '\n') ++off;
-                // 图后另起一页给正文，图页自己只剩这一张图。
-                // Start a fresh page for the text so the image page holds nothing else.
-                if (off < len && !append_page(off)) return false;
-                used = 0;
-            } else {
-                if ((used || heading_band) && !append_page(off)) return false;
-                used = s_rect.width;
-                off = block->offset + block->len;
-                if (off < len && s_text[off] == '\n') ++off;
-            }
-            continue;
-        }
-        int lead = s_count == 1 ? chapter_lead_extent() : 0;
-        size_t next;
-        bool paragraph_end, heading;
-        int px, run_height, indent, margin_before, margin_after;
-        uint8_t align;
-        if (!take_line(off, book_layout_page_content_height(s_count - 1) - lead, 0, &next, &paragraph_end, &px, &heading,
-                       &run_height, &indent, &align, &margin_before, &margin_after)) return false;
-        int pitch = line_height_for(px);
-        if (pitch > s_rect.width) return false;
-        int leading = line_leading(block,margin_before,used,s_rect.width-pitch);
-        if (used + leading + pitch > s_rect.width) {
-            if (!append_page(off)) return false;
-            used = 0;
-            continue;
-        }
-        used += leading + pitch;
-        if (paragraph_end) used += gap_for(pitch, heading, px) + margin_after;
-        off = next;
+        *off_io = off;
+        *used_io = used;
+        return off >= len ? 1 : 0;
     }
-    return true;
+    if (block && block->image >= 0 && off == block->offset) {
+        int img_w = 0, img_h = 0;
+        // 首页题头占的就是顶部这一条，插图不能在题头上开画。
+        // The first page's heading owns the top band, so an illustration may not start there.
+        bool heading_band = s_count == 1 && s_lead_height > 0;
+        if (image_display_size(block->image, &img_w, &img_h)) {
+            if ((used || heading_band) && !append_page(off)) return -1;
+            if (!record_page_image(block->image, -1, 0, img_w, img_h)) return -1;
+            off = block->offset + block->len;
+            if (off < len && s_text[off] == '\n') ++off;
+            // 图后另起一页给正文，图页自己只剩这一张图。
+            // Start a fresh page for the text so the image page holds nothing else.
+            if (off < len && !append_page(off)) return -1;
+            used = 0;
+        } else {
+            if ((used || heading_band) && !append_page(off)) return -1;
+            used = s_rect.width;
+            off = block->offset + block->len;
+            if (off < len && s_text[off] == '\n') ++off;
+        }
+        *off_io = off;
+        *used_io = used;
+        return off >= len ? 1 : 0;
+    }
+    int lead = s_count == 1 ? chapter_lead_extent() : 0;
+    size_t next;
+    bool paragraph_end, heading;
+    int px, run_height, indent, margin_before, margin_after;
+    uint8_t align;
+    if (!take_line(off, book_layout_page_content_height(s_count - 1) - lead, 0, &next, &paragraph_end, &px, &heading,
+                   &run_height, &indent, &align, &margin_before, &margin_after)) return -1;
+    int pitch = line_height_for(px);
+    if (pitch > s_rect.width) return -1;
+    int leading = line_leading(block, margin_before, used, s_rect.width - pitch);
+    if (used + leading + pitch > s_rect.width) {
+        if (!append_page(off)) return -1;
+        *off_io = off;
+        *used_io = 0;
+        return 0;
+    }
+    used += leading + pitch;
+    if (paragraph_end) used += gap_for(pitch, heading, px) + margin_after;
+    off = next;
+    *off_io = off;
+    *used_io = used;
+    return off >= len ? 1 : 0;
 }
 
 bool book_layout_build(const char* utf8, size_t len, EpdRect rect, int px) {
@@ -1243,8 +1275,10 @@ static const blk_t *banner_heading(const blk_t *image) {
     const blk_t *next = image+1;
     return next->chapter_start && !next->reader_heading && !(next->page_break & HTML_BREAK_BEFORE) ? next : NULL;
 }
-bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks, size_t count, EpdRect rect, int px) {
-    book_layout_free();
+
+static bool layout_prepare_doc(const char *utf8, size_t len, const blk_t *blocks, size_t count,
+                               EpdRect rect, int px, size_t *out_off, size_t *out_checked,
+                               int64_t *out_used, int *out_line_height) {
     if ((!utf8 && len) || len == SIZE_MAX || s_lead_skip > len || s_lead_height >= (unsigned)rect.height ||
         px <= 0 || px > INT_MAX / 3 ||
         rect.width <= 0 || rect.height <= 0 || rect.x < 0 || rect.y < 0 ||
@@ -1261,7 +1295,7 @@ bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks,
         if (!blocks || count > HTML_TEXT_MAX_BLOCKS) return false;
         size_t expected = 0;
         for (size_t i = 0; i < count; ++i) {
-            const blk_t* b = &blocks[i];
+            const blk_t *b = &blocks[i];
             if ((sparse ? b->offset < expected || b->reader_heading != BOOK_HEADING_TXT :
                           b->offset != expected) ||
                 b->offset >= len || !b->len || b->len > len - b->offset ||
@@ -1288,13 +1322,8 @@ bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks,
     resolve_image_rect();
     s_line_capacity = len + 1 < 256 ? len + 1 : 256;
     s_line = heap_caps_malloc(s_line_capacity, PSRAM_CAPS);
+    if (!s_line) return false;
     size_t off = skip_reader_spacing(s_lead_skip);
-    if (!s_line) goto fail;
-    if (s_vertical) {
-        if (!build_vertical(len)) goto fail;
-        ttf_font_select(TTF_FONT_SLOT_SYSTEM);
-        return true;
-    }
     size_t visible_off = skip_reader_spacing(skip_image_spacing(off));
     if (visible_off < len) off = visible_off;
     else if (!s_images_visible) {
@@ -1305,153 +1334,185 @@ bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks,
     }
     size_t checked = 0;
     off = skip_heading_spacing(off, &checked);
-    if (!append_page(off)) goto fail;
-    int64_t used = chapter_lead_extent();
-    while (off < len) {
-        size_t visible = skip_reader_spacing(skip_image_spacing(off));
-        if (visible != off) { off = visible; continue; }
-        off = skip_heading_spacing(off, &checked);
-        if (off > s_pages[s_count - 1] && page_break_at(off)) {
-            if (!used) s_pages[s_count - 1] = off;
-            else if (!append_page(off)) goto fail;
-            used = 0;
-        }
-        const blk_t* block = block_at(off);
-        const int height = book_layout_page_content_height(s_count - 1);
-        EpdRect page_rect = rect;
-        page_rect.height = height;
-        int extent = heading_extent(block, off, page_rect);
-        if (extent) {
-            used += extent;
-            s_page_has_text = true;
-            s_page_text_bottom = used;
-            s_last_line_x_end = 0;
-            off = skip_reader_spacing(heading_end(block));
-            if (block->volume_start) {
-                off = after_volume(off);
-                if (off < len && !append_page(off)) goto fail;
-                used = 0;
-            }
-            continue;
-        }
-        if (block && block->image >= 0 && off == block->offset) {
-            int img_w = 0, img_h = 0;
-            if (image_display_size(block->image, &img_w, &img_h)) {
-                // 小图标（注号等）贴着上一行末尾画，不占新行；其余插图按块级流排。
-                // Small icons (footnote markers) attach to the end of the previous line instead of
-                // claiming a new line; other illustrations stay block-level.
-                const blk_t *title = banner_heading(block);
-                const bool inline_icon = !title && s_last_line_x_end > 0 && line_height > 0 &&
-                    img_h <= line_height * 2 && img_w <= s_rect.width / 2 &&
-                    s_last_line_x_end + img_w + 4 <= s_rect.x + s_rect.width;
-                if (inline_icon) {
-                    int iy = s_last_line_used + (line_height - img_h) / 2;
-                    if (iy < 0) iy = 0;
-                    if (!record_page_image(block->image, s_last_line_x_end + 2, iy, img_w, img_h)) goto fail;
-                } else {
-                    // 图是页面流里的一个块：放得下就留在本页，文字接着图下面排；放不下才翻页。
-                    // An image is one block in the page flow: keep it on this page when it fits and
-                    // let the text continue below it; only start a new page when it does not fit.
-                    int need = img_h;
-                    if (title) {
-                        const int title_px = block_line_px(title,title->heading || title->authored_style);
-                        const int together = img_h + px/2 + line_height_for(title_px) +
-                            title_px * title->margin_before_percent / 100;
-                        if (together<=rect.height) need=together;
-                    }
-                    if (used && used + need > height) {
-                        if (!append_page(off)) goto fail;
-                        used = 0;
-                    }
-                    if (!record_page_image(block->image, -1, (int)used, img_w, img_h)) goto fail;
-                    used += img_h + px / 2;  // 图下留半个行高 / half a line under the image
-                }
-            } else {
-                // 取不到尺寸时退回整页显示，保证纯插图章节仍可被跨章跳过逻辑识别。
-                // Without dimensions, fall back to a whole-page image so an image-only chapter
-                // stays detectable by the chapter-skip path.
-                if (used && !append_page(off)) goto fail;
-                used = rect.height;
-            }
-            off = block->offset + block->len;
-            if (off < len && utf8[off] == '\n') ++off;
-            continue;
-        }
-        size_t next;
-        bool paragraph_end, heading;
-        int line_px, line_width, indent, margin_before, margin_after;
-        uint8_t align;
-        if (!take_line(off, s_rect.width, s_rect.x, &next, &paragraph_end, &line_px, &heading,
-                       &line_width, &indent, &align, &margin_before, &margin_after)) goto fail;
-        (void)line_width; (void)indent; (void)align;
-        line_height = line_height_for(line_px);
-        int leading = line_leading(block,margin_before,used,height-line_height);
-        int fit_height=line_page_height(line_px,line_height,off,used+leading,height);
-        if (fit_height > rect.height) goto fail;
-        if (used + leading + fit_height > height) {
-            if (!append_page(off)) goto fail;
-            used = 0;
-            leading = line_leading(block,margin_before,0,
-                book_layout_page_content_height(s_count-1)-line_height);
-            fit_height=line_fit_height(line_px,line_height);
-        }
-        // 记下这一行里的行内注号图标：x 用行内前缀宽度估算，y 落在该行内。
-        // Record inline markers on this line: x from the measured prefix, y inside the line.
-        for (size_t p = off; p + 3 <= next; ++p) {
-            if ((uint8_t)s_text[p] != 0xEF || (uint8_t)s_text[p + 1] != 0xBF || (uint8_t)s_text[p + 2] != 0xBC)
-                continue;
-            int image = -1, iw = 0, ih = 0;
-            if (!inline_icon_at(p, &image, &iw, &ih)) continue;
-            char prefix[256];
-            size_t plen = p - off;
-            if (plen >= sizeof(prefix)) plen = sizeof(prefix) - 1;
-            memcpy(prefix, s_text + off, plen);
-            prefix[plen] = 0;
-            int px_w = 0;
-            if (plen) { slot_select_for(off); px_w = ttf_text_width_px(line_px, prefix); }
-            int icon_x = rect.x + indent + px_w;
-            int icon_y = (int)used + leading + (line_height - ih) / 2;
-            if (icon_y < 0) icon_y = 0;
-            if (!record_page_image(image, icon_x, icon_y, iw, ih)) goto fail;
-        }
-        // 文字注号没有图标占位，按行内位置记下命中矩形（宽约一个字）。
-        // Text markers carry no placeholder; record their in-line rect (about one em wide).
-        for (size_t ni = 0; ni < s_inline_note_count; ++ni) {
-            if (s_inline_notes[ni].image >= 0) continue;
-            const size_t marker = s_inline_notes[ni].marker_offset;
-            if (marker < off || marker >= next) continue;
-            char prefix[256];
-            size_t plen = marker - off;
-            if (plen >= sizeof(prefix)) continue;
-            memcpy(prefix, s_text + off, plen);
-            prefix[plen] = 0;
-            int px_w = 0;
-            if (plen) { slot_select_for(off); px_w = ttf_text_width_px(line_px, prefix); }
-            int marker_x = rect.x + indent + px_w;
-            int marker_y = (int)used + leading;
-            if (marker_y < 0) marker_y = 0;
-            if (!record_note_marker(s_count ? s_count - 1 : 0, ni, marker_x, marker_y,
-                                    line_px, fit_height)) goto fail;
-        }
-        if(s_line[0]){s_page_has_text=true;s_page_text_bottom=used+leading+fit_height;}
-        s_last_line_used = (int)used + leading;
-        s_last_line_x_end = s_rect.x + indent + line_width;
-        used += leading + line_height;
-        if (paragraph_end) used += gap_for(line_height, heading, line_px) + margin_after;
-        off = next;
+    if (!append_page(off)) return false;
+    *out_off = off;
+    *out_checked = checked;
+    *out_line_height = line_height;
+    if (s_vertical) {
+        *out_used = s_count == 1 && s_chapter_lead_width < (unsigned)s_rect.width
+            ? (int64_t)s_chapter_lead_width : 0;
+    } else {
+        *out_used = chapter_lead_extent();
     }
+    return true;
+}
+
+static int layout_step_horizontal(size_t *off_io, size_t *checked, int64_t *used_io, int *line_height_io) {
+    size_t off = *off_io;
+    const size_t len = s_len;
+    if (off >= len) return 1;
+    int64_t used = *used_io;
+    int line_height = *line_height_io;
+    const EpdRect rect = s_rect;
+    const int px = s_px;
+    const char *utf8 = s_text;
+    size_t visible = skip_reader_spacing(skip_image_spacing(off));
+    if (visible != off) {
+        *off_io = visible;
+        return visible >= len ? 1 : 0;
+    }
+    off = skip_heading_spacing(off, checked);
+    if (off > s_pages[s_count - 1] && page_break_at(off)) {
+        if (!used) s_pages[s_count - 1] = off;
+        else if (!append_page(off)) return -1;
+        used = 0;
+    }
+    const blk_t *block = block_at(off);
+    const int height = book_layout_page_content_height(s_count - 1);
+    EpdRect page_rect = rect;
+    page_rect.height = height;
+    int extent = heading_extent(block, off, page_rect);
+    if (extent) {
+        used += extent;
+        s_page_has_text = true;
+        s_page_text_bottom = used;
+        s_last_line_x_end = 0;
+        off = skip_reader_spacing(heading_end(block));
+        if (block->volume_start) {
+            off = after_volume(off);
+            if (off < len && !append_page(off)) return -1;
+            used = 0;
+        }
+        *off_io = off;
+        *used_io = used;
+        return off >= len ? 1 : 0;
+    }
+    if (block && block->image >= 0 && off == block->offset) {
+        int img_w = 0, img_h = 0;
+        if (image_display_size(block->image, &img_w, &img_h)) {
+            // 小图标（注号等）贴着上一行末尾画，不占新行；其余插图按块级流排。
+            // Small icons (footnote markers) attach to the end of the previous line instead of
+            // claiming a new line; other illustrations stay block-level.
+            const blk_t *title = banner_heading(block);
+            const bool inline_icon = !title && s_last_line_x_end > 0 && line_height > 0 &&
+                img_h <= line_height * 2 && img_w <= s_rect.width / 2 &&
+                s_last_line_x_end + img_w + 4 <= s_rect.x + s_rect.width;
+            if (inline_icon) {
+                int iy = s_last_line_used + (line_height - img_h) / 2;
+                if (iy < 0) iy = 0;
+                if (!record_page_image(block->image, s_last_line_x_end + 2, iy, img_w, img_h)) return -1;
+            } else {
+                // 图是页面流里的一个块：放得下就留在本页，文字接着图下面排；放不下才翻页。
+                // An image is one block in the page flow: keep it on this page when it fits and
+                // let the text continue below it; only start a new page when it does not fit.
+                int need = img_h;
+                if (title) {
+                    const int title_px = block_line_px(title, title->heading || title->authored_style);
+                    const int together = img_h + px / 2 + line_height_for(title_px) +
+                        title_px * title->margin_before_percent / 100;
+                    if (together <= rect.height) need = together;
+                }
+                if (used && used + need > height) {
+                    if (!append_page(off)) return -1;
+                    used = 0;
+                }
+                if (!record_page_image(block->image, -1, (int)used, img_w, img_h)) return -1;
+                used += img_h + px / 2; // 图下留半个行高 / half a line under the image
+            }
+        } else {
+            // 取不到尺寸时退回整页显示，保证纯插图章节仍可被跨章跳过逻辑识别。
+            // Without dimensions, fall back to a whole-page image so an image-only chapter
+            // stays detectable by the chapter-skip path.
+            if (used && !append_page(off)) return -1;
+            used = rect.height;
+        }
+        off = block->offset + block->len;
+        if (off < len && utf8[off] == '\n') ++off;
+        *off_io = off;
+        *used_io = used;
+        return off >= len ? 1 : 0;
+    }
+    size_t next;
+    bool paragraph_end, heading;
+    int line_px, line_width, indent, margin_before, margin_after;
+    uint8_t align;
+    if (!take_line(off, s_rect.width, s_rect.x, &next, &paragraph_end, &line_px, &heading,
+                   &line_width, &indent, &align, &margin_before, &margin_after)) return -1;
+    (void)line_width; (void)indent; (void)align;
+    line_height = line_height_for(line_px);
+    *line_height_io = line_height;
+    int leading = line_leading(block, margin_before, used, height - line_height);
+    int fit_height = line_page_height(line_px, line_height, off, used + leading, height);
+    if (fit_height > rect.height) return -1;
+    if (used + leading + fit_height > height) {
+        if (!append_page(off)) return -1;
+        used = 0;
+        leading = line_leading(block, margin_before, 0,
+            book_layout_page_content_height(s_count - 1) - line_height);
+        fit_height = line_fit_height(line_px, line_height);
+    }
+    // 记下这一行里的行内注号图标：x 用行内前缀宽度估算，y 落在该行内。
+    // Record inline markers on this line: x from the measured prefix, y inside the line.
+    for (size_t p = off; p + 3 <= next; ++p) {
+        if ((uint8_t)s_text[p] != 0xEF || (uint8_t)s_text[p + 1] != 0xBF || (uint8_t)s_text[p + 2] != 0xBC)
+            continue;
+        int image = -1, iw = 0, ih = 0;
+        if (!inline_icon_at(p, &image, &iw, &ih)) continue;
+        char prefix[256];
+        size_t plen = p - off;
+        if (plen >= sizeof(prefix)) plen = sizeof(prefix) - 1;
+        memcpy(prefix, s_text + off, plen);
+        prefix[plen] = 0;
+        int px_w = 0;
+        if (plen) { slot_select_for(off); px_w = ttf_text_width_px(line_px, prefix); }
+        int icon_x = rect.x + indent + px_w;
+        int icon_y = (int)used + leading + (line_height - ih) / 2;
+        if (icon_y < 0) icon_y = 0;
+        if (!record_page_image(image, icon_x, icon_y, iw, ih)) return -1;
+    }
+    // 文字注号没有图标占位，按行内位置记下命中矩形（宽约一个字）。
+    // Text markers carry no placeholder; record their in-line rect (about one em wide).
+    for (size_t ni = 0; ni < s_inline_note_count; ++ni) {
+        if (s_inline_notes[ni].image >= 0) continue;
+        const size_t marker = s_inline_notes[ni].marker_offset;
+        if (marker < off || marker >= next) continue;
+        char prefix[256];
+        size_t plen = marker - off;
+        if (plen >= sizeof(prefix)) continue;
+        memcpy(prefix, s_text + off, plen);
+        prefix[plen] = 0;
+        int px_w = 0;
+        if (plen) { slot_select_for(off); px_w = ttf_text_width_px(line_px, prefix); }
+        int marker_x = rect.x + indent + px_w;
+        int marker_y = (int)used + leading;
+        if (marker_y < 0) marker_y = 0;
+        if (!record_note_marker(s_count ? s_count - 1 : 0, ni, marker_x, marker_y,
+                                line_px, fit_height)) return -1;
+    }
+    if (s_line[0]) { s_page_has_text = true; s_page_text_bottom = used + leading + fit_height; }
+    s_last_line_used = (int)used + leading;
+    s_last_line_x_end = s_rect.x + indent + line_width;
+    used += leading + line_height;
+    if (paragraph_end) used += gap_for(line_height, heading, line_px) + margin_after;
+    off = next;
+    *off_io = off;
+    *used_io = used;
+    return off >= len ? 1 : 0;
+}
+
+static void layout_finish_horizontal(void) {
     // 整页只有一张插图时把它上下居中：贴顶会让插图页看起来像被裁掉了下半页。
     // Center a sheet that holds one illustration and no text: top alignment left the lower half
     // empty and read like a cropped page. A recorded offset above zero means a chapter heading
     // already owns that band, so those pages keep their image where the flow put it.
     for (size_t page = 0; page < s_count; ++page) {
         if (book_layout_page_image_count(page) != 1) continue;
-        layout_image_t* rec = &s_images[s_page_img_start[page]];
+        layout_image_t *rec = &s_images[s_page_img_start[page]];
         if (rec->y != 0 || rec->height >= s_image_rect.height) continue;
         size_t end = page + 1 < s_count ? s_pages[page + 1] : s_len;
         bool text = false;
         for (size_t i = 0; i < s_block_count && !text; ++i) {
-            const blk_t* block = &s_blocks[i];
+            const blk_t *block = &s_blocks[i];
             if (block->image >= 0 || block->offset < s_pages[page] || block->offset >= end) continue;
             for (size_t k = 0; k < block->len; ++k) {
                 char c = s_text[block->offset + k];
@@ -1460,6 +1521,27 @@ bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks,
         }
         if (!text) rec->y = (int16_t)((s_image_rect.height - rec->height) / 2);
     }
+}
+
+bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks, size_t count, EpdRect rect, int px) {
+    book_layout_free();
+    s_doc = &s_active;
+    size_t off = 0, checked = 0;
+    int64_t used = 0;
+    int line_height = 0;
+    if (!layout_prepare_doc(utf8, len, blocks, count, rect, px, &off, &checked, &used, &line_height))
+        goto fail;
+    if (s_vertical) {
+        while (off < len) {
+            if (layout_step_vertical(&off, &checked, &used) < 0) goto fail;
+        }
+        ttf_font_select(TTF_FONT_SLOT_SYSTEM);
+        return true;
+    }
+    while (off < len) {
+        if (layout_step_horizontal(&off, &checked, &used, &line_height) < 0) goto fail;
+    }
+    layout_finish_horizontal();
     // 测量会按 run 移动游标；还回去，后面的界面与状态栏仍从系统字体起。
     // Measuring moves the cursor across spans; hand it back so the UI and status bar still
     // start from the system face.
@@ -1821,4 +1903,141 @@ int book_layout_draw_slice(uint8_t *fb,size_t page,EpdRect rect,int px,book_layo
     s_idle_draw=NULL;
     ttf_draw_set_runs(NULL,0);ttf_font_select(TTF_FONT_SLOT_SYSTEM);
     return cursor->failed?-1:cursor->complete?1:0;
+}
+
+struct book_layout_stage {
+    book_layout_doc_t doc;
+    size_t off;
+    size_t checked;
+    int64_t used;
+    int line_height;
+    uint32_t draw_generation;
+    bool vertical;
+    bool done;
+    bool failed;
+};
+
+book_layout_stage_t *book_layout_stage_begin(const book_layout_stage_params_t *params) {
+    if (!params) return NULL;
+    book_layout_stage_t *stage = heap_caps_malloc(sizeof(*stage), PSRAM_CAPS);
+    if (!stage) return NULL;
+    memset(stage, 0, sizeof(*stage));
+    stage->doc.runs = (params->runs && params->run_count) ? params->runs : NULL;
+    stage->doc.run_count = stage->doc.runs ? params->run_count : 0;
+    stage->doc.inline_notes = params->inline_notes;
+    stage->doc.inline_note_count = params->inline_note_count;
+    stage->doc.dims_fn = params->dims_fn;
+    stage->doc.dims_ctx = params->dims_ctx;
+    stage->doc.lead_skip = params->lead_skip;
+    stage->doc.lead_height = params->lead_height;
+    stage->doc.chapter_lead_width = params->lead_width;
+    stage->vertical = s_vertical;
+    if (++s_stage_generation == 0) ++s_stage_generation;
+    stage->draw_generation = s_stage_generation;
+
+    book_layout_doc_t *prev = s_doc;
+    s_doc = &stage->doc;
+    bool ok = layout_prepare_doc(params->utf8, params->len, params->blocks, params->block_count,
+                                 params->rect, params->px, &stage->off, &stage->checked,
+                                 &stage->used, &stage->line_height);
+    if (ok && stage->off >= stage->doc.len) {
+        if (!stage->vertical) layout_finish_horizontal();
+        stage->done = true;
+    }
+    ttf_font_select(TTF_FONT_SLOT_SYSTEM);
+    s_doc = prev;
+    if (!ok) {
+        doc_release_buffers(&stage->doc);
+        free(stage);
+        return NULL;
+    }
+    return stage;
+}
+
+int book_layout_stage_step(book_layout_stage_t *stage, unsigned max_steps) {
+    if (!stage || stage->failed) return -1;
+    if (stage->done) return 1;
+    if (!max_steps) max_steps = 1;
+    book_layout_doc_t *prev = s_doc;
+    s_doc = &stage->doc;
+    int result = 0;
+    for (unsigned step = 0; step < max_steps; ++step) {
+        result = stage->vertical
+            ? layout_step_vertical(&stage->off, &stage->checked, &stage->used)
+            : layout_step_horizontal(&stage->off, &stage->checked, &stage->used, &stage->line_height);
+        if (result != 0) break;
+    }
+    if (result < 0) {
+        doc_release_buffers(&stage->doc);
+        stage->failed = true;
+    } else if (result > 0) {
+        if (!stage->vertical) layout_finish_horizontal();
+        stage->done = true;
+    }
+    ttf_font_select(TTF_FONT_SLOT_SYSTEM);
+    s_doc = prev;
+    return result;
+}
+
+size_t book_layout_stage_page_count(const book_layout_stage_t *stage) {
+    return stage && !stage->failed ? stage->doc.count : 0;
+}
+
+int book_layout_stage_page_image_count(const book_layout_stage_t *stage, size_t page) {
+    if (!stage || stage->failed || page >= stage->doc.count || !stage->doc.page_img_start) return 0;
+    return (int)(stage->doc.page_img_start[page + 1] - stage->doc.page_img_start[page]);
+}
+
+int book_layout_stage_page_image(const book_layout_stage_t *stage, size_t page) {
+    if (!stage || stage->failed || page >= stage->doc.count || !stage->doc.block_count) return -1;
+    book_layout_doc_t *prev = s_doc;
+    s_doc = (book_layout_doc_t *)&stage->doc;
+    int image = book_layout_page_image(page);
+    s_doc = prev;
+    return image;
+}
+
+int book_layout_stage_draw_slice(book_layout_stage_t *stage, uint8_t *fb, size_t page,
+                                 EpdRect rect, int px, book_layout_draw_cursor_t *cursor) {
+    if (!stage || !stage->done || stage->failed || !cursor || !fb || s_idle_draw ||
+        page >= stage->doc.count || px != stage->doc.px ||
+        rect.width != stage->doc.rect.width || rect.height != stage->doc.rect.height) {
+        return -1;
+    }
+    if (!cursor->generation) {
+        cursor->generation = stage->draw_generation;
+        cursor->page = page;
+    }
+    if (cursor->generation != stage->draw_generation || cursor->page != page || cursor->failed) {
+        return -1;
+    }
+    if (cursor->complete) return 1;
+    cursor->complete = true;
+    book_layout_doc_t *prev = s_doc;
+    s_doc = &stage->doc;
+    s_idle_draw = cursor;
+    book_layout_draw_page(fb, page, rect, px);
+    s_idle_draw = NULL;
+    s_doc = prev;
+    ttf_draw_set_runs(NULL, 0);
+    ttf_font_select(TTF_FONT_SLOT_SYSTEM);
+    return cursor->failed ? -1 : cursor->complete ? 1 : 0;
+}
+
+bool book_layout_stage_commit(book_layout_stage_t *stage, void *dims_ctx) {
+    if (!stage || !stage->done || stage->failed) return false;
+    doc_release_buffers(&s_active);
+    s_active = stage->doc;
+    s_active.dims_ctx = dims_ctx;
+    s_doc = &s_active;
+    ++s_generation;
+    free(stage);
+    return true;
+}
+
+void book_layout_stage_free(book_layout_stage_t *stage) {
+    if (!stage) return;
+    if (s_doc == &stage->doc) s_doc = &s_active;
+    doc_release_buffers(&stage->doc);
+    free(stage);
 }

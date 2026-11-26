@@ -1084,6 +1084,10 @@ void book_epub_set_fonts_enabled(book_epub_t *book, bool on) {
     if (book) book->fonts_enabled = on;
 }
 size_t book_epub_chapter_count(const book_epub_t *book) { return book ? book->count : 0; }
+bool book_epub_chapter_windowed(const book_epub_t *book, size_t index) {
+    return book && index < book->count &&
+           zip_entry_size(book->zip, book->chapters[index].zip_index) > EPUB_PART_THRESHOLD;
+}
 // 目录缺项时只解析当前可见章节的标题，不在开书时解压所有章节。
 // Resolve missing navigation labels lazily so opening a large book remains fast.
 static void chapter_heading(book_epub_t *book, size_t i) {

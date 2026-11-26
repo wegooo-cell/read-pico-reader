@@ -23,9 +23,10 @@ static int s_next_page=-1,s_prep_page=-1;
 static uint32_t s_next_generation;
 static struct{int generation;}s_prep_cursor;
 static uint8_t*s_next_fb;
-static unsigned generation=1,allocations,fail_allocation;
+static unsigned generation=1,allocations,fail_allocation,next_chapter_clears;
 static size_t free_heap=4*1024*1024;
 static bool next_ok=true;
+static void next_chapter_clear(void){++next_chapter_clears;}
 static size_t fb_bytes(void){return 684*1216/2;}
 static size_t heap_caps_get_free_size(int caps){(void)caps;return free_heap;}
 static void*heap_caps_aligned_alloc(size_t a,size_t n,int caps){(void)a;(void)caps;if(++allocations==fail_allocation)return NULL;return malloc(n);}
@@ -47,7 +48,8 @@ int main(void){
  s_keep_cur.page=3;s_keep_cur.generation=generation;assert(reader_keep_holds(&s_keep_cur,3));
  assert(!reader_keep_holds(&s_keep_cur,4));++generation;assert(!reader_keep_holds(&s_keep_cur,3));
  s_keep_cur.page=2;s_keep_prev.page=1;s_next_page=4;s_prep_page=5;s_next_generation=generation;
- invalidate_prep();assert(s_keep_cur.page==-1&&s_keep_prev.page==-1&&s_next_page==-1&&s_prep_page==-1&&!s_next_generation);
+ unsigned clears_before=next_chapter_clears;
+ invalidate_prep();assert(s_keep_cur.page==-1&&s_keep_prev.page==-1&&s_next_page==-1&&s_prep_page==-1&&!s_next_generation&&next_chapter_clears==clears_before+1);
  reader_keep_free();reader_keep_free();assert(!s_keep_cur.fb&&!s_keep_prev.fb);
  free_heap=BOOK_PREP_RESERVE+fb_bytes();assert(!reader_keep_buffers()&&!s_keep_cur.fb&&!s_keep_prev.fb);
  free_heap=4*1024*1024;next_ok=false;assert(!reader_keep_buffers());next_ok=true;

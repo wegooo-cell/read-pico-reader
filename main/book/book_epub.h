@@ -28,6 +28,8 @@ void book_epub_close(book_epub_t *book);
 void book_epub_set_fonts_enabled(book_epub_t *book, bool on);
 /// 返回 spine 章节数，上限 8192。/ Return the spine chapter count, at most 8192.
 size_t book_epub_chapter_count(const book_epub_t *book);
+/// 该章是否超过窗口阈值，需要按分段流加载。/ Whether this chapter exceeds the window threshold and uses streaming parts.
+bool book_epub_chapter_windowed(const book_epub_t *book, size_t index);
 /// 保留已核对的书内导航，缺少可靠目录时用正文题头补全；目录位置映射到原 spine。
 /// Keep corroborated authored navigation and recover weak indexes from body headings; retain spine positions.
 size_t book_epub_navigation_count(book_epub_t *book);

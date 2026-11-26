@@ -1326,5 +1326,103 @@ int main(void) {
     assert(cross_note==0&&cross_w>0&&cross_h>0&&
            cross_x>=note_box.x&&cross_x+cross_w<=note_box.x+note_box.width);
     book_layout_free();book_layout_set_inline_images(NULL,0);html_text_free(&cross);free(cross_text);
+
+    // 候选章节分步排版与活动排版一致；准备/OOM/释放阶段绝不破坏活动排版与代次。
+    // Staged incremental pagination matches direct builds; staging, OOM and freeing leave active layout and generation intact.
+    const char *active_ch="当前章第一页。当前章第二页。";
+    const char *cand_html="<p>AB<a href='#n1'><img src='note.gif'/></a>CD</p><p>下一章正文段落，包含换行与标点。</p><aside id='n1'>注</aside>";
+    html_text_t cand={0};
+    assert(html_to_blocks(cand_html,strlen(cand_html),&cand)==ESP_OK&&cand.note_count==1);
+    const EpdRect stage_box={8,12,240,120};
+    uint8_t dummy_fb=0;
+    for(int vertical=0;vertical<2;++vertical){
+        book_layout_set_vertical(vertical);
+        book_layout_set_typography(0);
+        book_layout_set_spacing(150,25);
+        book_layout_set_chapter_lead(0,0);
+        book_layout_set_chapter_lead_width(0);
+        book_layout_set_image_dims(probe_image,&image_probe_count);
+        book_layout_set_inline_images(cand.notes,cand.note_count);
+        assert(book_layout_build_blocks(cand.utf8,cand.len,cand.blocks,cand.count,stage_box,10));
+        size_t exp_pages=book_layout_page_count();
+        size_t exp_off[16]={0};
+        int exp_top[16]={0},exp_imgs[16]={0},exp_notes[16]={0};
+        assert(exp_pages>0&&exp_pages<16);
+        for(size_t p=0;p<exp_pages;++p){
+            exp_off[p]=book_layout_page_start_offset(p);
+            exp_top[p]=book_layout_page_top_padding(p);
+            exp_imgs[p]=book_layout_page_image_count(p);
+            exp_notes[p]=book_layout_page_note_marker_count(p);
+        }
+        drawn[0]=0;
+        book_layout_draw_page(&dummy_fb,0,stage_box,10);
+        char exp_drawn[sizeof(drawn)];strcpy(exp_drawn,drawn);
+        book_layout_set_inline_images(NULL,0);
+        assert(book_layout_build(active_ch,strlen(active_ch),stage_box,10));
+        uint32_t active_gen=book_layout_generation();
+        size_t active_pages=book_layout_page_count();
+        book_layout_stage_params_t params={
+            .utf8=cand.utf8,.len=cand.len,.blocks=cand.blocks,.block_count=cand.count,
+            .runs=cand.runs,.run_count=cand.run_count,.inline_notes=cand.notes,.inline_note_count=cand.note_count,
+            .dims_fn=probe_image,.dims_ctx=&image_probe_count,.rect=stage_box,.px=10,
+        };
+        test_heap_fail_after=0;
+        assert(!book_layout_stage_begin(&params));
+        test_heap_fail_after=-1;
+        assert(book_layout_generation()==active_gen&&book_layout_page_count()==active_pages);
+        char oom_text[1024];
+        size_t oom_len=0;
+        for(int k=0;k<80&&oom_len+8<sizeof(oom_text);++k){memcpy(oom_text+oom_len,"甲。\n",7);oom_len+=7;}
+        oom_text[oom_len]=0;
+        book_layout_stage_params_t oom_params={.utf8=oom_text,.len=oom_len,.rect=(EpdRect){0,0,60,20},.px=10};
+        book_layout_stage_t *oom_stage=book_layout_stage_begin(&oom_params);
+        assert(oom_stage);
+        test_heap_fail_after=0;
+        int oom_res=0;
+        for(int k=0;k<400&&(oom_res=book_layout_stage_step(oom_stage,1))==0;++k){}
+        assert(oom_res<0);
+        test_heap_fail_after=-1;
+        book_layout_stage_free(oom_stage);
+        assert(book_layout_generation()==active_gen&&book_layout_page_count()==active_pages);
+
+        book_layout_stage_t *stage=book_layout_stage_begin(&params);
+        assert(stage);
+        int sres=0,steps=0;
+        do{sres=book_layout_stage_step(stage,1);assert(sres>=0&&++steps<500);}while(!sres);
+        assert(book_layout_generation()==active_gen&&book_layout_page_count()==active_pages);
+        assert(book_layout_stage_page_count(stage)==exp_pages);
+        drawn[0]=0;
+        book_layout_draw_page(&dummy_fb,0,stage_box,10);
+        assert(!strcmp(drawn,active_ch));
+
+        // 释放未提交 stage 不影响活动排版；随后重排并分步绘制候选首页。
+        // Freeing an uncommitted stage keeps active layout intact; then restage and slice-draw page 0.
+        book_layout_stage_free(stage);
+        assert(book_layout_generation()==active_gen&&book_layout_page_count()==active_pages);
+        stage=book_layout_stage_begin(&params);
+        assert(stage);
+        do{sres=book_layout_stage_step(stage,2);}while(!sres);
+        assert(sres==1);
+        book_layout_draw_cursor_t scursor={0};
+        drawn[0]=0;
+        int dres=0;
+        do{dres=book_layout_stage_draw_slice(stage,&dummy_fb,0,stage_box,10,&scursor);assert(dres>=0);}while(!dres);
+        assert(!strcmp(drawn,exp_drawn));
+        assert(book_layout_generation()==active_gen);
+        assert(book_layout_stage_commit(stage,&image_probe_count));
+        assert(book_layout_generation()==active_gen+1&&book_layout_page_count()==exp_pages);
+        for(size_t p=0;p<exp_pages;++p){
+            assert(book_layout_page_start_offset(p)==exp_off[p]);
+            assert(book_layout_page_top_padding(p)==exp_top[p]);
+            assert(book_layout_page_image_count(p)==exp_imgs[p]);
+            assert(book_layout_page_note_marker_count(p)==exp_notes[p]);
+        }
+        book_layout_free();
+        book_layout_set_inline_images(NULL,0);
+        book_layout_set_runs(NULL,0);
+        book_layout_set_image_dims(NULL,NULL);
+    }
+    book_layout_set_vertical(false);html_text_free(&cand);
+
     puts("book_layout_host_test: PASS; English word wrapping/hyphens, source offsets, idle rows/columns and bounded large chapters");
 }

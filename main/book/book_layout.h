@@ -152,3 +152,41 @@ typedef struct {
 /// 每次只画一行或一列，不推屏；返回-1失败、0待续、1完成。只在UI空闲线程调用。
 /// Draw at most one row/column without presenting; -1 failed,0 pending,1 complete. UI idle thread only.
 int book_layout_draw_slice(uint8_t *fb,size_t page,EpdRect rect,int px,book_layout_draw_cursor_t *cursor);
+
+/// 候选章节分步排版上下文；准备期不触碰当前活动排版。
+/// Staged chapter pagination handle; never touches the active layout while staging.
+typedef struct book_layout_stage book_layout_stage_t;
+typedef struct {
+    const char *utf8;
+    size_t len;
+    const blk_t *blocks;
+    size_t block_count;
+    const html_run_t *runs;
+    size_t run_count;
+    const html_note_t *inline_notes;
+    size_t inline_note_count;
+    book_layout_image_dims_fn dims_fn;
+    void *dims_ctx;
+    size_t lead_skip;
+    unsigned lead_height;
+    unsigned lead_width;
+    EpdRect rect;
+    int px;
+} book_layout_stage_params_t;
+
+book_layout_stage_t *book_layout_stage_begin(const book_layout_stage_params_t *params);
+/// 推进最多 max_steps 行/块分页；返回 -1 失败、0 待续、1 完成。不触碰当前活动排版。
+/// Advance pagination by up to max_steps rows/blocks; -1 failed, 0 pending, 1 complete. Never touches active layout.
+int book_layout_stage_step(book_layout_stage_t *stage, unsigned max_steps);
+size_t book_layout_stage_page_count(const book_layout_stage_t *stage);
+int book_layout_stage_page_image_count(const book_layout_stage_t *stage, size_t page);
+int book_layout_stage_page_image(const book_layout_stage_t *stage, size_t page);
+/// 在候选排版上逐行预绘指定页，不触碰当前活动排版。
+/// Draw one row/column slice of a staged page without touching the active layout.
+int book_layout_stage_draw_slice(book_layout_stage_t *stage, uint8_t *fb, size_t page,
+                                 EpdRect rect, int px, book_layout_draw_cursor_t *cursor);
+/// 原子提交已完成的候选排版为当前活动排版并递增代次；成功后释放 stage 外壳。
+/// Atomically commit a finished staged layout as the active layout, bump generation, and free the stage shell.
+bool book_layout_stage_commit(book_layout_stage_t *stage, void *dims_ctx);
+/// 释放未提交的候选排版，不触碰当前活动排版与代次。/ Free an uncommitted stage without touching active layout or generation.
+void book_layout_stage_free(book_layout_stage_t *stage);
