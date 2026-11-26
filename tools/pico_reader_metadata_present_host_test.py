@@ -34,7 +34,7 @@ typedef int EpdWaveform;
 typedef struct {uint8_t *front_fb,*back_fb;} EpdiyHighlevelState;
 enum {READER_PANEL_TOUCH_SETTINGS=80,READER_PANEL_TOUCH_MORE,BULK};
 enum {EPD_ROT_PORTRAIT=1,EPD_ROT_INVERTED_LANDSCAPE,EPD_ROT_INVERTED_PORTRAIT};
-static bool s_rc_full_was_visible,s_shelf_key_paint_pending,s_txt_opening;
+static bool s_rc_full_was_visible,s_shelf_key_paint_pending,s_txt_opening,s_chapter_display_pending;
 static int64_t now_ms=1000,s_reader_footer_due_ms;
 static uint8_t front[684*1216/2],back[684*1216/2];
 static int fail_region=-1,attempts;

@@ -54,6 +54,18 @@ esp_err_t book_chapter_load_blocks_anchor(size_t i, const char *anchor,
 esp_err_t book_chapter_load_blocks_target(size_t i, const char *anchor,
                                            size_t source_offset, size_t *text_offset,
                                            html_text_t *out);
+/// 候选章节附带的 TXT 目录映射快照；EPUB 为空，准备阶段不改变当前章状态。
+/// TXT navigation mapping snapshot for a staged chapter; empty for EPUB, keeping active chapter state intact.
+typedef struct {
+    size_t chapter, begin, end, title;
+    bool mapped;
+} book_chapter_map_t;
+/// 预解析候选章节而不改变当前章映射或分段流状态；调用方 html_text_free。
+/// Pre-parse a candidate chapter without mutating active chapter mapping or part streams; caller frees with html_text_free.
+esp_err_t book_chapter_preload(size_t chapter, html_text_t *out, book_chapter_map_t *map);
+/// 确认候选章节后提交其 TXT 目录映射；EPUB 或空快照无操作。
+/// Commit a staged chapter's TXT navigation mapping on adoption; no-op for EPUB or empty maps.
+void book_chapter_commit_map(const book_chapter_map_t *map);
 esp_err_t book_chapter_load_part(size_t chapter, size_t offset, bool last, const char *anchor,
                                  size_t source_offset, size_t *local, html_text_t *out);
 /// 读取当前 EPUB 章内图片。/ Read an image from the current EPUB chapter.

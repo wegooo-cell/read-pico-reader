@@ -174,6 +174,45 @@ esp_err_t book_chapter_load_blocks_target(size_t i, const char *anchor,
     if (err == ESP_OK) book_txt_heading_blocks(&s_book,out);
     return err;
 }
+esp_err_t book_chapter_preload(size_t chapter, html_text_t *out, book_chapter_map_t *map) {
+    if (!out) return ESP_ERR_INVALID_ARG;
+    memset(out, 0, sizeof(*out));
+    if (map) memset(map, 0, sizeof(*map));
+    if (s_epub) {
+        if (chapter >= book_epub_chapter_count(s_epub)) return ESP_ERR_INVALID_ARG;
+        if (book_epub_chapter_windowed(s_epub, chapter)) return ESP_ERR_NOT_SUPPORTED;
+        return book_epub_load(s_epub, chapter, out);
+    }
+    if (!s_book.file || chapter >= s_book.count) return ESP_ERR_INVALID_ARG;
+    const book_chapter_map_t saved = {
+        s_book.mapped_chapter, s_book.mapped_begin, s_book.mapped_end, s_book.mapped_title, s_book.mapped
+    };
+    esp_err_t err = book_txt_load_target(&s_book, chapter, SIZE_MAX, NULL, &out->utf8, &out->len);
+    if (err == ESP_OK) {
+        book_txt_heading_blocks(&s_book, out);
+        if (map) {
+            *map = (book_chapter_map_t){
+                s_book.mapped_chapter, s_book.mapped_begin, s_book.mapped_end, s_book.mapped_title, s_book.mapped
+            };
+        }
+    }
+    // 预载只能读取，绝不能覆盖当前正在阅读章节的 TXT 目录映射。
+    // Preloading is read-only for the active chapter and must never clobber its TXT navigation map.
+    s_book.mapped_chapter = saved.chapter;
+    s_book.mapped_begin = saved.begin;
+    s_book.mapped_end = saved.end;
+    s_book.mapped_title = saved.title;
+    s_book.mapped = saved.mapped;
+    return err;
+}
+void book_chapter_commit_map(const book_chapter_map_t *map) {
+    if (s_epub || !map || !map->mapped || !s_book.file || map->chapter >= s_book.count) return;
+    s_book.mapped = true;
+    s_book.mapped_chapter = map->chapter;
+    s_book.mapped_begin = map->begin;
+    s_book.mapped_end = map->end;
+    s_book.mapped_title = map->title;
+}
 esp_err_t book_chapter_load_part(size_t i, size_t offset, bool last, const char *anchor,
                                 size_t source_offset, size_t *local, html_text_t *out) {
     if (s_epub) return book_epub_load_part(s_epub, i, offset, last, anchor, source_offset, local, out);
