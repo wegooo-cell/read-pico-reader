@@ -41,6 +41,7 @@ static int E0470_WAVEFORM,E0470_FULL_WAVEFORM,E0470_FOLLOW_WAVEFORM;
 #endif
 typedef int EpdWaveform;
 #define TT_STAMP(x) ((void)0)
+static bool s_chapter_display_pending;
 static bool s_reader_dc_recover;
 static enum EpdDrawError display_dc_recover_light(void *hl){(void)hl;return 0;}
 static int reader_waveform,soft_turn_waveform;
