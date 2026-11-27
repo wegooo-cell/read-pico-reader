@@ -51,6 +51,7 @@ static void test_log(const char *tag,const char *format,...){(void)tag;(void)for
 #define ESP_LOGW(...) test_log(__VA_ARGS__)
 #define ESP_LOGI(...) test_log(__VA_ARGS__)
 #define ESP_FAIL -1
+#define ESP_ERR_NOT_SUPPORTED -2
 enum {READING,SHELF};
 typedef struct {uint8_t *gray;int width,height;} reader_image_t;
 static reader_image_t *s_page_images;
@@ -62,8 +63,10 @@ static uint32_t s_page_images_generation;
 static size_t s_page,s_chapter=3,s_image_count;
 static char **s_images;
 static bool hidden,locked;
+static bool stream_png;
 static int alloc_fail_after=-1,read_failure=-1,decode_failure=-1;
 static unsigned reads,decodes,pixels,notices,invalidations;
+static unsigned stream_decodes;
 static int reading_image;
 static EpdRect body={40,20,100,200};
 // 插图可用区域：默认等于正文栏，通栏用例把它换成更宽的一条带。
@@ -122,6 +125,7 @@ static bool fail_alloc(void){if(!alloc_fail_after)return true;if(alloc_fail_afte
 static void *heap_caps_malloc(size_t n,int c){(void)c;if(n>free_block)return NULL;return fail_alloc()?NULL:malloc(n);}
 static void *heap_caps_calloc(size_t n,size_t size,int c){(void)c;return fail_alloc()?NULL:calloc(n,size);}
 static void invalidate_prep(void){++invalidations;}
+static void reset_prefetch(void){invalidate_prep();}
 static void release_image_headroom(void){}
 static uint8_t *s_next_fb;
 static void reader_page_cache_clear(void){s_next_fb=NULL;}
@@ -133,6 +137,16 @@ static esp_err_t book_chapter_image(size_t chapter,const char *path,uint8_t **ou
  assert(path);if(locked)measured_chapter=chapter;else assert(chapter==s_chapter);++reads;reading_image=atoi(path);
  if(reading_image==read_failure)return ESP_FAIL;
  *out=malloc(1);assert(*out);*size=1;*png=false;return ESP_OK;
+}
+static esp_err_t book_chapter_png_info(size_t chapter,const char *path,size_t *size,unsigned *w,unsigned *h){
+ assert(chapter==s_chapter&&path);
+ if(!stream_png)return ESP_ERR_NOT_SUPPORTED;
+ *size=1432361;*w=1032;*h=1186;return ESP_OK;
+}
+static esp_err_t book_chapter_png_grayscale(size_t chapter,const char *path,unsigned w,unsigned h,uint8_t *gray){
+ assert(chapter==s_chapter&&path&&w&&h&&gray);
+ ++stream_decodes;
+ memset(gray,128,(size_t)w*h);return ESP_OK;
 }
 static esp_err_t book_chapter_image_dimensions(size_t chapter,const char *path,unsigned *w,unsigned *h){
  assert(path);if(locked)measured_chapter=chapter;else assert(chapter==s_chapter);
@@ -235,6 +249,8 @@ static void draw_zoomed_image(uint8_t *fb,EpdRect band,int scale,int cx,int cy,b
 }
 """
 unit+='\n'+function('reader_zoom_reset')
+if 'book_chapter_png_grayscale(' in source:
+    unit += '\n#define TEST_STREAM_PNG 1\n'
 for name in ('inline_ink_gray', 'reader_image_slots', 'reader_image_slot', 'reader_image_dims', 'alloc_page_bitmap', 'release_page_images', 'prepare_inline_image', 'draw_reader_images', 'reader_footer_progress', 'load_chapter_at'):
     unit += '\n' + function(name)
 unit += r'''
@@ -263,6 +279,13 @@ int main(void){
  prepare_inline_image();assert(reads==24);draw_reader_images(&fb,s_page,body);assert(pixels==24*20*6);
  hidden=true;prepare_inline_image();assert(!s_page_images&&!s_page_image_count);draw_reader_images(&fb,s_page,body);assert(pixels==24*20*6);
  hidden=false;prepare_inline_image();assert(reads==36&&s_page_image_count==12);
+#ifdef TEST_STREAM_PNG
+ // Large direct PNGs use the archive stream and paint without a whole-file read.
+ setup_images(1);read_failure=0;stream_png=true;
+ prepare_inline_image();draw_reader_images(&fb,s_page,body);
+ assert(reads==0&&stream_decodes==1&&s_page_images[0].gray&&pixels>0&&!notices);
+ stream_png=false;
+#endif
  // 未知尺寸槽仍解码，保持原始比例和灰阶；失败提示留在自己的位置。
  // Unknown-size slots still decode proportionally in grayscale; failures stay in their own slots.
  setup_images(1);slots[0].width=100;slots[0].height=200;

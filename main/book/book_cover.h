@@ -15,6 +15,11 @@ bool book_image_grayscale(const uint8_t *data, size_t size, bool png,
 bool book_image_dimensions(const uint8_t *data, size_t size, bool png,
                            unsigned *width, unsigned *height);
 
+/// 从顺序输入逐行解码非交错 PNG。/ Decode non-interlaced PNG from a sequential input.
+typedef bool (*book_image_read_fn)(void *context, uint8_t *out, size_t bytes);
+bool book_png_read_grayscale(book_image_read_fn read, void *context, size_t bytes,
+                             unsigned width, unsigned height, uint8_t *out);
+
 /// 源图取样窗口，按「填满目标再居中裁剪」计算。
 /// 长宽比不同时按长边铺满、裁掉多余的一边，绝不拉伸。
 /// Source sampling window computed as cover-then-centre-crop: the longer side fills the target

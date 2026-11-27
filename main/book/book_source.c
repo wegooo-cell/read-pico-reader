@@ -6,6 +6,9 @@
  * Frozen: TXT retains source offsets; EPUB uses cumulative spine HTML bytes; retain plain-text loading; only source-validated derived chapter summaries may be written, never books or progress.
  */
 #include "book_source_internal.h"
+#if defined(ESP_PLATFORM) && !KIIKO_BOARD_METALIO47
+#include "book_cover.h"
+#endif
 #include "book_epub.h"
 #include "book_index_cache.h"
 #include "esp_heap_caps.h"
@@ -251,6 +254,42 @@ esp_err_t book_chapter_image(size_t chapter, const char *src, uint8_t **data, si
 esp_err_t book_chapter_image_dimensions(size_t chapter, const char *src, unsigned *width, unsigned *height) {
     return s_epub ? book_epub_image_dimensions(s_epub, chapter, src, width, height) : ESP_ERR_NOT_SUPPORTED;
 }
+
+#if defined(ESP_PLATFORM) && !KIIKO_BOARD_METALIO47
+esp_err_t book_chapter_png_info(size_t chapter, const char *src, size_t *bytes, unsigned *width, unsigned *height) {
+    return s_epub ? book_epub_png_open(s_epub, chapter, src, NULL, bytes, width, height) : ESP_ERR_NOT_SUPPORTED;
+}
+
+typedef struct { zip_stream_t *stream; esp_err_t error; } chapter_png_input_t;
+static bool chapter_png_read(void *context, uint8_t *out, size_t count) {
+    chapter_png_input_t *input = context;
+    size_t received = 0;
+    input->error = zip_stream_read(input->stream, out, count, &received);
+    return input->error == ESP_OK && received == count;
+}
+
+esp_err_t book_chapter_png_grayscale(size_t chapter, const char *src, unsigned width, unsigned height, uint8_t *out) {
+    if (!s_epub) return ESP_ERR_NOT_SUPPORTED;
+    chapter_png_input_t input = {0};
+    size_t bytes = 0;
+    unsigned source_width, source_height;
+    esp_err_t err = book_epub_png_open(s_epub, chapter, src, &input.stream, &bytes, &source_width, &source_height);
+    if (err != ESP_OK) return err;
+    const bool decoded = book_png_read_grayscale(chapter_png_read, &input, bytes, width, height, out);
+    // 读到 ZIP 条目末尾，核验 IEND 后剩余字节和 CRC。/ Drain past IEND to verify the entire ZIP entry.
+    uint8_t tail[512];
+    size_t received;
+    if (decoded) {
+        do {
+            err = zip_stream_read(input.stream, tail, sizeof(tail), &received);
+        } while (err == ESP_OK && received);
+    }
+    zip_stream_close(input.stream);
+    if (input.error != ESP_OK) return input.error;
+    if (err != ESP_OK) return err;
+    return decoded ? ESP_OK : ESP_FAIL;
+}
+#endif
 #if KIIKO_BOARD_METALIO47
 
 esp_err_t book_suspend_io(void) {

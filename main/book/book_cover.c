@@ -780,17 +780,26 @@ static bool gif_gray(const uint8_t *data, size_t size, unsigned out_width, unsig
     return false;
 }
 
-typedef struct { const uint8_t *data; size_t size, pos; FILE *file; } png_input_t;
+typedef struct {
+    const uint8_t *data;
+    size_t size, pos;
+    FILE *file;
+    book_image_read_fn read;
+    void *read_context;
+} png_input_t;
 static void png_read_mem(png_structp png, png_bytep dst, png_size_t count) {
     png_input_t *input = png_get_io_ptr(png);
     if (count > input->size - input->pos) png_error(png, "truncated PNG");
-    if (input->file) { if (fread(dst, 1, count, input->file) != count) png_error(png, "truncated PNG file"); }
+    if (input->read) {
+        if (!input->read(input->read_context, dst, count)) png_error(png, "PNG stream read failed");
+    } else if (input->file) { if (fread(dst, 1, count, input->file) != count) png_error(png, "truncated PNG file"); }
     else memcpy(dst, input->data + input->pos, count);
     input->pos += count;
 }
 static bool png_gray_rows(const uint8_t *data, size_t size, FILE *file, unsigned out_width,
                      unsigned out_height, uint8_t *out, uint8_t *alpha,
-                     bool (*sink)(void *, unsigned, unsigned, const uint8_t *, const uint8_t *), void *context) {
+                     bool (*sink)(void *, unsigned, unsigned, const uint8_t *, const uint8_t *), void *context,
+                     book_image_read_fn read, void *read_context) {
     png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
     if (!png) return false;
     png_infop info = png_create_info_struct(png);
@@ -807,7 +816,7 @@ static bool png_gray_rows(const uint8_t *data, size_t size, FILE *file, unsigned
     uint8_t *volatile rows[2] = {NULL, NULL};
     uint8_t *volatile masks[2] = {NULL, NULL};
     uint8_t *volatile output_row = NULL;
-    png_input_t input = {data, size, 0, file};
+    png_input_t input = {data, size, 0, file, read, read_context};
     bool ok = false;
     const bool keep_alpha = alpha != NULL || sink != NULL;
     if (setjmp(png_jmpbuf(png))) goto done;
@@ -898,7 +907,14 @@ done:
 
 static bool png_gray_input(const uint8_t *data, size_t size, FILE *file, unsigned width,
                           unsigned height, uint8_t *out, uint8_t *alpha) {
-    return png_gray_rows(data, size, file, width, height, out, alpha, NULL, NULL);
+    return png_gray_rows(data, size, file, width, height, out, alpha, NULL, NULL, NULL, NULL);
+}
+
+bool book_png_read_grayscale(book_image_read_fn read, void *context, size_t bytes,
+                             unsigned width, unsigned height, uint8_t *out) {
+    if (!read || !out || !bytes || !width || !height ||
+        width > 1216 || height > 1216 || (size_t)width * height > 684u * 1216u) return false;
+    return png_gray_rows(NULL, bytes, NULL, width, height, out, NULL, NULL, NULL, read, context);
 }
 
 bool book_cover_thumbnail(const uint8_t *data, size_t size, bool png,
@@ -1969,7 +1985,7 @@ bool book_png_file_layer_rows(const char *path, unsigned width, unsigned height,
         stat(path, &st) || st.st_size <= 0 || (uint64_t)st.st_size > BOOK_IMAGE_FILE_MAX) return false;
     FILE *file = fopen(path, "rb");
     if (!file) return false;
-    bool ok = png_gray_rows(NULL, (size_t)st.st_size, file, width, height, NULL, NULL, sink, context);
+    bool ok = png_gray_rows(NULL, (size_t)st.st_size, file, width, height, NULL, NULL, sink, context, NULL, NULL);
     fclose(file);
     return ok;
 }
