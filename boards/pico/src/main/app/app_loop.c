@@ -66,6 +66,11 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#ifdef ESP_PLATFORM
+#include "driver/gpio.h"
+#include "esp_attr.h"
+#include "freertos/semphr.h"
+#endif
 #include "read_pico_board.h"
 #include "read_pico_crashlog.h"
 #include "read_pico_pmu.h"
@@ -116,10 +121,292 @@ static void quick_reset(void) {
     s_quick_pressed=-1;
 }
 static bool s_nav_contact_down,s_nav_polled;
+
+/* ---- 刷屏期间底栏点击缓冲 / Refresh-window bottom-navigation tap buffer ---- */
+#define NAV_TAP_QUEUE_TTL_MS 1200
+
+typedef struct {
+    bool armed;
+    bool wait_release;
+    bool prev_down;
+    bool queued_still_down;
+    int queued_tab;
+    int64_t queued_at_ms;
+} nav_tap_buf_t;
+
+static nav_tap_buf_t s_nav_buf = {.queued_tab = -1};
+static unsigned s_nav_arm_depth;
+static bool s_nav_overlay_blocked;
+
+/// 重置底栏缓冲状态与队列。/ Reset bottom-navigation buffer state and queued tap.
+static void nav_tap_buf_reset(nav_tap_buf_t *b) {
+    *b = (nav_tap_buf_t){.queued_tab = -1};
+}
+
+/// 只清空已缓存的目标页签，保留当前布防与抬手抑制标志。
+/// Clear only the queued tab while preserving arming and release-wait flags.
+static void nav_tap_buf_clear_queue(nav_tap_buf_t *b) {
+    b->queued_tab = -1;
+    b->queued_at_ms = 0;
+    b->queued_still_down = false;
+}
+
+/// 在刷屏窗口内处理一次触控采样；仅接收新按下的单指底栏点击，拒绝拖动滑入与多指。
+/// Feed one touch sample while armed; accept fresh single-finger nav presses and reject drags/multi-touch.
+static bool nav_tap_buf_feed(nav_tap_buf_t *b, const cst836u_touch_t *sample, int64_t now_ms) {
+    if (!b->armed) return false;
+    if (!sample || !sample->touched) {
+        b->wait_release = false;
+        b->prev_down = false;
+        b->queued_still_down = false;
+        return false;
+    }
+    if (sample->count != 1) {
+        b->wait_release = true;
+        b->prev_down = true;
+        b->queued_still_down = false;
+        return false;
+    }
+    if (b->wait_release) {
+        b->prev_down = true;
+        return false;
+    }
+    if (!b->prev_down) {
+        b->prev_down = true;
+        int tab = ui_nav_hit(sample->x, sample->y);
+        if (tab >= 0) {
+            b->queued_tab = tab;
+            b->queued_at_ms = now_ms;
+            b->queued_still_down = true;
+            return true;
+        }
+        // 正文区落指后拖入底栏绝不误触切换。/ Dragging from body into the nav bar never triggers a switch.
+        b->wait_release = true;
+    }
+    return false;
+}
+
+/// 读取未过期的缓存页签但不消费；过期则返回 -1。
+/// Peek buffered tab without consuming it; returns -1 if empty or expired.
+static int nav_tap_buf_peek(const nav_tap_buf_t *b, int64_t now_ms) {
+    if (b->queued_tab < 0) return -1;
+    if (now_ms < b->queued_at_ms || now_ms - b->queued_at_ms > NAV_TAP_QUEUE_TTL_MS) return -1;
+    return b->queued_tab;
+}
+
+/// 取出并清空未过期的缓存页签，可选返回是否仍未抬手。
+/// Take and clear a non-expired buffered tab, optionally returning still-down state.
+static int nav_tap_buf_take(nav_tap_buf_t *b, int64_t now_ms, bool *still_down) {
+    int tab = nav_tap_buf_peek(b, now_ms);
+    if (still_down) *still_down = tab >= 0 && b->queued_still_down;
+    nav_tap_buf_clear_queue(b);
+    return tab;
+}
+
+#ifdef ESP_PLATFORM
+static portMUX_TYPE s_nav_buf_mux = portMUX_INITIALIZER_UNLOCKED;
+static SemaphoreHandle_t s_nav_tp_lock;
+static TaskHandle_t s_nav_task;
+static cst836u_handle_t s_nav_tp;
+static gpio_num_t s_nav_int_gpio = GPIO_NUM_NC;
+static bool s_nav_irq_ready;
+static volatile bool s_nav_irq_armed;
+
+/// 仅在刷屏窗口开启期间由 TP_INT 下降沿唤醒采样任务。
+/// Wake the capture task on TP_INT falling edge only while the refresh window is armed.
+static void IRAM_ATTR nav_tap_isr(void *arg) {
+    (void)arg;
+    if (!s_nav_irq_armed || !s_nav_task) return;
+    BaseType_t higher = pdFALSE;
+    vTaskNotifyGiveFromISR(s_nav_task, &higher);
+    if (higher) portYIELD_FROM_ISR();
+}
+
+/// 刷屏窗口后台触控采集任务；非窗口期完全阻塞在通知上（零 I2C 与 CPU 开销）。
+/// Refresh-window touch capture task; blocks indefinitely outside refresh windows (zero I2C/CPU cost).
+static void nav_tap_task(void *arg) {
+    (void)arg;
+    TickType_t wait_ticks = portMAX_DELAY;
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, wait_ticks);
+        if (!s_nav_tp_lock || !s_nav_tp) {
+            wait_ticks = portMAX_DELAY;
+            continue;
+        }
+        xSemaphoreTake(s_nav_tp_lock, portMAX_DELAY);
+        portENTER_CRITICAL(&s_nav_buf_mux);
+        bool armed = s_nav_buf.armed;
+        portEXIT_CRITICAL(&s_nav_buf_mux);
+        if (!armed || cst836u_get_mode(s_nav_tp) != CST836U_MODE_NORMAL) {
+            xSemaphoreGive(s_nav_tp_lock);
+            wait_ticks = portMAX_DELAY;
+            continue;
+        }
+        cst836u_touch_t sample = {0};
+        esp_err_t err = cst836u_read(s_nav_tp, &sample);
+        int64_t now_ms = esp_timer_get_time() / 1000;
+        bool need_fast = true;
+        portENTER_CRITICAL(&s_nav_buf_mux);
+        if (err == ESP_OK) {
+            (void)nav_tap_buf_feed(&s_nav_buf, &sample, now_ms);
+            need_fast = s_nav_buf.wait_release || s_nav_buf.prev_down;
+        }
+        armed = s_nav_buf.armed;
+        portEXIT_CRITICAL(&s_nav_buf_mux);
+        bool int_low = cst836u_int_asserted(s_nav_tp);
+        xSemaphoreGive(s_nav_tp_lock);
+        if (!armed) {
+            wait_ticks = portMAX_DELAY;
+        } else {
+            wait_ticks = pdMS_TO_TICKS((need_fast || !s_nav_irq_ready || int_low) ? 12 : 25);
+        }
+    }
+}
+
+/// 初始化刷屏窗口触控采样任务与可选 TP_INT 边沿唤醒。
+/// Initialize the refresh-window capture task and optional TP_INT falling-edge wakeup.
+static void nav_tap_init(cst836u_handle_t tp) {
+    s_nav_tp = tp;
+    if (!s_nav_tp_lock) s_nav_tp_lock = xSemaphoreCreateMutex();
+    if (!tp || !s_nav_tp_lock || s_nav_task) return;
+    gpio_num_t int_gpio = cst836u_int_gpio(tp);
+    if (int_gpio != GPIO_NUM_NC && GPIO_IS_VALID_GPIO(int_gpio)) {
+        gpio_config_t irq = {
+            .pin_bit_mask = 1ULL << int_gpio,
+            .mode = GPIO_MODE_INPUT,
+            .pull_up_en = GPIO_PULLUP_ENABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_NEGEDGE,
+        };
+        esp_err_t err = gpio_config(&irq);
+        if (err == ESP_OK) {
+            err = gpio_install_isr_service(0);
+            if (err == ESP_OK || err == ESP_ERR_INVALID_STATE) {
+                err = gpio_isr_handler_add(int_gpio, nav_tap_isr, NULL);
+            }
+        }
+        if (err == ESP_OK) {
+            s_nav_int_gpio = int_gpio;
+            s_nav_irq_ready = true;
+            // 默认禁能中断，仅在进入刷屏窗口时开启。/ Disabled by default; enabled only inside refresh windows.
+            gpio_intr_disable(s_nav_int_gpio);
+        }
+    }
+    if (xTaskCreate(nav_tap_task, "nav_tap", 3072, NULL, 3, &s_nav_task) != pdPASS) {
+        s_nav_task = NULL;
+    }
+}
+
+/// 互斥串行读取触摸状态，确保采集任务与主循环绝不并发读 I2C。
+/// Serialize cst836u_read calls so the capture task and main loop never overlap on I2C.
+static esp_err_t nav_tp_read(cst836u_handle_t tp, cst836u_touch_t *touch) {
+    if (!s_nav_tp_lock) return cst836u_read(tp, touch);
+    xSemaphoreTake(s_nav_tp_lock, portMAX_DELAY);
+    esp_err_t err = cst836u_read(tp, touch);
+    xSemaphoreGive(s_nav_tp_lock);
+    return err;
+}
+
+static void nav_tap_clear(void) {
+    portENTER_CRITICAL(&s_nav_buf_mux);
+    nav_tap_buf_clear_queue(&s_nav_buf);
+    portEXIT_CRITICAL(&s_nav_buf_mux);
+}
+
+static int nav_tap_peek(int64_t now_ms) {
+    portENTER_CRITICAL(&s_nav_buf_mux);
+    int tab = nav_tap_buf_peek(&s_nav_buf, now_ms);
+    portEXIT_CRITICAL(&s_nav_buf_mux);
+    return tab;
+}
+
+static int nav_tap_take(int64_t now_ms, bool *still_down) {
+    portENTER_CRITICAL(&s_nav_buf_mux);
+    int tab = nav_tap_buf_take(&s_nav_buf, now_ms, still_down);
+    portEXIT_CRITICAL(&s_nav_buf_mux);
+    return tab;
+}
+
+/// 进入刷屏捕获窗口（支持嵌套引用计数）。/ Enter refresh capture window (refcounted for nested calls).
+static bool nav_tap_enter(cst836u_handle_t tp, bool initially_down) {
+    if (!tp || !s_nav_task || cst836u_get_mode(tp) != CST836U_MODE_NORMAL) return false;
+    if (++s_nav_arm_depth == 1) {
+        portENTER_CRITICAL(&s_nav_buf_mux);
+        s_nav_buf.armed = true;
+        s_nav_buf.wait_release = initially_down;
+        s_nav_buf.prev_down = initially_down;
+        portEXIT_CRITICAL(&s_nav_buf_mux);
+        s_nav_irq_armed = true;
+        if (s_nav_irq_ready) gpio_intr_enable(s_nav_int_gpio);
+        xTaskNotifyGive(s_nav_task);
+    }
+    return true;
+}
+
+/// 退出刷屏捕获窗口并等待正在进行的 I2C 读点完成。
+/// Leave refresh capture window and synchronize with any in-flight I2C touch read.
+static void nav_tap_leave(bool entered) {
+    if (!entered || s_nav_arm_depth == 0) return;
+    if (--s_nav_arm_depth == 0) {
+        s_nav_irq_armed = false;
+        if (s_nav_irq_ready) gpio_intr_disable(s_nav_int_gpio);
+        portENTER_CRITICAL(&s_nav_buf_mux);
+        s_nav_buf.armed = false;
+        portEXIT_CRITICAL(&s_nav_buf_mux);
+        if (s_nav_tp_lock) {
+            xSemaphoreTake(s_nav_tp_lock, portMAX_DELAY);
+            xSemaphoreGive(s_nav_tp_lock);
+        }
+    }
+}
+#else
+static esp_err_t nav_tp_read(cst836u_handle_t tp, cst836u_touch_t *touch) {
+    return cst836u_read(tp, touch);
+}
+
+static void nav_tap_clear(void) {
+    nav_tap_buf_clear_queue(&s_nav_buf);
+}
+
+static int nav_tap_peek(int64_t now_ms) {
+    return nav_tap_buf_peek(&s_nav_buf, now_ms);
+}
+
+static int nav_tap_take(int64_t now_ms, bool *still_down) {
+    return nav_tap_buf_take(&s_nav_buf, now_ms, still_down);
+}
+
+static bool nav_tap_enter(cst836u_handle_t tp, bool initially_down) {
+    if (!tp) return false;
+    if (++s_nav_arm_depth == 1) {
+        s_nav_buf.armed = true;
+        s_nav_buf.wait_release = initially_down;
+        s_nav_buf.prev_down = initially_down;
+    }
+    return true;
+}
+
+static void nav_tap_leave(bool entered) {
+    if (!entered || s_nav_arm_depth == 0) return;
+    if (--s_nav_arm_depth == 0) s_nav_buf.armed = false;
+}
+
+/// 主机测试辅助接口：检查是否处于刷屏捕获窗口以及在窗口内注入触控采样。
+/// Host-test helpers: inspect armed state and inject touch samples inside display stub callbacks.
+bool app_loop_test_nav_armed(void) { return s_nav_buf.armed; }
+bool app_loop_test_nav_feed(const cst836u_touch_t *sample, int64_t now_ms) {
+    return nav_tap_buf_feed(&s_nav_buf, sample, now_ms);
+}
+#endif
+static bool nav_initially_down(const app_ctx_t *ctx) {
+    return s_nav_contact_down || (ctx && ctx->touch && ctx->touch->touched);
+}
+static bool nav_tap_allowed(app_ctx_t *ctx, const app_desc_t *app);
 // 锁屏占用整屏后旧主页面底栏不再是物理基准；解锁第一帧必须完整绘制。
 // A lock screen replaces the old navigation baseline; the first unlocked frame must render complete navigation.
 static void main_lock_boundary(void) {
     (void)ble_pt_take_standby();
+    nav_tap_clear();
     ui_click_feedback_reset();
     quick_reset();
     s_presented_main = NULL;
@@ -373,6 +660,11 @@ static void app_present_impl(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t
 // 将系统页策略限制在实际推屏作用域；下拉玻璃、锁屏及阅读不继承它。
 // Scope system policy to presentation so quick-menu glass, lock and reader do not inherit it.
 void app_present(app_ctx_t* ctx,const app_desc_t* app,app_redraw_t redraw) {
+    bool nav_armed = false;
+    if (redraw != APP_REDRAW_NONE && redraw != APP_REDRAW_DONE) {
+        if (nav_tap_allowed(ctx, app)) nav_armed = nav_tap_enter(ctx->tp, nav_initially_down(ctx));
+        else nav_tap_clear();
+    }
     const bool root_switch=redraw==APP_REDRAW_PAGE &&
         s_presented_root && s_presented_root!=app && main_page_ready(ctx,app);
     const bool child_white=redraw==APP_REDRAW_PAGE && app->white_child_transition &&
@@ -386,12 +678,16 @@ void app_present(app_ctx_t* ctx,const app_desc_t* app,app_redraw_t redraw) {
     unsigned previous = display_main_quality_set(white_phases);
     app_present_impl(ctx,app,redraw);
     display_main_quality_set(previous);
+    nav_tap_leave(nav_armed);
 }
 
 // 反馈只推控件附近，失败后重新绘制当前页面；不占用底栏切页许可。
 // Push feedback only near its control, repainting the current page on failure without consuming navigation permission.
 static void click_present(app_ctx_t *ctx, const app_desc_t *current, EpdRect area) {
+    bool nav_armed = nav_tap_allowed(ctx, current)
+        ? nav_tap_enter(ctx->tp, nav_initially_down(ctx)) : false;
     enum EpdDrawError error = update_display_click_feedback(ctx->hl,area);
+    nav_tap_leave(nav_armed);
     guard_draw_result(ctx->hl, error);
     if (error != EPD_DRAW_SUCCESS) app_present(ctx, current, APP_REDRAW_FULL);
 }
@@ -480,6 +776,16 @@ static bool main_page_ready(app_ctx_t* ctx, const app_desc_t* app) {
            app->main_page_visible && app->main_page_visible(ctx);
 }
 
+static bool nav_tap_allowed(app_ctx_t *ctx, const app_desc_t *app) {
+    return ctx && ctx->tp && app && !s_nav_overlay_blocked && !usb_storage_active() &&
+           !app->setup_flow && !app->holds_pmu && navigation_input_ready(ctx, app);
+}
+
+static bool nav_tap_actionable(app_ctx_t *ctx, const app_desc_t *current, int tab) {
+    if (tab < 0 || tab >= 4) return false;
+    return tab != app_index_of(current) || !main_page_ready(ctx, current) || ctx->request_app != NULL;
+}
+
 // 主页面左右键循环切页；中键短按交给页面，长按统一全刷。阅读及子页继续使用原映射。
 // Main roots cycle with side keys, delegate a middle tap, and share middle-hold full refresh. Reader/subpage mappings stay page-owned.
 static app_redraw_t main_key_action(app_ctx_t *ctx,const app_desc_t *current,int key,bool held) {
@@ -496,6 +802,11 @@ static void switch_to(
     app_ctx_t* ctx, const app_desc_t** current, const app_desc_t* next
 ) {
     if (!next || (next==*current && (!next->persistent_navigation || main_page_ready(ctx,next)))) return;
+    bool nav_armed = false;
+    if (app_index_of(next) >= 0 && app_index_of(next) < 4 && !s_nav_overlay_blocked &&
+        !usb_storage_active() && !next->setup_flow && !next->holds_pmu && ctx->tp) {
+        nav_armed = nav_tap_enter(ctx->tp, nav_initially_down(ctx));
+    }
     const bool reader_to_home = *current==&app_book && next==app_at(0) && app_book_reading_active();
 #if defined(KIIKO_LOCAL_LATENCY) || KIIKO_BOARD_METALIO47
     const int64_t probe_start=esp_timer_get_time();
@@ -518,9 +829,15 @@ static void switch_to(
 #if defined(KIIKO_LOCAL_LATENCY) || KIIKO_BOARD_METALIO47
     const int64_t probe_enter=esp_timer_get_time();
 #endif
+    if (nav_armed && !nav_tap_allowed(ctx, next)) {
+        nav_tap_leave(nav_armed);
+        nav_armed = false;
+        nav_tap_clear();
+    }
     if (main_source && navigation_page_ready(ctx, next)) display_main_transition_arm(next, shelf_source, true);
     app_present(ctx, next, (reader_to_home || next->enter_full) ? APP_REDRAW_FULL : APP_REDRAW_PAGE);
     display_main_transition_disarm();
+    nav_tap_leave(nav_armed);
 #ifdef KIIKO_LOCAL_LATENCY
     if(local_probe_contact_start_us){
         ESP_LOGI("latency","CONTACT to=%d total_us=%lld",app_index_of(next),(long long)(esp_timer_get_time()-local_probe_contact_start_us));
@@ -646,6 +963,7 @@ static bool poll_media(app_ctx_t* ctx, const app_desc_t* current,
 // 锁屏前先由页面保存进度，再持久化一次恢复上下文；不在翻页或点击时写入。
 // Flush page progress before persisting one lock checkpoint; never write it on page turns or taps.
 static bool prepare_lock(app_ctx_t *ctx, const app_desc_t *current, bool feedback) {
+    nav_tap_clear();
     app_book_shelf_prefetch_cancel();
     if (feedback) app_lock_feedback(ctx->hl);
     if (current->on_before_lock) current->on_before_lock(ctx);
@@ -685,16 +1003,27 @@ static void run_power_action(app_ctx_t *ctx, const app_desc_t *current, bool res
 
 bool app_touch_input_pending(app_ctx_t *ctx) {
     if (ctx->request_app || ctx->request_return || ctx->request_menu ||
-        (ctx->touch && ctx->touch->touched)) return true;
+        (ctx->touch && ctx->touch->touched) ||
+        nav_tap_peek(esp_timer_get_time() / 1000) >= 0) return true;
     cst836u_touch_t touch = {0};
-    return ctx->tp && cst836u_read(ctx->tp, &touch) == ESP_OK && touch.touched;
+    return ctx->tp && nav_tp_read(ctx->tp, &touch) == ESP_OK && touch.touched;
 }
 
 bool app_poll_main_navigation(app_ctx_t *ctx) {
     if(!ctx||!ctx->tp)return false;
     if(ctx->request_app)return true;
+    if (s_nav_arm_depth > 0) {
+        int queued = nav_tap_peek(esp_timer_get_time() / 1000);
+        if (queued >= 0 && queued != 1) {
+            (void)nav_tap_take(esp_timer_get_time() / 1000, NULL);
+            ui_nav_request(ctx, queued);
+            ctx->user_activity = true;
+            return true;
+        }
+        return false;
+    }
     cst836u_touch_t touch={0};
-    if(cst836u_read(ctx->tp,&touch)!=ESP_OK||!touch.touched||touch.count!=1) {
+    if(nav_tp_read(ctx->tp,&touch)!=ESP_OK||!touch.touched||touch.count!=1) {
         s_nav_contact_down=s_nav_polled=false;return false;
     }
     int index=ui_nav_hit(touch.x,touch.y);
@@ -719,6 +1048,12 @@ void app_loop_run(const app_loop_config_t* config) {
     s_presented_main = NULL;
     s_presented_root = NULL;
     s_nav_contact_down=s_nav_polled=false;
+    nav_tap_buf_reset(&s_nav_buf);
+    s_nav_arm_depth = 0;
+    s_nav_overlay_blocked = false;
+#ifdef ESP_PLATFORM
+    nav_tap_init(config->tp);
+#endif
     const app_desc_t* current = config->first_app != NULL
         ? config->first_app
         : app_home_page();
@@ -795,13 +1130,13 @@ void app_loop_run(const app_loop_config_t* config) {
             cover_policy = requested_cover_policy;
         }
         cst836u_touch_t touch = { 0 };
-        esp_err_t err = cst836u_read(config->tp, &touch);
+        esp_err_t err = nav_tp_read(config->tp, &touch);
         // 一轮补采两次：主循环被渲染/存储拖长时，短促点击不会落在两次采样之间。
         // Two extra reads per loop: a short tap cannot fall between samples when rendering or
         // storage work stretches the iteration.
         for (int extra = 0; extra < 2; ++extra) {
             cst836u_touch_t again = { 0 };
-            if (cst836u_read(config->tp, &again) == ESP_OK && again.touched && !touch.touched) {
+            if (nav_tp_read(config->tp, &again) == ESP_OK && again.touched && !touch.touched) {
                 touch = again;
                 err = ESP_OK;
             }
@@ -848,6 +1183,7 @@ void app_loop_run(const app_loop_config_t* config) {
                 held_key = -1;
                 cancel_gesture(&ctx, current, &gesture);
                 menu_pressed = UI_MENU_HIT_NONE;
+                nav_tap_clear();
                 ctx.consumed = true;
                 ctx.pressed = ctx.released = false;
                 was_touched = touch.touched;
@@ -1002,6 +1338,8 @@ void app_loop_run(const app_loop_config_t* config) {
         }
         // 主页面底栏在首次单指报点就确认；抬手、轻滑和停留不再重复切页。
         // Commit root navigation on the first single contact; lift, small motion and holds never repeat it.
+        s_nav_overlay_blocked = power_input_owned || quick_input_owned || s_quick.open || menu_open || usb_storage_active();
+        if (s_nav_overlay_blocked || !navigation_input_ready(&ctx, current)) nav_tap_clear();
         bool nav_press_owned=s_nav_polled&&touch.touched&&touch.count==1&&navigation_input_ready(&ctx,current)&&ui_nav_hit(touch.x,touch.y)>=0;
         if(nav_press_owned)ctx.consumed=true;
         if (err == ESP_OK && pressed && !nav_press_owned && touch.count == 1 && !power_input_owned &&
@@ -1009,6 +1347,7 @@ void app_loop_run(const app_loop_config_t* config) {
             navigation_input_ready(&ctx, current)) {
             const int tab = ui_nav_hit(touch.x, touch.y);
             if (tab >= 0) {
+                nav_tap_clear();
                 held_key = -1;
                 cancel_gesture(&ctx, current, &gesture);
                 ctx.consumed = true;
@@ -1019,6 +1358,27 @@ void app_loop_run(const app_loop_config_t* config) {
                 ui_click_feedback_nav_request(tab);
                 if(ui_click_feedback_nav_tick(ctx.fb,esp_timer_get_time()/1000,&click_area))
                     click_present(&ctx,current,click_area);
+            }
+        }
+        if (!nav_press_owned && !s_nav_overlay_blocked && navigation_input_ready(&ctx, current)) {
+            bool queued_still_down = false;
+            int queued = nav_tap_take(ctx.now_ms, &queued_still_down);
+            if (queued >= 0 && nav_tap_actionable(&ctx, current, queued)) {
+                held_key = -1;
+                cancel_gesture(&ctx, current, &gesture);
+                ctx.consumed = true;
+                ctx.user_activity = true;
+                last_input_ms = ctx.now_ms;
+                nav_press_owned = true;
+                if (queued_still_down && err == ESP_OK && touch.touched && touch.count == 1 &&
+                    ui_nav_hit(touch.x, touch.y) == queued) {
+                    s_nav_contact_down = true;
+                    s_nav_polled = true;
+                }
+                ui_nav_request(&ctx, queued);
+                ui_click_feedback_nav_request(queued);
+                if (ui_click_feedback_nav_tick(ctx.fb, esp_timer_get_time() / 1000, &click_area))
+                    click_present(&ctx, current, click_area);
             }
         }
         if (err == ESP_OK && pressed && touch.count == 1 && !nav_press_owned && !power_input_owned &&
@@ -1404,6 +1764,20 @@ void app_loop_run(const app_loop_config_t* config) {
                     display_main_transition_disarm();
                 }
             } else if (next) {
+                if (!s_nav_overlay_blocked && navigation_input_ready(&ctx, current)) {
+                    int64_t override_ms = esp_timer_get_time() / 1000;
+                    int override_tab = nav_tap_peek(override_ms);
+                    const app_desc_t *override_app = override_tab >= 0 ? app_at(override_tab) : NULL;
+                    if (override_app && override_app != next && nav_tap_actionable(&ctx, current, override_tab)) {
+                        (void)nav_tap_take(override_ms, NULL);
+                        ui_nav_request(&ctx, override_tab);
+                        next = ctx.request_app;
+                        ctx.request_app = NULL;
+                        ui_click_feedback_nav_request(override_tab);
+                        if (ui_click_feedback_nav_tick(ctx.fb, override_ms, &click_area))
+                            click_present(&ctx, current, click_area);
+                    }
+                }
                 if (next != current) {
                     return_app = current;
                     return_leaf = ctx.leaf;
@@ -1419,16 +1793,19 @@ void app_loop_run(const app_loop_config_t* config) {
                 present_menu(&ctx, current, menu_leaf, &feedback);
             }
         }
-        // 按下效果已经显示，只定时复位；不把是否切页当作反馈触发条件。
-        // The pressed pose is already visible; settle by timer independently of navigation.
+        s_nav_overlay_blocked = power_dialog_open || s_quick.open || quick_input_owned || menu_open || usb_storage_active();
+        bool fast_next = !s_nav_overlay_blocked && navigation_input_ready(&ctx, current) &&
+            nav_tap_actionable(&ctx, current, nav_tap_peek(esp_timer_get_time() / 1000));
+        // 按下效果已经显示，只定时复位；已有下一跳缓冲时跳过多余复位扫描，下一拍直接合绘切换。
+        // The pressed pose is already visible; settle by timer unless another buffered nav tap is pending.
         if(ui_click_feedback_nav_pending()) {
             if(err!=ESP_OK || touch.count>1 || menu_open || power_dialog_open || s_quick.open ||
                 usb_storage_active() || !navigation_page_ready(&ctx,current))ui_click_feedback_reset();
-            else if(ui_click_feedback_nav_tick(ctx.fb,esp_timer_get_time()/1000,&click_area))
+            else if(!fast_next && ui_click_feedback_nav_tick(ctx.fb,esp_timer_get_time()/1000,&click_area))
                 click_present(&ctx,current,click_area);
         }
         // 连续列表相位期间缩短等待；每次仍读触摸，并给其他任务让出一个调度周期。
         // Reduce waits during continuous list phases; poll touch each time and yield one scheduling tick.
-        vTaskDelay(pdMS_TO_TICKS(LOOP_TICK_MS));
+        if (!fast_next) vTaskDelay(pdMS_TO_TICKS(LOOP_TICK_MS));
     }
 }
