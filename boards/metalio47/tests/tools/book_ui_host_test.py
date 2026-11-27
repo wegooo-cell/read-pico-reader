@@ -89,7 +89,6 @@ typedef enum {APP_REDRAW_PAGE,APP_REDRAW_AREA,APP_REDRAW_NONE,APP_REDRAW_FULL} a
 typedef struct {int x,y,width,height;} EpdRect;
 static EpdRect ui_bar_rect(int i,int count){int width=(508-(count-1)*12)/count;return(EpdRect){40+i*(width+12),1096,width,96};}
 enum {UI_PAGER_NONE=-1,UI_PAGER_FIRST,UI_PAGER_PREVIOUS,UI_PAGER_NEXT,UI_PAGER_LAST};
-static EpdRect ui_pager_rect(int i){return (EpdRect){40+i*140,1004,100,70};}
 static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}
 typedef struct {char name[256],author[128],path[288];uint32_t size;int64_t modified;bool cover_identity_known;uint16_t chapter;bool chapters_checked;uint16_t chapters;bool is_flash,has_progress;uint8_t pct;uint32_t recent;uint64_t added;bool selected,removed,search_match,favorite,shelved,is_dir;} shelf_entry_t;
 #define BOOK_ROWS 13
@@ -587,7 +586,7 @@ unit += function("set_reader_view") + "\n"
 unit += function("ble_pt_action_for_usage", source.parents[2] / "components/ble_page_turner/src/ble_page_turner.c") + "\n"
 
 for name in ("inline_ink_gray", "reader_margin_width", "reader_margin_levels", "reader_margin_level_for", "reader_margin_for_level", "slider_index", "reader_margin_input", "reader_area", "reader_fullscreen_progress_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_display_style", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_category_matches", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "shelf_matches", "compare_books", "sort_shelf", "shelf_reserve", "delete_retry_find", "delete_retry_reserve", "delete_retry_discard", "scan_shelf_dir", "shelf_backfill_visit", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress",
-             "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "reader_saved_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "shelf_manage_rect", "shelf_sort_rect", "shelf_pager_group_rect", "shelf_search_rect", "shelf_search_clear_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "bulk_sort_rect", "shelf_sort_menu_rect", "shelf_order_mode", "shelf_order_desc", "leaves", "selected_count", "clear_selection", "toggle_selection", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "shelf_search_clear", "refresh_capacity", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_select_row", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "reader_key_action", "import_finish", "shelf_sort_gesture", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
+             "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "reader_saved_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "shelf_manage_rect", "shelf_sort_rect", "shelf_pager_area", "shelf_pager_rect", "shelf_pager_hit", "shelf_search_rect", "shelf_search_clear_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "bulk_sort_rect", "shelf_sort_menu_rect", "shelf_order_mode", "shelf_order_desc", "leaves", "selected_count", "clear_selection", "toggle_selection", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "shelf_search_clear", "refresh_capacity", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_select_row", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "reader_key_action", "import_finish", "shelf_sort_gesture", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
     unit += function(name) + "\n"
 unit += "static void shelf_join_quick_covers(app_ctx_t *ctx){(void)ctx;}\n"
 for name in ("book_remote_direction", "shelf_turn_page", "shelf_page_arrow_rect", "reader_swipe_direction"):
@@ -652,7 +651,22 @@ int main(void) {
     assert(shelf_turn_page(&remote_ctx,1)==APP_REDRAW_AREA&&remote_ctx.leaf==2);
     s_scan_pending=false;s_view=MANAGE;
     assert(shelf_turn_page(&remote_ctx,1)==APP_REDRAW_NONE);
+    // Plan A1：四个分页药丸共用一个612×72条带，互不重叠且让开底部导航。
+    // Plan A1: the four pager pills share one612x72 strip, disjoint and clear of the bottom navigation.
+    EpdRect pager=shelf_pager_area();
+    assert(pager.x==36&&pager.y==998&&pager.width==612&&pager.height==72&&pager.y+pager.height<=UI_BAR_TOP);
+    for(int action=UI_PAGER_FIRST;action<=UI_PAGER_LAST;++action){
+        EpdRect pill=shelf_pager_rect(action);
+        assert(pill.y==pager.y&&pill.x>=pager.x&&pill.x+pill.width<=pager.x+pager.width);
+        if(action>UI_PAGER_FIRST){EpdRect previous_pill=shelf_pager_rect(action-1);assert(previous_pill.x+previous_pill.width<pill.x);}
+        assert(shelf_pager_hit(pill.x+pill.width/2,pill.y+pill.height/2)==action);
+    }
+    assert(shelf_pager_rect(UI_PAGER_LAST+1).width==0&&shelf_pager_rect(UI_PAGER_NONE).width==0);
+    assert(shelf_pager_hit(pager.x-1,pager.y+pager.height/2)==UI_PAGER_NONE);
+    assert(shelf_pager_hit(342,pager.y+pager.height+1)==UI_PAGER_NONE);
     EpdRect left=shelf_page_arrow_rect(-1),right=shelf_page_arrow_rect(1);
+    EpdRect previous_page=shelf_pager_rect(UI_PAGER_PREVIOUS),next_page=shelf_pager_rect(UI_PAGER_NEXT);
+    assert(!memcmp(&left,&previous_page,sizeof(left))&&!memcmp(&right,&next_page,sizeof(right)));
     assert(left.y==right.y&&left.y+left.height<=UI_BAR_TOP);
     test_shelf_style=5;s_view=SHELF;s_visible_count=15;assert(shelf_rows()==8&&leaves()==2);
     for(int i=0;i<8;++i){EpdRect r=row_rect(i);assert(r.y==184+i*96&&r.y+r.height<=952);}
@@ -961,7 +975,13 @@ int main(void) {
     for(int row=0;row<7;++row)toggle_selection(row);
     // The new root footer route owns its own hit and binds the existing bottom keyboard.
     s_view=SHELF;ctx.leaf=2;EpdRect search=shelf_search_rect(ctx.leaf,leaves());int began=keyboard_begins;
-    assert(search.x>204&&search.x+search.width<480&&search.y==1006&&search.width>49&&search.height==50);
+    // Plan A1：搜索胶囊在顶栏管理左侧，筛选激活时左侧48px整体作为X清除热区。
+    // Plan A1: the search capsule sits left of Manage in the top bar; an active query makes its left48px the X clear target.
+    assert(search.x==300&&search.y==94&&search.width==108&&search.height==54);
+    assert(search.y+search.height<=176&&search.x+search.width<=shelf_manage_rect().x);
+    EpdRect search_clear=shelf_search_clear_rect(ctx.leaf,leaves());
+    assert(search_clear.x==search.x&&search_clear.y==search.y&&search_clear.width==48&&search_clear.height==search.height);
+    assert(!ui_rect_hit(search_clear,search_clear.x+search_clear.width,search_clear.y+1));
     s_shelf_key_mode=true;s_shelf_key_delta=3;
     search_begin();assert(s_view==SEARCH&&s_search_parent==SHELF);
     assert(keyboard_begins==began+1&&bound_keyboard==&s_search_input&&!s_shelf_key_mode&&!s_shelf_key_delta);
@@ -1100,7 +1120,11 @@ int main(void) {
     s_view=SHELF;test_shelf_style=5;s_batch_confirm=false;s_clear_confirm=false;s_scan_pending=false;
     EpdRect manage_header=shelf_manage_rect(),sort_header=shelf_sort_rect();
     assert(manage_header.x==420&&manage_header.x+manage_header.width<=sort_header.x);
-    assert(!ui_rect_hit((EpdRect){24,79,326,74},manage_header.x,110));
+    // 分类标题热区收窄到搜索胶囊左侧，不再压到管理/书架排序。
+    // The category-title hotspot narrows to the left of the search capsule and never reaches Manage or the shelf sort.
+    const EpdRect title_hotspot={24,79,270,74};
+    assert(ui_rect_hit(title_hotspot,36,120)&&!ui_rect_hit(title_hotspot,manage_header.x,110)
+           &&!ui_rect_hit(title_hotspot,sort_header.x+4,110));
     const int sort_modes[]={1,2,0,3};
     for(int i=0;i<4;++i){
         s_shelf_order=0;s_sort_menu=true;ctx.leaf=2;

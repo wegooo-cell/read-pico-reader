@@ -71,7 +71,10 @@ for name in ['ui_gesture_reset','emit','ui_gesture_feed']:
  u+=function(name,R/'main/ui/ui_gesture.c')+'\n'
 route=function('gesture_event',book)
 assert route.index('shelf_pager_event(')<route.index('reader_tools_swipe(')
-u += '#ifdef KIIKO_BOARD_METALIO47\n#define S31_PAGER KIIKO_BOARD_METALIO47\n#else\n#define S31_PAGER 0\n#endif\n'
+# 宿主测试不带板级 -D，不能用板宏；沿用基线从源码推断新分页行为（按下不重绘、后台核对时照常翻页），两板都含该句。
+# Host tests compile without board defines, so infer the new paging behavior from source (press does not repaint; a background check still turns pages) -- both boards contain this line.
+s31 = 's_shelf_input_ms = ctx->now_ms' in function('shelf_turn_page', book)
+u += '#define S31_PAGER ' + str(int(s31)) + '\n'
 u+=r'''
 static ui_gesture_t gesture;
 static cst836u_touch_t touch;
@@ -116,6 +119,8 @@ int main(void){
    reset(a<2?0:2);sample(x,y,true,true,false,false,1);sample(x,y,false,false,true,false,0);
    assert(ctx.leaf==(a<2?0:2)&&!prepares);
    reset(1);s_scan_pending=true;sample(x,y,true,true,false,false,1);sample(x,y,false,false,true,false,0);
+   // 后台核对时新分页行为仍照常翻页（不重绘分页区）。
+   // The new paging behavior still turns pages during a background check without repainting the strip.
    assert(ctx.leaf==(S31_PAGER?(a<2?0:2):1)&&prepares==S31_PAGER&&!paints);
   }
  }
