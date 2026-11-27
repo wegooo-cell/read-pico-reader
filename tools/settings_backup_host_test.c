@@ -42,6 +42,26 @@ static void remove_backup_files(void) {
     (void)remove(LEGACY_S31_PREVIOUS);
 }
 
+/* 覆盖备份里的背景路径块，用来验证旧备份恢复时是否被忽略。
+ * Rewrite the sealed background block so legacy backups can prove the path is ignored. */
+static bool patch_background_path(const char *file_path, const char *value) {
+    FILE *file = fopen(file_path, "r+b");
+    if (!file) return false;
+    const long offset = (long)(sizeof(settings_backup_v1_t) + 7 + sizeof(settings_backup_profile_t) +
+        sizeof(settings_backup_keys_t) + sizeof(settings_backup_hold_t) +
+        sizeof(settings_backup_indent_adjust_t) + sizeof(settings_backup_weight_t) +
+        sizeof(settings_backup_wifi_t));
+    settings_backup_background_t block = {0};
+    strlcpy(block.path, value, sizeof(block.path));
+    uint32_t hash = backup_background_checksum(&block);
+    for (unsigned i = 0; i < 4; ++i) block.checksum[i] = (uint8_t)(hash >> (8 * i));
+    bool ok = fseek(file, offset, SEEK_SET) == 0 &&
+        fwrite(&block, 1, sizeof(block), file) == sizeof(block);
+    if (fflush(file) != 0) ok = false;
+    if (fclose(file) != 0) ok = false;
+    return ok;
+}
+
 static bool copy_backup_file(const char *from, const char *to) {
     FILE *input = fopen(from, "rb");
     if (!input) return false;
@@ -325,8 +345,17 @@ int main(void) {
     app_settings_set_book_margin(0);assert(app_settings_book_margin()==0);
     app_settings_set_book_margin(24);assert(app_settings_book_margin()==24);
     app_settings_set_book_margin(49);assert(app_settings_book_margin()==24);
+#if KIIKO_BOARD_METALIO47
     assert(app_settings_set_book_background_path("/sdcard/pictures/bg.png"));
     assert(!app_settings_set_book_background_path("/sdcard/pictures/../bad.png"));
+#else
+    // Pico 已移除背景入口：只接受清除，非空路径被拒绝。
+    // Pico removed the entry: only clearing succeeds and non-empty paths are rejected.
+    assert(!app_settings_set_book_background_path("/sdcard/pictures/bg.png"));
+    assert(!app_settings_set_book_background_path("/sdcard/pictures/../bad.png"));
+    assert(app_settings_set_book_background_path(""));
+    assert(!app_settings_book_background_path()[0]);
+#endif
     has_hold=true;loaded_hold=APP_READER_KEY_REFRESH;
     has_keys[0]=has_keys[1]=has_keys[2]=true;
     loaded_keys[0]=APP_READER_KEY_PREV;loaded_keys[1]=APP_READER_KEY_TOOLS;loaded_keys[2]=APP_READER_KEY_NEXT;
@@ -1152,6 +1181,17 @@ int main(void) {
     assert(app_settings_toggle_book_reading_line()&&!s_book_reading_line&&s_book_rule_saved==guide_preset);
     assert(app_settings_toggle_book_reading_line()&&s_book_reading_line==2&&s_book_rule_full&&s_book_rule_offset==7);
     free(guide_sync);
+
+#if !KIIKO_BOARD_METALIO47
+    // Pico 恢复旧备份时忽略背景路径，其余设置照常恢复。
+    // Pico ignores a restored background path while every other setting still applies.
+    app_settings_set_book_px(62);
+    assert(app_settings_backup_save() == ESP_OK);
+    assert(patch_background_path(BACKUP_FILE, "/sdcard/pictures/bg.png"));
+    app_settings_set_book_px(40);
+    assert(app_settings_backup_restore() == ESP_OK);
+    assert(app_settings_book_px() == 62 && !app_settings_book_background_path()[0]);
+#endif
 
     puts("settings backup host test passed (200% sizes, retired shelf migration, collage persistence/restore without wallpaper, unified backup name with both boards' legacy names)");
     return 0;

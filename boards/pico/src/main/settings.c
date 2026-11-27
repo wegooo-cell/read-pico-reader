@@ -141,6 +141,8 @@ static uint8_t s_book_px = 48;
 static uint8_t s_book_weight = 2;
 static int8_t s_book_weight_fine;
 static bool s_book_antialias = true;
+// Pico 已移除阅读背景入口，这里恒为空串；残留的旧值不再生效。
+// Pico removed the reader-background entry, so this stays empty and legacy values are ignored.
 static char s_book_background[288];
 static uint8_t s_reader_full_pages = 15;
 static uint8_t s_reader_turn_effect;
@@ -351,9 +353,11 @@ void app_settings_init(void) {
     s_book_antialias = nvs_get_u8(h, NVS_KEY_BOOK_AA, &antialias) != ESP_OK || antialias != 0;
     uint8_t book_px = 48;
     if (nvs_get_u8(h, NVS_KEY_BOOK_PX, &book_px) == ESP_OK) s_book_px = valid_book_px(book_px >= 18 && book_px < BOOK_READER_PX_MIN ? BOOK_READER_PX_MIN : book_px);
-    size_t background_len = sizeof(s_book_background);
-    if (nvs_get_str(h, NVS_KEY_BOOK_BACKGROUND, s_book_background, &background_len) != ESP_OK ||
-        (s_book_background[0] && strncmp(s_book_background, "/sdcard/pictures/", 17))) s_book_background[0] = 0;
+    // Pico 已移除背景入口：开机不取用残留的背景键，否则旧配置会一直画背景且无法关闭，
+    // 并让阅读预绘对每页失效。这里不读也不写 NVS，避免多余写入。
+    // Pico removed the entry: ignore any leftover background key on boot, otherwise an old
+    // profile paints an unclosable background and disables per-page prefetch. No NVS access here.
+    s_book_background[0] = 0;
     uint8_t reader_full_pages = 15;
     if (nvs_get_u8(h, NVS_KEY_READER_FULL, &reader_full_pages) == ESP_OK &&
         (reader_full_pages == 0 || reader_full_pages == 5 || reader_full_pages == 10 ||
@@ -770,15 +774,17 @@ void app_settings_set_book_px(uint8_t px) {
 
 const char *app_settings_book_background_path(void) { return s_book_background; }
 bool app_settings_set_book_background_path(const char *path) {
-    if (!path || (path[0] && strncmp(path, "/sdcard/pictures/", 17)) ||
-        strnlen(path, sizeof(s_book_background)) >= sizeof(s_book_background) || strstr(path, "/../")) return false;
+    // Pico 只接受清除：入口已移除，非空路径会让用户无法关闭背景并取消阅读预绘。
+    // Pico accepts clearing only: the entry is gone, and a non-empty path would leave an
+    // unclosable background that also cancels reader prefetch.
+    if (!path || path[0]) return false;
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
-    esp_err_t err = nvs_set_str(h, NVS_KEY_BOOK_BACKGROUND, path);
+    esp_err_t err = nvs_set_str(h, NVS_KEY_BOOK_BACKGROUND, "");
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
     if (err != ESP_OK) return false;
-    strlcpy(s_book_background, path, sizeof(s_book_background));
+    s_book_background[0] = 0;
     return true;
 }
 
@@ -1321,6 +1327,8 @@ static esp_err_t backup_write_stream(FILE *file, bool rotate, bool compatible) {
     }
     if (wifi_err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); fclose(file); return wifi_err; }
     backup_wifi_seal(&wifi);
+    // 背景块仍按原格式写出，Pico 的路径恒为空，备份布局与校验和不变。
+    // The background block keeps its layout and checksum; Pico always writes an empty path.
     settings_backup_background_t background = {0};
     strlcpy(background.path, s_book_background, sizeof(background.path));
     uint32_t background_hash = backup_background_checksum(&background);
@@ -1672,8 +1680,11 @@ static esp_err_t backup_apply_stream(FILE *file, bool apply) {
     if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_BOOK_PARA_FULL,restored_para+100);
     BACKUP_SET_U8(NVS_KEY_SHELF_STYLE, BK_SHELF);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_SHELF_V22, 1);
+    // 背景块照旧解析与校验，但不写入运行状态或设置键：Pico 不再启用阅读背景。
+    // Parse and validate the background block as before but keep it out of runtime state and
+    // NVS: Pico no longer enables reader backgrounds.
     if (background.path[0] && !backup_file_exists(background.path, false)) background.path[0] = 0;
-    BACKUP_SET_STR(NVS_KEY_BOOK_BACKGROUND, background.path);
+    BACKUP_SET_STR(NVS_KEY_BOOK_BACKGROUND, "");
     BACKUP_SET_STR(NVS_KEY_FONT, backup.font);
     BACKUP_SET_STR(NVS_KEY_SYS_FONT, backup.system_font);
     if(bookmark.path[0] && !backup_file_exists(bookmark.path,false))bookmark.path[0]=0;
@@ -1739,7 +1750,7 @@ static esp_err_t backup_apply_stream(FILE *file, bool apply) {
     s_book_margin_y = margin_y;
     s_book_para = restored_para;
     s_shelf_style = f[BK_SHELF];
-    strlcpy(s_book_background, background.path, sizeof(s_book_background));
+    s_book_background[0] = 0;
     s_home_component = (app_home_component_t)home.component;
     s_home_goal_minutes = home.minutes;
     strlcpy(s_books_dir,backup.books_dir,sizeof(s_books_dir));
