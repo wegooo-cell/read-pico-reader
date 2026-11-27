@@ -40,8 +40,9 @@ unit = r'''
 #include <stdio.h>
 static void *cover_alloc(size_t n){return malloc(n);}
 // 保留原解码/合成，只替代最终缩放。/ Exercise real decode/composition with identity output scaling.
-static bool jpegdec_plane_gray(const uint8_t *p,unsigned w,unsigned h,unsigned ow,unsigned oh,uint8_t *out){
- assert(w==ow && h==oh);memcpy(out,p,(size_t)w*h);return true;
+static bool jpegdec_plane_gray(const uint8_t *p,unsigned w,unsigned h,unsigned ow,unsigned oh,uint8_t *out,
+                               bool (*checkpoint)(void *),void *context){
+ assert(w==ow && h==oh && !checkpoint && !context);memcpy(out,p,(size_t)w*h);return true;
 }
 typedef struct {const uint8_t *data;size_t size,at;uint8_t block[256];int block_len,block_pos;} gif_stream_t;
 '''

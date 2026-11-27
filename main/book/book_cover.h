@@ -14,6 +14,15 @@ bool book_image_grayscale(const uint8_t *data, size_t size, bool png,
                           unsigned out_width, unsigned out_height, uint8_t *out);
 bool book_image_dimensions(const uint8_t *data, size_t size, bool png,
                            unsigned *width, unsigned *height);
+#if !KIIKO_BOARD_METALIO47
+bool book_image_speculative_dimensions(const uint8_t *data, size_t size, bool *png,
+                                       unsigned *width, unsigned *height);
+// 回调可暂停或取消；只允许走与前台同分辨率的首选解码器。
+// The callback can pause or cancel; use only the foreground decoder's preferred resolution.
+bool book_image_grayscale_speculative(const uint8_t *data, size_t size, bool png,
+                                      unsigned out_width, unsigned out_height, uint8_t *out,
+                                      bool (*checkpoint)(void *), void *context);
+#endif
 
 /// 源图取样窗口，按「填满目标再居中裁剪」计算。
 /// 长宽比不同时按长边铺满、裁掉多余的一边，绝不拉伸。

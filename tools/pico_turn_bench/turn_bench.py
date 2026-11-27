@@ -143,14 +143,13 @@ def cmd_restore(args):
     _, parts, slot = device_layout(port, args.backup)
     if slot != 0:
         die('device boots ota_1; not touching ota_0')
-    offset = parts['ota_0'][2]
-    # 备份是整个分区，尾部 0xff 不必写。/ The backup spans the whole partition; skip trailing 0xff.
-    data = open(backup, 'rb').read().rstrip(b'\xff')
-    trimmed = os.path.join(args.backup, 'dev_ota0.trimmed.bin')
-    with open(trimmed, 'wb') as f:
-        f.write(data + b'\xff' * (-len(data) % 4096))
+    offset, size = parts['ota_0'][2], parts['ota_0'][3]
+    if os.path.getsize(backup) != size:
+        die('backup length differs from the current ota_0 partition size')
+    # 写回整个分区，清除更长的计时版留在原固件末尾之后的数据。
+    # Restore the entire slot so a longer timing build cannot leave bytes after the original image.
     print(f'restoring {backup} to {hex(offset)}')
-    esptool(port, 'write-flash', hex(offset), trimmed)
+    esptool(port, 'write-flash', hex(offset), backup)
     print('done; device rebooted')
 
 
@@ -166,7 +165,7 @@ class Device:
         self.ser.dtr = False
         self.ser.rts = False
         self.ser.open()  # 打开串口会让设备复位。/ Opening the port resets the device.
-        self.log = open(log_path, 'w', encoding='utf-8', errors='replace')
+        self.log = open(log_path, 'w', buffering=1, encoding='utf-8', errors='replace')
         self.buf = b''
         self.boot = {}
 
@@ -259,7 +258,7 @@ class Bench:
             if t:
                 rec = {k: v for k, v in FIELD_RE.findall(t.group(1))}
                 for k, v in list(rec.items()):
-                    if k in ('dir', 'hit', 'img', 'fx', 'lg', 'pf', 'glyphs', 'miss', 'scans', 'frames', 'skip'):
+                    if k in ('dir', 'hit', 'img', 'img_hit', 'fx', 'lg', 'pf', 'glyphs', 'miss', 'scans', 'frames', 'skip'):
                         rec[k] = int(v)
                     elif k == 'page':
                         rec['page'], rec['pages'] = map(int, v.split('/'))
@@ -335,14 +334,21 @@ def summarize(turns):
     out = {}
     for label, ts in groups.items():
         med = lambda k: round(statistics.median(t[k] for t in ts), 1)
+        med_opt = lambda k: round(statistics.median(t[k] for t in ts if k in t), 1) if any(k in t for t in ts) else 0
         out[label] = {
             'n': len(ts),
             'hit_rate': round(sum(t['hit'] in (1, 3) for t in ts) / len(ts), 2),
             'fn': round(statistics.median(t['turn'] - t['save'] - t['load'] for t in ts), 1),
             'img': round(statistics.median(t['prep'] + t['pre'] for t in ts), 1),
-            'turn': med('turn'), 'load': med('load'), 'join': med('join'), 'draw': med('draw'), 'push': med('push'),
+            'turn': med('turn'), 'load': med('load'), 'join': med('join'), 'draw': med('draw'),
+            'imgdraw': med_opt('imgdraw'), 'text': med_opt('text'),
+            'push': med('push'),
             'total': med('total'), 'frames': med('frames'), 'raster': med('raster'), 'miss': med('miss'),
         }
+        image_turns = [t for t in ts if t.get('img') and 'img_hit' in t]
+        if image_turns:
+            out[label]['image_prefetch_hits'] = sum(t['img_hit'] for t in image_turns)
+            out[label]['image_turns'] = len(image_turns)
     saves = [t['save'] for t in turns if t['save'] > 0]
     out['_save'] = {'n': len(saves), 'median': round(statistics.median(saves), 1) if saves else 0}
     return out
@@ -356,6 +362,8 @@ def print_summary(summary):
             continue
         print(f'{label:16}{s["n"]:>3}{s["hit_rate"]:>5.2f}{s["fn"]:>7.1f}{s["img"]:>6.0f}{s["draw"]:>7.1f}'
               f'{s["push"]:>7.1f}{s["join"]:>6.1f}{s["total"]:>7.1f}{s["frames"]:>5.0f}{s["miss"]:>5.0f}')
+        if 'image_prefetch_hits' in s:
+            print(f'  predecoded image pages: {s["image_prefetch_hits"]}/{s["image_turns"]}')
     s = summary['_save']
     print(f'progress saves: {s["n"]} x median {s["median"]} ms (inside "total", excluded from "fn")')
     if summary.get('_idle_save', {}).get('n'):

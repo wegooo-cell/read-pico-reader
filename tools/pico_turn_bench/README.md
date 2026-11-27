@@ -15,6 +15,14 @@ Measures per-stage page-turn time on a real Pico, as a before/after yardstick fo
 
 Firmware side: a `--pico-turn-timing` build enables `KIIKO_TURN_TIMING` plus the local USB probe, printing one `turn: TURN …` line per page turn. Default builds compile none of it.
 
+`img_hit` 记录本次翻页有没有复用已解码的插图。用汇总里的插图命中数和 `img` 准备耗时一起对比，`push` 单独记录推屏耗时。
+
+`img_hit` records whether a turn reused predecoded illustrations. Compare the image hit count with `img` preparation time. The `push` column reports panel time separately.
+
+`imgdraw` 记录插图贴图耗时（`draw_reader_images` 内写帧缓冲），`text` 记录正文文字绘制耗时（`book_layout_draw_page`）。两者都在 `draw` 阶段内部，用于把插图页 294 ms 的绘制拆开看。旧日志没有这两个字段，汇总里记 0。
+
+`imgdraw` is the image blit time (framebuffer writes inside `draw_reader_images`) and `text` is the body text drawing time (`book_layout_draw_page`). Both live inside the `draw` stage, so image pages can be split apart from their 294 ms draw. Older logs lack these fields and summarize them as 0.
+
 ## 用法 / Usage
 
 ```

@@ -34,9 +34,7 @@ static bool reader_prefetch_buffer(void){if(!next_ok)return false;if(!s_next_fb)
 static uint32_t book_layout_generation(void){return generation;}
 static size_t s_page=3,page_count=10;
 static unsigned s_back_turns;
-static int image_page=-1;
 static size_t book_layout_page_count(void){return page_count;}
-static unsigned book_layout_page_image_count(size_t p){return (int)p==image_page;}
 static const char*background="";
 static const char*app_settings_book_background_path(void){return background;}
 '''
@@ -55,7 +53,9 @@ int main(void){
  free_heap=4*1024*1024;next_ok=false;assert(!reader_keep_buffers());next_ok=true;
  for(unsigned failure=1;failure<=2;++failure){fail_allocation=allocations+failure;assert(!reader_keep_buffers()&&!s_keep_cur.fb&&!s_keep_prev.fb);}
  fail_allocation=0;assert(reader_keep_buffers());
- image_page=3;assert(reader_prefetch_target()==4);image_page=4;assert(reader_prefetch_target()==-1);image_page=-1;
+ // 带插图的目标页也预绘文字层：目标选择不再看插图数量（见 pico_image_text_prefetch_host_test.py）。
+ // Image-bearing targets prefetch their text layer too: selection ignores image counts (see pico_image_text_prefetch_host_test.py).
+ assert(reader_prefetch_target()==4);
  s_back_turns=1;assert(reader_prefetch_target()==2);background="paper";assert(reader_prefetch_target()==-1);background="";
  s_page=0;s_back_turns=2;assert(reader_prefetch_target()==1);s_page=9;s_back_turns=0;assert(reader_prefetch_target()==-1);
  reader_keep_free();free(s_next_fb);

@@ -48,6 +48,7 @@ static const int *display_main_gray_waveform(void){return &reader_waveform;}
 static const int *display_reader_soft_turn_waveform(void){return &soft_turn_waveform;}
 static const int *display_reader_image_turn_waveform(void){return &soft_turn_waveform;}
 static bool s_reader_clock_pending,s_input_settle,s_shelf_feedback_pending,s_cover_batch_present_pending,s_shelf_page_pending;
+static bool s_chapter_display_pending;
 static bool s_reader_image_refresh_pending,s_reader_cleanup,s_reader_turn_pending,s_water_turn_pending,s_clear_confirm,s_reader_fullscreen,s_reader_footer_pending,s_reader_text_frame;
 static bool s_toolbar;
 static int s_view=READING,s_reader_panel,s_mode=MODE_GL16,s_presented_view=READING,s_water_turn_dir,s_page,s_du_count;
@@ -147,6 +148,7 @@ static struct {bool pending;} s_reader_tap;
 static char s_path[16]="book";
 static int64_t s_stats_last_ms;
 static int lock_saves,lock_flushes,lock_cover_cancels,lock_stats_pauses;
+static void reader_image_prep_cancel(void){}
 static void reader_indent_hold_cancel(void){}
 static void shelf_category_remember(app_ctx_t *ctx){(void)ctx;}
 static void book_weread_cover_cancel(void){++lock_cover_cancels;}

@@ -434,7 +434,7 @@ esp_err_t zip_stream_open(zip_reader_t *z, int index, zip_stream_t **out) {
 
 void zip_stream_close(zip_stream_t *stream) { free(stream); }
 
-static esp_err_t stream_fill(zip_stream_t *s) {
+static esp_err_t stream_fill(zip_stream_t *s, unsigned *input_reads) {
     s->out_at = s->out_len = 0;
     if (s->entry->method == 0) {
         size_t n = s->entry->unpacked - s->produced;
@@ -446,6 +446,10 @@ static esp_err_t stream_fill(zip_stream_t *s) {
         // Keep the preceding 32 KiB dictionary in the wrapping inflate window.
         while (s->out_len < sizeof(s->window) && !s->done) {
             if (s->in_at == s->in_len && s->packed < s->entry->packed) {
+                if (input_reads) {
+                    if (!*input_reads) return ESP_ERR_NOT_SUPPORTED;
+                    --*input_reads;
+                }
                 size_t n = s->entry->packed - s->packed;
                 if (n > sizeof(s->input)) n = sizeof(s->input);
                 if (!read_at(s->reader, s->data + s->packed, s->input, n)) return ESP_FAIL;
@@ -474,13 +478,14 @@ static esp_err_t stream_fill(zip_stream_t *s) {
     return ESP_OK;
 }
 
-esp_err_t zip_stream_read(zip_stream_t *s, void *dst, size_t cap, size_t *received) {
+static esp_err_t stream_read(zip_stream_t *s, void *dst, size_t cap, size_t *received,
+                             unsigned *input_reads) {
     if (!s || !dst || !received || s->failed) return ESP_ERR_INVALID_ARG;
     *received = 0;
     while (*received < cap) {
         if (s->out_at == s->out_len) {
             if (s->done) break;
-            esp_err_t err = stream_fill(s);
+            esp_err_t err = stream_fill(s, input_reads);
             if (err != ESP_OK) { s->failed = true; return err; }
         }
         size_t n = s->out_len - s->out_at;
@@ -490,11 +495,25 @@ esp_err_t zip_stream_read(zip_stream_t *s, void *dst, size_t cap, size_t *receiv
         *received += n;
     }
     if (!s->done && s->produced == s->entry->unpacked && s->out_at == s->out_len) {
-        esp_err_t err = stream_fill(s);
+        esp_err_t err = stream_fill(s, input_reads);
         if (err != ESP_OK) { s->failed = true; return err; }
     }
     return ESP_OK;
 }
+
+esp_err_t zip_stream_read(zip_stream_t *s, void *dst, size_t cap, size_t *received) {
+    return stream_read(s, dst, cap, received, NULL);
+}
+
+#if !KIIKO_BOARD_METALIO47
+esp_err_t zip_stream_read_idle(zip_stream_t *s, void *dst, size_t cap, size_t *received) {
+    if (cap > ZIP_STREAM_WINDOW) return ESP_ERR_INVALID_SIZE;
+    // 多留两块输入给 deflate 开销和结束标记。超出时交回按需解码。
+    // Allow two extra input blocks for deflate overhead and the end marker. Fall back on excess.
+    unsigned input_reads = ZIP_STREAM_WINDOW / ZIP_STREAM_INPUT + 2;
+    return stream_read(s, dst, cap, received, &input_reads);
+}
+#endif
 
 #if KIIKO_BOARD_METALIO47
 

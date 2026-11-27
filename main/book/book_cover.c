@@ -175,11 +175,14 @@ book_crop_t book_cover_crop(unsigned src_width, unsigned src_height,
 typedef struct {
     uint8_t *plane;
     unsigned stride, height;
+    bool (*checkpoint)(void *);
+    void *context;
 } jpegdec_plane_t;
 
 static int jpegdec_collect(JPEGDRAW *draw) {
     jpegdec_plane_t *plane = draw->pUser;
     if (!plane || !plane->plane || draw->iBpp != 8 || !draw->pPixels || draw->iWidth < 1) return 0;
+    if (plane->checkpoint && !plane->checkpoint(plane->context)) return 0;
     const uint8_t *src = (const uint8_t *)draw->pPixels;
     const int columns = draw->iWidthUsed < draw->iWidth ? draw->iWidthUsed : draw->iWidth;
     for (int row = 0; row < draw->iHeight; ++row) {
@@ -205,13 +208,16 @@ extern int jpegdec_gray_ram(const uint8_t *data, int size, int divisor, JPEG_DRA
 // JPEGDEC 回传的小平面（按 divisor 缩放）→ 目标灰度：长边铺满、居中裁剪、双线性。
 // Map the JPEGDEC plane (scaled by divisor) to the target: fill the longer side, centre-crop, bilinear.
 static bool jpegdec_plane_gray(const uint8_t *plane, unsigned stride, unsigned height,
-                               unsigned out_width, unsigned out_height, uint8_t *out) {
+                               unsigned out_width, unsigned out_height, uint8_t *out,
+                               bool (*checkpoint)(void *), void *context) {
     if (!plane || !stride || !height) return false;
     const book_crop_t crop = book_cover_crop(stride, height, out_width, out_height);
     scale_step_t *xmap = scale_map(out_width, crop.width);
     scale_step_t *ymap = scale_map(out_height, crop.height);
     if (!xmap || !ymap) { free(xmap); free(ymap); return false; }
+    bool ok = true;
     for (unsigned y = 0; y < out_height; ++y) {
+        if (checkpoint && !checkpoint(context)) { ok = false; break; }
         const int sy = ymap[y].at, fy = ymap[y].frac;
         const int sy1 = scale_next(sy, crop.height);
         const uint8_t *r0 = plane + (size_t)(crop.y + (unsigned)sy) * stride;
@@ -223,11 +229,11 @@ static bool jpegdec_plane_gray(const uint8_t *plane, unsigned stride, unsigned h
                 r0[crop.x + (unsigned)sx], r0[crop.x + (unsigned)sx1],
                 r1[crop.x + (unsigned)sx], r1[crop.x + (unsigned)sx1], fx, fy);
         }
-        decode_yield(y);
+        if (!checkpoint) decode_yield(y);
     }
     free(xmap);
     free(ymap);
-    return true;
+    return ok;
 }
 
 // ROM 解码器失败时的兜底：JPEGDEC 直接解 1/2..1/8 小平面，内存占用远低于整幅 RGB565。
@@ -235,26 +241,32 @@ static bool jpegdec_plane_gray(const uint8_t *plane, unsigned stride, unsigned h
 // less memory than a full RGB565 frame.
 static bool jpegdec_gray_fallback(const uint8_t *data, size_t size, unsigned frame_width,
                                   unsigned frame_height, unsigned out_width, unsigned out_height,
-                                  uint8_t *out) {
+                                  uint8_t *out, bool (*checkpoint)(void *), void *context) {
     if (!data || size < 4 || size > INT32_MAX || !frame_width || !frame_height) return false;
     unsigned divisor = 1;
     while (divisor < 8 && frame_width / (divisor * 2) >= out_width &&
            frame_height / (divisor * 2) >= out_height) divisor *= 2;
-    jpegdec_plane_t plane = {0};
+    jpegdec_plane_t plane = {.checkpoint = checkpoint, .context = context};
     const size_t budget = image_work_budget(4u * 1024u * 1024u);
     for (; divisor <= 8; divisor *= 2) {
         plane.stride = (frame_width + divisor - 1) / divisor;
         plane.height = (frame_height + divisor - 1) / divisor;
-        if (plane.stride > 4096 || plane.height > 4096) continue;
-        size_t bytes = (size_t)plane.stride * plane.height;
-        if (bytes <= budget && (plane.plane = cover_alloc(bytes))) break;
+        if (plane.stride <= 4096 && plane.height <= 4096) {
+            size_t bytes = (size_t)plane.stride * plane.height;
+            // 为灰度平面之外的解码器对象和双线性映射留余量。
+            // Leave room for the JPEGDEC object and bilinear maps beyond the plane itself.
+            if (checkpoint && bytes + 64u * 1024u > image_work_budget(SIZE_MAX)) return false;
+            if (bytes <= budget && (plane.plane = cover_alloc(bytes))) break;
+        }
+        if (checkpoint) return false;
     }
     if (!plane.plane) return false;
     memset(plane.plane, 0xFF, (size_t)plane.stride * plane.height);
     const bool decoded = jpegdec_gray_ram(data, (int)size, (int)divisor, jpegdec_collect, &plane,
                                           NULL, NULL) != 0;
-    const bool ok = decoded && jpegdec_plane_gray(plane.plane, plane.stride, plane.height,
-                                                  out_width, out_height, out);
+    const bool ok = decoded && (!checkpoint || checkpoint(context)) &&
+        jpegdec_plane_gray(plane.plane, plane.stride, plane.height, out_width, out_height, out,
+                           checkpoint, context);
     free(plane.plane);
     return ok;
 }
@@ -527,7 +539,7 @@ static bool jpeg_gray(const uint8_t *data, size_t size, unsigned out_width,
     // User2026-11-05: oversized/progressive S31 covers can exhaust the full-frame decoder; try
     // JPEGDEC's 1/2..1/8 plane first, which needs far less memory than coefficients or a bitmap.
     if (have_frame && jpegdec_gray_fallback(data, size, frame_width, frame_height,
-                                           out_width, out_height, out)) return true;
+                                           out_width, out_height, out, NULL, NULL)) return true;
     if(!metalio_jpeg_fallback_allowed())return false;
 #endif
 #endif
@@ -542,7 +554,7 @@ static bool jpeg_gray(const uint8_t *data, size_t size, unsigned out_width,
     // Trial: decode baseline JPEGs with JPEGDEC's full plane (1/1..1/8 chosen from the target size),
     // matching TJpgDec's sharpness; TJpgDec remains the fallback.
     if (have_frame && sof != 0xC2 &&
-        jpegdec_gray_fallback(data, size, frame_width, frame_height, out_width, out_height, out))
+        jpegdec_gray_fallback(data, size, frame_width, frame_height, out_width, out_height, out, NULL, NULL))
         return true;
     esp_jpeg_image_cfg_t cfg = { .indata = (uint8_t *)data, .indata_size = (uint32_t)size,
                                  .out_format = JPEG_IMAGE_FORMAT_RGB565 };
@@ -570,7 +582,7 @@ static bool jpeg_gray(const uint8_t *data, size_t size, unsigned out_width,
     // 大尺寸 Exif JPEG 在部分基线上会让 ROM 解码器失败；JPEGDEC 直接解 1/2..1/8 小平面。
     // Large Exif baseline JPEGs can defeat the ROM decoder; let JPEGDEC decode a 1/2..1/8 plane.
     return have_frame && jpegdec_gray_fallback(data, size, frame_width, frame_height,
-                                               out_width, out_height, out);
+                                               out_width, out_height, out, NULL, NULL);
 }
 
 // WebP：先整幅/限幅解成 RGB565 平面，再走与基线 JPEG 相同的裁剪缩放。
@@ -772,7 +784,7 @@ static bool gif_gray(const uint8_t *data, size_t size, unsigned out_width, unsig
                 }
             }
         }
-        const bool ok = jpegdec_plane_gray(screen, gw, gh, out_width, out_height, out);
+        const bool ok = jpegdec_plane_gray(screen, gw, gh, out_width, out_height, out, NULL, NULL);
         free(screen);
         free(idx);
         return ok;
@@ -780,9 +792,16 @@ static bool gif_gray(const uint8_t *data, size_t size, unsigned out_width, unsig
     return false;
 }
 
-typedef struct { const uint8_t *data; size_t size, pos; FILE *file; } png_input_t;
+typedef struct {
+    const uint8_t *data;
+    size_t size, pos;
+    FILE *file;
+    bool (*checkpoint)(void *);
+    void *context;
+} png_input_t;
 static void png_read_mem(png_structp png, png_bytep dst, png_size_t count) {
     png_input_t *input = png_get_io_ptr(png);
+    if (input->checkpoint && !input->checkpoint(input->context)) png_error(png, "cancelled");
     if (count > input->size - input->pos) png_error(png, "truncated PNG");
     if (input->file) { if (fread(dst, 1, count, input->file) != count) png_error(png, "truncated PNG file"); }
     else memcpy(dst, input->data + input->pos, count);
@@ -790,7 +809,8 @@ static void png_read_mem(png_structp png, png_bytep dst, png_size_t count) {
 }
 static bool png_gray_rows(const uint8_t *data, size_t size, FILE *file, unsigned out_width,
                      unsigned out_height, uint8_t *out, uint8_t *alpha,
-                     bool (*sink)(void *, unsigned, unsigned, const uint8_t *, const uint8_t *), void *context) {
+                     bool (*sink)(void *, unsigned, unsigned, const uint8_t *, const uint8_t *),
+                     bool (*checkpoint)(void *), void *context) {
     png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
     if (!png) return false;
     png_infop info = png_create_info_struct(png);
@@ -807,7 +827,7 @@ static bool png_gray_rows(const uint8_t *data, size_t size, FILE *file, unsigned
     uint8_t *volatile rows[2] = {NULL, NULL};
     uint8_t *volatile masks[2] = {NULL, NULL};
     uint8_t *volatile output_row = NULL;
-    png_input_t input = {data, size, 0, file};
+    png_input_t input = {data, size, 0, file, checkpoint, context};
     bool ok = false;
     const bool keep_alpha = alpha != NULL || sink != NULL;
     if (setjmp(png_jmpbuf(png))) goto done;
@@ -849,8 +869,9 @@ static bool png_gray_rows(const uint8_t *data, size_t size, FILE *file, unsigned
     if (sink) output_row = cover_alloc(2u * out_width);
     if (xmap && ymap && rows[0] && rows[1] && (!keep_alpha || (masks[0] && masks[1])) && (!sink || output_row)) {
         for (png_uint_32 y = 0; y < height; ++y) {
+            if (checkpoint && !checkpoint(context)) goto done;
             png_read_row(png, row, NULL);
-            decode_yield((unsigned)y);
+            if (!checkpoint) decode_yield((unsigned)y);
             const int wy = (int)y - (int)crop.y;
             if (wy < 0 || wy >= (int)crop.height) continue;
             uint8_t *cur = rows[wy & 1];
@@ -898,7 +919,7 @@ done:
 
 static bool png_gray_input(const uint8_t *data, size_t size, FILE *file, unsigned width,
                           unsigned height, uint8_t *out, uint8_t *alpha) {
-    return png_gray_rows(data, size, file, width, height, out, alpha, NULL, NULL);
+    return png_gray_rows(data, size, file, width, height, out, alpha, NULL, NULL, NULL);
 }
 
 bool book_cover_thumbnail(const uint8_t *data, size_t size, bool png,
@@ -918,6 +939,39 @@ bool book_image_grayscale(const uint8_t *data, size_t size, bool png,
     return png ? png_gray_input(data, size, NULL, out_width, out_height, out, NULL)
                : jpeg_gray(data, size, out_width, out_height, out);
 }
+
+#if !KIIKO_BOARD_METALIO47
+bool book_image_speculative_dimensions(const uint8_t *data, size_t size, bool *png,
+                                       unsigned *width, unsigned *height) {
+    *png = size >= 8 && !memcmp(data, "\x89PNG\r\n\x1a\n", 8);
+    uint8_t sof = 0;
+    bool known = *png ? book_image_dimensions(data, size, true, width, height) :
+        book_jpeg_frame(data, size, &sof, width, height) && sof == 0xC0;
+    return known && *width && *height && *width <= 1536 && *height <= 1536 &&
+        (size_t)*width * *height <= 1280u * 1024u;
+}
+
+bool book_image_grayscale_speculative(const uint8_t *data, size_t size, bool png,
+                                      unsigned out_width, unsigned out_height, uint8_t *out,
+                                      bool (*checkpoint)(void *), void *context) {
+    if (!checkpoint || !out || !out_width || !out_height ||
+        out_width > 1216 || out_height > 1216 || (size_t)out_width * out_height > 684u * 1216u)
+        return false;
+    if (!checkpoint(context)) return false;
+    if (png) {
+        // libpng/zlib、辅助块、行缓冲与映射也消耗堆空间。
+        // Account for libpng/zlib, ancillary chunks, row buffers and maps.
+        if (image_work_budget(384u * 1024u) < 384u * 1024u) return false;
+        return png_gray_rows(data, size, NULL, out_width, out_height, out, NULL, NULL,
+                             checkpoint, context);
+    }
+    uint8_t sof = 0;
+    unsigned width = 0, height = 0;
+    return book_jpeg_frame(data, size, &sof, &width, &height) && sof == 0xC0 &&
+        jpegdec_gray_fallback(data, size, width, height, out_width, out_height, out,
+                              checkpoint, context);
+}
+#endif
 
 
 
@@ -1969,7 +2023,7 @@ bool book_png_file_layer_rows(const char *path, unsigned width, unsigned height,
         stat(path, &st) || st.st_size <= 0 || (uint64_t)st.st_size > BOOK_IMAGE_FILE_MAX) return false;
     FILE *file = fopen(path, "rb");
     if (!file) return false;
-    bool ok = png_gray_rows(NULL, (size_t)st.st_size, file, width, height, NULL, NULL, sink, context);
+    bool ok = png_gray_rows(NULL, (size_t)st.st_size, file, width, height, NULL, NULL, sink, NULL, context);
     fclose(file);
     return ok;
 }

@@ -100,6 +100,7 @@ jobs:
         working-directory: build/host/pico
         run: |
           python3 tools/pico_reader_cache_host_test.py
+          python3 tools/reader_images_host_test.py
           python3 tools/pico_chapter_preload_host_test.py
           python3 tools/cover_legacy_sweep_host_test.py
           python3 tools/pico_pclk_safe_host_test.py
@@ -173,6 +174,8 @@ jobs:
           KIIKO_TEST_BOARD="${{ matrix.board }}" \
           KIIKO_LIBPNG_PATH="$PWD/build/boards/${{ matrix.board }}/source/managed_components/espressif__libpng/libpng" \
             python3 build/bookmark-tests/${{ matrix.board }}/tools/book_lock_bookmark_host_test.py
+          KIIKO_LIBPNG_PATH="$PWD/build/boards/${{ matrix.board }}/source/managed_components/espressif__libpng/libpng" \
+            python3 tools/book_cover_resample_host_test.py
       - name: S31 progressive JPEG bounded-memory regression
         if: matrix.board == 'metalio47'
         shell: bash
