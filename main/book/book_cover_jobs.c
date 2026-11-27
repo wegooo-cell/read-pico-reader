@@ -88,11 +88,21 @@ static void defer_fast_cache_write(const book_cover_job_t *q,const uint8_t *bits
 // it. S31 logs inside its scans and does not install this hook.
 static TaskHandle_t s_worker_task;
 static SemaphoreHandle_t s_worker_task_lock;
+#if !KIIKO_BOARD_METALIO47
+__attribute__((weak)) void epd_image_scan_hook(bool active) { (void)active; }
+#endif
 void epd_scan_hook(bool active) {
-    if(!s_worker_task_lock)return;
-    xSemaphoreTake(s_worker_task_lock,portMAX_DELAY);
-    if(s_worker_task){if(active)vTaskSuspend(s_worker_task);else vTaskResume(s_worker_task);}
-    xSemaphoreGive(s_worker_task_lock);
+#if !KIIKO_BOARD_METALIO47
+    if(active)epd_image_scan_hook(true);
+#endif
+    if(s_worker_task_lock){
+        xSemaphoreTake(s_worker_task_lock,portMAX_DELAY);
+        if(s_worker_task){if(active)vTaskSuspend(s_worker_task);else vTaskResume(s_worker_task);}
+        xSemaphoreGive(s_worker_task_lock);
+    }
+#if !KIIKO_BOARD_METALIO47
+    if(!active)epd_image_scan_hook(false);
+#endif
 }
 // 后台任务自己登记与注销，扫屏钩子不会拿到已删除任务的句柄。/ The worker registers and unregisters itself, so the hook never sees a deleted task.
 static void worker_register(bool live) {

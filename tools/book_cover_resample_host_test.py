@@ -27,12 +27,17 @@ static void *cover_alloc(size_t n){if(fail_after==0)return NULL;if(fail_after>0)
 static void tracked_free(void *p){if(p)--live;free(p);}
 #define free tracked_free
 static void decode_yield(unsigned at){(void)at;}
+typedef struct {unsigned calls,stop_at;} checkpoint_t;
+static bool keep_decoding(void *context){
+ checkpoint_t *checkpoint=context;
+ return ++checkpoint->calls<checkpoint->stop_at;
+}
 typedef struct {unsigned x,y,width,height;} book_crop_t;
 '''
 for name in ('luminance','scale_axis'):unit+=fn(name)+'\n'
 unit+='typedef struct {uint16_t at;uint8_t frac;} scale_step_t;\n'
 for name in ('scale_map','scale_next','bilinear4','book_cover_crop'):unit+=fn(name)+'\n'
-unit+='typedef struct {const uint8_t *data;size_t size,pos;FILE *file;} png_input_t;\n'
+unit+=re.search(r'typedef struct \{[^{}]*\} png_input_t;',source).group()+'\n'
 for name in ('png_read_mem','png_gray_rows','png_gray_input'):unit+=fn(name)+'\n'
 unit+=r'''
 #undef free
@@ -59,6 +64,16 @@ int main(int argc,char **argv){
  for(int i=0;i<64;++i)assert(masks[i]==255);
  for(int i=64;i<80;++i)assert(masks[i]==0xaa);
  for(int i=0;i<7;++i){fail_after=i;assert(!png_gray_input(data,size,NULL,8,8,pixels,masks));assert(!live);}fail_after=-1;
+ // 每个检查点都能停止解码并释放缓冲，包括读取回调长跳转与输出开始后的取消。
+ // Stop and release at every checkpoint, including read-callback longjmp and partial gray output.
+ checkpoint_t checkpoint={.stop_at=1000};
+ assert(png_gray_rows(data,size,NULL,8,8,pixels,masks,NULL,keep_decoding,&checkpoint));assert(!live);
+ unsigned checkpoints=checkpoint.calls;assert(checkpoints>4);
+ for(unsigned stop_at=1;stop_at<=checkpoints;++stop_at){
+  checkpoint=(checkpoint_t){.stop_at=stop_at};
+  assert(!png_gray_rows(data,size,NULL,8,8,pixels,masks,NULL,keep_decoding,&checkpoint));
+  assert(!live&&checkpoint.calls==stop_at);
+ }
  free(data);
  f=fopen(argv[2],"rb");assert(f);fseek(f,0,SEEK_END);size=ftell(f);rewind(f);
  uint8_t *native=malloc(684u*1216u+16);memset(native,0xaa,684u*1216u+16);
@@ -68,7 +83,7 @@ int main(int argc,char **argv){
   assert(native[y*684+x]==gray);
  }
  for(unsigned i=684u*1216u;i<684u*1216u+16;++i)assert(native[i]==0xaa);
- free(native);puts("book_cover_resample: PASS (up/down/degenerate scaling, streamed PNG, bounds, truncation, OOM and native 684x1216 one-pixel detail)");
+ free(native);puts("book_cover_resample: PASS (scaling, PNG bounds, truncation, OOM, cancellation cleanup and native 684x1216 detail)");
 }
 '''
 def chunk(kind,data):return struct.pack('>I',len(data))+kind+data+struct.pack('>I',zlib.crc32(kind+data))

@@ -209,6 +209,7 @@ extern const app_desc_t app_device_settings;
 #include "book_toc.h"
 #include "app_font_context.h"
 #include "book_source.h"
+#include "zip_reader.h"
 #include "book_store.h"
 #include "book_library.h"
 #include "book_import.h"
@@ -661,6 +662,7 @@ static bool s_chapter_display_pending;
 #ifdef KIIKO_TURN_TIMING
 typedef struct {
     bool active;
+    bool image_prefetch_hit;
     int dir;
     int hit;                    ///< 0 现画 / 1 预绘命中 / 2 接着画完预绘 / 3 保留页 / drawn, prefetched, resumed, kept
     int64_t t0, load, save, prep, draw, turn_end, present_in, present_start, push_main;
@@ -705,6 +707,7 @@ static void before_lock(app_ctx_t *ctx);
 static void invalidate_prep(void);
 static void next_chapter_clear(void);
 static void prepare_inline_image(void);
+static void reader_image_prep_cancel(void);
 static void release_page_images(void);
 static void sort_shelf(app_ctx_t* ctx);
 static void prepare_covers(app_ctx_t* ctx);
@@ -2592,6 +2595,7 @@ bool app_book_checkpoint_ready(void) {
 // 目录使用系统字体；切换前等待预渲染结束，回正文时恢复阅读字体与字形缓存。
 // The directory uses the system face; join painting before switching and restore the reader face on return.
 static void set_reader_view(book_view_t view) {
+    reader_image_prep_cancel();
     reader_indent_hold_cancel();
     s_reader_tap.pending = false;
     lock_draw();
@@ -5077,9 +5081,9 @@ static void tt_finish(const char* path, bool prefetch, int64_t drawn, int64_t di
     uint32_t scans, frames, skipped;
     epd_scan_totals(&scans, &frames, &skipped);
     char line[384];
-    int used = snprintf(line, sizeof(line), "TURN dir=%+d page=%u/%u hit=%d img=%u path=%s fx=%d lg=%d pf=%d |",
+    int used = snprintf(line, sizeof(line), "TURN dir=%+d page=%u/%u hit=%d img=%u img_hit=%d path=%s fx=%d lg=%d pf=%d |",
                         s_tt.dir, (unsigned)s_page + 1, (unsigned)book_layout_page_count(), s_tt.hit,
-                        (unsigned)book_layout_page_image_count(s_page), path, app_settings_reader_turn_effect(),
+                        (unsigned)reader_image_slots(s_page), s_tt.image_prefetch_hit, path, app_settings_reader_turn_effect(),
                         app_settings_low_ghost(), prefetch);
     used = tt_put(line, used, sizeof(line), "load", s_tt.load);
     used = tt_put(line, used, sizeof(line), "save", s_tt.save);
@@ -5773,6 +5777,7 @@ static bool commit_next_chapter(app_ctx_t *ctx, size_t chapter) {
         unlock_draw();
         return false;
     }
+    reader_image_prep_cancel();
     if (s_next_ch.state == NEXT_CH_PARSED) {
         if (!next_chapter_begin_layout_locked()) {
             next_chapter_clear();
@@ -5883,6 +5888,7 @@ static bool commit_next_chapter(app_ctx_t *ctx, size_t chapter) {
 }
 
 static void free_book(void) {
+    reader_image_prep_cancel();
     s_chapter_display_pending = false;
     s_reader_rule_pending = false;
     if (s_txt_opening) {
@@ -5960,6 +5966,270 @@ static void release_page_images(void) {
     free(s_page_images); s_page_images = NULL; s_page_image_count = 0;
     s_page_images_for = SIZE_MAX;
 }
+
+// 采用与前台相同的等比缩放，缓存只接收完整目标尺寸。
+// Use the foreground aspect fit; only full target sizes can enter the cache.
+static void reader_image_fit(unsigned source_w, unsigned source_h, int *width, int *height) {
+    uint64_t w = source_w, h = source_h;
+    if (w > (unsigned)*width) { h = h * *width / w; w = *width; }
+    if (h > (unsigned)*height) { w = w * *height / h; h = *height; }
+    *width = w ? (int)w : 1;
+    *height = h ? (int)h : 1;
+}
+
+enum {
+    IMAGE_PREP_STAGING, IMAGE_PREP_RUNNING, IMAGE_PREP_READY, IMAGE_PREP_FAILED,
+    IMAGE_PREP_SCAN = 1, IMAGE_PREP_BUSY = 2,
+    IMAGE_PREP_ASSET_MAX = 256 * 1024, IMAGE_PREP_PAGE_MAX = 512 * 1024,
+    IMAGE_PREP_SLOT_MAX = 16,
+    IMAGE_PREP_RESERVE = 640 * 1024,
+};
+
+typedef struct {
+    int resource, width, height;
+    uint8_t *data;
+    size_t size;
+} reader_image_prep_slot_t;
+
+typedef struct {
+    char path[BOOK_STORE_PATH_MAX];
+    size_t chapter, page, pixels;
+    uint32_t generation;
+    int count, loaded;
+    size_t encoded_bytes, offset;
+    atomic_uint refs;
+    atomic_int state;
+    atomic_bool cancelled;
+    reader_image_t *images;
+    reader_image_prep_slot_t slots[];
+} reader_image_prep_t;
+
+// ZIP 流只在界面线程使用；解码线程只有压缩字节、尺寸和自己的输出。
+// Only the UI accesses the ZIP stream. The decoder owns bytes, geometry and its output.
+static reader_image_prep_t *s_image_prep;
+static zip_stream_t *s_image_prep_stream;
+static atomic_bool s_image_prep_running;
+static atomic_uint s_image_prep_scan;
+
+static void reader_image_prep_clear(reader_image_prep_t *job) {
+    for (int i = 0; i < job->count; ++i) {
+        free(job->slots[i].data);
+        job->slots[i].data = NULL;
+        if (job->images) free(job->images[i].gray);
+    }
+    free(job->images);
+    job->images = NULL;
+}
+
+static void reader_image_prep_drop(reader_image_prep_t *job) {
+    if (atomic_fetch_sub(&job->refs, 1) != 1) return;
+    reader_image_prep_clear(job);
+    free(job);
+}
+
+static void reader_image_prep_cancel(void) {
+    zip_stream_close(s_image_prep_stream);
+    s_image_prep_stream = NULL;
+    reader_image_prep_t *job = s_image_prep;
+    s_image_prep = NULL;
+    if (!job) return;
+    atomic_store(&job->cancelled, true);
+    reader_image_prep_drop(job);
+}
+
+// 扫屏等一个解码检查点，检查点之间没有跨线程锁；导航取消无需等解码线程。
+// A scan waits for one decoder checkpoint, with no shared locks held. Navigation cancels without joining.
+void epd_image_scan_hook(bool active) {
+    if (active) {
+        atomic_fetch_or(&s_image_prep_scan, IMAGE_PREP_SCAN);
+        while (atomic_load(&s_image_prep_scan) & IMAGE_PREP_BUSY) vTaskDelay(1);
+    } else {
+        atomic_fetch_and(&s_image_prep_scan, ~IMAGE_PREP_SCAN);
+    }
+}
+
+static bool reader_image_prep_checkpoint(void *ctx) {
+    reader_image_prep_t *job = ctx;
+    if (atomic_load(&s_image_prep_scan) & IMAGE_PREP_SCAN) {
+        atomic_fetch_and(&s_image_prep_scan, ~IMAGE_PREP_BUSY);
+        unsigned idle = 0;
+        while (!atomic_compare_exchange_weak(&s_image_prep_scan, &idle, IMAGE_PREP_BUSY)) {
+            if (atomic_load(&job->cancelled)) return false;
+            idle = 0;
+            vTaskDelay(1);
+        }
+    }
+    return !atomic_load(&job->cancelled);
+}
+
+static bool reader_image_prep_room(size_t need) {
+    return heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) >= IMAGE_PREP_RESERVE + need;
+}
+
+static void reader_image_prep_worker(void *arg) {
+    reader_image_prep_t *job = arg;
+    unsigned idle = 0;
+    bool active = true;
+    while (!atomic_compare_exchange_weak(&s_image_prep_scan, &idle, IMAGE_PREP_BUSY)) {
+        if (atomic_load(&job->cancelled)) { active = false; break; }
+        idle = 0;
+        vTaskDelay(1);
+    }
+    size_t pixels_left = job->pixels;
+    bool ok = active;
+    for (int i = 0; ok && i < job->count; ++i) {
+        reader_image_prep_slot_t *slot = &job->slots[i];
+        bool png;
+        unsigned source_w, source_h;
+        ok = reader_image_prep_checkpoint(job) &&
+            book_image_speculative_dimensions(slot->data, slot->size, &png, &source_w, &source_h);
+        if (!ok) break;
+        int width = slot->width, height = slot->height;
+        reader_image_fit(source_w, source_h, &width, &height);
+        size_t pixels = (size_t)width * height;
+        uint8_t *gray = NULL;
+        if (pixels <= pixels_left && reader_image_prep_room(pixels))
+            gray = heap_caps_malloc(pixels, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        ok = gray && book_image_grayscale_speculative(slot->data, slot->size, png, width, height,
+                                                      gray, reader_image_prep_checkpoint, job);
+        free(slot->data);
+        slot->data = NULL;
+        if (ok) {
+            job->images[i] = (reader_image_t){gray, width, height};
+            pixels_left -= pixels;
+        } else {
+            free(gray);
+        }
+    }
+    if (ok) ok = reader_image_prep_checkpoint(job);
+    if (!ok) reader_image_prep_clear(job);
+    atomic_store(&job->state, ok ? IMAGE_PREP_READY : IMAGE_PREP_FAILED);
+    reader_image_prep_drop(job);
+    atomic_fetch_and(&s_image_prep_scan, ~IMAGE_PREP_BUSY);
+    atomic_store(&s_image_prep_running, false);
+    vTaskDelete(NULL);
+}
+
+static bool reader_image_prep_matches(const reader_image_prep_t *job, size_t page, uint32_t generation) {
+    return job && job->page == page && job->generation == generation &&
+        job->chapter == s_chapter && !strcmp(job->path, s_path);
+}
+
+static bool reader_image_prep_take(uint32_t generation, int count) {
+    reader_image_prep_t *job = s_image_prep;
+    bool ready = reader_image_prep_matches(job, s_page, generation) && job->count == count &&
+        atomic_load(&job->state) == IMAGE_PREP_READY;
+    for (int i = 0; ready && i < count; ++i) {
+        int resource, width, height;
+        const reader_image_prep_slot_t *slot = &job->slots[i];
+        ready = reader_image_slot(s_page, i, &resource, NULL, &width, &height) &&
+            resource == slot->resource && width == slot->width && height == slot->height;
+    }
+    if (ready) {
+        s_page_images = job->images;
+        s_page_image_count = count;
+        job->images = NULL;
+#ifdef KIIKO_TURN_TIMING
+        s_tt.image_prefetch_hit = true;
+#endif
+    }
+    reader_image_prep_cancel();
+    return ready;
+}
+
+static reader_image_prep_t *reader_image_prep_begin(size_t page, uint32_t generation, int count) {
+    if (count <= 0 || count > IMAGE_PREP_SLOT_MAX || atomic_load(&s_image_prep_running)) return NULL;
+    size_t bytes = sizeof(reader_image_prep_t) + (size_t)count * sizeof(reader_image_prep_slot_t);
+    if (!reader_image_prep_room(bytes + (size_t)count * sizeof(reader_image_t))) return NULL;
+    // 原子状态留在片内 RAM；大块图像数据才放 PSRAM。
+    // Keep atomic state in internal RAM; the image buffers are in PSRAM.
+    reader_image_prep_t *job = heap_caps_calloc(1, bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!job) return NULL;
+    atomic_init(&job->refs, 1);
+    atomic_init(&job->state, IMAGE_PREP_STAGING);
+    atomic_init(&job->cancelled, false);
+    job->chapter = s_chapter;
+    job->page = page;
+    job->generation = generation;
+    job->count = count;
+    copy_text(job->path, sizeof(job->path), s_path);
+    EpdRect band = book_layout_image_rect();
+    job->pixels = (size_t)band.width * band.height;
+    for (int i = 0; i < count; ++i) {
+        reader_image_prep_slot_t *slot = &job->slots[i];
+        if (!reader_image_slot(page, i, &slot->resource, NULL, &slot->width, &slot->height) ||
+            slot->resource < 0 || (size_t)slot->resource >= s_image_count ||
+            slot->width <= 0 || slot->height <= 0) {
+            atomic_store(&job->state, IMAGE_PREP_FAILED);
+            return job;
+        }
+    }
+    job->images = heap_caps_calloc((size_t)count, sizeof(*job->images), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!job->images) atomic_store(&job->state, IMAGE_PREP_FAILED);
+    return job;
+}
+
+// 每轮只从 TF 准备一段。ZIP 流校验 CRC 后才把完整资源交给独立解码任务。
+// Stage one bounded slice per idle tick. The ZIP stream checks CRC before handing bytes to the worker.
+static bool reader_image_prep_stage(reader_image_prep_t *job) {
+    reader_image_prep_slot_t *slot = &job->slots[job->loaded];
+    if (!s_image_prep_stream) {
+        size_t budget = IMAGE_PREP_PAGE_MAX - job->encoded_bytes;
+        if (budget > IMAGE_PREP_ASSET_MAX) budget = IMAGE_PREP_ASSET_MAX;
+        if (!reader_image_prep_room(64u * 1024u) ||
+            book_chapter_image_stream(job->chapter, s_images[slot->resource], budget,
+                                      &s_image_prep_stream, &slot->size) != ESP_OK ||
+            !reader_image_prep_room(slot->size))
+            return false;
+        slot->data = heap_caps_malloc(slot->size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!slot->data) return false;
+        job->encoded_bytes += slot->size;
+        job->offset = 0;
+        return true;
+    }
+    size_t bytes = slot->size - job->offset, received = 0;
+    if (bytes > 32u * 1024u) bytes = 32u * 1024u;
+    if (zip_stream_read_idle(s_image_prep_stream, slot->data + job->offset, bytes, &received) != ESP_OK ||
+        received != bytes) return false;
+    job->offset += received;
+    if (job->offset < slot->size) return true;
+    zip_stream_close(s_image_prep_stream);
+    s_image_prep_stream = NULL;
+    if (++job->loaded < job->count) return true;
+    atomic_fetch_add(&job->refs, 1);
+    atomic_store(&job->state, IMAGE_PREP_RUNNING);
+    atomic_store(&s_image_prep_running, true);
+    if (xTaskCreatePinnedToCore(reader_image_prep_worker, "book_image", 8192, job, 1, NULL, 1) == pdPASS)
+        return true;
+    atomic_store(&s_image_prep_running, false);
+    reader_image_prep_drop(job);
+    return false;
+}
+
+static void reader_image_prep_idle(app_ctx_t *ctx) {
+    size_t page = s_page + 1;
+    uint32_t generation = book_layout_generation();
+    if (s_view != READING || !s_text || !s_path[0] || book_kind() != BOOK_KIND_EPUB ||
+        app_settings_reader_hide_images() || s_chapter_display_pending ||
+        page >= book_layout_page_count() || reader_image_slots(s_page) || s_back_turns) {
+        reader_image_prep_cancel();
+        return;
+    }
+    if (!reader_image_prep_matches(s_image_prep, page, generation))
+        reader_image_prep_cancel();
+    if (s_toolbar || s_clear_confirm || s_reader_panel != READER_PANEL_NONE || s_reader_tap.pending ||
+        ctx->consumed || ctx->request_app || ctx->request_menu || ctx->request_return ||
+        (ctx->touch && ctx->touch->touched) || app_touch_input_pending(ctx)) return;
+    if (!s_image_prep)
+        s_image_prep = reader_image_prep_begin(page, generation, reader_image_slots(page));
+    reader_image_prep_t *job = s_image_prep;
+    if (job && atomic_load(&job->state) == IMAGE_PREP_STAGING && !reader_image_prep_stage(job)) {
+        zip_stream_close(s_image_prep_stream);
+        s_image_prep_stream = NULL;
+        reader_image_prep_clear(job);
+        atomic_store(&job->state, IMAGE_PREP_FAILED);
+    }
+}
 // 渐进式插图要 1-3 MB 系数缓冲：解码前把本页用不到的整页预取、书架封面和字形缓存还回去，
 // 解完再让各自的按需路径重建。只在 PSRAM 紧张时动手，纯文字页不受影响。
 // Progressive illustrations need 1-3 MB of coefficient buffers: before decoding, give back the
@@ -5984,7 +6254,7 @@ static void release_image_headroom(void) {
     (void)ttf_font_cache_clear_all();
 }
 static void prepare_inline_image(void) {
-    if (app_settings_reader_hide_images()) { release_page_images(); return; }
+    if (app_settings_reader_hide_images()) { reader_image_prep_cancel(); release_page_images(); return; }
     uint32_t generation = book_layout_generation();
     if (s_page_images_for == s_page && s_page_images_generation == generation) return;
     // 预绘的是纯文字页的正文，与上一页有没有插图无关：从插图页翻到预绘好的文字页时照样命中。
@@ -6001,7 +6271,13 @@ static void prepare_inline_image(void) {
     // continue; record the outcome instead of guessing.
     int count = reader_image_slots(s_page);
     if (changed_layout || count > 0) reset_prefetch();
-    if (count > 0) release_image_headroom();
+    if (reader_image_prep_take(generation, count)) return;
+    if (count > 0) {
+        // 前台解码先收回已取消任务的工作区；只等当前解码检查点和释放内存。
+        // Reclaim cancelled scratch before foreground allocation, waiting only for the current checkpoint and cleanup.
+        while (atomic_load(&s_image_prep_running)) vTaskDelay(1);
+        release_image_headroom();
+    }
     if (!count || count > (int)HTML_TEXT_MAX_BLOCKS) {
         ESP_LOGI(TAG, "inline page %u: %d image slots", (unsigned)s_page, count);
         return;
@@ -6040,10 +6316,7 @@ static void prepare_inline_image(void) {
         if (book_image_dimensions(encoded, size, png, &source_w, &source_h) && source_w && source_h) {
             // 回退槽也使用真实宽高等比缩小，避免尺寸探测失败时拉伸图片。
             // Aspect-fit even fallback slots from decoded dimensions, avoiding stretched unknown-size images.
-            uint64_t w = source_w, h = source_h;
-            if (w > (unsigned)width) { h = h * width / w; w = width; }
-            if (h > (unsigned)height) { w = w * height / h; h = height; }
-            width = w ? (int)w : 1; height = h ? (int)h : 1;
+            reader_image_fit(source_w, source_h, &width, &height);
             size_t pixels = (size_t)width * height;
             if (pixels > pixels_left) {
                 ESP_LOGW(TAG, "inline %d: %ux%u over %u px budget",
@@ -6084,6 +6357,7 @@ static void prepare_inline_image(void) {
 }
 static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
                             bool last_page, const char *anchor, size_t source_offset) {
+    reader_image_prep_cancel();
     bool clear_toc = chapter != s_chapter || (!anchor && source_offset == SIZE_MAX && !s_part_more && !s_part_base);
     html_text_t loaded = {0};
     size_t anchor_offset = 0;
@@ -10371,10 +10645,11 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
     app_redraw_t metadata=reader_metadata_tick(ctx);
     if(metadata!=APP_REDRAW_NONE)return metadata;
     app_redraw_t clock=reader_clock_tick(ctx);
-    if(clock==APP_REDRAW_NONE){reader_save_idle(ctx);reader_prefetch_idle(ctx);reader_next_chapter_idle(ctx);}
+    if(clock==APP_REDRAW_NONE){reader_save_idle(ctx);reader_prefetch_idle(ctx);reader_next_chapter_idle(ctx);reader_image_prep_idle(ctx);}
     return clock;
 }
 static void before_lock(app_ctx_t* ctx) {
+    reader_image_prep_cancel();
     if(s_import_candidates&&book_import_running()){book_import_cancel();copy_text(s_batch_message,sizeof(s_batch_message),"导入已取消，原书架已保留");}
     cancel_shelf_open();
     book_weread_cover_cancel();

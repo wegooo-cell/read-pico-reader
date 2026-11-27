@@ -15,6 +15,10 @@ Measures per-stage page-turn time on a real Pico, as a before/after yardstick fo
 
 Firmware side: a `--pico-turn-timing` build enables `KIIKO_TURN_TIMING` plus the local USB probe, printing one `turn: TURN …` line per page turn. Default builds compile none of it.
 
+`img_hit` 记录本次翻页有没有复用已解码的插图。用汇总里的插图命中数和 `img` 准备耗时一起对比，`push` 单独记录推屏耗时。
+
+`img_hit` records whether a turn reused predecoded illustrations. Compare the image hit count with `img` preparation time. The `push` column reports panel time separately.
+
 ## 用法 / Usage
 
 ```

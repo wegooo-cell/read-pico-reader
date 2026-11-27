@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Real streaming JPEG/PNG tests. Requires Pillow and libpng (pkg-config or --png-prefix)."""
+"""Real streaming and speculative JPEG/PNG tests. Requires Pillow and libpng."""
 import argparse
 from pathlib import Path
 import random
@@ -15,7 +15,10 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     args = argparse.ArgumentParser()
     args.add_argument("--png-prefix", type=Path)
+    args.add_argument("--jpeg-component", type=Path,
+                      default=ROOT / "managed_components/espressif__esp_jpeg")
     options = args.parse_args()
+    jpeg_component = options.jpeg_component.resolve()
     if options.png_prefix:
         png_cflags = ["-I" + str(options.png_prefix / "include/libpng16")]
         png_link = ["-L" + str(options.png_prefix / "lib"), "-lpng16", "-lz",
@@ -29,12 +32,12 @@ def main():
             "#define CONFIG_JD_SZBUF 512", "#define CONFIG_JD_FORMAT 0", "#define CONFIG_JD_USE_SCALE 1",
             "#define CONFIG_JD_TBLCLIP 1", "#define CONFIG_JD_FASTDECODE 0"]) + "\n")
         includes = ["tools/book_epub_stubs", "main/book", "components/jpegdec/src", "components/read_pico_webp/include",
-                    "managed_components/espressif__esp_jpeg/tjpgd", "managed_components/espressif__esp_jpeg/include"]
+                    jpeg_component / "tjpgd", jpeg_component / "include"]
         flags = ["-g", "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
                  "-ffunction-sections", "-fdata-sections"]
         flags += ["-I" + str(ROOT / path) for path in includes] + ["-I" + str(work)] + png_cflags
         sources = ["tools/book_image_file_host_test.c", "main/book/book_cover.c", "main/book/book_image_header.c",
-                   "managed_components/espressif__esp_jpeg/tjpgd/tjpgd.c",
+                   str(jpeg_component / "tjpgd/tjpgd.c"),
                    "components/jpegdec/src/JPEGDEC.cpp", "components/jpegdec/src/jpegdec_shim.cpp"]
         objects = []
         for index, source in enumerate(sources):
@@ -68,6 +71,13 @@ def main():
                                           "gray-icon.jpg", "gray-odd.jpg")]
         assert all(path.stat().st_size > 2 * 1024 * 1024 for path in files[:3])
         subprocess.run([str(exe), "read", *map(str, files)], check=True)
+        rgba = Image.frombytes("RGBA", (139, 113), random.Random(18).randbytes(139 * 113 * 4))
+        rgba.save(work / "alpha.png")
+        rgb = rgba.convert("RGB").resize((553, 491))
+        rgb.save(work / "color.jpg", quality=93)
+        rgb.save(work / "color-progressive.jpg", quality=93, progressive=True)
+        subprocess.run([str(exe), "speculate", str(work / "alpha.png"), str(work / "color.jpg"),
+                        str(work / "color-progressive.jpg")], check=True)
         (work / "bad.jpg").write_bytes(b"not an image")
         (work / "bad.png").write_bytes((work / "large.png").read_bytes()[:400])
         with (work / "overlimit.jpg").open("wb") as file:

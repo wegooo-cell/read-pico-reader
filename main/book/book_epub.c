@@ -2253,20 +2253,48 @@ static int svg_image_entry(book_epub_t *book, const char *path, const uint8_t *i
     return nested[0] ? zip_find(book->zip, nested) : -1;
 }
 
+static esp_err_t chapter_image_entry(book_epub_t *book, size_t chapter, const char *src,
+                                     char path[EPUB_PATH_CAP], int *entry) {
+    if (!resolve_path(zip_entry_name(book->zip, book->chapters[chapter].zip_index), src, path))
+        return ESP_ERR_INVALID_ARG;
+    *entry = zip_find(book->zip, path);
+    return *entry >= 0 ? ESP_OK : ESP_ERR_NOT_FOUND;
+}
+
+#if !KIIKO_BOARD_METALIO47
+// 仅读直接资源；SVG 包装等回退仍由按需路径处理。
+// Stage direct assets only; the on-demand path still handles SVG wrappers and other fallbacks.
+esp_err_t book_epub_image_stream(book_epub_t *book, size_t chapter, const char *src,
+                                 size_t budget, zip_stream_t **stream, size_t *size) {
+    if (!stream || !size) return ESP_ERR_INVALID_ARG;
+    *stream = NULL; *size = 0;
+    if (!book || chapter >= book->count || !src) return ESP_ERR_INVALID_ARG;
+    char path[EPUB_PATH_CAP];
+    int entry;
+    esp_err_t err = chapter_image_entry(book, chapter, src, path, &entry);
+    if (err != ESP_OK) return err;
+    size_t bytes = zip_entry_size(book->zip, entry);
+    if (!bytes || bytes > budget) return ESP_ERR_INVALID_SIZE;
+    err = zip_stream_open(book->zip, entry, stream);
+    if (err == ESP_OK) *size = bytes;
+    return err;
+}
+#endif
+
 esp_err_t book_epub_image_bounded(book_epub_t *book, size_t chapter, const char *src,
                                  uint8_t **data, size_t *size, bool *png, size_t budget) {
     if (!book || chapter >= book->count || !src || !data || !size || !png) return ESP_ERR_INVALID_ARG;
     *data = NULL; *size = 0; *png = false;
     char path[EPUB_PATH_CAP];
-    if (!resolve_path(zip_entry_name(book->zip, book->chapters[chapter].zip_index), src, path)) return ESP_ERR_INVALID_ARG;
-    int entry = zip_find(book->zip, path);
-    if (entry < 0) return ESP_ERR_NOT_FOUND;
+    int entry;
+    esp_err_t err = chapter_image_entry(book, chapter, src, path, &entry);
+    if (err != ESP_OK) return err;
     size_t n = zip_entry_size(book->zip, entry);
     if (!n || n > ZIP_OUTPUT_MAX) return ESP_ERR_INVALID_SIZE;
     if (n > budget) return ESP_ERR_NO_MEM;
     uint8_t *image = psram(n);
     if (!image) return ESP_ERR_NO_MEM;
-    esp_err_t err = zip_extract(book->zip, entry, image, n);
+    err = zip_extract(book->zip, entry, image, n);
     if (err != ESP_OK) { free(image); return err; }
     bool is_png = n >= 8 && !memcmp(image, "\x89PNG\r\n\x1a\n", 8);
     bool is_jpeg = n >= 3 && image[0] == 0xff && image[1] == 0xd8 && image[2] == 0xff;

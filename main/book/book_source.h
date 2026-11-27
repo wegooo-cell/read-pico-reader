@@ -70,6 +70,12 @@ esp_err_t book_chapter_load_part(size_t chapter, size_t offset, bool last, const
                                  size_t source_offset, size_t *local, html_text_t *out);
 /// 读取当前 EPUB 章内图片。/ Read an image from the current EPUB chapter.
 esp_err_t book_chapter_image(size_t chapter, const char *src, uint8_t **data, size_t *size, bool *png);
+#if !KIIKO_BOARD_METALIO47
+// 流由当前书源借出，必须先关流再关书。/ Close the borrowed stream before closing the current book.
+struct zip_stream;
+esp_err_t book_chapter_image_stream(size_t chapter, const char *src, size_t budget,
+                                    struct zip_stream **stream, size_t *size);
+#endif
 /// TXT 为源文件字节；EPUB 为 spine 原始 HTML 未压缩累计字节，不是 ZIP 文件大小。
 /// TXT uses source-file bytes; EPUB uses cumulative uncompressed spine HTML bytes, not ZIP file size.
 uint32_t book_total_bytes(void);

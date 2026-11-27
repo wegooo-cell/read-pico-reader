@@ -7,6 +7,7 @@
  */
 #include "book_epub.h"
 #include "book_chapter_lead.h"
+#include "zip_reader.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -326,6 +327,27 @@ int main(int argc, char **argv) {
                 assert(book_epub_image(book, i, "../images/wrapper.svg", &image, &size, &png) == ESP_OK);
                 assert(image && size == 24 && png); free(image);
                 unsigned width = 0, height = 0;
+#if !KIIKO_BOARD_METALIO47
+                // 预读跨多个 ZIP 窗口，中间的前台读图会移动同一个文件指针。
+                // Interleave an ordinary image read between ZIP windows on the same archive.
+                zip_stream_t *stream = NULL;
+                size_t length = 0;
+                const char *large = "../images/late.jpg";
+                assert(book_epub_image_stream(book, i, large, 32768, &stream, &length) != ESP_OK && !stream);
+                assert(book_epub_image(book, i, large, &image, &size, &png) == ESP_OK && !png);
+                assert(book_epub_image_stream(book, i, large, size, &stream, &length) == ESP_OK && length == size);
+                uint8_t window[32768];
+                for (size_t pos = 0; pos < length;) {
+                    size_t got = 0;
+                    assert(zip_stream_read_idle(stream, window, sizeof(window), &got) == ESP_OK);
+                    assert(got && got <= length - pos && !memcmp(window, image + pos, got));
+                    if (pos == 0)
+                        assert(book_epub_image_dimensions(book, i, text.images[0], &width, &height) == ESP_OK);
+                    pos += got;
+                }
+                zip_stream_close(stream);
+                free(image);
+#endif
                 const char *resources[] = {text.images[0], "../images/wrapper.svg", "../images/late.jpg"};
                 for (size_t r = 0; r < sizeof(resources) / sizeof(resources[0]); ++r) {
                     assert(book_epub_image_dimensions(book, i, resources[r], &width, &height) == ESP_OK);

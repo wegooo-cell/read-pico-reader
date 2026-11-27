@@ -387,6 +387,7 @@ static void reset_prefetch(void) { s_next_page = s_prep_page = -1; s_next_genera
 static void reader_keep_free(void) { ++test_keep_frees; free(s_keep_cur.fb); free(s_keep_prev.fb); s_keep_cur = s_keep_prev = (reader_keep_t){NULL, -1, 0}; }
 static void invalidate_prep(void);
 static void release_page_images(void) { s_page_images_for = SIZE_MAX; }
+static void reader_image_prep_cancel(void) {}
 static void prepare_inline_image(void) { s_page_images_for = s_page; s_page_images_generation = s_layout_gen; }
 static int reader_image_slots(size_t page) { (void)page; return test_page0_image ? 1 : 0; }
 static int book_layout_page_image_count(size_t page) { return reader_image_slots(page); }
