@@ -116,10 +116,16 @@ static bool s_leading_skip_enabled;
 static int s_last_leading_skip;
 static uint8_t s_present[256];
 static const uint8_t* s_present_for;
+// 差分统计提前停止时，结论只对这张波形表成立；NULL 表示统计完整或未提前停止。
+// When diff statistics stop early, the conclusion only holds for this waveform table; NULL means complete or not early-stopped.
+static const EpdWaveformPhases* s_present_resolved_for;
 
 // 按波形表缓存每个 (to<<4|from) 最早动作的相号，同一张表反复刷不用重算。
 static const EpdWaveformPhases* s_first_active_phases;
 static uint8_t s_first_active[256];
+// s_first_active 的全局下限：任何出现过的对，skip 都不会低于这个相号。
+// Global lower bound of s_first_active: no present pair can yield a skip below this phase.
+static uint8_t s_first_active_min;
 
 void epd_set_leading_skip(bool enable) {
     s_leading_skip_enabled = enable;
@@ -127,6 +133,7 @@ void epd_set_leading_skip(bool enable) {
 
 void epd_leading_skip_discard(void) {
     s_present_for = NULL;
+    s_present_resolved_for = NULL;
 }
 
 int epd_last_leading_skip(void) {
@@ -145,6 +152,7 @@ void epd_scan_totals(uint32_t* scans, uint32_t* frames, uint32_t* skipped) {
 
 static void build_first_active(const EpdWaveformPhases* phases) {
     const uint8_t(*luts)[16][4] = (const uint8_t(*)[16][4])phases->luts;
+    int min_first = phases->phases;
     for (int to = 0; to < 16; to++) {
         for (int from = 0; from < 16; from++) {
             int first = phases->phases;
@@ -155,8 +163,10 @@ static void build_first_active(const EpdWaveformPhases* phases) {
                 }
             }
             s_first_active[(to << 4) | from] = (uint8_t)first;
+            if (first < min_first) min_first = first;
         }
     }
+    s_first_active_min = (uint8_t)min_first;
     s_first_active_phases = phases;
 }
 
@@ -170,6 +180,8 @@ static void build_first_active(const EpdWaveformPhases* phases) {
 __attribute__((optimize("O3"))) static void mark_present_line(
     const uint8_t* to, const uint8_t* from, int fb_width
 ) {
+    const bool check_floor = (s_first_active_phases != NULL);
+    const uint8_t floor = s_first_active_min;
     const uint32_t* tw = (const uint32_t*)to;
     const uint32_t* fw = (const uint32_t*)from;
     uint32_t prev_t = ~tw[0];
@@ -182,14 +194,20 @@ __attribute__((optimize("O3"))) static void mark_present_line(
         prev_f = f;
         const uint32_t hi = (t & 0xF0F0F0F0u) | ((f & 0xF0F0F0F0u) >> 4);
         const uint32_t lo = ((t & 0x0F0F0F0Fu) << 4) | (f & 0x0F0F0F0Fu);
-        s_present[hi & 0xFF] = 1;
-        s_present[(hi >> 8) & 0xFF] = 1;
-        s_present[(hi >> 16) & 0xFF] = 1;
-        s_present[hi >> 24] = 1;
-        s_present[lo & 0xFF] = 1;
-        s_present[(lo >> 8) & 0xFF] = 1;
-        s_present[(lo >> 16) & 0xFF] = 1;
-        s_present[lo >> 24] = 1;
+        uint8_t p0 = hi & 0xFF, p1 = (hi >> 8) & 0xFF, p2 = (hi >> 16) & 0xFF, p3 = hi >> 24;
+        uint8_t p4 = lo & 0xFF, p5 = (lo >> 8) & 0xFF, p6 = (lo >> 16) & 0xFF, p7 = lo >> 24;
+        s_present[p0] = 1; s_present[p1] = 1; s_present[p2] = 1; s_present[p3] = 1;
+        s_present[p4] = 1; s_present[p5] = 1; s_present[p6] = 1; s_present[p7] = 1;
+        // 命中全局下限即停：它是 256 对里的最小相号，出现即代表整屏最小已确定。
+        // Hitting the global floor stops the scan: it is the minimum phase over all 256 pairs, so seeing it settles the whole-panel minimum.
+        if (check_floor
+            && (s_first_active[p0] == floor || s_first_active[p1] == floor
+                || s_first_active[p2] == floor || s_first_active[p3] == floor
+                || s_first_active[p4] == floor || s_first_active[p5] == floor
+                || s_first_active[p6] == floor || s_first_active[p7] == floor)) {
+            s_present_resolved_for = s_first_active_phases;
+            return;
+        }
     }
 }
 
@@ -200,16 +218,24 @@ __attribute__((optimize("O3"))) static int leading_skip_frames(
 ) {
     if (phases != s_first_active_phases) build_first_active(phases);
 
-    uint8_t* present = s_present;
-    if (s_present_for != data) {
-        memset(s_present, 0, sizeof(s_present));
-        const size_t n = (size_t)area.width * (size_t)area.height;
-        for (size_t i = 0; i < n; i++) s_present[data[i]] = 1;
-    }
-
-    int skip = phases->phases;
-    for (int i = 0; i < 256; i++) {
-        if (present[i] && s_first_active[i] < skip) skip = s_first_active[i];
+    int skip;
+    if (s_present_for == data && s_present_resolved_for == phases) {
+        // 差分时已命中这张表的全局下限，skip 直接取下限，省掉 256 项扫描。
+        // The diff already hit this table's global floor, so take it directly and skip the 256-entry scan.
+        skip = s_first_active_min;
+    } else {
+        uint8_t* present = s_present;
+        // 没统计过、统计的不是这块缓冲、或提前停止的结论对不上这张表时整块重扫。
+        // Rescan when stats are absent, belong to another buffer, or the early-stop conclusion does not match this table.
+        if (s_present_for != data || s_present_resolved_for != NULL) {
+            memset(s_present, 0, sizeof(s_present));
+            const size_t n = (size_t)area.width * (size_t)area.height;
+            for (size_t i = 0; i < n; i++) s_present[data[i]] = 1;
+        }
+        skip = phases->phases;
+        for (int i = 0; i < 256; i++) {
+            if (present[i] && s_first_active[i] < skip) skip = s_first_active[i];
+        }
     }
     // 全是保持也至少扫一相，把上一相残留在像素上的电压写成 0。
     if (skip >= phases->phases) skip = phases->phases - 1;
@@ -323,6 +349,7 @@ enum EpdDrawError IRAM_ATTR epd_draw_base(
     }
     s_last_leading_skip = skip;
     s_present_for = NULL;
+    s_present_resolved_for = NULL;
 
     render_context.current_frame = skip;
     render_context.cycle_frames = frame_count - skip;
@@ -618,14 +645,21 @@ EpdRect epd_difference_image_base(
     epd_difference_column_range(crop_to, &x_start, &x_stop);
     const int seg_px = x_stop - x_start;
 
-    if (s_leading_skip_enabled) memset(s_present, 0, sizeof(s_present));
+    if (s_leading_skip_enabled) {
+        memset(s_present, 0, sizeof(s_present));
+        s_present_resolved_for = NULL;  // 新一轮差分，提前停止的结论重新开始。/ New diff pass restarts the early-stop conclusion.
+    }
     for (int y = crop_to.y; y < y_end; y++) {
         uint32_t offset = y * fb_width / 2 + x_start / 2;
         int dirty = _epd_interlace_line(
             to + offset, from + offset, interlaced + offset * 2, col_dirtyness + x_start / 2, seg_px
         );
         dirty_lines[y] = dirty;
-        if (s_leading_skip_enabled) mark_present_line(to + offset, from + offset, seg_px);
+        // 命中下限后剩余行不再统计；向量差分每行照常执行。
+        // After hitting the floor the remaining rows skip statistics; the vector diff still runs every row.
+        if (s_leading_skip_enabled && s_present_resolved_for == NULL) {
+            mark_present_line(to + offset, from + offset, seg_px);
+        }
     }
     s_present_for = s_leading_skip_enabled ? interlaced : NULL;
 

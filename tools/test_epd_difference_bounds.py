@@ -17,11 +17,13 @@ PREFIX = r'''
 #define min(a,b) ((a)<(b)?(a):(b))
 #define max(a,b) ((a)>(b)?(a):(b))
 typedef struct {int x,y,width,height;} EpdRect;
+typedef struct {int phases;const uint8_t*luts;const int*phase_times;} EpdWaveformPhases;
 static int width=1216;
 int epd_width(void){return width;}
 static bool s_leading_skip_enabled;
 static uint8_t s_present[256];
 static const uint8_t *s_present_for;
+static const EpdWaveformPhases *s_present_resolved_for __attribute__((unused));
 static void mark_present_line(const uint8_t*a,const uint8_t*b,int c){(void)a;(void)b;(void)c;abort();}
 uint32_t epd_interlace_4bpp_line_VE(const uint8_t*,const uint8_t*,uint8_t*,uint8_t*,int);
 '''
