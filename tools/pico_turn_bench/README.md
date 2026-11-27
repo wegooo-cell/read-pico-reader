@@ -19,6 +19,10 @@ Firmware side: a `--pico-turn-timing` build enables `KIIKO_TURN_TIMING` plus the
 
 `img_hit` records whether a turn reused predecoded illustrations. Compare the image hit count with `img` preparation time. The `push` column reports panel time separately.
 
+`imgdraw` 记录插图贴图耗时（`draw_reader_images` 内写帧缓冲），`text` 记录正文文字绘制耗时（`book_layout_draw_page`）。两者都在 `draw` 阶段内部，用于把插图页 294 ms 的绘制拆开看。旧日志没有这两个字段，汇总里记 0。
+
+`imgdraw` is the image blit time (framebuffer writes inside `draw_reader_images`) and `text` is the body text drawing time (`book_layout_draw_page`). Both live inside the `draw` stage, so image pages can be split apart from their 294 ms draw. Older logs lack these fields and summarize them as 0.
+
 ## 用法 / Usage
 
 ```

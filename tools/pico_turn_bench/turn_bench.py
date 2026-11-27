@@ -334,12 +334,15 @@ def summarize(turns):
     out = {}
     for label, ts in groups.items():
         med = lambda k: round(statistics.median(t[k] for t in ts), 1)
+        med_opt = lambda k: round(statistics.median(t[k] for t in ts if k in t), 1) if any(k in t for t in ts) else 0
         out[label] = {
             'n': len(ts),
             'hit_rate': round(sum(t['hit'] in (1, 3) for t in ts) / len(ts), 2),
             'fn': round(statistics.median(t['turn'] - t['save'] - t['load'] for t in ts), 1),
             'img': round(statistics.median(t['prep'] + t['pre'] for t in ts), 1),
-            'turn': med('turn'), 'load': med('load'), 'join': med('join'), 'draw': med('draw'), 'push': med('push'),
+            'turn': med('turn'), 'load': med('load'), 'join': med('join'), 'draw': med('draw'),
+            'imgdraw': med_opt('imgdraw'), 'text': med_opt('text'),
+            'push': med('push'),
             'total': med('total'), 'frames': med('frames'), 'raster': med('raster'), 'miss': med('miss'),
         }
         image_turns = [t for t in ts if t.get('img') and 'img_hit' in t]

@@ -146,6 +146,11 @@ static void invalidate_prep(void){++invalidations;}
 static void reset_prefetch(void){++invalidations;}
 static void release_image_headroom(void){}
 static uint8_t *s_next_fb;
+// 预绘状态桩：Pico 的 prepare_inline_image 读取它们；S31 路径不引用，故标 unused。
+// Prefetch-state stubs read by Pico's prepare_inline_image; the S31 path ignores them, hence unused.
+__attribute__((unused)) static int s_next_page = -1, s_prep_page = -1;
+__attribute__((unused)) static uint32_t s_next_generation;
+__attribute__((unused)) static struct { bool started; uint32_t generation; } s_prep_cursor;
 static void reader_page_cache_clear(void){s_next_fb=NULL;}
 static void copy_text(char *out,size_t size,const char *in){snprintf(out,size,"%s",in);}
 static void fit_text(char *out,int px,int max){(void)px;if(max<40)out[0]=0;}
@@ -177,6 +182,9 @@ static bool book_image_grayscale(const uint8_t *data,size_t len,bool png,unsigne
  fixture_image_pixels(data,w,h,gray);return true;
 }
 #include "ui_image_dither.h"
+// 非计时构建的 TT_SPAN 等价：只展开语句，不记录耗时。
+// Non-timing TT_SPAN: expands to the statement only, recording no time.
+#define TT_SPAN(field, ...) do { __VA_ARGS__; } while (0)
 static void epd_draw_pixel(int x,int y,uint8_t gray,uint8_t *fb){
  (void)fb;
  assert(x>=image_band.x&&x<image_band.x+image_band.width);++pixels;
@@ -427,6 +435,21 @@ static void zip_stream_close(zip_stream_t *stream){
 unit+='\n'+function('reader_zoom_reset')
 for name in ('inline_ink_gray', 'reader_image_slots', 'reader_image_slot', 'reader_image_dims', 'alloc_page_bitmap', 'release_page_images'):
     unit += '\n' + function(name)
+# 贴图快速路径在本测试里退回逐像素 capture 桩，保持像素计数与边界断言；字节级一致性由
+# pico_inline_blit_host_test.py 单独核对。
+# The fast blit is stubbed back to the per-pixel capture here so pixel counts and bounds stay intact;
+# pico_inline_blit_host_test.py checks byte-level parity separately.
+unit += r'''
+#ifdef TEST_PICO
+static void blit_inline_gray(const reader_image_t *image, int left, int top, uint8_t *fb) {
+    for (int iy = 0; iy < image->height; ++iy)
+        for (int ix = 0; ix < image->width; ++ix)
+            epd_draw_pixel(left + ix, top + iy,
+                ui_image_dither_gray(inline_ink_gray(image->gray[(size_t)iy * image->width + ix]),
+                                     left + ix, top + iy), fb);
+}
+#endif
+'''
 if pico:
     unit += source[source.index('static void reader_image_fit('):
                    source.index('// 渐进式插图要', source.index('static void reader_image_fit('))]
@@ -650,7 +673,7 @@ static void test_image_prefetch(void){
 #endif
 int main(void){
  uint8_t fb=0;
- // Text-to-text within one layout keeps prefetch; image pages and reflows still invalidate it.
+ // Text-to-text within one layout keeps prefetch; image pages without a matching prefetch and reflows still invalidate it.
  char footer[64];
  reader_footer_progress(footer,sizeof(footer),0);assert(!strcmp(footer,"1/2  34%"));
  s_part_more=true;

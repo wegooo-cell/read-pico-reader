@@ -665,7 +665,7 @@ typedef struct {
     bool image_prefetch_hit;
     int dir;
     int hit;                    ///< 0 现画 / 1 预绘命中 / 2 接着画完预绘 / 3 保留页 / drawn, prefetched, resumed, kept
-    int64_t t0, load, save, prep, draw, turn_end, present_in, present_start, push_main;
+    int64_t t0, load, save, prep, draw, imgdraw, text, turn_end, present_in, present_start, push_main;
     ttf_bench_stats_t glyph;
 } turn_timing_t;
 static turn_timing_t s_tt;
@@ -4563,6 +4563,120 @@ static void draw_reader_footnote_card(uint8_t *fb, size_t page, EpdRect body) {
         y += line_h;
     }
 }
+// ui_image_dither_gray 的等价内联，直接返回写进 4bpp 帧缓冲的高 4 位（0..15）。
+// 与 ui_image_dither_gray 在 256 灰度 × 16 相位上逐点一致，只省略乘 17 与取高 4 位的往返。
+// Inline equivalent of ui_image_dither_gray returning the high nibble (0..15) written to the 4bpp
+// framebuffer. It matches ui_image_dither_gray at all 256 gray levels × 16 phases, skipping the
+// multiply-by-17 and high-nibble round trip.
+static inline uint8_t inline_ink_dither_nibble(uint8_t gray, int x, int y) {
+    static const uint8_t bayer4[16] = {0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5};
+    const unsigned base = (unsigned)gray / 17u;
+    if (base >= 15u) return 15u;
+    const unsigned remainder = (unsigned)gray - base * 17u;
+    const unsigned threshold = bayer4[((unsigned)y & 3u) << 2 | ((unsigned)x & 3u)];
+    return (uint8_t)(base + (remainder * 16u > threshold * 17u ? 1u : 0u));
+}
+
+// 把已解码灰阶插图整张写进 4bpp 帧缓冲：先裁剪到逻辑屏幕，再按旋转映射到物理内存，外层沿
+// 物理行、内层沿物理 x 连续走，能配对的两个半字节一次写一个整字节，只有不成对的端点才做半字节
+// 读改写。Bayer 抖动仍按逻辑坐标计算。与原来的逐像素 epd_draw_pixel(ui_image_dither_gray(...))
+// 逐字节一致，含越界、负起点、奇数起点与宽/高为 1 等边界。
+// Blit a decoded grayscale image into the 4bpp framebuffer: clip to the logical sheet, map through the
+// rotation, then walk physical rows with physical x consecutive inside, packing two nibbles into one byte
+// write whenever possible and using nibble RMW only at unpaired ends. Bayer dithering still uses logical
+// coordinates. Byte-identical to the original per-pixel epd_draw_pixel(ui_image_dither_gray(...)), including
+// clipped, negative, odd-start and single-column/row edges.
+static void blit_inline_gray(const reader_image_t *image, int left, int top, uint8_t *fb) {
+    if (!image || !image->gray || !fb || image->width <= 0 || image->height <= 0) return;
+    // inline_ink_gray 目前恒等，仍展开成 256 表，贴图循环里只剩一次查表。
+    // inline_ink_gray is an identity today; expand it into a 256-entry table so the blit loop keeps one lookup.
+    uint8_t ink[256];
+    for (unsigned g = 0; g < 256; ++g) ink[g] = inline_ink_gray((uint8_t)g);
+    // 裁剪到逻辑屏幕；旋转把有效逻辑区双射到有效物理区，越界像素与 epd_draw_pixel 一样被忽略。
+    // Clip to the logical sheet; rotation maps valid logical pixels bijectively onto valid physical ones,
+    // so out-of-range pixels are ignored exactly as epd_draw_pixel does.
+    const int lw = epd_rotated_display_width();
+    const int lh = epd_rotated_display_height();
+    int x0 = left, y0 = top;
+    int x1 = left + image->width, y1 = top + image->height;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > lw) x1 = lw;
+    if (y1 > lh) y1 = lh;
+    if (x0 >= x1 || y0 >= y1) return;
+    // 逻辑→物理仿射系数（只含 0/±1）。
+    // Logical-to-physical affine coefficients (0/±1 only).
+    int px0, py0, e1x, e1y, e2x, e2y;
+    reader_logical_to_phys(0, 0, &px0, &py0);
+    reader_logical_to_phys(1, 0, &e1x, &e1y);
+    reader_logical_to_phys(0, 1, &e2x, &e2y);
+    const int ax = e1x - px0, ay = e2x - px0;  // px = px0 + ax*lx + ay*ly
+    const int dx = e1y - py0, dy = e2y - py0;  // py = py0 + dx*lx + dy*ly
+    // 裁剪后的逻辑矩形经旋转仍是矩形，取对角两点的包围盒即得物理范围。
+    // The clipped logical rect stays a rect under rotation; the bounding box of opposite corners is exact.
+    const int pxA = px0 + ax * x0 + ay * y0;
+    const int pyA = py0 + dx * x0 + dy * y0;
+    const int pxB = px0 + ax * (x1 - 1) + ay * (y1 - 1);
+    const int pyB = py0 + dx * (x1 - 1) + dy * (y1 - 1);
+    const int pxmin = pxA < pxB ? pxA : pxB;
+    const int pxmax = pxA < pxB ? pxB : pxA;
+    const int pymin = pyA < pyB ? pyA : pyB;
+    const int pymax = pyA < pyB ? pyB : pyA;
+    const int stride = epd_width() / 2;
+    const int iw = image->width;
+    for (int py = pymin; py <= pymax; ++py) {
+        uint8_t *row = fb + (size_t)py * stride;
+        if (ay == 0) {
+            // 逻辑 x 方向即物理 x：源沿逻辑行连续读（lx 随 px 步进 ax）。
+            // Logical x is physical x: read the source row contiguously (lx advances by ax per px).
+            const int ly = dy * (py - py0);
+            int lx = ax * (pxmin - px0);
+            const uint8_t *src = image->gray + (size_t)(ly - top) * iw + (size_t)(lx - left);
+            for (int px = pxmin; px <= pxmax;) {
+                if (!(px & 1) && px + 1 <= pxmax) {
+                    uint8_t lo = inline_ink_dither_nibble(ink[src[0]], lx, ly);
+                    uint8_t hi = inline_ink_dither_nibble(ink[src[ax]], lx + ax, ly);
+                    row[px >> 1] = (uint8_t)((hi << 4) | lo);
+                    src += ax * 2;
+                    lx += ax * 2;
+                    px += 2;
+                } else {
+                    uint8_t nib = inline_ink_dither_nibble(ink[src[0]], lx, ly);
+                    if (px & 1) row[px >> 1] = (uint8_t)((row[px >> 1] & 0x0f) | (nib << 4));
+                    else row[px >> 1] = (uint8_t)((row[px >> 1] & 0xf0) | nib);
+                    src += ax;
+                    lx += ax;
+                    px += 1;
+                }
+            }
+        } else {
+            // 逻辑 y 方向即物理 x：源沿逻辑列跨行读（ly 随 px 步进 ay），目标物理 x 连续。
+            // Logical y is physical x: read the source column across rows (ly advances by ay per px)
+            // while the destination physical x stays consecutive.
+            const int lx = dx * (py - py0);
+            int ly = ay * (pxmin - px0);
+            const uint8_t *src = image->gray + (size_t)(ly - top) * iw + (size_t)(lx - left);
+            for (int px = pxmin; px <= pxmax;) {
+                if (!(px & 1) && px + 1 <= pxmax) {
+                    uint8_t lo = inline_ink_dither_nibble(ink[src[0]], lx, ly);
+                    uint8_t hi = inline_ink_dither_nibble(ink[src[ay * iw]], lx, ly + ay);
+                    row[px >> 1] = (uint8_t)((hi << 4) | lo);
+                    src += ay * iw * 2;
+                    ly += ay * 2;
+                    px += 2;
+                } else {
+                    uint8_t nib = inline_ink_dither_nibble(ink[src[0]], lx, ly);
+                    if (px & 1) row[px >> 1] = (uint8_t)((row[px >> 1] & 0x0f) | (nib << 4));
+                    else row[px >> 1] = (uint8_t)((row[px >> 1] & 0xf0) | nib);
+                    src += ay * iw;
+                    ly += ay;
+                    px += 1;
+                }
+            }
+        }
+    }
+}
+
 static void draw_reader_images(uint8_t *fb, size_t page, EpdRect body) {
     (void)body;
     // 位图和布局代次必须匹配；预渲染另一页不能复用当前页插图。
@@ -4615,11 +4729,7 @@ static void draw_reader_images(uint8_t *fb, size_t page, EpdRect body) {
                 // body text belongs to text and must not push the illustration down.
                 if (y == 0) top = reader_image_top();
 
-                for (int iy = 0; iy < image->height; ++iy)
-                    for (int ix = 0; ix < image->width; ++ix)
-                        epd_draw_pixel(left + ix, top + iy,
-                            ui_image_dither_gray(inline_ink_gray(image->gray[(size_t)iy * image->width + ix]),
-                                                 left + ix, top + iy), fb);
+                TT_SPAN(imgdraw, blit_inline_gray(image, left, top, fb));
             } else if (height >= UI_PX_CAPTION + 4 && width >= 70) {
                 char notice[64]; copy_text(notice, sizeof(notice), "此插图暂无法显示");
                 fit_text(notice, UI_PX_CAPTION, width - 8);
@@ -4731,7 +4841,7 @@ static void draw_reader_outer(uint8_t *fb,size_t page) {
 static void draw_reader(uint8_t *fb,size_t page) {
     ui_text_set_system_scale(false);ui_clear_page(fb);
     if (!(s_zoom_active && page == s_page && reader_zoom_image()))
-        book_layout_draw_page(fb,page,body_rect(),s_px);
+        TT_SPAN(text, book_layout_draw_page(fb, page, body_rect(), s_px));
     draw_reader_outer(fb,page);
 }
 // 预绘只在同步推屏期间借用字体；结束前逐行停止并交还，输入回调不等待整页预绘。
@@ -4782,16 +4892,18 @@ static void prep_task(void *arg) {
         xSemaphoreGive(s_prep_done);
     }
 }
-// 预绘目标：往回翻时取上一页，否则取下一页；越界、目标页带图或设了阅读背景时不预绘。
-// 当前是插图页时照样预绘相邻的文字页，插图页推屏期间不取显示锁，不会和预绘争用。
+// 预绘目标：往回翻时取上一页，否则取下一页；越界或设了阅读背景时不预绘。
+// 目标页带插图时也预绘正文文字层（插图槽位留白，由 draw_reader_outer 在命中后贴上）；
+// 当前是插图页时照样预绘相邻页，插图页推屏期间不取显示锁，不会和预绘争用。
 // Prefetch target: the previous page while paging backward, otherwise the next; none when out of
-// range, when the target carries an image or when a reading background is set. An image page still
-// prefetches its neighbouring text page: its panel push takes no draw lock, so the two do not contend.
+// range or when a reading background is set. An image-bearing target is prefetched too, but only its
+// body-text layer (the image slots stay blank; draw_reader_outer blits the images after a hit). An
+// image page still prefetches its neighbouring page: its panel push takes no draw lock, so the two do
+// not contend.
 static int reader_prefetch_target(void) {
     const bool back=s_page>0&&s_back_turns>=(s_keep_cur.fb?1:2);
     int target=back?(int)s_page-1:(int)s_page+1;
-    if(target>=(int)book_layout_page_count()||
-       book_layout_page_image_count((size_t)target)||app_settings_book_background_path()[0])return -1;
+    if(target>=(int)book_layout_page_count()||app_settings_book_background_path()[0])return -1;
     return target;
 }
 static bool kick_prep(void) {
@@ -5089,6 +5201,8 @@ static void tt_finish(const char* path, bool prefetch, int64_t drawn, int64_t di
     used = tt_put(line, used, sizeof(line), "save", s_tt.save);
     used = tt_put(line, used, sizeof(line), "prep", s_tt.prep);
     used = tt_put(line, used, sizeof(line), "draw", s_tt.draw);
+    used = tt_put(line, used, sizeof(line), "imgdraw", s_tt.imgdraw);
+    used = tt_put(line, used, sizeof(line), "text", s_tt.text);
     used = tt_put(line, used, sizeof(line), "turn", turn_end - s_tt.t0);
     used = tt_put(line, used, sizeof(line), "gap", present_in - turn_end);
     used = tt_put(line, used, sizeof(line), "pre", present_start - present_in);
@@ -5386,7 +5500,7 @@ static app_redraw_t paint_reading(app_ctx_t* ctx, enum EpdDrawMode mode) {
                 uint8_t *body = s_keep_prev.fb;
                 ui_text_set_system_scale(false);
                 memset(body, 0xff, fb_bytes());
-                book_layout_draw_page(body, s_page, body_rect(), s_px);
+                TT_SPAN(text, book_layout_draw_page(body, s_page, body_rect(), s_px));
                 s_keep_cur = (reader_keep_t){body, page, generation};
             }
             s_keep_prev = left;
@@ -5405,7 +5519,11 @@ static app_redraw_t paint_reading(app_ctx_t* ctx, enum EpdDrawMode mode) {
             s_keep_cur = (reader_keep_t){s_keep_prev.fb, -1, 0};
             s_keep_prev = left;
         }
-        cached = !s_toolbar && !s_clear_confirm && s_next_fb &&
+        // 缩放激活时 draw_reader 不画正文，命中路径同样不得拷贝预绘文字层，否则正文会透到放大的插图下。
+        // While zoom is active draw_reader paints no body, so the hit path must not copy the prefetched
+        // text layer either, or body text would show under the magnified illustration.
+        const bool zoom_hides_body = s_zoom_active && reader_zoom_image();
+        cached = !s_toolbar && !s_clear_confirm && !zoom_hides_body && s_next_fb &&
                  ((s_next_page == page && s_next_generation == generation) || reader_prefetch_resume(s_page));
         if (cached) {
             memcpy(ctx->fb, s_next_fb, fb_bytes());
@@ -6257,11 +6375,14 @@ static void prepare_inline_image(void) {
     if (app_settings_reader_hide_images()) { reader_image_prep_cancel(); release_page_images(); return; }
     uint32_t generation = book_layout_generation();
     if (s_page_images_for == s_page && s_page_images_generation == generation) return;
-    // 预绘的是纯文字页的正文，与上一页有没有插图无关：从插图页翻到预绘好的文字页时照样命中。
-    // 只在布局代次改变或本页带插图时作废。
-    // The prefetch holds a text page's body, independent of the previous page's images, so turning
-    // from an image page onto a prefetched text page still hits. Invalidate only across layout
-    // generations or onto an image-bearing page.
+    // 预绘的是目标页的正文文字层，与上一页有没有插图无关；带插图的目标页也预绘文字层，插图稍后由
+    // draw_reader_outer 贴上。只在布局代次改变，或本页带插图而预绘内容（已完成/可续画）不属于本页时
+    // 作废；属于本页的预绘层保留给 paint_reading 命中，命中仍逐项核对页号与代次。
+    // The prefetch holds the target page's body-text layer whatever the previous page held, and an
+    // image-bearing target is prefetched as text only, with its images blitted later by
+    // draw_reader_outer. Invalidate only across layout generations, or onto an image-bearing page
+    // whose prefetch (finished or resumable) is not this page's; this page's layer is kept for
+    // paint_reading, which still checks page and generation before every hit.
     const bool changed_layout = s_page_images_generation != generation;
     release_page_images();
     s_page_images_for = s_page; s_page_images_generation = generation;
@@ -6270,7 +6391,10 @@ static void prepare_inline_image(void) {
     // A missing illustration has no other symptom and every failure path used to be a silent
     // continue; record the outcome instead of guessing.
     int count = reader_image_slots(s_page);
-    if (changed_layout || count > 0) reset_prefetch();
+    const bool prefetch_is_page = s_next_fb &&
+        ((s_next_page == (int)s_page && s_next_generation == generation) ||
+         (s_prep_page == (int)s_page && s_prep_cursor.started && s_prep_cursor.generation == generation));
+    if (changed_layout || (count > 0 && !prefetch_is_page)) reset_prefetch();
     if (reader_image_prep_take(generation, count)) return;
     if (count > 0) {
         // 前台解码先收回已取消任务的工作区；只等当前解码检查点和释放内存。
