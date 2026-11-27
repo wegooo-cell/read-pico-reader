@@ -2035,6 +2035,40 @@ bool book_layout_stage_commit(book_layout_stage_t *stage, void *dims_ctx) {
     return true;
 }
 
+// 把已排完的活动排版整体搬进一个新的完成态候选，活动排版随即为空；缓冲区所有权转移、不复制。
+// Move the finished active layout into a new finished stage and leave the active one empty; buffer ownership transfers, nothing is copied.
+book_layout_stage_t *book_layout_stage_detach_active(void *dims_ctx) {
+    if (s_doc != &s_active || !s_active.pages || !s_active.count) return NULL;
+    book_layout_stage_t *stage = heap_caps_malloc(sizeof(*stage), PSRAM_CAPS);
+    if (!stage) return NULL;
+    memset(stage, 0, sizeof(*stage));
+    stage->doc = s_active;
+    stage->doc.dims_ctx = dims_ctx;
+    stage->vertical = s_vertical;
+    stage->done = true;
+    if (++s_stage_generation == 0) ++s_stage_generation;
+    stage->draw_generation = s_stage_generation;
+    // 缓冲区已归候选所有；先清空指针再释放，其余字段按空排版复位。
+    // The stage owns the buffers now; null the pointers first so the release only resets the remaining fields.
+    s_active.pages = NULL;
+    s_active.page_y = NULL;
+    s_active.line = NULL;
+    s_active.images = NULL;
+    s_active.page_img_start = NULL;
+    s_active.note_markers = NULL;
+    doc_release_buffers(&s_active);
+    ++s_generation;
+    return stage;
+}
+
+bool book_layout_stage_commit_keep(book_layout_stage_t *stage, void *dims_ctx,
+                                   void *kept_dims_ctx, book_layout_stage_t **kept) {
+    if (kept) *kept = NULL;
+    if (!stage || !stage->done || stage->failed) return false;
+    if (kept) *kept = book_layout_stage_detach_active(kept_dims_ctx);
+    return book_layout_stage_commit(stage, dims_ctx);
+}
+
 void book_layout_stage_free(book_layout_stage_t *stage) {
     if (!stage) return;
     if (s_doc == &stage->doc) s_doc = &s_active;

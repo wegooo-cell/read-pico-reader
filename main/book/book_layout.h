@@ -188,5 +188,13 @@ int book_layout_stage_draw_slice(book_layout_stage_t *stage, uint8_t *fb, size_t
 /// 原子提交已完成的候选排版为当前活动排版并递增代次；成功后释放 stage 外壳。
 /// Atomically commit a finished staged layout as the active layout, bump generation, and free the stage shell.
 bool book_layout_stage_commit(book_layout_stage_t *stage, void *dims_ctx);
+/// 把已排完的活动排版移入一个新的完成态候选（缓冲区所有权转移不复制），活动排版随即为空并递增代次；
+/// 无排版或内存不足返回 NULL 且活动排版不变。dims_ctx 成为该候选绘制时的尺寸回调上下文。
+/// Move the finished active layout into a new finished stage (buffers move, nothing copies), leaving the active layout empty and bumping the generation; NULL with the active layout untouched when there is none or memory is short. dims_ctx becomes the stage's image-size callback context.
+book_layout_stage_t *book_layout_stage_detach_active(void *dims_ctx);
+/// 同 book_layout_stage_commit，并把被替换的活动排版交给 *kept（失败或内存不足为 NULL，此时与普通提交一致）。
+/// 候选无效时不改动任何状态。/ Like book_layout_stage_commit, handing the replaced active layout to *kept (NULL on failure or low memory, then identical to a plain commit). Nothing changes when the stage is invalid.
+bool book_layout_stage_commit_keep(book_layout_stage_t *stage, void *dims_ctx,
+                                   void *kept_dims_ctx, book_layout_stage_t **kept);
 /// 释放未提交的候选排版，不触碰当前活动排版与代次。/ Free an uncommitted stage without touching active layout or generation.
 void book_layout_stage_free(book_layout_stage_t *stage);

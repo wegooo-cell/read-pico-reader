@@ -235,6 +235,25 @@ static void draw_zoomed_image(uint8_t *fb,EpdRect band,int scale,int cx,int cy,b
 }
 """
 unit+='\n'+function('reader_zoom_reset')
+# Pico 视图的 load_chapter_at 带跨章保留逻辑；S31 没有。/ Only the Pico view's load_chapter_at keeps the left chapter.
+if 'next_chapter_keep_eligible' in source:
+    # 跨章保留候选与本测试无关（此处只验图片表/回滚）：桩成不保留，真实保留路径由 pico_chapter_preload_host_test 覆盖。
+    # Keeping the left chapter is irrelevant to this image/rollback test: stub it to never keep; the real keep path is covered by pico_chapter_preload_host_test.
+    unit += r'''
+typedef struct book_layout_stage book_layout_stage_t;
+typedef struct { int unused; } reader_outgoing_t;
+static reader_outgoing_t s_outgoing;
+static struct { int dims_ctx; } s_next_ch;
+static bool next_chapter_keep_eligible(size_t chapter, int dir) { (void)chapter; (void)dir; return false; }
+static book_layout_stage_t *book_layout_stage_detach_active(void *dims) { (void)dims; return NULL; }
+static void book_layout_stage_free(book_layout_stage_t *stage) { (void)stage; }
+static void next_chapter_outgoing_take(reader_outgoing_t *o, size_t skip, unsigned height, unsigned width) {
+    (void)o; (void)skip; (void)height; (void)width; assert(false);
+}
+static void next_chapter_keep_install(reader_outgoing_t *o, book_layout_stage_t *layout, int dir) {
+    (void)o; (void)layout; (void)dir; assert(false);
+}
+'''
 for name in ('inline_ink_gray', 'reader_image_slots', 'reader_image_slot', 'reader_image_dims', 'alloc_page_bitmap', 'release_page_images', 'prepare_inline_image', 'draw_reader_images', 'reader_footer_progress', 'load_chapter_at'):
     unit += '\n' + function(name)
 unit += r'''
