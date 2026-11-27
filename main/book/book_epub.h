@@ -17,6 +17,11 @@
 #include "book_volume.h"
 
 typedef struct book_epub book_epub_t;
+#if !KIIKO_BOARD_METALIO47
+struct zip_stream;
+esp_err_t book_epub_image_stream(book_epub_t *book, size_t chapter, const char *src,
+                                 size_t budget, struct zip_stream **stream, size_t *size);
+#endif
 /// 打开 EPUB；失败时 out 置空，成功后由 close 释放。/ Open EPUB; clear out on failure, close owns successful cleanup.
 esp_err_t book_epub_open(const char *path, book_epub_t **out);
 /// 关闭 ZIP 并释放目录，可传 NULL。/ Close ZIP and free the index; NULL is allowed.

@@ -72,7 +72,7 @@ typedef struct{unsigned x,y,width,height;}book_crop_t;
 for n in ('luminance','scale_axis'):u+=function(n,c)+'\n'
 u+='typedef struct{uint16_t at;uint8_t frac;}scale_step_t;\n'
 for n in ('scale_map','scale_next','bilinear4','book_cover_crop'):u+=function(n,c)+'\n'
-u+='typedef struct{const uint8_t *data;size_t size,pos;FILE *file;}png_input_t;\n'
+u+=re.search(r'typedef struct \{[^{}]*\} png_input_t;',c.read_text()).group()+'\n'
 for n in ('png_read_mem','png_gray_rows','png_gray_input','book_png_file_layer','book_png_file_layer_rows'):u+=function(n,c)+'\n'
 u+=r'''
 static bool book_image_file_dimensions(const char *path,bool png,unsigned *w,unsigned *h){

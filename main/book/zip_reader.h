@@ -49,6 +49,11 @@ typedef struct zip_stream zip_stream_t;
 /// Bounded, sequential raw entry extraction. Read through EOF to verify the CRC.
 esp_err_t zip_stream_open(zip_reader_t *reader, int index, zip_stream_t **out);
 esp_err_t zip_stream_read(zip_stream_t *stream, void *dst, size_t cap, size_t *received);
+#if !KIIKO_BOARD_METALIO47
+/// 空闲预读每次最多 32 KiB 输出。输入读取超出预算则作废此流。
+/// Idle read returns at most 32 KiB of output. Exceeding the input budget invalidates the stream.
+esp_err_t zip_stream_read_idle(zip_stream_t *stream, void *dst, size_t cap, size_t *received);
+#endif
 void zip_stream_close(zip_stream_t *stream);
 #if KIIKO_BOARD_METALIO47
 

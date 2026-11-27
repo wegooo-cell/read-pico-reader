@@ -251,6 +251,12 @@ esp_err_t book_chapter_image(size_t chapter, const char *src, uint8_t **data, si
 esp_err_t book_chapter_image_dimensions(size_t chapter, const char *src, unsigned *width, unsigned *height) {
     return s_epub ? book_epub_image_dimensions(s_epub, chapter, src, width, height) : ESP_ERR_NOT_SUPPORTED;
 }
+#if !KIIKO_BOARD_METALIO47
+esp_err_t book_chapter_image_stream(size_t chapter, const char *src, size_t budget,
+                                    struct zip_stream **stream, size_t *size) {
+    return book_epub_image_stream(s_epub, chapter, src, budget, stream, size);
+}
+#endif
 #if KIIKO_BOARD_METALIO47
 
 esp_err_t book_suspend_io(void) {

@@ -27,6 +27,18 @@ int main(int argc, char** argv) {
     int index = zip_find(zip, argv[3]);
     assert(index >= 0);
     size_t size = zip_entry_size(zip, index);
+    if (!strcmp(argv[1], "read-beyond-idle-budget")) {
+#if !KIIKO_BOARD_METALIO47
+        zip_stream_t *stream = NULL;
+        unsigned char window[32768];
+        size_t received = 0;
+        assert(zip_stream_open(zip, index, &stream) == ESP_OK);
+        assert(zip_stream_read_idle(stream, window, sizeof(window), &received) == ESP_ERR_NOT_SUPPORTED);
+        assert(received == 0);
+        assert(zip_stream_read_idle(stream, window, sizeof(window), &received) != ESP_OK);
+        zip_stream_close(stream);
+#endif
+    }
     if (!strcmp(argv[1], "prefix")) {
         unsigned char bounded[257 + 16];
         memset(bounded, 0xcc, sizeof(bounded));

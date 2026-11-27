@@ -54,6 +54,17 @@ def main():
                 run("read", archive(data, method), expected=data)
                 run("prefix", archive(data, method), expected=data)
         run("read", archive(payload, stream=True), expected=payload)
+        # Empty stored deflate blocks can consume input without producing an output window.
+        original = archive(payload)
+        empty_blocks = b"\x00\x00\x00\xff\xff" * 9000
+        data_offset = 30 + len("entry.txt")
+        padded = bytearray(original[:data_offset] + empty_blocks + original[data_offset:])
+        central = padded.index(b"PK\x01\x02")
+        for offset in (18, central + 20):
+            (packed,) = struct.unpack_from("<I", padded, offset)
+            struct.pack_into("<I", padded, offset, packed + len(empty_blocks))
+        struct.pack_into("<I", padded, padded.rindex(b"PK\x05\x06") + 16, central)
+        run("read-beyond-idle-budget", padded, expected=payload)
         run("read", archive(payload, comment=b"x" * 65535), expected=payload)
         run("read", archive(b"x" * (8 * 1024 * 1024)), expected=b"x" * (8 * 1024 * 1024))
         run("reject-extract", archive(b"x" * (8 * 1024 * 1024 + 1)))

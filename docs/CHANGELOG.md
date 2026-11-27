@@ -1,3 +1,8 @@
+## Pico 阅读器（未发布 / Unreleased）
+
+- 阅读 EPUB 文字页时，Pico 在空闲时提前解码下一页的插图。翻页时可以直接使用已经备好的灰度图，渐进式 JPEG 和内存不足时仍按需解码。
+- While displaying EPUB text, Pico uses idle time to decode illustrations on the next page. A page turn can reuse the prepared grayscale images. Progressive JPEGs and images that exceed the available memory are decoded on demand.
+
 ## 第二批修正（未发布 / Unreleased）
 
 - 封面迁移遇到建目录、读取目标状态或改名失败时保留唯一旧缓存；目标已存在时保留旧副本供损坏回退，不阻塞其他文件迁移。
