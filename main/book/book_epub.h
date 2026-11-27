@@ -15,6 +15,7 @@
 #include "esp_err.h"
 #include "html_text.h"
 #include "book_volume.h"
+#include "zip_reader.h"
 
 typedef struct book_epub book_epub_t;
 /// 打开 EPUB；失败时 out 置空，成功后由 close 释放。/ Open EPUB; clear out on failure, close owns successful cleanup.
@@ -56,6 +57,9 @@ esp_err_t book_epub_load_target(book_epub_t *book, size_t index, const char *anc
 esp_err_t book_epub_image(book_epub_t *book, size_t chapter, const char *src, uint8_t **data, size_t *size, bool *png);
 esp_err_t book_epub_image_bounded(book_epub_t *book, size_t chapter, const char *src,
                                  uint8_t **data, size_t *size, bool *png, size_t budget);
+/// 直接非交错 PNG 的顺序流；stream 为 NULL 时只读头。/ Open direct PNG; NULL stream probes only.
+esp_err_t book_epub_png_open(book_epub_t *book, size_t chapter, const char *src,
+                             zip_stream_t **stream, size_t *bytes, unsigned *width, unsigned *height);
 /// spine 原始 HTML 未压缩字节总量，不等于 EPUB 文件大小。/ Total uncompressed source HTML bytes in the spine, not EPUB file size.
 uint32_t book_epub_total_bytes(const book_epub_t *book);
 /// 该章之前所有 spine 原始 HTML 字节累计值。/ Sum of source HTML bytes preceding this chapter in the spine.

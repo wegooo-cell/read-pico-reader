@@ -6030,14 +6030,19 @@ static void prepare_inline_image(void) {
             continue;
         }
         uint8_t *encoded = NULL; size_t size = 0; bool png = false;
-        esp_err_t err = book_chapter_image(s_chapter, s_images[index], &encoded, &size, &png);
+        unsigned source_w = 0, source_h = 0;
+        const char *src = s_images[index];
+        // 直接 PNG 按 ZIP 顺序解码，避免整张资源的连续内存。/ Stream direct PNG from ZIP without a whole-image input buffer.
+        esp_err_t err = book_chapter_png_info(s_chapter, src, &size, &source_w, &source_h);
+        const bool png_stream = err == ESP_OK;
+        if (err == ESP_ERR_NOT_SUPPORTED)
+            err = book_chapter_image(s_chapter, src, &encoded, &size, &png);
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "inline %d %s: read %s", i, s_images[index], esp_err_to_name(err));
             free(encoded);
             continue;
         }
-        unsigned source_w = 0, source_h = 0;
-        if (book_image_dimensions(encoded, size, png, &source_w, &source_h) && source_w && source_h) {
+        if ((png_stream || book_image_dimensions(encoded, size, png, &source_w, &source_h)) && source_w && source_h) {
             // 回退槽也使用真实宽高等比缩小，避免尺寸探测失败时拉伸图片。
             // Aspect-fit even fallback slots from decoded dimensions, avoiding stretched unknown-size images.
             uint64_t w = source_w, h = source_h;
@@ -6059,7 +6064,10 @@ static void prepare_inline_image(void) {
                 free(encoded);
                 continue;
             }
-            if (book_image_grayscale(encoded, size, png, width, height, gray)) {
+            const bool success = png_stream
+                ? book_chapter_png_grayscale(s_chapter, src, width, height, gray) == ESP_OK
+                : book_image_grayscale(encoded, size, png, width, height, gray);
+            if (success) {
                 s_page_images[i] = (reader_image_t){.gray=gray, .width=width, .height=height};
                 pixels_left -= pixels;
                 ++decoded;

@@ -80,6 +80,11 @@ uint32_t book_chapter_byte_offset(size_t i);
 book_kind_t book_kind(void);
 
 esp_err_t book_chapter_image_dimensions(size_t chapter, const char *src, unsigned *width, unsigned *height);
+#if defined(ESP_PLATFORM) && !KIIKO_BOARD_METALIO47
+/// PICO 正文直接 PNG 的探测和逐行解码。/ Pico inline direct-PNG probe and row decode.
+esp_err_t book_chapter_png_info(size_t chapter, const char *src, size_t *bytes, unsigned *width, unsigned *height);
+esp_err_t book_chapter_png_grayscale(size_t chapter, const char *src, unsigned width, unsigned height, uint8_t *out);
+#endif
 #if KIIKO_BOARD_METALIO47
 
 /// 浅睡仅暂停只读文件，不释放排版和章节索引。/ Pause read handles without discarding layout/indexes.

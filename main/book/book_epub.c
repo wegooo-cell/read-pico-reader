@@ -2298,6 +2298,32 @@ esp_err_t book_epub_image(book_epub_t *book, size_t chapter, const char *src,
                           uint8_t **data, size_t *size, bool *png) {
     return book_epub_image_bounded(book, chapter, src, data, size, png, ZIP_OUTPUT_MAX);
 }
+esp_err_t book_epub_png_open(book_epub_t *book, size_t chapter, const char *src,
+                             zip_stream_t **stream, size_t *bytes, unsigned *width, unsigned *height) {
+    if (stream) *stream = NULL;
+    if (!book || chapter >= book->count || !src || !bytes || !width || !height) return ESP_ERR_INVALID_ARG;
+    *bytes = 0;
+    *width = *height = 0;
+    char path[EPUB_PATH_CAP];
+    if (!resolve_path(zip_entry_name(book->zip, book->chapters[chapter].zip_index), src, path)) return ESP_ERR_INVALID_ARG;
+    int entry = zip_find(book->zip, path);
+    if (entry < 0) return ESP_ERR_NOT_FOUND;
+    size_t n = zip_entry_size(book->zip, entry);
+    if (!n || n > ZIP_OUTPUT_MAX) return ESP_ERR_INVALID_SIZE;
+    uint8_t header[32];
+    if (n < sizeof(header)) return ESP_ERR_NOT_SUPPORTED;
+    esp_err_t err = zip_extract_prefix(book->zip, entry, header, sizeof(header));
+    if (err != ESP_OK) return err;
+    // IHDR 交错字段为零才走行解码。/ Row decoding applies to a zero IHDR interlace field.
+    if (memcmp(header, "\x89PNG\r\n\x1a\n", 8) || header[28] ||
+        !book_image_dimensions(header, sizeof(header), true, width, height)) return ESP_ERR_NOT_SUPPORTED;
+    if (stream) {
+        err = zip_stream_open(book->zip, entry, stream);
+        if (err != ESP_OK) return err;
+    }
+    *bytes = n;
+    return ESP_OK;
+}
 uint32_t book_epub_total_bytes(const book_epub_t *book) { return book ? book->total : 0; }
 uint32_t book_epub_chapter_byte_offset(const book_epub_t *book, size_t i) { return book && i < book->count ? book->chapters[i].offset : 0; }
 
