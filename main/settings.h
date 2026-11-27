@@ -152,6 +152,10 @@ void app_settings_set_reader_full_pages(uint8_t pages);
 /// Reader effects:0 ordinary,1 ripple; Pico uses3 fast (legacy2 migrates to3), S31 retains2 FastBW.
 uint8_t app_settings_reader_turn_effect(void);
 void app_settings_set_reader_turn_effect(uint8_t effect);
+/// PICO 普通/快速模式纯文字连翻时使用黑白快翻并停手定稿；默认开启，保存后生效。
+/// Use rapid BW middle turns with idle grayscale settle for Pico ordinary/fast plain text; on by default, saved before applying.
+bool app_settings_reader_rapid_turn(void);
+bool app_settings_set_reader_rapid_turn(bool on);
 /// 阅读正文里短按电源键翻下一页；默认关闭。/ Short power press turns forward only in reader body; off by default.
 bool app_settings_reader_power_turn(void);
 void app_settings_set_reader_power_turn(bool on);

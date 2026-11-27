@@ -35,6 +35,10 @@ typedef struct {uint8_t *front_fb,*back_fb;} EpdiyHighlevelState;
 enum {READER_PANEL_TOUCH_SETTINGS=80,READER_PANEL_TOUCH_MORE,BULK};
 enum {EPD_ROT_PORTRAIT=1,EPD_ROT_INVERTED_LANDSCAPE,EPD_ROT_INVERTED_PORTRAIT};
 static bool s_rc_full_was_visible,s_shelf_key_paint_pending,s_txt_opening,s_chapter_display_pending;
+#define READER_RAPID_SETTLE_MS 700
+static bool s_rapid_turn_pending,s_rapid_settle_due,s_rapid_cleanup_due,s_rapid_settle_pending;
+static int64_t s_turn_done_ms=-1000000;
+#define reader_rapid_threshold_body(fb,area) ((void)(fb),(void)(area))
 static int64_t now_ms=1000,s_reader_footer_due_ms;
 static uint8_t front[684*1216/2],back[684*1216/2];
 static int fail_region=-1,attempts;
@@ -99,6 +103,7 @@ static void reset(unsigned effect,int style){
  target(42,1);memcpy(back,front,sizeof(back));s_page=43;target(43,2);
  s_view=s_presented_view=READING;s_text="text";s_reader_panel=READER_PANEL_NONE;
  s_reader_turn_pending=true;s_water_turn_pending=effect==1;s_reader_cleanup=false;s_reader_footer_pending=false;
+ s_rapid_turn_pending=s_rapid_settle_due=s_rapid_cleanup_due=s_rapid_settle_pending=false;s_turn_done_ms=-1000000;
  s_mode=MODE_GL16;s_area=reader_area();test_effect=effect;test_push_error=0;fail_region=-1;
  trace_count=attempts=0;now_ms=1000;
 }

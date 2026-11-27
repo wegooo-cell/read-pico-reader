@@ -305,6 +305,10 @@ static bool s_toolbar, s_clear_confirm, s_fonts_reload_pending, s_reader_rule_pe
 static bool s_book_fonts_applied = true, s_embedded_fonts = true;
 static bool s_reader_fullscreen, s_shelf_feedback_pending, s_reader_cleanup, s_reader_image_refresh_pending;
 static bool s_water_turn_pending, s_reader_footer_pending, s_reader_turn_pending, s_reader_text_frame;
+#define READER_RAPID_SETTLE_MS 700
+static bool s_rapid_turn_pending __attribute__((unused)), s_rapid_settle_due __attribute__((unused)), s_rapid_cleanup_due __attribute__((unused)), s_rapid_settle_pending __attribute__((unused));
+static int64_t s_turn_done_ms __attribute__((unused)) = -1000000, s_reader_footer_due_ms __attribute__((unused));
+#define reader_rapid_threshold_body(fb, area) ((void)(fb), (void)(area))
 static bool s_reader_dc_recover, s_rc_full_was_visible, s_shelf_key_paint_pending, s_txt_opening;
 static bool s_cover_batch_present_pending, s_shelf_page_pending, s_reader_clock_pending;
 static int s_pressed_control = -1, s_water_turn_dir = 1;

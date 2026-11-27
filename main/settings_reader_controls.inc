@@ -134,3 +134,18 @@ bool app_settings_set_reader_auto_seconds(unsigned seconds) {
     if (seconds < READER_AUTO_MIN_SECONDS || seconds > READER_AUTO_MAX_SECONDS) return false;
     reader_controls_config_t c=*app_settings_reader_controls();c.seconds_le[0]=seconds;c.seconds_le[1]=seconds>>8;return reader_controls_save(&c);
 }
+
+#define NVS_KEY_READER_RAPID "rd_rapid"
+static bool s_reader_rapid_turn = true;
+static void reader_rapid_turn_load(nvs_handle_t h) {
+    uint8_t value = 1;
+    if (nvs_get_u8(h, NVS_KEY_READER_RAPID, &value) == ESP_OK && value <= 1)
+        s_reader_rapid_turn = value != 0;
+}
+bool app_settings_reader_rapid_turn(void) { return s_reader_rapid_turn; }
+bool app_settings_set_reader_rapid_turn(bool on) {
+    if (on == s_reader_rapid_turn) return true;
+    if (!book_heading_save_value(NVS_KEY_READER_RAPID, on ? 1 : 0)) return false;
+    s_reader_rapid_turn = on;
+    return true;
+}
