@@ -411,6 +411,7 @@ void app_settings_init(void) {
     if (nvs_get_u8(h, NVS_KEY_BOOK_RULE, &reading_line) == ESP_OK && reading_line <= 2)
         s_book_reading_line = reading_line;
     book_heading_style_load(h);
+    reader_rapid_turn_load(h);
     uint8_t rule_full = 0;
     s_book_rule_full = nvs_get_u8(h, NVS_KEY_BOOK_RULE_FULL, &rule_full) == ESP_OK && rule_full == 1;
     if (nvs_get_u8(h, NVS_KEY_BOOK_RULE_OFFSET, &rule_offset) == ESP_OK && rule_offset <= 8)

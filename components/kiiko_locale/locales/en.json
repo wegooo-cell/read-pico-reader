@@ -1225,5 +1225,6 @@
   "正向平衡（约 6 秒）": "Forward balance (~6 s)",
   "正向：压黑后擦白，净负偏置": "Forward: darken then erase; net negative bias",
   "16 级灰阶：平衡后看渐变与残影": "16-step gray: check the ramp and ghosting after balancing",
-  "左黑 → 右白": "Black → white"
+  "左黑 → 右白": "Black → white",
+  "连续快翻": "Rapid turn"
 }

@@ -188,6 +188,12 @@ static app_redraw_t rc_panel_action(app_ctx_t*ctx,int x,int y,bool*handled){
             unsigned n=sizeof(values)/sizeof(values[0]),i=0;for(;i<n;++i)if(values[i]==app_settings_reader_full_pages())break;
             app_settings_set_reader_full_pages(values[(i+1)%n]);s_turns=0;return APP_REDRAW_PAGE;
         }
+#if !KIIKO_BOARD_METALIO47
+        if(ui_rect_hit(rc_rapid_rect(),x,y)){
+            if(!app_settings_set_reader_rapid_turn(!app_settings_reader_rapid_turn()))rc_notice(ctx,"保存失败，请重试");
+            return APP_REDRAW_PAGE;
+        }
+#endif
         if(ui_rect_hit(rc_auto_card(0),x,y))return rc_execute(ctx,RC_AUTOTURN);
         for(unsigned plus=0;plus<2;++plus)if(ui_rect_hit(rc_interval_rect(plus),x,y)){
             unsigned seconds=reader_controls_seconds(app_settings_reader_controls());
@@ -276,6 +282,9 @@ static int rc_hit_target(int x,int y){
         }
         if(s_rc_tab==1){for(int i=0;i<RC_EFFECT_COUNT;++i)if(ui_rect_hit(rc_effect_rect(i),x,y))return 100+i;
             if(ui_rect_hit(rc_refresh_rect(),x,y))return 110;
+#if !KIIKO_BOARD_METALIO47
+            if(ui_rect_hit(rc_rapid_rect(),x,y))return 114;
+#endif
             if(ui_rect_hit(rc_auto_card(0),x,y))return 111;
             for(unsigned i=0;i<2;++i)if(ui_rect_hit(rc_interval_rect(i),x,y))return 112+i;}
         if(s_rc_tab==2){for(int i=0;i<3;++i)if(ui_rect_hit((EpdRect){36,746+i*132,612,110},x,y))return 100+i;}

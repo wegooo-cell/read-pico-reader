@@ -37,7 +37,16 @@ static EpdRect rc_effect_rect(int i) {
     const int w = (612 - 12 * (RC_EFFECT_COUNT - 1)) / RC_EFFECT_COUNT;
     return (EpdRect){36 + i * (w + 12), 786, w, 68};
 }
-static EpdRect rc_refresh_rect(void) { return (EpdRect){36,882,612,84}; }
+static EpdRect rc_refresh_rect(void) {
+#if KIIKO_BOARD_METALIO47
+    return (EpdRect){36,882,612,84};
+#else
+    return (EpdRect){36,868,298,110};
+#endif
+}
+#if !KIIKO_BOARD_METALIO47
+static EpdRect rc_rapid_rect(void) { return (EpdRect){350,868,298,110}; }
+#endif
 static EpdRect rc_auto_card(int column) { return (EpdRect){36+column*314,994,298,126}; }
 static EpdRect rc_interval_rect(unsigned plus) {
     EpdRect card = rc_auto_card(1);
@@ -104,6 +113,9 @@ static void rc_draw_settings(uint8_t*fb){
             ui_fill_round_rect(fb,r,17,on?UI_GRAY_BLACK:0xf0);ui_draw_control_frame(fb,r,17,on?UI_GRAY_BLACK:0x98);rc_text(fb,r,24,rc_effect_name(i),true,on);}
         char value[24];unsigned full=app_settings_reader_full_pages();if(full)snprintf(value,sizeof(value),"每 %u 页",full);else snprintf(value,sizeof(value),"不强制");
         rc_link(fb,rc_refresh_rect(),"全刷间隔",value);
+#if !KIIKO_BOARD_METALIO47
+        rc_toggle_card(fb,rc_rapid_rect(),"连续快翻",app_settings_reader_rapid_turn());
+#endif
         rc_toggle_card(fb,rc_auto_card(0),"自动翻页",s_rc_auto.running);
         const unsigned seconds = reader_controls_seconds(app_settings_reader_controls());
         EpdRect card = rc_auto_card(1), step = rc_interval_rect(0);

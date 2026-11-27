@@ -61,6 +61,10 @@ static int s_px=48,s_reader_panel=READER_PANEL_NONE,s_reader_slider=-1,s_view=RE
 #define s_toolbar (s_reader_panel!=READER_PANEL_NONE)
 static bool s_reader_fullscreen,s_clear_confirm,s_reader_text_frame,s_reader_turn_pending;
 static bool s_water_turn_pending,s_reader_cleanup,draw_locked,load_failed;
+#define READER_RAPID_TURN 1
+#define READER_RAPID_GAP_MS 500
+static bool s_rapid_turn_pending __attribute__((unused)),s_rapid_settle_due __attribute__((unused)),s_rapid_cleanup_due __attribute__((unused)),s_rapid_settle_pending __attribute__((unused));
+static int64_t s_turn_done_ms __attribute__((unused))=-1000000;
 static int s_water_turn_dir;
 static unsigned s_stats_pending_turns,s_session_turns,s_turns,s_unsaved;
 static int64_t s_last_turn_ms,s_stats_activity_ms;
@@ -130,6 +134,7 @@ static void skip_hidden_image_pages(app_ctx_t *ctx,int dir){(void)ctx;(void)dir;
 static uint8_t app_settings_reader_full_pages(void){return full_pages;}
 static int effect=1;
 static int app_settings_reader_turn_effect(void){return effect;}
+static bool app_settings_reader_rapid_turn(void){return false;}
 static int test_images;
 static int book_layout_page_image_count(size_t page){(void)page;return test_images;}
 static app_redraw_t paint_reading(app_ctx_t *ctx,int mode){(void)ctx;assert(mode==MODE_GL16);++paints;return APP_REDRAW_AREA;}
@@ -174,6 +179,7 @@ static void reset(bool full,bool tools,size_t page,size_t chapter){
  reflows=paints=saves=s_stats_pending_turns=s_session_turns=s_turns=s_unsaved=0;
  failed_reflows=0;load_failed=false;full_pages=0;s_reader_text_frame=true;
  s_reader_turn_pending=s_water_turn_pending=s_reader_cleanup=false;s_jump_offset=0;
+ s_rapid_turn_pending=s_rapid_settle_due=s_rapid_cleanup_due=s_rapid_settle_pending=false;s_turn_done_ms=-1000000;
 }
 int main(void){
  app_ctx_t ctx={.now_ms=1000};
