@@ -38,7 +38,7 @@ enum EpdDrawMode {MODE_GC16,MODE_GL16,MODE_DU};
 enum EpdDrawError {EPD_DRAW_SUCCESS};
 enum {APP_MAIN_REFRESH_NORMAL,APP_MAIN_REFRESH_FAST,APP_MAIN_REFRESH_WATER,E0470_TURN_RTL};
 typedef int EpdWaveform;
-static const int E0470_WAVEFORM=2,E0470_FOLLOW_WAVEFORM=3,gray_wave=4,normal_wave=5,bw_wave=6,scroll_wave=7,settle_wave=8,motion_wave=9;
+static const int E0470_WAVEFORM=2,E0470_FOLLOW_WAVEFORM=3,gray_wave=4,normal_wave=5,bw_wave=6,scroll_wave=7,motion_wave=9;
 static bool motion_available=true;
 static int motion_pushes,fallback_pushes;
 #define UI_LOCK_WIDTH 684
@@ -84,7 +84,8 @@ static int offset(void){return s_page==SETTINGS_MAIN?s_main_scroll:s_ble_scroll;
 static unsigned expansions;
 static unsigned scene(int x,int y){
  if(y<(s_page==SETTINGS_MAIN?160:190))return 5;
- if(y>=UI_NAV_REFRESH_END)return 10;
+ if(y>=UI_NAV_TOP)return 10;
+ if(y>=UI_NAV_REFRESH_END)return 15;
  return(unsigned)(x/7+(y-160+offset())/9)%16;
 }
 static void render_content(app_ctx_t *ctx,uint8_t *fb){
@@ -99,7 +100,6 @@ static const EpdWaveform *display_main_fast_white_waveform(const EpdWaveform *ba
 static const EpdWaveform *display_main_normal_waveform(void){return &normal_wave;}
 static const EpdWaveform *display_main_bw_waveform(void){return &bw_wave;}
 static const EpdWaveform *display_settings_scroll_waveform(void){return &scroll_wave;}
-static const EpdWaveform *display_reader_soft_turn_waveform(void){return &settle_wave;}
 static const EpdWaveform *display_settings_motion_waveform(void){return motion_available?&motion_wave:NULL;}
 static void display_main_transition_cancel(void){}
 static void commit(void *ptr,EpdRect area){
@@ -117,7 +117,11 @@ static int update_display_area_diff_with(void *hl,const int *wave,enum EpdDrawMo
  ++diffs;commit(hl,area);return 0;
 }
 static int update_display_area_full_with(void *hl,const int *wave,enum EpdDrawMode mode,EpdRect area){
- assert(wave==&settle_wave&&mode==MODE_GL16);++settles;commit(hl,area);return 0;
+ (void)wave;assert(mode==MODE_GL16);commit(hl,area);return 0;
+}
+static int update_display_reader_area(void *hl,const int *wave,enum EpdDrawMode mode,EpdRect area,bool full){
+ assert(full&&wave==&scroll_wave&&mode==MODE_GL16&&area.y+area.height==UI_NAV_TOP);
+ ++settles;commit(hl,area);return 0;
 }
 static int update_display_settings_list(void *hl,unsigned page,EpdRect area){
  assert(page==(unsigned)s_page+1);++discrete;return update_display_area_diff_with(hl,&normal_wave,MODE_GL16,area);
@@ -136,7 +140,7 @@ static EpdRect upgrade_progress_area(void){return(EpdRect){52,468,580,64};}
 for name in ('settings_content_end','settings_viewport_end','settings_plain_list','render',
              'settings_drag_reset','settings_drag_pixel','settings_drag_cache','settings_drag_warm','settings_drag_expand','settings_drag_blit',
              'settings_drag_repeated','settings_drag_sample','settings_drag_finish','settings_drag_gesture',
-             'settings_drag_tick','settings_drag_present','settings_drag_quick','scroll_gesture','settings_present'):
+             'settings_drag_tick','settings_scroll_settle','settings_drag_present','settings_drag_quick','scroll_gesture','settings_present'):
     code=function(name,book)
     if name=='settings_drag_expand':code=code.replace('{','{++expansions;',1)
     unit += code+'\n'
@@ -212,7 +216,10 @@ int main(void){
   // 缓存输出只有黑白，固定题头/导航保持原灰度；反向拖动不重绘文字。
   // Cached motion is binary, fixed chrome stays gray, and reversal never rasterizes text again.
   for(int y=160;y<UI_NAV_REFRESH_END;++y)for(int x=0;x<UI_LOCK_WIDTH;++x){unsigned v=get(hl.back_fb,x,y);assert(v==0||v==15);}
+  // The motion crop misses this band. Final output must reach it without touching navigation.
+  put(hl.back_fb,0,UI_NAV_TOP-1,0);
   feed(300,700,0,false,510);
+  assert(get(hl.back_fb,0,UI_NAV_TOP-1)==15&&get(hl.back_fb,0,UI_NAV_TOP)==10);
   assert(!s_list_drag.active&&!s_list_drag.following&&allocation&&settles==old_settles+1&&paints==captured+1);
   expect_gray();before=diffs;for(int i=0;i<20;++i)feed(300,700,0,false,1400+i*1000);
   assert(diffs==before&&settles==old_settles+1&&taps==old_taps);

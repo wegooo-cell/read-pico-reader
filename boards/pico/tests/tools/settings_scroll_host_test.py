@@ -91,6 +91,10 @@ static int update_display_area_diff_with(void *hl,const int *wave,enum EpdDrawMo
  (void)hl;assert(wave==&E0470_WAVEFORM||wave==&E0470_FOLLOW_WAVEFORM||wave==&settings_soft||wave==&fast_white);if(s_scroll_present_pending==false&&s_page!=SETTINGS_UPGRADE&&s_page!=SETTINGS_TEXT_EDIT&&s_page!=SETTINGS_PIN_ENTRY&&s_page!=SETTINGS_MAIN_REFRESH)assert(wave==&settings_soft);++pushes;pushed=area;pushed_mode=mode;return 0;
 }
 static int update_display_area_full_with(void *hl,const int *wave,enum EpdDrawMode mode,EpdRect area){++full_pushes;return update_display_area_diff_with(hl,wave,mode,area);}
+static int update_display_reader_area(void *hl,const int *wave,enum EpdDrawMode mode,EpdRect area,bool full){
+ assert(full&&wave==&settings_soft&&mode==MODE_GL16&&area.y+area.height==UI_NAV_TOP);
+ return update_display_area_diff_with(hl,wave,mode,area);
+}
 static void guard_draw_result(void *hl,int status){(void)hl;assert(!status);}
 static void display_main_transition_cancel(void){++cancels;}
 
@@ -98,7 +102,7 @@ static EpdRect upgrade_progress_area(void){return(EpdRect){52,468,580,64};}
 typedef struct {int content_bottom;} layout_t;
 static layout_t ble_layout(void){return(layout_t){2000-s_ble_scroll};}
 static layout_t ble_scan_layout(void){return(layout_t){2000};}
-''' + function('settings_content_end') + '\n' + function('settings_viewport_end') + '\n' + function('scroll_gesture') + '\n' + function('settings_present')
+''' + function('settings_content_end') + '\n' + function('settings_viewport_end') + '\n' + function('scroll_gesture') + '\n' + function('settings_scroll_settle') + '\n' + function('settings_present')
 unit += '\nstatic app_redraw_t event(app_ctx_t *ctx,const ui_gesture_event_t *ev){(void)ctx;'+event_block+'if(ev->type==UI_GESTURE_TAP)++row_taps;return APP_REDRAW_NONE;}\n'
 unit += r'''
 static ui_gesture_t recognizer;
@@ -148,12 +152,12 @@ int main(void){
   for(int i=0;i<80;++i){reset(SETTINGS_MAIN,400);before=pushes;feed(300,800,true,true,0);feed(300,680,true,false,20);feed(300,680,false,false,40);assert(pushes==before+1&&pushed_mode==MODE_GL16);}
   for(int page=SETTINGS_BLUETOOTH;page<=SETTINGS_BLE_SCAN;++page){
    reset(page,0);feed(300,800,true,true,0);assert(feed(300,680,true,false,20)==APP_REDRAW_AREA&&s_ble_scroll==204);
-   assert(pushed.y==190&&pushed.y+pushed.height==settings_content_end());feed(300,680,false,false,40);
+   assert(pushed.y==190&&pushed.y+pushed.height==UI_NAV_REFRESH_END);feed(300,680,false,false,40);
   }
   const int pages[]={SETTINGS_SHELF_STYLE,SETTINGS_SYSTEM_FONT,SETTINGS_WALLPAPER,SETTINGS_AVATAR};
   for(unsigned i=0;i<sizeof(pages)/sizeof(pages[0]);++i){
    s_page=pages[i];s_scroll_present_pending=true;assert(settings_present(&ctx,APP_REDRAW_AREA));
-   assert(pushed_mode==MODE_GL16&&pushed.y==(s_page==SETTINGS_SHELF_STYLE?242:190)&&pushed.y+pushed.height==settings_content_end());
+   assert(pushed_mode==MODE_GL16&&pushed.y==(s_page==SETTINGS_SHELF_STYLE?242:190)&&pushed.y+pushed.height==UI_NAV_TOP);
   }
  }
  s_page=SETTINGS_MAIN_REFRESH;
@@ -168,7 +172,7 @@ int main(void){
  assert(!settings_present(&ctx,APP_REDRAW_FULL)&&!s_refresh_mode_white_pending);
  s_page=SETTINGS_UPGRADE;assert(settings_present(&ctx,APP_REDRAW_AREA)&&pushed.y==468&&pushed.height==64);
  assert(!settings_present(&ctx,APP_REDRAW_NONE));
- puts("PASS: original discrete fallback/preview pages with new motion hooks isolated: all three modes use one discrete step and one shared fast-difference update per swipe; retained AA/avatars, one bounded list-gray pass, no extra release/idle frames or periodic full flash; root crop preserves navigation and child crop stops above persistent navigation; selectors and OTA remain");
+ puts("PASS: original discrete fallback/preview pages with new motion hooks isolated: all three modes use one discrete step and one differential gray update per held swipe; retained AA/avatars, one bounded list-gray pass, no extra release/idle frames or periodic full flash; released list crops include the margin and stop before navigation; selectors and OTA remain");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='kiikoread-settings-rollback-') as directory:

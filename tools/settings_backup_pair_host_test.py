@@ -15,23 +15,38 @@ static unsigned card_version(const char *path){
  assert(file&&fread(&value,1,sizeof(value),file)==sizeof(value)&&fclose(file)==0);
  return backup_version(&value);
 }
+static void legacy_cover_off(void){
+ assert(copy_backup_file(BACKUP_FULL,BACKUP_FULL_TEMP));
+ FILE *file=fopen(BACKUP_FULL_TEMP,"r+b");
+ settings_backup_hold_t block;
+ // The host history stub writes eight bytes after the two-byte vertical inset.
+ const long cover_offset=-(long)(8+2+sizeof(block));
+ assert(file&&!fseek(file,cover_offset,SEEK_END));
+ assert(fread(&block,1,sizeof(block),file)==sizeof(block));
+ assert(block.action==1&&backup_shelf_covers_valid(&block));
+ block.action=0;
+ uint32_t hash=backup_hold_checksum(&block);
+ for(unsigned i=0;i<4;++i)block.checksum[i]=(uint8_t)(hash>>(8*i));
+ assert(!fseek(file,cover_offset,SEEK_END));
+ assert(fwrite(&block,1,sizeof(block),file)==sizeof(block)&&!fclose(file));
+ assert(backup_pair_commit()==ESP_OK&&backup_pair_matches(BACKUP_FILE));
+}
 int main(int argc,char **argv){
  remove_backup_files();app_settings_init();app_settings_set_book_px(40);
  s_book_reading_line=2;s_book_rule_full=true;s_book_rule_offset=7;
  assert(app_settings_save_book_reading_line());uint8_t guide=s_book_rule_saved;
  s_book_reading_line=0;app_settings_set_book_line_spacing(300);app_settings_set_book_paragraph_spacing(-100);
- assert(app_settings_set_shelf_covers(false)&&!app_settings_shelf_covers());
  assert(app_settings_backup_save()==ESP_OK&&card_version(BACKUP_FILE)==25&&card_version(BACKUP_FULL)==28);
  assert(backup_pair_matches(BACKUP_FILE));
  if(argc==2)assert(copy_backup_file(BACKUP_FULL,argv[1]));
- s_book_rule_saved=1;app_settings_set_book_px(48);s_shelf_covers=true;
- assert(app_settings_backup_restore()==ESP_OK&&app_settings_book_px()==40&&!app_settings_shelf_covers()&&s_book_rule_saved==guide&&app_settings_book_line_spacing()==300&&app_settings_book_paragraph_spacing()==-100);
+ legacy_cover_off();
+ s_book_rule_saved=1;app_settings_set_book_px(48);
+ assert(app_settings_backup_restore()==ESP_OK&&app_settings_book_px()==40&&s_book_rule_saved==guide&&app_settings_book_line_spacing()==300&&app_settings_book_paragraph_spacing()==-100);
  // An older firmware updates only the interchange file. Never replay its stale full companion.
  app_settings_set_book_px(52);FILE *file=fopen(BACKUP_TEMP,"wb");assert(file);
  assert(backup_write_stream(file,true,true)==ESP_OK&&!backup_pair_matches(BACKUP_FILE));
  app_settings_set_book_px(44);
- // 旧版只写互换文件，其中没有封面开关：恢复后封面回到默认显示。/ The interchange file has no cover switch, so covers return to their default.
- assert(app_settings_backup_restore()==ESP_OK&&app_settings_book_px()==52&&app_settings_shelf_covers());
+ assert(app_settings_backup_restore()==ESP_OK&&app_settings_book_px()==52);
  // A damaged companion leaves the independently checked interchange fully restorable.
  assert(app_settings_backup_save()==ESP_OK);file=fopen(BACKUP_FULL,"r+b");assert(file&&fputc(0,file)!=EOF&&!fclose(file));
  app_settings_set_book_px(44);assert(app_settings_backup_restore()==ESP_OK&&app_settings_book_px()==52);
@@ -44,7 +59,7 @@ int main(int argc,char **argv){
  s_reader_turn_effect=0;assert(app_settings_sync_import(wire,bytes)==ESP_OK);
  assert(app_settings_reader_turn_effect()==(READER_TURN_EFFECT_MAX>=3?3:0));free(wire);
  remove_backup_files();
- puts("PASS: v25 interchange/v28 full pair, saved guide, shelf-cover switch and vertical inset, legacy-write invalidation, damaged companion/primary fallback, cross-board turn normalization");
+ puts("PASS: v25 interchange/v28 full pair, saved guide and vertical inset, legacy cover-off field accepted without applying it, legacy-write invalidation, damaged companion/primary fallback, cross-board turn normalization");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='settings-pair-') as folder:

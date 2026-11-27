@@ -257,12 +257,10 @@ const EpdWaveform* display_main_ui_waveform(void) {
     return display_main_normal_waveform();
 }
 
-// 设置滚动只撤掉额外四相补白；中灰、字缘与原DU的完整擦白保持，不改其他页面或周期清理。
-// Settings scrolling omits only four extra whitening phases, retaining midgrays, AA edges and native DU erasure without changing other pages or cleanup.
+// 设置列表定稿仅增强目标白，保留字缘和头像灰阶。/ Settings settling strengthens white targets and preserves glyph and avatar grays.
 const EpdWaveform* display_settings_scroll_waveform(void) {
-    // User revision2026-10-29: keep all native white erasure, insert eight
-    // changed-white phases before three settle holds. Highlevel list output
-    // supports45 phases independently of the41-phase staggered engine.
+    // 保留原迁移，定稿前三相保持之前为目标白补八相，包含白到白。
+    // Keep native transitions and add eight white-target phases, including white-to-white, before the three final holds.
     enum {WHITE=8,HOLDS=3,PHASES=E0470_GL16_FRAMES+WHITE};
     static EpdWaveformPhases phases;
     static const EpdWaveformPhases *ranges[]={&phases};
@@ -286,7 +284,7 @@ const EpdWaveform* display_settings_scroll_waveform(void) {
     for(int f=0;f<PHASES;++f)for(int gray=0;gray<16;++gray)
         data[f][gray][gray/4]&=(uint8_t)~(3u<<(6-2*(gray%4)));
     for(int f=drive;f<drive+WHITE;++f)
-        for(int from=0;from<15;++from)data[f][15][from/4]|=(uint8_t)(2u<<(6-2*(from%4)));
+        for(int from=0;from<16;++from)data[f][15][from/4]|=(uint8_t)(2u<<(6-2*(from%4)));
     phases=(EpdWaveformPhases){PHASES,(const uint8_t*)data,NULL};
     waveform.temp_intervals=base->temp_intervals;
     return &waveform;

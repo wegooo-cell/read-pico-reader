@@ -60,8 +60,6 @@ static int shelf_rows(void){return rows;}
 static int app_settings_shelf_style(void){return 2;}
 static bool app_settings_main_fast_refresh(void){return fast;}
 static unsigned app_settings_system_contrast(void){return 100;}
-static bool covers_off;
-static bool app_settings_shelf_covers(void){return !covers_off;}
 static EpdRect shelf_cover_image(int row){return(EpdRect){20,192+row*282,164,214};}
 static void copy_text(char *to,size_t cap,const char *from){snprintf(to,cap,"%s",from);}
 static __attribute__((unused)) bool app_touch_input_pending(app_ctx_t *ctx){return ctx->request_app||queued_touch;}
@@ -89,7 +87,7 @@ static book_shelf_page_state_t book_shelf_page_poll(void){return BOOK_SHELF_PAGE
 static void prepare_covers(app_ctx_t *ctx){(void)ctx;assert(false);}
 '''
 unit += function('shelf_page_mask', book) + '\n'
-functions=['shelf_covers_hidden','shelf_is_txt','prepare_cover_batch','shelf_cover_frame_ready','shelf_cover_reveal_mask']
+functions=['shelf_is_txt','prepare_cover_batch','shelf_cover_frame_ready','shelf_cover_reveal_mask']
 for name in functions:
  unit+=function(name,book)+'\n'
 present=function('present',book)
@@ -115,7 +113,7 @@ static bool book_shelf_page_capture(uint8_t *fb,unsigned edges,int64_t now){(voi
 static bool shelf_cover_white_edge(int row,EpdRect rect){(void)row;(void)rect;return false;}
 static void draw_shelf_cover(uint8_t *fb,EpdRect rect,int row,const char *name,bool favorite){
  (void)fb;(void)rect;(void)name;(void)favorite;slots_drawn|=1u<<row;
- if(!shelf_covers_hidden()&&shelf_cover_frame_ready()&&(s_covers[row].gray||s_covers[row].fast_bits))art_drawn|=1u<<row;
+ if(shelf_cover_frame_ready()&&(s_covers[row].gray||s_covers[row].fast_bits))art_drawn|=1u<<row;
 }
 static void draw_shelf_furniture(uint8_t *fb){(void)fb;}
 static void draw_shelf_cover_favorite(uint8_t *fb,int row,EpdRect rect,bool favorite){
@@ -234,24 +232,13 @@ int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
  ack_present(APP_REDRAW_AREA,EPD_DRAW_SUCCESS);
  assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&queued==0);
  shelf_page_turn=false;
- // 关闭封面：整页只画书名卡，不入队、不读内存封面，也没有可推的封面格。
- // Covers off: the page draws title cards only, with no queueing, RAM cover reads or cells to present.
- reset(&ctx);covers_off=true;s_visible_count=9;
- s_covers[0].index=-1;s_cover_pending_mask=0;ram_mask=511;
- prepare_shelf_cover_slots(&ctx);
- assert(!s_cover_pending_mask&&!s_cover_dirty_mask&&s_covers[8].index==8&&!s_covers[0].gray);
- assert(prepare_cover_batch(&ctx,false)==0&&queued==0);
- render(&ctx,ctx.fb);assert(slots_drawn==511&&!art_drawn);
- assert(shelf_cover_tick(&ctx)==APP_REDRAW_NONE&&queued==0);
- covers_off=false;
- puts("PASS: shelf covers can be switched off: title cards only, no cover jobs or RAM reads");
  puts("PASS: shelf gathers finished covers for at most one window while others are in flight, reveals them in retry-safe cell updates, includes TXT covers and skips known missing artwork");
  (void)warm_calls;(void)s_cover_warm_mask;(void)s_cover_warm_after_ms;
  for(unsigned i=0;i<9;++i){free(s_covers[i].gray);free(s_covers[i].fast_bits);}
  puts("PASS: queue without IO, reveal ready cells, retain dirty covers through failed displays, retry with backoff and prioritize touch");
 }
 '''
-assert 'const bool artwork = !shelf_covers_hidden() && shelf_cover_frame_ready();' in function('draw_shelf_cover', book)
+assert 'const bool artwork = shelf_cover_frame_ready();' in function('draw_shelf_cover', book)
 assert 'shelf_cover_tick(ctx)' in function('on_tick', book)
 assert 's_cover_batch_present_pending = true;' in function('shelf_cover_tick', book)
 with tempfile.TemporaryDirectory() as d:

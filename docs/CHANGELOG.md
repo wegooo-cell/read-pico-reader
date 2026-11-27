@@ -1,5 +1,9 @@
 ## 第二批修正（未发布 / Unreleased）
 
+- 移除 PICO 和 S31 的「书架封面显示」开关。书架按原有样式显示封面，旧配置和备份中的关闭状态会被忽略。
+- PICO 设置列表滑动结束后精确刷新到导航栏上沿，补白白色背景，减少底部残影。
+- Remove the shelf-cover switch on Pico and S31. Shelves display covers according to their existing style and ignore the former off preference.
+- Pico settings lists settle through the top of navigation and re-whiten the white background after scrolling to clear ghosts at the bottom.
 - 封面迁移遇到建目录、读取目标状态或改名失败时保留唯一旧缓存；目标已存在时保留旧副本供损坏回退，不阻塞其他文件迁移。
 - 网页刷机按串口库的真实三参数读取回调计算进度，避免出现 NaN；对应测试使用真实回调形状并拒绝非有限进度。
 - 回翻缓存与图片页预绘补充低内存、解码余量、排版代际失效、方向及图文边界回归；保留封面扫屏暂停，欠载降频后不自动提高像素时钟，等待独立验收。
