@@ -34,13 +34,15 @@ static bool reader_prefetch_buffer(void){if(!next_ok)return false;if(!s_next_fb)
 static uint32_t book_layout_generation(void){return generation;}
 static size_t s_page=3,page_count=10;
 static unsigned s_back_turns;
+static size_t s_chapter,s_part_base;
+static bool s_part_more;
 static int image_page=-1;
 static size_t book_layout_page_count(void){return page_count;}
 static unsigned book_layout_page_image_count(size_t p){return (int)p==image_page;}
 static const char*background="";
 static const char*app_settings_book_background_path(void){return background;}
 '''
-for name in ['reader_keep_free','reset_prefetch','invalidate_prep','reader_keep_buffers','reader_keep_holds','reader_prefetch_target']:
+for name in ['reader_keep_free','reset_prefetch','invalidate_prep','reader_keep_buffers','reader_keep_holds','reader_back_chapter_trend','reader_prefetch_target']:
     unit+=function(name,source)+'\n'
 unit+=r'''
 int main(void){
@@ -58,6 +60,13 @@ int main(void){
  image_page=3;assert(reader_prefetch_target()==4);image_page=4;assert(reader_prefetch_target()==-1);image_page=-1;
  s_back_turns=1;assert(reader_prefetch_target()==2);background="paper";assert(reader_prefetch_target()==-1);background="";
  s_page=0;s_back_turns=2;assert(reader_prefetch_target()==1);s_page=9;s_back_turns=0;assert(reader_prefetch_target()==-1);
+ // 第 0 页往回趋势且有上一章：不预绘下一页，让位给上一章末页预排；首章/分段流/趋势不足保持原行为。
+ // Page 0 with a backward trend and a previous chapter skips next-page prefetch for the previous-chapter preload; first chapter, part streams and weak trends keep the old behaviour.
+ s_page=0;s_back_turns=2;s_chapter=2;assert(reader_back_chapter_trend()&&reader_prefetch_target()==-1);
+ s_part_base=5;assert(!reader_back_chapter_trend()&&reader_prefetch_target()==1);s_part_base=0;
+ s_part_more=true;assert(reader_prefetch_target()==1);s_part_more=false;
+ s_back_turns=0;assert(!reader_back_chapter_trend()&&reader_prefetch_target()==1);
+ s_back_turns=2;s_chapter=0;assert(reader_prefetch_target()==1);s_page=9;s_back_turns=0;s_chapter=0;
  reader_keep_free();free(s_next_fb);
  puts("PASS: real retained-page/image-to-text/backward helpers, allocation failures, decode reserve, layout-generation invalidation and book boundaries");
 }

@@ -663,6 +663,7 @@ typedef struct {
     bool active;
     int dir;
     int hit;                    ///< 0 现画 / 1 预绘命中 / 2 接着画完预绘 / 3 保留页 / drawn, prefetched, resumed, kept
+    bool kept;                  ///< 采用的是越界时留下的反向候选章 / the adopted chapter was the reverse candidate kept at a crossing
     int64_t t0, load, save, prep, draw, turn_end, present_in, present_start, push_main;
     ttf_bench_stats_t glyph;
 } turn_timing_t;
@@ -704,6 +705,7 @@ static void save_progress(void);
 static void before_lock(app_ctx_t *ctx);
 static void invalidate_prep(void);
 static void next_chapter_clear(void);
+static bool next_chapter_holds_fb(void);
 static void prepare_inline_image(void);
 static void release_page_images(void);
 static void sort_shelf(app_ctx_t* ctx);
@@ -4778,12 +4780,20 @@ static void prep_task(void *arg) {
         xSemaphoreGive(s_prep_done);
     }
 }
+// 往回跨章趋势：第 0 页、有上一章、非分段流且已连续往回翻；与同章往回预绘共用趋势门槛。
+// Backward cross-chapter trend: page 0 with a previous chapter, no part stream and consecutive backward turns; shares the same-chapter backward threshold.
+static bool reader_back_chapter_trend(void) {
+    return s_page==0&&s_chapter>0&&!s_part_base&&!s_part_more&&s_back_turns>=(s_keep_cur.fb?1:2);
+}
 // 预绘目标：往回翻时取上一页，否则取下一页；越界、目标页带图或设了阅读背景时不预绘。
 // 当前是插图页时照样预绘相邻的文字页，插图页推屏期间不取显示锁，不会和预绘争用。
 // Prefetch target: the previous page while paging backward, otherwise the next; none when out of
 // range, when the target carries an image or when a reading background is set. An image page still
 // prefetches its neighbouring text page: its panel push takes no draw lock, so the two do not contend.
 static int reader_prefetch_target(void) {
+    // 第 0 页的往回趋势没有同章上一页可预绘，也不再预绘下一页，让位给上一章末页预排。
+    // Page 0 under a backward trend has no same-chapter previous page; skip next-page prefetch so the previous chapter's last page can be pre-laid out.
+    if(reader_back_chapter_trend())return -1;
     const bool back=s_page>0&&s_back_turns>=(s_keep_cur.fb?1:2);
     int target=back?(int)s_page-1:(int)s_page+1;
     if(target>=(int)book_layout_page_count()||
@@ -4796,7 +4806,9 @@ static bool kick_prep(void) {
     if(target<0)return false;
     if(s_next_page==target&&s_next_generation==book_layout_generation())return false;
     if(reader_keep_holds(&s_keep_prev,target)||reader_keep_holds(&s_keep_cur,target))return false;
-    next_chapter_clear();
+    // 只有占用 s_next_fb 的候选章（或尚无预绘缓冲时的候选章）让位；纯解析/排版阶段保留。
+    // Only a candidate that owns s_next_fb (or competes for it before it exists) yields; parse/layout-only stages stay.
+    if(next_chapter_holds_fb()||!s_next_fb)next_chapter_clear();
     if(s_prep_page!=target||s_prep_cursor.generation!=book_layout_generation()){
         s_next_page=-1;s_next_generation=0;s_prep_page=target;memset(&s_prep_cursor,0,sizeof(s_prep_cursor));
     }
@@ -5099,6 +5111,10 @@ static void tt_finish(const char* path, bool prefetch, int64_t drawn, int64_t di
         snprintf(line + used, sizeof(line) - (size_t)used, " glyphs=%u miss=%u | scans=%u frames=%u skip=%u",
                  (unsigned)s_tt.glyph.glyphs, (unsigned)s_tt.glyph.misses, (unsigned)(scans - scans0),
                  (unsigned)(frames - frames0), (unsigned)(skipped - skipped0));
+    if (s_tt.kept) {
+        const size_t at = strlen(line);
+        if (at + 8 < sizeof(line)) snprintf(line + at, sizeof(line) - at, " kept=1");
+    }
     ESP_LOGI("turn", "%s", line);
 }
 #endif
@@ -5473,6 +5489,7 @@ typedef enum {
     NEXT_CH_IDLE = 0,
     NEXT_CH_PARSED,
     NEXT_CH_LAYOUT,
+    NEXT_CH_LAYOUT_DONE,   // 排版完成，等待预绘许可 / layout complete, waiting for permission to draw
     NEXT_CH_DRAWING,
     NEXT_CH_READY,
     NEXT_CH_FAILED,
@@ -5491,7 +5508,11 @@ typedef struct {
     unsigned lead_row_height, lead_height, lead_width;
     book_layout_stage_t *layout;
     book_layout_draw_cursor_t draw_cursor;
-    bool page0_drawn, page0_has_images, uses_next_fb;
+    int dir;               // +1 下一章首页；-1 上一章末页 / +1 next chapter page 0; -1 previous chapter last page
+    size_t target_page;    // 候选章内要预绘并采用的页 / page of the candidate to pre-draw and land on
+    bool target_drawn, target_has_images, uses_next_fb;
+    // 刚离开的相邻章（已解析并排完版）原样留作反向候选，不再解析/排版。/ The just-left adjacent chapter (parsed and fully laid out) kept as the opposite-direction candidate, with no parse/layout left.
+    bool kept;
 #ifdef KIIKO_TURN_TIMING
     int64_t parse_us, layout_us, draw_us;
     bool timing_logged;
@@ -5511,7 +5532,9 @@ static void next_chapter_free_resources(void) {
     s_next_ch.lead_skip = 0;
     s_next_ch.lead_row_height = s_next_ch.lead_height = s_next_ch.lead_width = 0;
     memset(&s_next_ch.draw_cursor, 0, sizeof(s_next_ch.draw_cursor));
-    s_next_ch.page0_drawn = s_next_ch.page0_has_images = s_next_ch.uses_next_fb = false;
+    s_next_ch.target_page = 0;
+    s_next_ch.target_drawn = s_next_ch.target_has_images = s_next_ch.uses_next_fb = false;
+    s_next_ch.kept = false;
 #ifdef KIIKO_TURN_TIMING
     s_next_ch.parse_us = s_next_ch.layout_us = s_next_ch.draw_us = 0;
     s_next_ch.timing_logged = false;
@@ -5522,13 +5545,18 @@ static void next_chapter_clear(void) {
     next_chapter_free_resources();
     s_next_ch.state = NEXT_CH_IDLE;
     s_next_ch.chapter = 0;
+    s_next_ch.dir = 0;
     s_next_ch.source_generation = 0;
 }
 
-static void next_chapter_mark_failed(size_t target, uint32_t generation) {
+static void next_chapter_mark_failed(size_t target, int dir, uint32_t generation) {
     next_chapter_free_resources();
     s_next_ch.state = NEXT_CH_FAILED;
     s_next_ch.chapter = target;
+    s_next_ch.dir = dir;
+    // 记录书路径，失败标记才不会被下一轮空闲当作换书清掉而反复重试。
+    // Record the book path so the failure marker is not mistaken for a book change and retried every idle tick.
+    copy_text(s_next_ch.path, sizeof(s_next_ch.path), s_path);
     s_next_ch.source_generation = generation;
 }
 
@@ -5536,19 +5564,71 @@ static bool next_chapter_has_headroom(void) {
     return heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) >= BOOK_NEXT_CH_RESERVE;
 }
 
-// 仅在章末最后一页且无未完成工具栏、分段流或回翻趋势时预排下一章。
-// Pre-layout the next chapter only on the chapter's last page without modals, windows or backward turns.
-static int reader_next_chapter_target(void) {
-    if (s_view != READING || !s_text || !s_path[0] ||
-        s_toolbar || s_clear_confirm || s_reader_panel != READER_PANEL_NONE ||
-        s_fonts_reload_pending || s_reader_rule_pending ||
-        s_part_more || s_back_turns || reader_prefetch_target() >= 0) {
-        return -1;
+static bool next_chapter_holds_fb(void) { return s_next_ch.uses_next_fb; }
+
+// 章末前最多提前几页开始解析/排版。/ How many pages before the chapter end parse/layout may start.
+#define BOOK_NEXT_CH_EARLY_PAGES 3
+
+// 规划只在阅读正文、无工具栏/面板/分段流/待办重排时进行。
+// Planning runs only in the reading body with no toolbar, panel, part stream or pending reflow.
+static bool reader_next_chapter_context_ok(void) {
+    return s_view == READING && s_text && s_path[0] &&
+           !s_toolbar && !s_clear_confirm && s_reader_panel == READER_PANEL_NONE &&
+           !s_fonts_reload_pending && !s_reader_rule_pending && !s_part_more;
+}
+
+// 决定候选章：往前为下一章首页，往回为上一章末页；二者同一时刻只存在一个。
+// 无工具栏/面板/分段流时：往回只在第 0 页且往回趋势成立时；往前只在无往回趋势、距章末不超过
+// BOOK_NEXT_CH_EARLY_PAGES 页时。work_ok 表示可做解析/排版（不占 s_next_fb），同章下一页预绘未完成时为 false；
+// draw_ok 表示可借用 s_next_fb 预绘：往前仅末页且同章无预绘目标，往回随往回趋势成立。
+// Pick the candidate: next chapter page 0 forward, previous chapter last page backward; only one at a time.
+// Without toolbars/panels/part streams: backward only on page 0 with a backward trend; forward only without
+// a backward trend and within BOOK_NEXT_CH_EARLY_PAGES of the end. work_ok allows parse/layout (which never
+// touches s_next_fb) and is false while the same-chapter next-page prefetch is unfinished; draw_ok allows
+// borrowing s_next_fb: forward only on the last page without a same-chapter target, backward with the trend.
+static int reader_next_chapter_plan_normal(int *dir, bool *draw_ok, bool *work_ok) {
+    *dir = 0;
+    *draw_ok = *work_ok = false;
+    if (!reader_next_chapter_context_ok()) return -1;
+    if (reader_back_chapter_trend()) {
+        *dir = -1;
+        *draw_ok = *work_ok = true;
+        return (int)(s_chapter - 1);
     }
+    if (s_back_turns) return -1;
     size_t pages = book_layout_page_count();
-    if (!pages || s_page + 1 != pages) return -1;
-    if (s_chapter + 1 >= book_chapter_count()) return -1;
+    if (!pages || s_chapter + 1 >= book_chapter_count()) return -1;
+    if (s_page + 1 + BOOK_NEXT_CH_EARLY_PAGES < pages) return -1;
+    // 同章下一页预绘优先：目标页尚未画好（或保留）时，解析/排版也让路，不抢显示锁与 s_next_fb。
+    // Same-chapter next-page prefetch has priority: until its target is drawn (or kept), parse/layout yields too.
+    const int same = reader_prefetch_target();
+    const bool same_pending = same >= 0 &&
+        !(s_next_page == same && s_next_generation == book_layout_generation()) &&
+        !reader_keep_holds(&s_keep_prev, same) && !reader_keep_holds(&s_keep_cur, same);
+    *dir = 1;
+    *work_ok = !same_pending;
+    *draw_ok = s_page + 1 == pages && same < 0;
     return (int)(s_chapter + 1);
+}
+
+// 刚越过章界时留下的反向候选：只在边界页（往前越界后的新章第 0 页、往回越界后的新章末页）保留。
+// 常规规划没有候选或给出同一候选时按常规走；给出别的候选则让位（单候选）；离开边界页即释放。
+// 它已排完版，不需要再做解析/排版工作，也不借用 s_next_fb（同章预绘优先）。
+// The reverse candidate left after crossing a chapter boundary lives only on the boundary page (page 0 of the new chapter after a forward crossing, its last page after a backward one).
+// The normal plan wins when it wants the same or a different candidate (one at a time); leaving the boundary page releases it.
+// It is already laid out, so it needs no parse/layout work and never borrows s_next_fb (same-chapter prefetch keeps priority).
+static int reader_next_chapter_plan(int *dir, bool *draw_ok, bool *work_ok) {
+    const int target = reader_next_chapter_plan_normal(dir, draw_ok, work_ok);
+    if (target >= 0 || !s_next_ch.kept || !reader_next_chapter_context_ok()) return target;
+    const size_t pages = book_layout_page_count();
+    const bool at_boundary = s_next_ch.dir < 0
+        ? (s_page == 0 && s_chapter == s_next_ch.chapter + 1)
+        : (pages && s_page + 1 == pages && s_chapter + 1 == s_next_ch.chapter);
+    if (!at_boundary) return -1;
+    *dir = s_next_ch.dir;
+    *draw_ok = s_next_ch.uses_next_fb;
+    *work_ok = false;
+    return (int)s_next_ch.chapter;
 }
 
 static bool next_chapter_begin_layout_locked(void) {
@@ -5594,12 +5674,120 @@ static bool next_chapter_begin_layout_locked(void) {
     return true;
 }
 
+// 排版完成：记录采用页（往前首页，往回末页）及该页是否含插图。
+// Layout complete: record the landing page (first forward, last backward) and whether it has images.
+static void next_chapter_layout_finished(void) {
+    const size_t pages = book_layout_stage_page_count(s_next_ch.layout);
+    s_next_ch.target_page = s_next_ch.dir < 0 && pages ? pages - 1 : 0;
+    s_next_ch.target_has_images =
+        book_layout_stage_page_image_count(s_next_ch.layout, s_next_ch.target_page) > 0 ||
+        book_layout_stage_page_image(s_next_ch.layout, s_next_ch.target_page) >= 0;
+    // 含插图或设了阅读背景的目标页不预绘；其余等待预绘许可。
+    // A target page with images or a reading background is not pre-drawn; others wait for permission.
+    s_next_ch.state = (s_next_ch.target_has_images || app_settings_book_background_path()[0])
+                          ? NEXT_CH_READY : NEXT_CH_LAYOUT_DONE;
+}
+
+// 刚离开章的现场快照：文本表所有权由此转交给候选，活动状态清空，后续释放旧章成为空操作。
+// Snapshot of the chapter being left: text-table ownership moves to the candidate and the live pointers are cleared, so freeing the old chapter becomes a no-op.
+typedef struct {
+    html_text_t text;
+    size_t chapter, lead_skip;
+    unsigned lead_row_height, lead_height, lead_width;
+    char title[128], heading_title[128], heading_label[32];
+} reader_outgoing_t;
+// 静态存放，不占阅读/加载调用链的栈；仅在持有绘制锁的一次搬出→装入之间使用。
+// Static so it adds nothing to the reader/load call-chain stack; used only between one take and install under the draw lock.
+static reader_outgoing_t s_outgoing;
+
+// 当前章能否作为反向候选留下：仅 EPUB（TXT 目录映射无法从活动状态取回）、非分段流、已排完版、
+// 内存有余量，且新章与当前章相邻。cross_dir=+1 往前越界，-1 往回越界。
+// Whether the current chapter may stay as the reverse candidate: EPUB only (the TXT navigation map cannot be read back from live state), no part stream, laid out, memory headroom, and the new chapter adjacent. cross_dir=+1 forward, -1 backward.
+static bool next_chapter_keep_eligible(size_t new_chapter, int cross_dir) {
+    if (book_kind() != BOOK_KIND_EPUB || !s_text || !s_text_len || !s_path[0] ||
+        s_part_base || s_part_more || !book_layout_page_count() || !next_chapter_has_headroom()) {
+        return false;
+    }
+    if (cross_dir > 0) return new_chapter == s_chapter + 1;
+    return cross_dir < 0 && s_chapter > 0 && new_chapter == s_chapter - 1;
+}
+
+// 把活动章的文本/脚注/图片表搬出（不复制）；活动指针清零。题头几何由调用方给出，因为它可能已被新章覆盖。
+// Move the live chapter's text, note and image tables out (no copy) and null the live pointers; the caller supplies the heading geometry because the new chapter may already have overwritten it.
+static void next_chapter_outgoing_take(reader_outgoing_t *out, size_t lead_skip, unsigned lead_height,
+                                       unsigned lead_width) {
+    memset(out, 0, sizeof(*out));
+    out->text.utf8 = s_text;
+    out->text.len = s_text_len;
+    out->text.blocks = s_blocks;
+    out->text.count = s_block_count;
+    out->text.images = s_images;
+    out->text.image_count = s_image_count;
+    out->text.runs = s_runs;
+    out->text.run_count = s_run_count;
+    out->text.notes = s_notes;
+    out->text.note_count = s_note_count;
+    out->text.part_base = s_part_base;
+    out->text.source_begin = s_part_begin;
+    out->text.source_end = s_part_end;
+    out->text.part_more = s_part_more;
+    out->chapter = s_chapter;
+    out->lead_skip = lead_skip;
+    out->lead_row_height = s_chapter_lead_row_height;
+    out->lead_height = lead_height;
+    out->lead_width = lead_width;
+    copy_text(out->title, sizeof(out->title), s_title);
+    copy_text(out->heading_title, sizeof(out->heading_title), s_chapter_heading_title);
+    copy_text(out->heading_label, sizeof(out->heading_label), s_chapter_heading_label);
+    s_text = NULL;
+    s_text_len = 0;
+    s_blocks = NULL;
+    s_block_count = 0;
+    s_runs = NULL;
+    s_run_count = 0;
+    s_notes = NULL;
+    s_note_count = 0;
+    s_images = NULL;
+    s_image_count = 0;
+}
+
+// 把快照连同其已排完的排版装入（已清空的）s_next_ch 作为反向候选；落点页与是否预绘按往常的排版完成规则定。
+// Install the snapshot and its finished layout into the (cleared) s_next_ch as the reverse candidate; the landing page and drawing follow the usual layout-finished rules.
+static void next_chapter_keep_install(reader_outgoing_t *out, book_layout_stage_t *layout, int dir) {
+    s_next_ch.text = out->text;
+    s_next_ch.layout = layout;
+    s_next_ch.chapter = out->chapter;
+    s_next_ch.dir = dir;
+    s_next_ch.source_generation = book_layout_generation();
+    copy_text(s_next_ch.path, sizeof(s_next_ch.path), s_path);
+    copy_text(s_next_ch.title, sizeof(s_next_ch.title), out->title);
+    copy_text(s_next_ch.heading_title, sizeof(s_next_ch.heading_title), out->heading_title);
+    copy_text(s_next_ch.heading_label, sizeof(s_next_ch.heading_label), out->heading_label);
+    s_next_ch.lead_skip = out->lead_skip;
+    s_next_ch.lead_row_height = out->lead_row_height;
+    s_next_ch.lead_height = out->lead_height;
+    s_next_ch.lead_width = out->lead_width;
+    s_next_ch.dims_ctx = (reader_dims_ctx_t){
+        out->chapter, s_next_ch.text.images, s_next_ch.text.image_count,
+        s_next_ch.text.notes, s_next_ch.text.note_count
+    };
+    s_next_ch.kept = true;
+#ifdef KIIKO_TURN_TIMING
+    // 留下的候选没有解析/排版耗时，不进 PRELOAD 统计；采用时由 TURN 行的 kept=1 标出。
+    // A kept candidate has no parse/layout cost, so it stays out of PRELOAD stats; the TURN line flags adoption with kept=1.
+    s_next_ch.timing_logged = true;
+#endif
+    next_chapter_layout_finished();
+}
+
 static void reader_next_chapter_idle(app_ctx_t *ctx) {
     if (ctx->consumed || ctx->request_app || ctx->request_menu || ctx->request_return ||
         (ctx->touch && ctx->touch->touched) || app_touch_input_pending(ctx)) {
         return;
     }
-    int target = reader_next_chapter_target();
+    int dir = 0;
+    bool draw_ok = false, work_ok = false;
+    int target = reader_next_chapter_plan(&dir, &draw_ok, &work_ok);
     uint32_t gen = book_layout_generation();
     if (target < 0) {
         if (s_next_ch.state != NEXT_CH_IDLE) {
@@ -5609,20 +5797,27 @@ static void reader_next_chapter_idle(app_ctx_t *ctx) {
         }
         return;
     }
+    // 目标章、方向、代次、书或字体变化，或已占 s_next_fb 却不再允许预绘：释放候选。
+    // Release the candidate when target, direction, generation, book or fonts change, or when it holds
+    // s_next_fb although drawing is no longer allowed.
     if (s_next_ch.state != NEXT_CH_IDLE &&
-        (s_next_ch.chapter != (size_t)target || s_next_ch.source_generation != gen ||
+        (s_next_ch.chapter != (size_t)target || s_next_ch.dir != dir ||
+         s_next_ch.source_generation != gen ||
          strcmp(s_next_ch.path, s_path) != 0 || strcmp(s_font_path, ttf_font_path()) != 0 ||
-         s_book_fonts_applied != app_settings_book_fonts())) {
+         s_book_fonts_applied != app_settings_book_fonts() ||
+         (s_next_ch.kept && !next_chapter_has_headroom()) ||
+         (s_next_ch.uses_next_fb && !draw_ok))) {
         lock_draw();
         next_chapter_clear();
         unlock_draw();
     }
     if (s_next_ch.state == NEXT_CH_READY || s_next_ch.state == NEXT_CH_FAILED) return;
+    if (!work_ok) return;
 
     lock_draw();
     if (s_next_ch.state == NEXT_CH_IDLE) {
         if (!next_chapter_has_headroom()) {
-            next_chapter_mark_failed((size_t)target, gen);
+            next_chapter_mark_failed((size_t)target, dir, gen);
             unlock_draw();
             return;
         }
@@ -5631,11 +5826,12 @@ static void reader_next_chapter_idle(app_ctx_t *ctx) {
 #endif
         esp_err_t err = book_chapter_preload((size_t)target, &s_next_ch.text, &s_next_ch.txt_map);
         if (err != ESP_OK) {
-            next_chapter_mark_failed((size_t)target, gen);
+            next_chapter_mark_failed((size_t)target, dir, gen);
             unlock_draw();
             return;
         }
         s_next_ch.chapter = (size_t)target;
+        s_next_ch.dir = dir;
         s_next_ch.source_generation = gen;
         copy_text(s_next_ch.path, sizeof(s_next_ch.path), s_path);
         if (book_chapter_title((size_t)target, s_next_ch.title, sizeof(s_next_ch.title)) != ESP_OK)
@@ -5654,7 +5850,7 @@ static void reader_next_chapter_idle(app_ctx_t *ctx) {
         const int64_t t0 = esp_timer_get_time();
 #endif
         if (!next_chapter_begin_layout_locked()) {
-            next_chapter_mark_failed((size_t)target, gen);
+            next_chapter_mark_failed((size_t)target, dir, gen);
             unlock_draw();
             return;
         }
@@ -5665,7 +5861,7 @@ static void reader_next_chapter_idle(app_ctx_t *ctx) {
 
     if (s_next_ch.state == NEXT_CH_LAYOUT) {
         if (!next_chapter_has_headroom()) {
-            next_chapter_mark_failed((size_t)target, gen);
+            next_chapter_mark_failed((size_t)target, dir, gen);
             unlock_draw();
             return;
         }
@@ -5679,24 +5875,12 @@ static void reader_next_chapter_idle(app_ctx_t *ctx) {
 #ifdef KIIKO_TURN_TIMING
                 s_next_ch.layout_us += esp_timer_get_time() - t0;
 #endif
-                next_chapter_mark_failed((size_t)target, gen);
+                next_chapter_mark_failed((size_t)target, dir, gen);
                 unlock_draw();
                 return;
             }
             if (res > 0) {
-                s_next_ch.page0_has_images =
-                    book_layout_stage_page_image_count(s_next_ch.layout, 0) > 0 ||
-                    book_layout_stage_page_image(s_next_ch.layout, 0) >= 0;
-                if (!s_next_ch.page0_has_images && !app_settings_book_background_path()[0] &&
-                    reader_prefetch_buffer()) {
-                    reset_prefetch();
-                    s_next_ch.uses_next_fb = true;
-                    s_next_ch.page0_drawn = false;
-                    memset(&s_next_ch.draw_cursor, 0, sizeof(s_next_ch.draw_cursor));
-                    s_next_ch.state = NEXT_CH_DRAWING;
-                } else {
-                    s_next_ch.state = NEXT_CH_READY;
-                }
+                next_chapter_layout_finished();
                 break;
             }
         }
@@ -5705,10 +5889,24 @@ static void reader_next_chapter_idle(app_ctx_t *ctx) {
 #endif
     }
 
+    // 排版已完成：只有获准借用 s_next_fb 才开始预绘（往前须在末页且同章无预绘目标）。
+    // Layout is done: start drawing only once borrowing s_next_fb is allowed (forward: last page, no same-chapter target).
+    if (s_next_ch.state == NEXT_CH_LAYOUT_DONE && draw_ok) {
+        if (reader_prefetch_buffer()) {
+            reset_prefetch();
+            s_next_ch.uses_next_fb = true;
+            s_next_ch.target_drawn = false;
+            memset(&s_next_ch.draw_cursor, 0, sizeof(s_next_ch.draw_cursor));
+            s_next_ch.state = NEXT_CH_DRAWING;
+        } else {
+            s_next_ch.state = NEXT_CH_READY;
+        }
+    }
+
     if (s_next_ch.state == NEXT_CH_DRAWING) {
         if (!s_next_ch.uses_next_fb || !s_next_fb || app_settings_book_background_path()[0]) {
             s_next_ch.uses_next_fb = false;
-            s_next_ch.page0_drawn = false;
+            s_next_ch.target_drawn = false;
             memset(&s_next_ch.draw_cursor, 0, sizeof(s_next_ch.draw_cursor));
             s_next_ch.state = NEXT_CH_READY;
         } else {
@@ -5719,17 +5917,17 @@ static void reader_next_chapter_idle(app_ctx_t *ctx) {
                    esp_timer_get_time() < deadline && !app_touch_input_pending(ctx)) {
                 if (!s_next_ch.draw_cursor.generation) memset(s_next_fb, 0xff, fb_bytes());
                 ui_text_set_system_scale(false);
-                int res = book_layout_stage_draw_slice(s_next_ch.layout, s_next_fb, 0,
+                int res = book_layout_stage_draw_slice(s_next_ch.layout, s_next_fb, s_next_ch.target_page,
                                                        body_rect(), s_px, &s_next_ch.draw_cursor);
                 if (res < 0) {
                     s_next_ch.uses_next_fb = false;
-                    s_next_ch.page0_drawn = false;
+                    s_next_ch.target_drawn = false;
                     memset(&s_next_ch.draw_cursor, 0, sizeof(s_next_ch.draw_cursor));
                     s_next_ch.state = NEXT_CH_READY;
                     break;
                 }
                 if (res > 0) {
-                    s_next_ch.page0_drawn = true;
+                    s_next_ch.target_drawn = true;
                     s_next_ch.state = NEXT_CH_READY;
                     break;
                 }
@@ -5743,32 +5941,38 @@ static void reader_next_chapter_idle(app_ctx_t *ctx) {
 #ifdef KIIKO_TURN_TIMING
     if (s_next_ch.state == NEXT_CH_READY && !s_next_ch.timing_logged) {
         s_next_ch.timing_logged = true;
-        ESP_LOGI("turn", "PRELOAD ch=%u pages=%u img=%d drawn=%d parse=%lld.%lld layout=%lld.%lld draw=%lld.%lld",
+        ESP_LOGI("turn", "PRELOAD ch=%u pages=%u img=%d drawn=%d parse=%lld.%lld layout=%lld.%lld draw=%lld.%lld dir=%+d",
                  (unsigned)s_next_ch.chapter,
                  (unsigned)book_layout_stage_page_count(s_next_ch.layout),
-                 (int)s_next_ch.page0_has_images,
-                 (int)s_next_ch.page0_drawn,
+                 (int)s_next_ch.target_has_images,
+                 (int)s_next_ch.target_drawn,
                  (long long)(s_next_ch.parse_us / 1000), (long long)((s_next_ch.parse_us % 1000) / 100),
                  (long long)(s_next_ch.layout_us / 1000), (long long)((s_next_ch.layout_us % 1000) / 100),
-                 (long long)(s_next_ch.draw_us / 1000), (long long)((s_next_ch.draw_us % 1000) / 100));
+                 (long long)(s_next_ch.draw_us / 1000), (long long)((s_next_ch.draw_us % 1000) / 100),
+                 s_next_ch.dir);
     }
 #endif
     unlock_draw();
 }
 
-static bool next_chapter_can_adopt(size_t chapter) {
+static bool next_chapter_can_adopt(size_t chapter, int dir) {
     return s_next_ch.state != NEXT_CH_IDLE && s_next_ch.state != NEXT_CH_FAILED &&
-           s_next_ch.chapter == chapter &&
+           s_next_ch.chapter == chapter && s_next_ch.dir == dir &&
            s_next_ch.source_generation == book_layout_generation() &&
            strcmp(s_next_ch.path, s_path) == 0 &&
            strcmp(s_font_path, ttf_font_path()) == 0 &&
            s_book_fonts_applied == app_settings_book_fonts();
 }
 
-static bool commit_next_chapter(app_ctx_t *ctx, size_t chapter) {
+// 采用候选章：往前落在首页，往回落在末页。往回必须先同步排完版才知道末页；
+// 候选未预绘到位时由调用方按正常流程现画。位置确认仍等 present 成功（s_chapter_display_pending）。
+// Adopt the candidate: page 0 forward, last page backward. Backward must finish layout first to know the
+// last page; an undrawn candidate is drawn normally by the caller. The saved position is still confirmed
+// only after a successful present (s_chapter_display_pending).
+static bool commit_next_chapter(app_ctx_t *ctx, size_t chapter, int dir) {
     (void)ctx;
     lock_draw();
-    if (!next_chapter_can_adopt(chapter)) {
+    if (!next_chapter_can_adopt(chapter, dir)) {
         next_chapter_clear();
         unlock_draw();
         return false;
@@ -5787,18 +5991,28 @@ static bool commit_next_chapter(app_ctx_t *ctx, size_t chapter) {
             unlock_draw();
             return false;
         }
-        if (res > 0) {
-            s_next_ch.page0_has_images =
-                book_layout_stage_page_image_count(s_next_ch.layout, 0) > 0 ||
-                book_layout_stage_page_image(s_next_ch.layout, 0) >= 0;
-            s_next_ch.state = NEXT_CH_READY;
-        }
+        if (res > 0) next_chapter_layout_finished();
     }
+    // 排版必须已完成，才能提交并确定落点页。/ Layout must be complete before commit and landing-page selection.
+    if (s_next_ch.state == NEXT_CH_PARSED || s_next_ch.state == NEXT_CH_LAYOUT) {
+        next_chapter_clear();
+        unlock_draw();
+        return false;
+    }
+    const size_t target_page = s_next_ch.target_page;
     const bool adopt_fb = s_next_ch.uses_next_fb && s_next_fb &&
-                          !s_next_ch.page0_has_images && !app_settings_book_background_path()[0];
-    const bool page0_done = adopt_fb && s_next_ch.page0_drawn;
+                          !s_next_ch.target_has_images && !app_settings_book_background_path()[0];
+    const bool page_done = adopt_fb && s_next_ch.target_drawn;
     const book_layout_draw_cursor_t saved_cursor = s_next_ch.draw_cursor;
-    if (!book_layout_stage_commit(s_next_ch.layout, &s_reader_dims_ctx)) {
+#ifdef KIIKO_TURN_TIMING
+    if (s_tt.active) s_tt.kept = s_next_ch.kept;
+#endif
+    // 离开的章与新章相邻时，把它已解析的文本与已排完的排版留作反向候选（移交而不复制）。
+    // When the chapter being left is adjacent, keep its parsed text and finished layout as the reverse candidate (moved, not copied).
+    book_layout_stage_t *kept_layout = NULL;
+    const bool keep_out = next_chapter_keep_eligible(chapter, dir);
+    if (!book_layout_stage_commit_keep(s_next_ch.layout, &s_reader_dims_ctx, &s_next_ch.dims_ctx,
+                                       keep_out ? &kept_layout : NULL)) {
         next_chapter_clear();
         unlock_draw();
         return false;
@@ -5806,6 +6020,9 @@ static bool commit_next_chapter(app_ctx_t *ctx, size_t chapter) {
     s_next_ch.layout = NULL;
     book_chapter_commit_map(&s_next_ch.txt_map);
     if (!s_next_ch.text.source_begin) book_excerpt_offer(s_path, chapter, &s_next_ch.text);
+    if (kept_layout) {
+        next_chapter_outgoing_take(&s_outgoing, s_chapter_lead_skip, s_chapter_lead_height, s_chapter_lead_width);
+    }
     free(s_text);
     free(s_blocks);
     free(s_runs);
@@ -5833,11 +6050,11 @@ static bool commit_next_chapter(app_ctx_t *ctx, size_t chapter) {
     book_layout_set_heading_draw(draw_reader_flow_heading);
 
     s_chapter = chapter;
-    s_page = 0;
+    s_page = target_page;
     s_chapter_jump_undo.valid = false;
     s_selected_toc = SIZE_MAX;
     s_jump_offset = SIZE_MAX;
-    s_jump_page = 0;
+    s_jump_page = target_page;
     s_chapter_lead_skip = s_next_ch.lead_skip;
     s_chapter_lead_row_height = s_next_ch.lead_row_height;
     s_chapter_lead_height = s_next_ch.lead_height;
@@ -5851,24 +6068,25 @@ static bool commit_next_chapter(app_ctx_t *ctx, size_t chapter) {
     reset_prefetch();
     s_keep_cur.page = s_keep_prev.page = -1;
     const uint32_t new_gen = book_layout_generation();
-    if (page0_done) {
-        s_next_page = 0;
-        s_prep_page = 0;
+    if (page_done) {
+        s_next_page = (int)target_page;
+        s_prep_page = (int)target_page;
         s_next_generation = new_gen;
     } else if (adopt_fb && saved_cursor.started && !saved_cursor.failed) {
-        s_prep_page = 0;
+        s_prep_page = (int)target_page;
         s_prep_cursor = saved_cursor;
         s_prep_cursor.generation = new_gen;
     }
     memset(&s_next_ch, 0, sizeof(s_next_ch));
     s_next_ch.state = NEXT_CH_IDLE;
+    if (kept_layout) next_chapter_keep_install(&s_outgoing, kept_layout, -dir);
     // 等目标页真实推屏成功再确认新章阅读位置。
     // Confirm the adopted chapter's saved position only after presentation succeeds.
     s_chapter_display_pending = true;
 
     release_page_images();
-    if (reader_image_slots(0) == 0) {
-        s_page_images_for = 0;
+    if (reader_image_slots(s_page) == 0) {
+        s_page_images_for = s_page;
         s_page_images_generation = new_gen;
         unlock_draw();
     } else {
@@ -6108,6 +6326,19 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     reader_dims_ctx_t old_dims_ctx = s_reader_dims_ctx;
     lock_draw();
     invalidate_prep();
+    // 相邻章冷加载：先把当前章已排完的排版整体移出，成功后连同文本一起留作反向候选；
+    // 必须在题头/run/脚注等设置写入活动排版之前移出。失败时由下面的回滚按旧文本重排。
+    // Cold load of an adjacent chapter: detach the current chapter's finished layout before any heading/run/note setter touches the active layout, and keep it with its text as the reverse candidate on success. A failure rolls back by re-laying out the old text below.
+    book_layout_stage_t *kept_layout = NULL;
+    int keep_dir = 0;
+    if (!anchor && source_offset == SIZE_MAX && !offset) {
+        const int cross = !last_page && chapter == s_chapter + 1 ? 1
+                        : last_page && s_chapter > 0 && chapter == s_chapter - 1 ? -1 : 0;
+        if (cross && next_chapter_keep_eligible(chapter, cross)) {
+            kept_layout = book_layout_stage_detach_active(&s_next_ch.dims_ctx);
+            keep_dir = -cross;
+        }
+    }
     // 题头几何按当前模式重算，横排留顶部行高、竖排留右侧列宽，绘制与预留不会错开。
     // Recompute the heading geometry for the current mode -- rows at the top horizontally,
     // columns at the right vertically -- so drawing and reservation cannot drift apart.
@@ -6136,6 +6367,7 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
         s_chapter_lead_width = old_lead_width;
         book_layout_set_chapter_lead(old_lead_skip, old_lead_height);
         book_layout_set_chapter_lead_width(old_lead_width);
+        book_layout_stage_free(kept_layout);
         bool restored = s_text && book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
         unlock_draw();
         if (!restored) {
@@ -6147,6 +6379,9 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
         return false;
     }
     if (!loaded.source_begin) book_excerpt_offer(s_path, chapter, &loaded);
+    // 旧章文本移交给反向候选后，下面的释放对空指针是空操作。旧题头几何此时已被新章覆盖，取调用前保存的值。
+    // After the old chapter's text moves to the reverse candidate, the frees below are no-ops. The old heading geometry was already overwritten, so use the values saved on entry.
+    if (kept_layout) next_chapter_outgoing_take(&s_outgoing, old_lead_skip, old_lead_height, old_lead_width);
     free(s_text);
     free(s_blocks);
     free(s_runs);
@@ -6180,6 +6415,8 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     if (book_chapter_title(chapter, s_title, sizeof(s_title)) != ESP_OK) s_title[0] = 0;
     copy_text(s_font_path, sizeof(s_font_path), ttf_font_path());
     s_message[0] = 0;
+    // 候选记录排版代次，须在新章排版完成之后装入。/ The candidate records the layout generation, so install it after the new chapter is laid out.
+    if (kept_layout) next_chapter_keep_install(&s_outgoing, kept_layout, keep_dir);
     unlock_draw();
     prepare_inline_image();
     // 开书这条链上有解析、解压和字体装载，栈曾经在这里溢出过；留一个可观测的水位。
@@ -6194,7 +6431,10 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     return true;
 }
 static bool load_chapter(app_ctx_t* ctx, size_t chapter, size_t offset, bool last_page) {
-    if (!offset && !last_page && next_chapter_can_adopt(chapter) && commit_next_chapter(ctx, chapter))
+    // 往前采用下一章首页，往回采用上一章末页（last_page）。
+    // Forward adopts the next chapter's page 0; backward (last_page) adopts the previous chapter's last page.
+    const int adopt_dir = last_page ? -1 : 1;
+    if (!offset && next_chapter_can_adopt(chapter, adopt_dir) && commit_next_chapter(ctx, chapter, adopt_dir))
         return true;
     s_chapter_display_pending = false;
     return load_chapter_at(ctx, chapter, offset, last_page, NULL, SIZE_MAX);

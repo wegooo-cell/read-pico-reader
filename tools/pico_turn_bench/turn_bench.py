@@ -319,13 +319,24 @@ class Bench:
         self.turn(3, 'walk_fwd')             # 再跨进纯文字乙 / forward into the second text chapter
         for _ in range(6):
             self.turn(3, 'cold_text')
+        # 连续往回翻穿过章首进入上一章：验证往回趋势下的跨章预排（追加在末尾，旧场景顺序不变）。
+        # Page backward across the chapter start into the previous chapter: exercises backward
+        # cross-chapter preload under a backward trend (appended so earlier scenarios keep their order).
+        for _ in range(60):
+            rec = self.turn(1, 'walk_back_trend')
+            if rec['label'] == 'chapter_back':
+                rec['label'] = 'chapter_back_trend'
+                break
+        for _ in range(3):
+            self.turn(1, 'walk_back_trend')
         self.home()
 
 
 # ---- 汇总 / Summary ----
 
 LABEL_ORDER = ['first_after_open', 'text_fwd', 'text_back', 'alternate', 'lowghost', 'fastgray', 'ripple',
-               'image', 'after_image', 'image_ch_text', 'walk_short', 'cold_text', 'chapter_fwd', 'chapter_back']
+               'image', 'after_image', 'image_ch_text', 'walk_short', 'cold_text', 'chapter_fwd', 'chapter_back',
+               'walk_back_trend', 'chapter_back_trend']
 
 
 def summarize(turns):
@@ -411,8 +422,10 @@ def cmd_run(args):
     preloads = [{
         'ch': int(m.group(1)), 'pages': int(m.group(2)), 'img': int(m.group(3)), 'drawn': int(m.group(4)),
         'parse': float(m.group(5)), 'layout': float(m.group(6)), 'draw': float(m.group(7)),
+        # 旧固件没有 dir 字段，缺省按往前 +1。/ Older firmware has no dir field; default to +1 (forward).
+        'dir': int(m.group(8)) if m.group(8) else 1,
     } for m in re.finditer(
-        r'turn: PRELOAD ch=(\d+) pages=(\d+) img=(\d+) drawn=(\d+) parse=([\d.]+) layout=([\d.]+) draw=([\d.]+)',
+        r'turn: PRELOAD ch=(\d+) pages=(\d+) img=(\d+) drawn=(\d+) parse=([\d.]+) layout=([\d.]+) draw=([\d.]+)(?: dir=([+-]?\d+))?',
         log_text)]
     summary['_preload'] = {
         'n': len(preloads),
