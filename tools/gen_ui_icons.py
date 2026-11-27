@@ -99,6 +99,9 @@ COMMON_ICONS = (
     "animate-bookmark-plus", # 阅读题头已收藏 / saved reader-header favorite
     "x",                 # 电源弹窗·取消 / power dialog, cancel
     "hard-drive", "file-image", "usb", "folder-input", "trash", "layout-grid", "search", "expand", "book", "book-bookmark", "palette", # 文件管理 / file hub
+    "chevrons-left",     # 书架首页 / shelf first page
+    "chevrons-right",    # 书架末页 / shelf last page
+    "animate-circle-chevron-right", # 书架下一页 / shelf next page
 )
 
 def icons_for_board(board):
