@@ -30,8 +30,6 @@ static bool s_reader_dc_recover;
 static enum EpdDrawError display_dc_recover_light(void *hl){(void)hl;return 0;}
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
-#define UI_NAV_TOP 1096
-static int shelf_display_style(void){return test_style;}
 typedef int EpdWaveform;
 typedef struct {uint8_t *front_fb,*back_fb;} EpdiyHighlevelState;
 enum {READER_PANEL_TOUCH_SETTINGS=80,READER_PANEL_TOUCH_MORE,BULK};

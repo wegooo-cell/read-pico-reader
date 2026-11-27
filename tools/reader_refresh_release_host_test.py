@@ -26,11 +26,6 @@ enum {READING,SHELF,MANAGE,BULK,EDIT,SEARCH,TOC,READER_PANEL_NONE,READER_PANEL_B
 enum {MODE_DU,MODE_GL16,MODE_GC16,APP_PAGE_REFRESH_MODE=MODE_GL16};
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
-#define UI_NAV_TOP 1096
-static int shelf_style;
-static int shelf_display_style(void){return shelf_style;}
-static int shelf_rows(void){return 8;}
-static EpdRect row_rect(int row){return (EpdRect){36,184+row*96,612,96};}
 #define TAG "test"
 #define ESP_LOGI(...) ((void)0)
 #define portMAX_DELAY 0
@@ -46,7 +41,7 @@ static int E0470_WAVEFORM,E0470_FULL_WAVEFORM,E0470_FOLLOW_WAVEFORM;
 #endif
 typedef int EpdWaveform;
 #define TT_STAMP(x) ((void)0)
-static bool s_reader_dc_recover,s_chapter_display_pending;
+static bool s_reader_dc_recover;
 static enum EpdDrawError display_dc_recover_light(void *hl){(void)hl;return 0;}
 static int reader_waveform,soft_turn_waveform;
 static const int *display_main_gray_waveform(void){return &reader_waveform;}
@@ -258,17 +253,6 @@ int main(void){
  reset();s_view=s_presented_view=SHELF;s_shelf_key_paint_pending=true;
  present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==13&&!s_shelf_key_paint_pending&&!prepares);
  reset();ctx.request_app=true;present(&ctx,APP_REDRAW_AREA);assert(calls==0);ctx.request_app=false;
- // A successful list turn re-whitens the exact pager strip after the main output.
- for(int list=0;list<=1;++list)for(int pending=0;pending<=1;++pending)for(int broken=0;broken<=1;++broken){
-  reset();s_view=s_presented_view=SHELF;shelf_style=list?5:0;s_shelf_page_pending=pending;fail=broken;
-  const bool settle=list&&pending&&!broken;
-  assert(present(&ctx,APP_REDRAW_AREA)&&calls==1+settle&&!s_shelf_page_pending);
-  if(settle){
-   assert(selected==14&&waves[1]==&white_push_waveform&&modes[1]==MODE_GL16);
-   same_area(areas[1],(EpdRect){0,952,UI_LOCK_WIDTH,144});
-  }
- }
- shelf_style=0;
  // 55b9d26起Pico不再有快速黑白（旧ID2迁移为3）；快速灰阶与普通同样整屏一次，页脚随后提交；清理、图像和整页重绘优先。
  // Since 55b9d26 Pico has no fast BW (old ID2 migrates to 3); fast gray sweeps the whole panel once like
  // ordinary turns, then commits the footer; cleanup, images and full redraws take priority.

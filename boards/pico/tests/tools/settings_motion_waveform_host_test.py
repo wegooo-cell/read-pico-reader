@@ -10,12 +10,14 @@ import tempfile
 ROOT=Path(__file__).resolve().parents[1]
 unit=r'''
 #include <assert.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include "display_main_waveform.h"
 #include "display_reader_waveform.h"
 #include "e0470_epaper_waveform.h"
+bool app_settings_low_ghost(void){return true;}
 int epd_width(void){return 1216;}
 int epd_height(void){return 684;}
 enum EpdRotation epd_get_rotation(void){return EPD_ROT_PORTRAIT;}
@@ -79,7 +81,7 @@ with tempfile.TemporaryDirectory(prefix='pico-settings-white-motion-') as direct
     p=Path(directory);(p/'test.c').write_text(unit)
     subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined',
                     '-I'+str(ROOT/'main'),'-I'+str(ROOT/'main/app'),
-                    '-I'+str(ROOT/'tools/waveform_host_stubs'),'-I'+str(ROOT/'components/epdiy/include'),
+                    '-I'+str(ROOT/'tools/waveform_host_stubs'),'-I'+str(ROOT/'tools/file_tree_stubs'),'-I'+str(ROOT/'components/epdiy/include'),
                     '-I'+str(ROOT/'components/epdiy/src'),'-I'+str(ROOT/'components/e0470_epaper_waveform/include'),
                     '-I'+str(ROOT/'components/e0470_epaper_waveform/waveforms'),
                     str(p/'test.c'),str(ROOT/'main/display_main_waveform.c'),str(ROOT/'main/display_reader_waveform.c'),

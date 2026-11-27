@@ -529,10 +529,6 @@ static void xTaskNotifyGive(void *t){(void)t;}
 #define atomic_store_explicit(p,v,m) (*(p)=(v))
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
-#define UI_NAV_TOP 1096
-static int shelf_display_style(void){return 0;}
-static int shelf_rows(void){return 8;}
-static EpdRect row_rect(int row){return (EpdRect){36,184+row*96,612,96};}
 static void next_chapter_clear(void);
 '''
     unit += function('save_progress', BOOK) + '\n'

@@ -5275,14 +5275,6 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         ? update_display_area_diff_with(ctx->hl,display_main_normal_waveform(),MODE_GL16,
               (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT})
         : update_display_fast_page(ctx->hl);
-    // 列表换页后补白分页区及底栏上沿空白，页码、图标和底栏原样保持。
-    // After list paging, re-whiten the space around the pager up to navigation, preserving other colors.
-    if (shelf_page_turn && shelf_display_style() == 5 && err == EPD_DRAW_SUCCESS) {
-        const EpdRect last_row = row_rect(shelf_rows() - 1);
-        const int top = last_row.y + last_row.height;
-        err = update_display_reader_area(ctx->hl, display_reader_white_push_waveform(), MODE_GL16,
-                                         (EpdRect){0, top, UI_LOCK_WIDTH, UI_NAV_TOP - top}, true);
-    }
     int64_t displayed = esp_timer_get_time();
     reader_prefetch_end(prep);
 #ifdef KIIKO_TURN_TIMING
