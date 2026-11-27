@@ -265,7 +265,7 @@ static void migrate_reader_full_off(nvs_handle_t read) {
 }
 
 void app_settings_init(void) {
-    s_reader_controls_loaded=false;s_shelf_badges=true;s_shelf_covers=true;
+    s_reader_controls_loaded=false;s_shelf_badges=true;
     s_book_heading_style = BOOK_HEADING_DEFAULT_STYLE;
     s_book_heading_align = BOOK_HEADING_DEFAULT_ALIGN;
     s_book_heading_size = APP_BOOK_HEADING_SIZE_DEFAULT;
@@ -437,7 +437,6 @@ void app_settings_init(void) {
     if (nvs_get_u8(h, NVS_KEY_SHELF_RECENT, &recent_sort) == ESP_OK) s_shelf_order = recent_sort < 8 ? recent_sort : 0;
     s_shelf_recent_sort = s_shelf_order == 1 || s_shelf_order == 3;
     uint8_t badges=1;if(nvs_get_u8(h,"shelf_badges",&badges)==ESP_OK&&badges<=1)s_shelf_badges=badges;
-    uint8_t covers=1;if(nvs_get_u8(h,"shelf_covers",&covers)==ESP_OK&&covers<=1)s_shelf_covers=covers;
     if (nvs_get_u8(h, NVS_KEY_BOOK_FONTS, &book_fonts) == ESP_OK) s_book_fonts = book_fonts == 1;
     if (nvs_get_u8(h, NVS_KEY_BOOK_VERTICAL, &book_vertical) == ESP_OK) s_book_vertical = book_vertical == 1;
     s_book_tracking = -APP_BOOK_TRACK_MIN;
@@ -1205,8 +1204,8 @@ static bool backup_hold_valid(const settings_backup_hold_t *hold) {
     return hold->action < APP_READER_KEY_COUNT && stored == backup_hold_checksum(hold);
 }
 // v26复用五字节校验块保存阅读线预设，不改变旧字段偏移。/ V26 seals the guide preset in five bytes without moving legacy fields.
-// v28只在完整备份追加书架封面开关；标准互换文件不变，旧版恢复时封面保持显示。
-// V28 appends the shelf-cover switch to the full backup only; the interchange file is unchanged and older restores keep covers on.
+// v28 保留原封面字段及校验以兼容旧备份，恢复时忽略开关值。
+// Keep the legacy v28 cover field and checksum for compatibility, ignoring its value on restore.
 static bool backup_shelf_covers_valid(const settings_backup_hold_t *covers) {
     uint32_t sum=0;for(unsigned i=0;i<4;++i)sum|=(uint32_t)covers->checksum[i]<<(8*i);
     return covers->action<=1&&sum==backup_hold_checksum(covers);
@@ -1448,7 +1447,7 @@ static esp_err_t backup_write_stream(FILE *file, bool rotate, bool compatible) {
     uint32_t guide_hash=backup_hold_checksum(&guide);
     for(unsigned i=0;i<4;++i)guide.checksum[i]=guide_hash>>(8*i);
     if(ok && !compatible)ok=fwrite(&guide,1,sizeof(guide),file)==sizeof(guide);
-    settings_backup_hold_t covers={.action=s_shelf_covers};
+    settings_backup_hold_t covers={.action=1};
     uint32_t covers_hash=backup_hold_checksum(&covers);
     for(unsigned i=0;i<4;++i)covers.checksum[i]=covers_hash>>(8*i);
     if(ok && !compatible)ok=fwrite(&covers,1,sizeof(covers),file)==sizeof(covers);
@@ -1791,7 +1790,6 @@ static esp_err_t backup_apply_stream(FILE *file, bool apply) {
 #undef BACKUP_SET_STR
     if(err==ESP_OK)err=nvs_set_blob(h,"rd_controls",&controls,sizeof(controls));
     if(err==ESP_OK)err=nvs_set_u8(h,"shelf_badges",shelf.badges);
-    if(err==ESP_OK)err=nvs_set_u8(h,"shelf_covers",covers.action);
     if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_BOOK_RULE_SAVED,guide.action);
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
@@ -1815,7 +1813,7 @@ static esp_err_t backup_apply_stream(FILE *file, bool apply) {
     s_main_refresh = main_refresh;
     s_reader_hide_images = (profile.home_full_refresh & 2) != 0;
     s_shelf_recent_sort = (profile.home_full_refresh & 4) != 0;
-    s_shelf_order=shelf.order;s_shelf_recent_sort=s_shelf_order==1||s_shelf_order==3;s_shelf_badges=shelf.badges;s_shelf_covers=covers.action;
+    s_shelf_order=shelf.order;s_shelf_recent_sort=s_shelf_order==1||s_shelf_order==3;s_shelf_badges=shelf.badges;
     strlcpy(s_device_name, profile.device_name, sizeof(s_device_name));
     strlcpy(s_avatar, profile.avatar, sizeof(s_avatar));
     strlcpy(s_status_signature, profile.status_signature, sizeof(s_status_signature));

@@ -195,7 +195,6 @@ static const ui_locale_pair_t s_pairs[] = {
     {"书名不能为空","Book title cannot be empty"},
     {"书封、进度和阅读记录","Cover, progress and reading history"},
     {"书架","Bookshelf"},
-    {"书架封面显示","Shelf covers"},
     {"书架拼贴","Shelf collage"},
     {"书架排序","Bookshelf order"},
     {"书架排序：%s","Shelf order: %s"},

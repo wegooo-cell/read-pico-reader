@@ -455,11 +455,11 @@ static int settings_main_row_height(void) {
 #define SETTINGS_DISPLAY_ROWS 8
 #endif
 #if KIIKO_BOARD_METALIO47
-// S31 个性化功能多一行「快充」，其余板型保持六项。
-// S31 keeps one extra Fast charge row in Personalization; other boards keep six.
-#define SETTINGS_PERSONAL_ROWS 7
-#else
+// S31 个性化功能多一行「快充」，其余板型保持五项。
+// S31 keeps one extra Fast charge row in Personalization; other boards keep five.
 #define SETTINGS_PERSONAL_ROWS 6
+#else
+#define SETTINGS_PERSONAL_ROWS 5
 #endif
 #if KIIKO_BOARD_METALIO47
 #define SETTINGS_MAINTENANCE_ROWS 6
@@ -1114,7 +1114,6 @@ static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
         UI_ICON_ZAP,               // 19 快充 / fast charge
         [20] = UI_ICON_CHART_COLUMN, // 20 书籍百分比 / cover progress
         [21] = UI_ICON_REFRESH_CW,  // 21 设备同步 / device sync
-        [22] = UI_ICON_FILE_IMAGE,  // 22 书架封面显示 / shelf covers
     };
     if (index < 0 || index >= (int)(sizeof(icons) / sizeof(icons[0]))) return;
     ui_draw_icon(fb, cx, cy, SETTINGS_ICON_PX, icons[index], SETTINGS_ICON_INK);
@@ -1160,9 +1159,9 @@ static void setting_group(uint8_t *fb, int title_y, const char *title,
         if (y + row_height <= 160 || y >= settings_viewport_end()) continue;
         if (i) settings_divider(fb, y, 88, 544);
         setting_icon(fb, icons[i], 67, y + row_height / 2);
-        if(icons[i]==20||icons[i]==22){
+        if(icons[i]==20){
             ui_text_vc(fb,100,y+row_height/2,25,labels[i],EPD_DRAW_ALIGN_LEFT,false);
-            settings_switch(fb,y+row_height/2,icons[i]==20?app_settings_shelf_progress_badges():app_settings_shelf_covers());continue;
+            settings_switch(fb,y+row_height/2,app_settings_shelf_progress_badges());continue;
         }
         if (icons[i] == SETTINGS_UNLOCK_ICON) {
             ui_text_vc(fb, 100, y + row_height / 2, 25, labels[i], EPD_DRAW_ALIGN_LEFT, false);
@@ -1981,18 +1980,18 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
 #if KIIKO_BOARD_METALIO47
     // 快充是独立一行：点按即切换，值显示实际生效档位。
     // Fast charge is its own row: a tap toggles it and the value shows the effective current.
-    const char *personal_labels[]={"书架样式","书籍百分比显示","书架封面显示","锁屏样式","锁屏密码","状态栏签名","快充"};
-    const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==6?"液态玻璃书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架","","",
+    const char *personal_labels[]={"书架样式","书籍百分比显示","锁屏样式","锁屏密码","状态栏签名","快充"};
+    const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==6?"液态玻璃书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架","",
         app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
         lock_pin_enabled()?"已开启":"已关闭",signature,
         app_settings_fast_charge()?"开启":"关闭"};
-    const int personal_icons[]={4,20,22,5,16,10,19};
+    const int personal_icons[]={4,20,5,16,10,19};
 #else
-    const char *personal_labels[]={"书架样式","书籍百分比显示","书架封面显示","锁屏样式","锁屏密码","状态栏签名"};
-    const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==6?"液态玻璃书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架","","",
+    const char *personal_labels[]={"书架样式","书籍百分比显示","锁屏样式","锁屏密码","状态栏签名"};
+    const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==6?"液态玻璃书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架","",
         app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
         lock_pin_enabled()?"已开启":"已关闭",signature};
-    const int personal_icons[]={4,20,22,5,16,10};
+    const int personal_icons[]={4,20,5,16,10};
 #endif
     setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
                   personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
@@ -3460,14 +3459,12 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         row=(y-SETTINGS_PERSONAL_Y)/SETTINGS_ROW_H;
         if(row==0) {s_page=SETTINGS_SHELF_STYLE;s_style_scroll=0;}
         else if(row==1){if(!app_settings_set_shelf_progress_badges(!app_settings_shelf_progress_badges()))snprintf(s_notice,sizeof(s_notice),"保存失败，请重试");}
-        // 关闭封面后书架只画书名卡，不读取或生成封面。/ With covers off the shelf draws title cards without reading or generating covers.
-        else if(row==2){if(!app_settings_set_shelf_covers(!app_settings_shelf_covers()))snprintf(s_notice,sizeof(s_notice),"保存失败，请重试");}
-        else if(row==3)s_page=SETTINGS_LOCK_STYLE;
-        else if(row==4){s_page=SETTINGS_LOCK_PIN;s_notice[0]=0;}
+        else if(row==2)s_page=SETTINGS_LOCK_STYLE;
+        else if(row==3){s_page=SETTINGS_LOCK_PIN;s_notice[0]=0;}
 #if KIIKO_BOARD_METALIO47
         // 先保存设置再改充电电流；写 NVS 失败时按实际生效的旧值应用并重绘，避免行与硬件不一致。
         // Persist before reprogramming; on a failed save apply the value that actually took effect.
-        else if(row==6) {
+        else if(row==5) {
             bool next=!app_settings_fast_charge();
             app_settings_set_fast_charge(next);
             (void)metalio_charger_set_fast_charge(app_settings_fast_charge());
