@@ -9542,7 +9542,7 @@ static int control_at(app_ctx_t* ctx, uint16_t x, uint16_t y, EpdRect* rect) {
         *rect=(EpdRect){570,430,62,62};if(ui_rect_hit(*rect,x,y))return 758;
         return -1;
     }
-    if (s_view==SHELF && (s_category_menu || ui_rect_hit((EpdRect){24,79,326,74},x,y))) return -1;
+    if (s_view==SHELF && (s_category_menu || ui_rect_hit((EpdRect){24,79,270,74},x,y))) return -1;
     if (s_view == BULK) return bulk_control_at(ctx, x, y, rect);
     if (s_view == MANAGE) {
         *rect = manage_back_rect();

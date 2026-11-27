@@ -1847,23 +1847,24 @@ static int leaves(void) {
 }
 static EpdRect shelf_manage_rect(void) { return (EpdRect){420,94,92,54}; }
 static EpdRect shelf_sort_rect(void) { return (EpdRect){524,94,124,54}; }
-static EpdRect shelf_pager_group_rect(int page,int pages) {
-    char label[64];snprintf(label,sizeof(label),"%02d/%02d",page+1,pages);
-    int width=ui_text_fixed_width_px(32,label);
-    int search_width=ui_text_fixed_width_px(26,"搜索");
-    if(width>154-search_width)width=154-search_width;
-    int total=width+search_width+106;
-    return (EpdRect){(UI_LOCK_WIDTH-total)/2,1004,total,54};
+static EpdRect shelf_pager_area(void) { return (EpdRect){36,998,612,72}; }
+static EpdRect shelf_pager_rect(int action) {
+    static const int left[]={36,138,428,556},width[]={92,118,118,92};
+    return action>=UI_PAGER_FIRST&&action<=UI_PAGER_LAST?
+        (EpdRect){left[action],998,width[action],72}:(EpdRect){0};
+}
+static int shelf_pager_hit(int x,int y) {
+    for(int action=UI_PAGER_FIRST;action<=UI_PAGER_LAST;++action)
+        if(ui_rect_hit(shelf_pager_rect(action),x,y))return action;
+    return UI_PAGER_NONE;
 }
 static EpdRect shelf_page_label_rect(int page,int pages) {
-    EpdRect group=shelf_pager_group_rect(page,pages);
-    int search_width=ui_text_fixed_width_px(26,"搜索");
-    return (EpdRect){group.x+88+search_width,1006,group.width-106-search_width,50};
+    (void)page;(void)pages;
+    return (EpdRect){264,998,156,72};
 }
 static EpdRect shelf_search_rect(int page,int pages) {
-    EpdRect group=shelf_pager_group_rect(page,pages);
-    int search_width=ui_text_fixed_width_px(26,"搜索");
-    return (EpdRect){group.x+11,1006,search_width+49,50};
+    (void)page;(void)pages;
+    return (EpdRect){300,94,108,54};
 }
 // 静态整页与实时信息分层；不在绘图中读写文件。/ Split static artwork and live information; no file IO while painting.
 static void draw_shelf_page_artwork(app_ctx_t *ctx,uint8_t *fb) {
@@ -1923,41 +1924,64 @@ static void draw_shelf_header_button(uint8_t *fb,EpdRect r,bool sorting) {
     if(pressed)ui_draw_pressed_round_rect(fb,r,18);
     ui_text_vc(fb,r.x+r.width/2,r.y+r.height/2+(pressed?2:0),20,"管理",EPD_DRAW_ALIGN_CENTER,false);
 }
-// 图标和搜索文字共用点击区；无外框，按下下沉，筛选激活时以细下划线提示。
-// Share the icon/text hit area without a frame; inset on press and underline an active query.
+// 搜索移至顶栏管理左侧，加圆角胶囊底框；筛选激活时左侧48px可点X清除。
+// Top-bar search capsule left of Manage; active queries expose a 48px clear X target on the left.
 static EpdRect shelf_search_clear_rect(int page,int pages) {
-    EpdRect r=shelf_search_rect(page,pages);r.width=40;return r;
+    EpdRect r=shelf_search_rect(page,pages);r.width=48;return r;
 }
 static void draw_shelf_search_button(uint8_t *fb,int page,int pages) {
-    EpdRect r=shelf_search_rect(page,pages);int offset=(s_pressed_control==112||s_pressed_control==113)?2:0;
-    int search_width=r.width-49;
-    ui_draw_icon(fb,r.x+20,r.y+r.height/2+offset,26,s_query[0]?UI_ICON_X:UI_ICON_SEARCH,0x30);
-    EpdRect text={r.x+41,1006+2*offset,search_width,50-2*offset};
-    ui_text_fixed_vc(fb,text.x+text.width/2,text.y+text.height/2,26,"搜索",EPD_DRAW_ALIGN_CENTER,false);
-    if(s_query[0])ui_hairline(fb,1053,text.x,text.width,0x30);
+    EpdRect r=shelf_search_rect(page,pages);
+    bool pressed=s_pressed_control==112||s_pressed_control==113;
+    int offset=pressed?2:0;
+    if(pressed)ui_draw_pressed_round_rect(fb,r,18);
+    else{ui_fill_round_rect(fb,r,18,0xF0);ui_draw_control_frame(fb,r,18,0x60);}
+    ui_draw_icon(fb,r.x+28,r.y+r.height/2+offset,28,s_query[0]?UI_ICON_X:UI_ICON_SEARCH,0x20);
+    EpdRect text={r.x+46,r.y+offset,r.width-52,r.height};
+    ui_text_fixed_vc(fb,text.x+text.width/2,text.y+text.height/2,22,"搜索",EPD_DRAW_ALIGN_CENTER,false);
+    if(s_query[0])ui_hairline(fb,r.y+r.height-9,text.x+4,text.width-8,0x30);
 }
 static EpdRect shelf_page_arrow_rect(int direction) {
-    return ui_pager_rect(direction<0?UI_PAGER_PREVIOUS:UI_PAGER_NEXT);
+    return shelf_pager_rect(direction<0?UI_PAGER_PREVIOUS:UI_PAGER_NEXT);
 }
 static void draw_shelf_pager(uint8_t *fb, int count, int page, int pages) {
     (void)count;char label[64];snprintf(label,sizeof(label),"%02d/%02d",page+1,pages);
     int pressed=s_shelf_key_mode&&s_shelf_key_pressed?
         (s_shelf_key_pressed<0?UI_PAGER_PREVIOUS:UI_PAGER_NEXT):UI_PAGER_NONE;
     if(s_pressed_control>=116&&s_pressed_control<=119)pressed=s_pressed_control-116;
-    ui_pager_draw(fb,"",page,pages,s_shelf_key_mode,pressed);
-    EpdRect group=shelf_pager_group_rect(page,pages);
-    int search_width=ui_text_fixed_width_px(26,"搜索");
-    epd_fill_circle(group.x+70+search_width,1031,2,0x80,fb);
+    static const ui_icon_t icons[]={
+        UI_ICON_CHEVRONS_LEFT,
+        UI_ICON_ANIMATE_CIRCLE_CHEVRON_LEFT,
+        UI_ICON_ANIMATE_CIRCLE_CHEVRON_RIGHT,
+        UI_ICON_CHEVRONS_RIGHT
+    };
+    for(int action=UI_PAGER_FIRST;action<=UI_PAGER_LAST;++action){
+        EpdRect r=shelf_pager_rect(action);
+        bool previous=action==UI_PAGER_FIRST||action==UI_PAGER_PREVIOUS;
+        bool end=action==UI_PAGER_FIRST||action==UI_PAGER_LAST;
+        bool down=pressed==action,outlined=s_shelf_key_mode&&!end;
+        bool enabled=ui_pager_target(action,page,pages)!=page;
+        if(down)ui_draw_pressed_round_rect(fb,r,18);
+        else{
+            ui_fill_round_rect(fb,r,18,enabled?0xFA:0xF4);
+            ui_draw_control_frame(fb,r,18,enabled?0x60:0xB0);
+        }
+        int cx=r.x+r.width/2+(down?(previous?-3:3):0),cy=r.y+r.height/2;
+        int size=(end?40:44)+(down?4:0);
+        ui_icon_t icon=icons[action];
+        if(outlined)
+            for(int dy=-2;dy<=2;++dy)for(int dx=-2;dx<=2;++dx)
+                if(dx*dx+dy*dy<=4)ui_draw_icon(fb,cx+dx,cy+dy,size,icon,enabled?0x10:0x90);
+        ui_draw_icon(fb,cx,cy,size,icon,outlined?(down?0x30:0xF0):(enabled?0x10:0xA0));
+    }
     EpdRect page_label=shelf_page_label_rect(page,pages);int label_px=32;
     while(label_px>1&&ui_text_fixed_width_px(label_px,label)>page_label.width)--label_px;
     ui_text_fixed_vc(fb,page_label.x+page_label.width/2,page_label.y+page_label.height/2,
                      label_px,label,EPD_DRAW_ALIGN_CENTER,false);
-    draw_shelf_search_button(fb,page,pages);
 }
 // 只推分页小区；按压不重绘封面，翻页在下一轮输入后执行，可被切页打断。
 // Update only the pager; presses do not redraw covers. Page work follows on the next input tick and is cancellable by navigation.
 static app_redraw_t shelf_key_paint(app_ctx_t *ctx) {
-    s_area=ui_pager_area();
+    s_area=shelf_pager_area();
     ui_fill_rect_fast(s_area,UI_GRAY_WHITE,ctx->fb);
     draw_shelf_pager(ctx->fb,s_visible_count,ctx->leaf,leaves());
     s_shelf_key_paint_pending=true;
@@ -1981,15 +2005,15 @@ static app_redraw_t shelf_turn_page(app_ctx_t *ctx, int direction);
 // 分页独立接管完整触摸，按下只反馈，抬手才翻页；容许轻点在边缘小幅漂移。
 // Own pager contacts independently: press feedback only, turn on release, tolerating small edge drift.
 static bool shelf_pager_release_hit(int action, int x, int y) {
-    int end = ui_pager_hit(x, y);
+    int end = shelf_pager_hit(x, y);
     if (end >= 0) return end == action;
-    EpdRect hit = ui_pager_rect(action);
+    EpdRect hit = shelf_pager_rect(action);
     hit.x -= 8; hit.y -= 8; hit.width += 16; hit.height += 16;
     return ui_rect_hit(hit, x, y);
 }
 static bool shelf_pager_event(app_ctx_t *ctx, const ui_gesture_event_t *ev, app_redraw_t *redraw) {
     if (s_view != SHELF || s_category_menu || s_sort_menu || s_clear_confirm || s_batch_confirm) return false;
-    int start = ui_pager_hit(ev->x0, ev->y0);
+    int start = shelf_pager_hit(ev->x0, ev->y0);
     bool decorated = s_pressed_control >= 116 && s_pressed_control <= 119;
     if (start < 0 && !decorated) return false;
     *redraw = APP_REDRAW_NONE;
@@ -4897,11 +4921,12 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
     ui_nav_status(fb);
     char category_title[BOOK_STORE_PATH_MAX];
     copy_text(category_title,sizeof(category_title),s_category_selected ? shelf_category_name(s_category_selected) : "书架");
-    fit_text(category_title,52,244);
+    fit_text(category_title,52,198);
     ui_text(fb, 36, 90, 52, category_title, EPD_DRAW_ALIGN_LEFT, false);
     int title_width=ui_text_fixed_width_px(ui_text_effective_px(52),category_title);
     ui_draw_icon(fb,36+title_width+27,120,26,
                  s_category_menu ? UI_ICON_CHEVRON_UP : UI_ICON_CHEVRON_DOWN,UI_GRAY_BLACK);
+    draw_shelf_search_button(fb, ctx->leaf, leaves());
     draw_shelf_header_button(fb, shelf_manage_rect(), false);
     draw_shelf_header_button(fb, shelf_sort_rect(), true);
     draw_shelf_page_artwork(ctx,fb);
@@ -8658,7 +8683,7 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
             if (tab >= 0) { ui_nav_request(ctx, tab); return APP_REDRAW_NONE; }
             if(s_query[0]&&ui_rect_hit(shelf_search_clear_rect(ctx->leaf,leaves()),x,y))return shelf_search_clear(ctx);
             if(ui_rect_hit(shelf_search_rect(ctx->leaf,leaves()),x,y)){search_begin();return APP_REDRAW_PAGE;}
-            int pager=ui_pager_hit(x,y);
+            int pager=shelf_pager_hit(x,y);
             if(pager>=0)return shelf_turn_page(ctx,ui_pager_target(pager,ctx->leaf,leaves())-ctx->leaf);
         }
         if(s_view==SHELF&&ui_rect_hit(shelf_sort_rect(),x,y)){
@@ -8954,7 +8979,7 @@ static int control_at(app_ctx_t* ctx, uint16_t x, uint16_t y, EpdRect* rect) {
         *rect=(EpdRect){570,430,62,62};if(ui_rect_hit(*rect,x,y))return 758;
         return -1;
     }
-    if (s_view==SHELF && (s_category_menu || ui_rect_hit((EpdRect){24,79,326,74},x,y))) return -1;
+    if (s_view==SHELF && (s_category_menu || ui_rect_hit((EpdRect){24,79,270,74},x,y))) return -1;
     if (s_view == BULK) return bulk_control_at(ctx, x, y, rect);
     if (s_view == MANAGE) {
         *rect = manage_back_rect();
@@ -9013,7 +9038,7 @@ static int control_at(app_ctx_t* ctx, uint16_t x, uint16_t y, EpdRect* rect) {
     if(s_view==SHELF&&ui_rect_hit(shelf_search_rect(ctx->leaf,leaves()),x,y)){*rect=shelf_search_rect(ctx->leaf,leaves());return 112;}
     if (s_view == SHELF) {
         for (int i = UI_PAGER_FIRST; i <= UI_PAGER_LAST; ++i) {
-            *rect = i==UI_PAGER_PREVIOUS?shelf_page_arrow_rect(-1):i==UI_PAGER_NEXT?shelf_page_arrow_rect(1):ui_pager_rect(i);
+            *rect = shelf_pager_rect(i);
             if (ui_rect_hit(*rect, x, y)) return 116 + i;
         }
     }
@@ -9027,10 +9052,18 @@ static int control_at(app_ctx_t* ctx, uint16_t x, uint16_t y, EpdRect* rect) {
     return -1;
 }
 static app_redraw_t paint_control(app_ctx_t* ctx, EpdRect rect) {
-    if(s_view==SHELF&&s_query[0]){EpdRect clear=shelf_search_clear_rect(ctx->leaf,leaves());if(!memcmp(&rect,&clear,sizeof(rect)))return shelf_key_paint(ctx);}
-    if(s_view==SHELF){EpdRect search=shelf_search_rect(ctx->leaf,leaves());if(!memcmp(&rect,&search,sizeof(rect)))return shelf_key_paint(ctx);}
+    if(s_view==SHELF){
+        EpdRect search=shelf_search_rect(ctx->leaf,leaves());
+        EpdRect clear=shelf_search_clear_rect(ctx->leaf,leaves());
+        if((s_query[0]&&!memcmp(&rect,&clear,sizeof(rect)))||!memcmp(&rect,&search,sizeof(rect))){
+            rect=search;
+            draw_shelf_search_button(ctx->fb,ctx->leaf,leaves());
+            s_mode=MODE_DU;s_shelf_feedback_pending=false;s_area=rect;
+            return APP_REDRAW_AREA;
+        }
+    }
     if(s_view==SHELF)for(int i=UI_PAGER_FIRST;i<=UI_PAGER_LAST;++i){
-        EpdRect r=ui_pager_rect(i);
+        EpdRect r=shelf_pager_rect(i);
         if(!memcmp(&rect,&r,sizeof(r)))return shelf_key_paint(ctx);
     }
     if (s_view == SHELF && shelf_display_style() == 5) {
@@ -9355,7 +9388,7 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
     bool indent_handled=false;
     app_redraw_t indent_redraw=reader_indent_gesture(ctx,ev,&indent_handled);
     if(indent_handled)return indent_redraw;
-    if (s_view==SHELF && (s_category_menu || ui_rect_hit((EpdRect){24,79,326,74},ev->x0,ev->y0)))
+    if (s_view==SHELF && (s_category_menu || ui_rect_hit((EpdRect){24,79,270,74},ev->x0,ev->y0)))
         return shelf_category_gesture(ctx,ev);
     if (s_view == READING && (s_reader_panel == READER_PANEL_BACKGROUND ||
         s_reader_panel == READER_PANEL_BACKGROUND_PREVIEW) &&
